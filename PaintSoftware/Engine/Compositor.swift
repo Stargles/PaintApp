@@ -1249,24 +1249,21 @@ enum CoreGraphicsCompositor {
         guard width > 0, height > 0,
               let sourceImage = image.cgImage,
               let backdropImage = context.currentImage.cgImage,
-              var source = premultipliedBytes(sourceImage, width: width, height: height),
+              let source = premultipliedBytes(sourceImage, width: width, height: height),
               let backdrop = premultipliedBytes(backdropImage, width: width, height: height)
         else { return }
 
+        // Keep the fade in Float through unpremultiply and blend, just like `compositeOver`.
+        // Rounding RGB and alpha independently first can change the whole-colour winner.
         let scale = Float(opacity)
-        for index in source.indices {
-            // Premultiplied, so opacity scales all four channels — the same `layer.read(gid) *
-            // opacity` the kernel does, and for the reason `Composite.metal`'s header gives.
-            source[index] = UInt8((Float(source[index]) * scale).rounded(.toNearestOrEven))
-        }
-
         let nonSeparable = mode.isNonSeparable
         var result = backdrop
         for pixel in stride(from: 0, to: source.count, by: 4) {
-            let sa = Float(source[pixel + 3]) / 255, da = Float(backdrop[pixel + 3]) / 255
+            let sa = Float(source[pixel + 3]) / 255 * scale, da = Float(backdrop[pixel + 3]) / 255
             guard sa > 0 else { continue }  // a transparent source is the identity, exactly
 
-            let sp = (Float(source[pixel]) / 255, Float(source[pixel + 1]) / 255, Float(source[pixel + 2]) / 255)
+            let sp = (Float(source[pixel]) / 255 * scale, Float(source[pixel + 1]) / 255 * scale,
+                      Float(source[pixel + 2]) / 255 * scale)
             let dp = (Float(backdrop[pixel]) / 255, Float(backdrop[pixel + 1]) / 255, Float(backdrop[pixel + 2]) / 255)
             let cs = (min(max(sp.0 / sa, 0), 1), min(max(sp.1 / sa, 0), 1), min(max(sp.2 / sa, 0), 1))
             let cb = da > 0 ? (min(max(dp.0 / da, 0), 1), min(max(dp.1 / da, 0), 1), min(max(dp.2 / da, 0), 1))

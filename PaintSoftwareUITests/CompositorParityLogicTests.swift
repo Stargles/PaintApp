@@ -749,6 +749,68 @@ final class CompositorParityLogicTests: XCTestCase {
                        "…and Darker Color keeps the lower-Lum backdrop, red, whole. Got RGBA \(pixel(darkerImage, 16, 16))")
     }
 
+    /// Opacity changes coverage, not the colour whose luminosity chooses the whole-triple winner.
+    /// The near-tie row discriminates rounding RGB and alpha to bytes before the comparison:
+    /// 0.3 * 200/255 > Lum(0,101/255,2/255), but 0.3 * 100/128 is smaller.
+    func testFadingWholeColorLayersAndGroupsDoesNotChangeTheirWinningColor() throws {
+        try skipUnlessGPUAvailable()
+        let source: [UInt8] = [200, 0, 0, 255]
+        let cases: [(backdrop: [UInt8], mode: BlendMode, half: [Int], full: [Int])] = [
+            ([0, 101, 2, 255], .lighterColor, [100, 50, 1, 255], [200, 0, 0, 255]),
+            ([0, 101, 2, 255], .darkerColor, [0, 101, 2, 255], [0, 101, 2, 255]),
+            ([0, 185, 0, 255], .lighterColor, [0, 185, 0, 255], [0, 185, 0, 255]),
+            ([0, 185, 0, 255], .darkerColor, [100, 92, 0, 255], [200, 0, 0, 255]),
+        ]
+        let side = Int(CanvasFixture.canvasSize.width)
+        for entry in cases {
+            for grouped in [false, true] {
+                for opacity in grouped ? [0.5] : [0.0, 0.5, 1.0] {
+                    let manager = CanvasFixture.manager(layerCount: 2)
+                    for (layer, rgba) in [entry.backdrop, source].enumerated() {
+                        let bytes = Array(repeating: rgba, count: side * side).flatMap { $0 }
+                        let image = try XCTUnwrap(CoreGraphicsCompositor.makeImage(
+                            fromPremultiplied: bytes, width: side, height: side))
+                        CanvasFixture.setBakedContent(manager, layerIndex: layer,
+                                                      UIImage(cgImage: image, scale: 1, orientation: .up))
+                    }
+                    if grouped {
+                        let folder = manager.addFolder(name: "Faded source")
+                        manager.layers[1].parentFolderID = folder
+                        manager.setFolderBlendMode(folder, to: entry.mode)
+                        manager.setFolderOpacity(folder, to: opacity)
+                    } else {
+                        manager.setLayerBlendMode(layerIndex: 1, to: entry.mode)
+                        manager.layers[1].opacity = opacity
+                    }
+                    let request = try XCTUnwrap(manager.makeRenderRequest(atFrame: 0, includeBackground: false))
+                    for (layer, rgba) in [entry.backdrop, source].enumerated() {
+                        let input = try XCTUnwrap(request.sources[layer])
+                        XCTAssertEqual(pixel(input.image, 16, 16), rgba.map(Int.init),
+                                       "The actual resolved input bytes must establish the luminosity ordering")
+                    }
+                    let cpu = try XCTUnwrap(CoreGraphicsCompositor.composite(request))
+                    let gpu = try XCTUnwrap(MetalCompositor.composite(request))
+                    let expected = opacity == 0 ? entry.backdrop.map(Int.init)
+                        : (opacity == 1 ? entry.full : entry.half)
+                    for (backend, image) in [("CPU", cpu), ("GPU", gpu)] {
+                        let actual = pixel(image, 16, 16)
+                        XCTAssertEqual(actual[3], 255, "Fading over opaque ink must preserve opaque coverage")
+                        if opacity == 0 || opacity == 1 {
+                            XCTAssertEqual(actual, expected, "\(backend): exact endpoint for \(entry.mode)")
+                        } else {
+                            for channel in 0..<3 {
+                                XCTAssertLessThanOrEqual(abs(actual[channel] - expected[channel]), Self.blendTolerance,
+                                                        "\(backend), group=\(grouped), \(entry.mode): opacity must not reverse the unfaded colour winner")
+                            }
+                        }
+                    }
+                    XCTAssertLessThanOrEqual(maxChannelDelta(gpu, cpu), Self.blendTolerance,
+                                             "Layer and buffered-group fades use the same blend arithmetic")
+                }
+            }
+        }
+    }
+
     // MARK: - The snapshot rule (§9.1 point 3)
 
     /// The guarantee the whole request type exists for: once a `RenderRequest` is built, it is a
@@ -1058,6 +1120,19 @@ final class CompositorParityLogicTests: XCTestCase {
                 XCTAssertLessThanOrEqual(delta, Self.blendTolerance,
                                          "\(mode.displayName) differs by \(delta), past the \(Self.blendTolerance) this file's comment derives from measurement. Table: \(table)")
             }
+        }
+    }
+
+    /// The existing spectrum at fractional layer opacity, so every hand-rolled mode also crosses
+    /// the fade boundary without introducing another fixture or relaxing the measured tolerance.
+    func testEveryBlendModeAgreesBetweenTheBackendsAtFractionalLayerOpacity() throws {
+        try skipUnlessGPUAvailable()
+        for mode in BlendMode.allCases {
+            let manager = spectrumManager(mode)
+            manager.layers[1].opacity = 0.5
+            guard let (gpu, cpu) = gpuAndCPU(manager) else { return }
+            XCTAssertLessThanOrEqual(maxChannelDelta(gpu, cpu), mode == .normal ? 0 : Self.blendTolerance,
+                                     "\(mode.displayName) at 50% opacity must retain the existing parity bound")
         }
     }
 

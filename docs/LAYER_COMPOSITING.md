@@ -362,6 +362,14 @@ performs.
   mask parity (§6.1) free rather than a matching exercise.
 
 **Blend modes are one `switch` in one shader.** Adding a mode is a few lines and no new plumbing.
+
+**Opacity stays in Float until the finished blend is quantized**, on both backends. It scales every
+premultiplied channel, then the blend uses the unpremultiplied colour. Independently rounding faded
+RGB and alpha before that comparison can make Lighter/Darker Color pick the opposite whole colour.
+The CPU hand-rolled draw is shared by leaf/group composites and Merge Down; none needs a second
+fade path or a per-mode exception. Document geometry, colour-space policy and parity tolerances stay
+unchanged.
+
 Effect nodes get a slightly larger contract (they read the backdrop, may need multiple passes and a
 ping-pong buffer for separable blurs).
 

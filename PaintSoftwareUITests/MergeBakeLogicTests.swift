@@ -232,6 +232,42 @@ final class MergeBakeLogicTests: XCTestCase {
         assertBytesEqual(gpu, cpu, "the same merge with the backend flag flipped")
     }
 
+    /// Merge uses the same CPU draw seam even when the canvas prefers Metal. The winner is chosen
+    /// from the original colour, then its contribution fades; it is not chosen from rounded faded bytes.
+    func testMergingAFadedWholeColorBlendUsesTheUnfadedWinner() throws {
+        let inputs: [[UInt8]] = [[0, 101, 2, 255], [200, 0, 0, 255]]
+        let cases: [(BlendMode, [Int])] = [
+            (.lighterColor, [100, 50, 1, 255]), (.darkerColor, [0, 101, 2, 255]),
+        ]
+        for (mode, expected) in cases {
+            let manager = CanvasFixture.manager(layerCount: 2)
+            for (layer, rgba) in inputs.enumerated() {
+                let bytes = Array(repeating: rgba, count: side * side).flatMap { $0 }
+                let image = try XCTUnwrap(CoreGraphicsCompositor.makeImage(
+                    fromPremultiplied: bytes, width: side, height: side))
+                CanvasFixture.setBakedContent(manager, layerIndex: layer,
+                                              UIImage(cgImage: image, scale: 1, orientation: .up))
+            }
+            manager.setLayerBlendMode(layerIndex: 1, to: mode)
+            manager.layers[1].opacity = 0.5
+            let request = try XCTUnwrap(manager.makeRenderRequest(atFrame: 0, includeBackground: false))
+            for (layer, rgba) in inputs.enumerated() {
+                let input = try XCTUnwrap(request.sources[layer])
+                let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(input.image))
+                XCTAssertEqual(pixel(bytes, side / 2, side / 2), rgba.map(Int.init),
+                               "Merge must start from the exact normalized luminosity witness")
+            }
+            let merged = try XCTUnwrap(try mergedBytes(manager))
+            XCTAssertEqual(manager.layers.count, 1, "The real merge must replace the pair with its survivor")
+            let actual = pixel(merged, side / 2, side / 2)
+            XCTAssertEqual(actual[3], 255, "The merged opaque pair stays opaque")
+            for channel in 0..<3 {
+                XCTAssertLessThanOrEqual(abs(actual[channel] - expected[channel]), 1,
+                                         "\(mode.displayName): the saved merge must use the unfaded whole-colour winner")
+            }
+        }
+    }
+
     // MARK: - Comparison
 
     /// Byte-for-byte, reported as the first disagreement rather than as two 16 KB arrays — an
