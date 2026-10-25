@@ -371,6 +371,8 @@ final class TextLayoutLogicTests: XCTestCase {
             (witness, ratio, 4096, 1), (witness, ratio.nextUp, 4096, 1)
         ]
         for (box, request, width, height) in fractional {
+            XCTAssertNotNil(TextLayout.rasterScale(for: box, requested: request),
+                            "A positive fractional backing axis must remain renderable")
             let scale = try XCTUnwrap(TextLayout.rasterScale(for: box, requested: request))
             XCTAssertTrue(scale.isFinite && scale > 0)
             let image = try XCTUnwrap(TextLayout.renderBox(recipe: text, boxSize: box, clip: false, scale: request)?.cgImage)
