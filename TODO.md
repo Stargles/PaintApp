@@ -1,55 +1,49 @@
 # TODO
 
-## Current source and next actions — 2026-10-25
+## Parked checkpoint — 2026-10-25
 
-Integration remains unmerged/uninstalled; main/origin remain afd2030c. Root accepted actual Debug
-492/492 at0e215 and260/260 atbddb, zero failures/skips/expected failures. Logic26 qualifies36 intended
-statements and selection/seed5 qualifies10; actual source/device/method identities and729 immutable
-entries reconcile. Fill126/owner UI4/all29 controls qualify at83380 with whole pictures inspected.
-Named evidence and limits are in HANDOFF.md. Vector normal270/270 and13 deliberate controls qualify
-at9fee:29unique behavior statements,58mapped issues/6excluded consequences. Last compiled app is
-a vector mutant; new source requires a normal rebuild before UI/install.
+Owner explicitly requests “checkpoint here and park”. Work is paused until resumed; no implementation,
+test or device operation is running. HANDOFF.md and `~/PaintWork/s54-final-qualification/park-20261025/`
+carry the exact checkpoint/evidence/agent state. Integration is `tmp/s54-mend-free-caps`; installed
+product source **6fb979f4**, unmerged/unpushed; main/origin **afd2030c**. This checkpoint changes docs only.
 
-Current queue (items remain until merged):
+**What Kevin has now:** point-only vector Liquify, interior fill mending and vector Mend All Fills,
+newest father–grandfather saves, and integrated audit fixes. Release6fb installed/launched normally
+without uninstall/reset. Fresh250-package backup is verified and preserved; Kevin confirms usual scenes
+**“Looks right”**. The erasing crash remains unresolved. New strict-text and layer-limit candidates
+below are NOT in this install. Final regression/performance/audit gates remain unfinished.
 
-- Resolve actual cold UI21 atc4df:18pass3fail; allGraph6 pass and root LOOKed3 whole pictures.
-  Exact Blend diagnostic94fed proves brush input199/200/201, invalidating near-tie premises; scoped
-  public solid-fill6c5d1003 fixture harvested after root review, exact outcomes/fixed uniformity checks.
-  Text4b060d05 harvested after independent review: clip existing colour ROI to actual visible paper
-  (exact7320 margin samples); set public size before keyboard and preserve W/w physical key.
-  Whole Text5+Graph6+Blend10+PoseBake2+Mode1 4+Glare2 (29) and meaningful Graph3/Blend3/text1
-  plus transfer UI controls remain pending.
-- Correct THREE scoped effects audit clusters via existing owners: cap radius before Int; normalize
-  periodic angles/shared apron inputs; price actual missing GPU scratch/intermediate pictures plus
-  readback at warm first-effect growth. Source55383dd6 independently7a1b6a17 reviewed and harvested7paths, old118 exact/four newmethods.
-  Actual ordinary121/121 and13controls/all31product+4premise identities qualify at8dcb, root ab2ff6db.
-  Cold appearance and final fast/Release remain pending. Actual consumer, refusal,
-  strip/periodicity/reuse and meaningful fault controls. Preserve sigma/appearance/budgets/fallback;
-  no new retained counter/cache/renderer/schema. Audit8b106831 is source/model evidence, not RSS.
-- Cold stored-vector eraser Splatter/Undo/Redo source59a3fb51 is harvested after independent review;
-  Mode1 wholeclass4/runtime sampled-mask stability and4wholepictures remain pending. Existing-seed handoff and UTF-16 selection are
-  integrated and pass related260 plus all5 meaningful faults; no new state and no Mode3 cause claim.
-- Repin historical UI13/mask6-positive+11-fault gates; final fast Debug AND Release, counts/lints/PBX/
-  graph, touched UI classes/full phase. Current5444 fast/6038 full runnable with cold-text harvested.
-- Final fill sampler/count/cost gates,16 paired Release trials and genuine cold previous-writer
-  library UI; untouched original256-package export and old071 product stay preserved.
-- TWO source-confirmed vector transfer defects: missing cel/group pose on Duplicate/To New Layer,
-  and fresh split payloads omitted from undo cost. Use one existing pose/bake preflight with strict
-  transfer refusal/ID preservation and normal rest-walk appearance; existing Bake policy stays.
-  Sourcead1548d6 harvested after independent0241a072/root review: price actual prepared lists with
-  VectorUndoCost through one shared standalone reversal, refuse enclosing brackets before tool
-  settlement, reuse existing end-frame clamp. Actual normal9classes270/13causalcontrols qualify at9fee;
-  cold UI pending. Existing
-  parent/pose/pixel/undo/cost/eviction and cold controls required; independent43957eca design accepted.
-- Genuine remaining architecture coverage: vector tools/undo/render, graph evaluation, remaining
-  fonts/panels/platform/RSS. Read prior reports before reopening anything; inventory is not review.
-- Fresh saved-scene readiness/export/signing/old workflows/device checks; actual Test1 eraser cause
-  unresolved. Remove one-shot geometry repair/UI only after owner artwork confirmation.
+**On resume, in queue order (items remain until merged):**
 
-Owner scope is settled: vector-only mending includes attached marks and protects uncertain joins and
-outside outline, with interactive feedback. Engineering choices need no extra approval. Vector Liquify
-is point-position-only; smart saving keeps newest clock-bucket versions. Continue and delegate useful
-tasks; later features/interpolation overhaul remain deferred.
+- Retire the one-shot geometry converter and converter-only tests/fixtures/PBX/startup UI WHOLE now
+  that artwork confirmation is complete. Preserve permanent maintenance/readiness/current-format
+  validation. No retirement code has begun. Remove obsolete converter-only cold256 gates with it;
+  preserve originals and meaningful permanent current-format gallery/package tests.
+- Review/integrate pending strict saved-text79538f17 (source peer accepted, compiler/whole44/fault/
+  damaged-package UI UNRUN), finish separately parked layer-input capacity WIP (not harvest-ready),
+  independently review and qualify. Reuse existing owners, no retained state/duplicate schema.
+- Fix three cold-test setup failures, preserving their product assertions. Actual6fb UI29+graph86:
+  **115 total/112passed/3failed/0skips/0expected**. Graph86 pass; Mode1 eraser4 pass with all4whole
+  pictures inspected. Blend opacity reached42% instead50%, Pose sampling includes toolbar, Text's
+  exterior-band containment uses narrow words ROI. Isolated Blend candidate3bbf8732 is reviewed,
+  UNRUN. Two other setup proposals32a1f68a have no edits authorized; root must LOOK actual tail images.
+  Rebuild normal whole affected UI, inspect stable owner-size captures (Glare landscape still invalid),
+  then meaningful graph/blend/selected-text/transfer/Mode1 controls from green baselines.
+- Repin historical UI47+13controls and mask6positives+11faults. Finish final fast Debug AND Release,
+  actual/static reconciliation, lints/PBX/graph, touched UI/full phase. Root6fb census5444fast/6038full,
+  729source/PBX1329; recompute after pending changes. Earlier qualified evidence stays at its exact pin.
+- Fill16 paired Release ABBA/final sampler/count/cost/whole-RSS and remaining genuine file-level
+  architecture audit. Protected old071 benchmark product/real artwork/results must remain intact.
+- Physical Test1 erasing all-process capture only after fresh saved/unlocked readiness. Do not infer
+  crash cause from allocation fixes or simulator results. Finish qualified merge/release lifecycle.
+
+**Renewal risk:** current profile expires Oct29,8:18pm Toronto. Kevin approved this verified four-day
+artifact only. Auto-resign builds origin/main; resolve before renewal so old main cannot silently
+replace the repaired-format install. No main/daemon/policy change has been made.
+
+Owner rulings are settled: vector-only batch mending includes attached marks/protects uncertain joins
+and outline; vector Liquify edits point positions only; saves keep newest clock-bucket versions.
+Future interpolation and other explicitly deferred features stay deferred. No owner question pending.
 
 ## How to read and keep this file
 
@@ -125,7 +119,7 @@ review found no concrete remaining defect; final-source fast/UI/device gates are
 
 ## Vector Liquify must move points only — 2026-10-23
 
-**Implemented, previously qualified, unmerged.** Continue the remaining preservation/release gates.
+**Implemented, installed6fb and owner-confirmed, unmerged.** Finish retirement and final gates on resume.
 The owner's point-only instruction below is authoritative; no unwanted material path or compatibility
 flag may return during integration. Independent review and passing controls supplement drawn proof.
 
@@ -161,8 +155,9 @@ zero failures/expected, all method identities/255 classes reconcile. Corrected c
 723 bytes/modes restored, lints/plutil/PBX1317 unique clean. The corrections remove obsolete placement
 and oldest-plus3 expectations only; production and earlier338/17/UI proof remain exact.
 
-- [ ] Fresh verified current-library export before signed device install; owner confirms real scenes.
-      Keep the one-shot repair until that confirmation, then retire it whole.
+- [ ] Retire one-shot repair and converter-only UI/tests/fixtures whole: fresh250-package preservation,
+      signed6fb install/normal launch and owner “Looks right” confirmation are complete. Preserve
+      permanent maintenance/readiness/current-format validation; finish final qualification/merge.
 
 ---
 
@@ -286,8 +281,10 @@ layout defects. Worktree `~/PaintWork/PaintApp-s53-fill-mend` retains the exact 
       Lazy-fill normal regressions and base49 controls are qualified in the dependency; final fast
       tiers and paired old/lazy Release ABBA still remain. Sixteen earlier paired trials passed, with
       inside paired median delta+5.1ms; this is simulator evidence, not device timing or attribution.
-- [ ] Qualify the implemented startup scheduling with a genuine cold old-library launch before deployment.
-- [ ] Fresh saved-scene readiness/export, signed clean Release, device checks, owner artwork confirmation and merge.
+- [ ] Qualify permanent startup/gallery readiness after removing the now-owner-confirmed temporary converter.
+      Retire its obsolete old-library converter gate; preserve pre-conversion exports and current-format tests.
+- [ ] Final qualification/merge; current250-package export, signed6fb install/normal launch and owner
+      artwork confirmation are complete. Any further device restart requires fresh saved-scene readiness.
 
 ---
 
@@ -305,15 +302,11 @@ Inventory-only files are not reviewed code. New source is not called complete be
 
 - [ ] Data protection/background: finish final-source gates for strict migration/Trash ownership,
       export cancellation, serialized cleanup and close-owned thumbnails; retain the qualified controls.
-- [ ] Temporary geometry repair: cold previous-writer library UI and responsive first screen still
-      need proof. New4b453d97 normalizes the SAME raw geometryVersion bytes before strict current-model
-      metadata validation; only DecodingError goes to existing backup recovery. Drawing/source I/O,
-      conversion/ownership and final validation remain hard failures. Original damaged packages stay
-      exact/visible, including no-backup cases. The corrected sameUUID/title/old-address fixture and
-      all99 affected methods passed within normal1cf422/422, zero skips. Final-source qualification
-      and genuine whole-library cold UI remain pending. Retire the converter
-      and temporary UI whole only after owner confirms current artwork; preserve permanent startup
-      maintenance scheduling and truthful post-maintenance gallery readiness.
+- [ ] Retire temporary geometry repair and converter-only UI/tests/fixtures/PBX paths WHOLE: Kevin
+      confirmed current scenes “Looks right” after the preserved250-package export and signed6fb
+      install/normal launch. Keep permanent startup maintenance scheduling, truthful gallery readiness
+      and strict current-model validation. Retire obsolete converter-specific cold-library gates;
+      retain current-format package/startup coverage. No retirement implementation has begun.
 - [ ] Bake recovery/close: existing baker/store/read demands share one authoritative source and checked
       admission; corrupt/missing/zero-byte derived files recover without permanent retry. Keep final
       headroom refusal and actual unlink failure coverage. Derived cache bytes are separate from source pixels.

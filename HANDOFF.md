@@ -1,226 +1,144 @@
 # Handoff
 
-Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md. Verify
-origin, worktrees and every tmp branch before trusting this file. Kevin authorizes useful agents and
-has a large budget; quality and usage conservation matter more than speed. Delegate implementation
-and independent review; root owns integration, evidence review and the one Mac native lease.
-Continue actionable work, do not park for context, and give concise status reports. Architecture and
-preserving real artwork are the top priorities. Record before acting. No physical-device operation
-is authorized by an old readiness answer: obtain fresh saved-scene readiness when actually ready.
+Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md.
+Verify origin, worktrees and every tmp branch before trusting this file. Main's handoff is behind
+this integration branch. Kevin authorizes useful agents; quality and usage conservation matter more
+than speed. Delegate implementation and independent review; root owns integration, evidence review
+and ONE Mac native lease. Preserve real artwork and record before acting.
 
-## Current source and next actions — 2026-10-25
+**PARKED at the owner's explicit request on 2026-10-25: “checkpoint here and park”.**
+Do not resume implementation, tests or device operations until Kevin resumes. This overrides earlier
+instructions to keep working. No further question or approval is pending.
 
-Main/origin remain afd2030c; integration is unmerged/uninstalled. Latest accepted normal vector
-source is9fee1fcd:270/270 across9wholeclasses, zero failures/skips/expected failures and729 exact
-entries (root5b44b113). All13 deliberate vector transfer controls causally qualify29unique behavior
-statements/40case-bound references:58 mapped actual issues,6 later consequences excluded; root
-e26e4fc4 under native/vector-controls13-9fee1fcd-run01/. All source restored. Root owns ONE native
-lease; last compiled product is a mutant, so normal rebuild is mandatory. Cold UI21 atc4df remains
-18pass3fail; corrected fixtures and new cold PoseBake2/Mode1 4 are unrun. No install/final fast/full/
-performance qualification is claimed.
-All historical attempts remain at named immutable pins; do not retag them.
+## Checkpoint — 2026-10-25
 
-**Actual root-accepted results:**
+Integration tree: `~/PaintWork/PaintApp-s54-mend-free-caps`, branch `tmp/s54-mend-free-caps`.
+Installed product source is **6fb979f442f4d3da1299785de2a077a2058a4dfe**; this checkpoint changes docs
+only. Main/origin remain **afd2030c831db7a746271fe306e8b5a5b9b02df6**, unmerged/unpushed.
+Latest branch-audit/checkpoint details live under `~/PaintWork/s54-final-qualification/park-20261025/`;
+`root-next-gates.json` is the compact external queue. Review both before granting native work.
 
-- Debug492/492 at0e215b4f: Fill126, Text135, Graph148, Blend69 and VectorTextPersistence14; zero
-  failures/skips/expected failures,17 actual classes and all729 source entries reconciled.
-- Debug260/260 atbddb83db: whole TextBake31, VectorEraserHybrid23, VectorEraserCommit17 plus seven
-  affected brush/liquify/repair/undo classes; zero failures/skips/expected failures,729 exact entries.
-  Includes new actual UITextView selection/insertion and real eraser live/commit/archive/undo pixels.
-- Logic26 at isolated0e215:26 product cases/24 recipes/all36 intended unique behavior statements;
-  root causally accepted80 mapped issues and excluded6 other issues. Raw141 location records have a
-  different duplicate population. Receipt b70b095a under native/logic26-0e215b4f-isolated-run01/.
-- Selection/seed5 atbddb83db: all5 product faults reach all10 intended unique behavior statements;
-  root causally accepted15 mapped issues, excluded4 later consequences. Unicode insertion/range,
-  selected replacement, actual live/commit removal, per-target field and reopened pixels all expose
-  their intended defects. Receipt038b6bd7 under native/text-selection-eraser-seed5-bddb83db-run01/.
-- Effects121/121 at8dcb, zero failures/skips/expected failures, exact121 selectors/729 entries;
-  only existing cost opt-in omitted. Rootd15c6f15 independently accepted. Effects13 controls qualify
-  all31 product+4 premise identities:53 mapped actual issues,11 later consequences excluded. Root
-  ab2ff6db under native/effects-controls13-8dcb01a2-run01/;11product/2premise cases,12 recipes.
-- Fill126 and whole owner FillMendUITests4/4 at83380. Root LOOKed six unique whole1080×810 pictures
-  (nine named files): attached/detached bodies and free caps mend; outside/uncertain joins protected;
-  extension/seam controls and batch undo/redo assertions reached. All29 controls root-qualified:
-  27 product cases/26 unique statements and2 premise cases/2 statements. Cost/sampler/RSS stay open.
+**Installed and confirmed:** Release6fb installed without uninstall/reset, normal launch with no
+arguments succeeded, PID83736 remained alive after20s. Signature/entitlements/binary+dSYM UUID verify:
+AE3F2323-9760-3783-BB5A-0756F9828CCA; executable SHA81c96ba6f87063bf5fd845f7c0af2b7e433fb673eeefdbaa0b66a0b428ad4346.
+Install receipt5107bd94 is under `device-install-current-20261025/installation/`. Kevin answered
+**“Looks right”** to opening his usual scenes in this build. Record is authoritative: artwork
+confirmation is complete; don't ask again. This does not establish the erasing crash's cause.
 
-Exact normal evidence lives under ~/PaintWork/s54-final-qualification/native/ as
-combined-normal492-0e215b4f-run01 and seed-selection-normal260-bddb83db-run01. These bounded Debug
-results are not final fast Debug/Release, whole UI, performance or device qualification.
+Fresh protected PRE-conversion backup: `device-install-current-20261025/library-backup/package-export`,
+250 packages=10Projects+221Backups+19Trash,3127 package files/544516496bytes; receipt3638741c.
+Index/path/size recheck and all copied file hashes verify. Only disposable device Export copies were
+cleared. Ordinary existing startup maintenance could run during export; no whole-library before/after
+immutability claim. Preserve this and original256 export (`~/PaintWork/s51-cleanup/current-library/Export`).
+Neither PRE-conversion export is silently a current-format decoder baseline.
 
-**Integrated architecture changes:** shared text raster-scale caps backing4096 without the0.05
-floor; positive fractional axes remain valid. Existing graph drag/hold/undo owners retain current
-focus, nil readout, baseline curves and consumed marks. CPU blend fades in Float and quantizes final
-output. Text publication calls existing atomic commitTextEdit, restoring1095 ink pixels and existing
-two-invalidation contract. No parallel renderer/cache/schema/state was added by these corrections.
+**Signing renewal risk:** Apple reused profile6e35f262, expires2026-10-30T00:18:54Z (Oct29,8:18pm Toronto).
+Kevin explicitly approved “Install now” for this verified four-day artifact only. The ordinary five-day
+rule remains. `~/PaintApp/deploy/resign.sh` fetches/builds origin/main, which is older than the repaired
+format build. Before the Oct29 renewal window, qualify+merge current source or resolve the deployment
+lifecycle so renewal cannot silently downgrade it. No daemon/main/policy change was made.
 
-TextOverlayView now preserves its saved full UTF-16 selection directly after restyling identical
-text; no clamp/helper/state/PBX edit. All29 older TextBake methods remain exact. Mode1 erasing passes
-the existing gesture seed through required existing erase/universal APIs and existing punch owner;
-72 calls supply it, no new random owner/default/overload/schema. Seed test-call arguments changed
-mechanically; old assertions remain exact after normalization. Modes2/3/4 do not stamp this punch,
-so this does not establish the cause of the owner's Mode3 respring.
+**Native is idle; all owned children joined.** No source hold remains. iPad9 simulator56CC563F is booted;
+M5 logic39E84984 and cold iPad9 AC8049AC are shutdown. No physical restart/export is authorized by the
+old readiness answer: owner is now using PaintApp. Ask fresh saved-scene readiness only when needed.
+About3.37GiB was free after the Release build; recheck before native. Nine specifically inventoried
+inactive compiler caches (860938240bytes) were reclaimed with receiptcd8797ee; all products/evidence/
+artwork protected. Never broaden cleanup or discard old071 benchmark products.
 
-**Actual cold UI21 atc4df:18pass3fail, zero skips/expected failures.** Root independently
-reconciled all21 exact methods, owned iPad9 and729 immutable entries; native processes joined and
-source clean. AllGraph6 pass, including continuation/returned-drag/Undo. Root LOOKed all three new
-whole landscape graph pictures: focus/handles persist, return restores the point/readout, Undo reaches
-preceding authoring. Root also LOOKed all three actual final failed-video frames; author LOOKed15
-reached named pictures. All15 original/display hashes and lossless normalization verified;8 of23
-named captures unreached. Receipts5374b5de (red extraction) and7ce960c7 (root6-picture LOOK) under
-native/owner-ui21-c4df4add-run01/. This is not a green whole-class gate.
+## Resume queue — actionable work stays unfinished
 
-Actual exact Blend diagnostic94fed failed its unchanged opaque input premise at [199,0,0,255]
-versus [200,0,0,255]. Root independently extracted the joined one-test failure and LOOKed the whole
-lossless failure PNG; exact floor-row sampling matches the callback. A local brush region contains
-199/200/201, so a +/-1 tolerance would invalidate the near-tie winner. No product quantization cause
-is established. Root review7bc71fff and exact trace00e10812 are under native/blend-core-diagnostic1-
-94fedfee-run01/ and blend-core-trace-94fedfee/. Native is idle. Public Add Rectangle solid fills are
-now scoped in ONLY the new Blend method, retaining exact colours/probes/all outcomes and diagnostic;
-prove fixed local input uniformity and capture whole inputs before fade. Author startup_repair
-froze6c5d1003 after scope85b2b938/proposal75c4b25d. Rootef094758 source-reviewed and harvested ONLY
-that new method: public solid rectangles, exact9-neighbourhood premises and red3sites, whole input
-capture before fade. Other9 bodies/all blend+merge outcomes exact; native delivery/uniformity unrun.
+1. **Retire the temporary point-geometry converter now that Kevin confirmed artwork.** No retirement
+   code has begun. Record/trace scope, then delegate startup_repair in a new task tree. Remove
+   PointGeometryRepair and converter-only tests/fixtures/PBX references/temporary startup UI WHOLE.
+   Preserve permanent startup maintenance scheduling/readiness and strict current-format validation;
+   relocate a converter-owned current-format constant to its existing permanent codec owner if needed,
+   without duplicate schema/state. Delete obsolete converter-only cold256 gates with the feature;
+   retain meaningful current-format startup/gallery/package tests. No compatibility decoder/default.
+2. **Finish the pending source changes, independently review, then integrate exact paths.**
+   - Strict saved-text source79538f17, `PaintApp-s54-text-current-decode`, clean/source-peer accepted
+     ba720df1. Temporary old-writer capture removed WHOLE0a6b4949 before strict code. Actual old-product
+     package4files/46680bytes is accepted42823789. Remove4 fallback decoders through synthesis; only
+     TextFrame required decoding/corner error remains.21 required/4 optional fields, no schema/new
+     repair/state. The actual4-file package is retained exactly;733source/PBX1331,
+     fast5441/full6035 runnable in that isolated tree. Whole44 and old-code expected-red4, compiler,
+     fault/cold-package/save-gate behavior are UNRUN. Candidate nine-case map is incomplete:42 forwarded
+     helper rows are ONE canonical assertion, not42 unique identities. Review full packet before harvest.
+   - Shared layer-input capacity: vector_mend_proof has saved a WIP checkpoint in
+     `PaintApp-s54-graph-grammar-admission`. Precode60e7c32e; parked WIP **c215b7a35df46df16b082336949d010520536376** (clean),
+     receipt56375ed2. Seven production+36test/support paths;205 explicit ID unwraps/568 mechanical
+     migrations. Six planned new regressions and API/throws/assertion/overfull/grouping/late-Mix review
+     are unfinished. Only diff-check ran; no compiler/native/UI/fault/fast. Final details in park receipt.
+     NOT harvest-ready/compiled/tested. Shared actual destination/net count via existing maxInputCount,
+     no retained state/cache/schema/renderer truncation/fakeUUID/reparent. Preserve grouping net count,
+     delete cycle-parent rules and existing Mix→Mix policy. Video must resolve the actual fresh layer
+     inside existing structural transaction BEFORE consuming staging; retryable media remains on
+     refusal. Frozen designc433b99b, delete/Mix addendumb9485e, video234f45f8 and peers exist under
+     `~/PaintWork/s54-final-qualification/graph-grammar-admission-9fee1fcd/` (discover exact path).
+3. **Repair three cold-test setup failures, then drive unchanged outcomes.** Actual6fb whole115:
+   **112pass/3fail/0skip/0expected** (UI29+graph86). Root aa3c9b02 independently reconciled source729,
+   native/device/counts and all issues. Graph86 pass within a red aggregate; not a whole115 green gate.
+   - Blend new method reaches exact solid inputs; synthetic slider stops42% rather than50%, so outcome
+     loop is unreached. Isolated test-only candidate3bbf8732 in `PaintApp-s54-blend-slider` uses existing
+     clamped0→midpoint helper; all outcomes/readout unchanged. Independent source reviewbfdc2ccf;
+     UNRUN/unintegrated.
+   - Pose grid samples toolbar; new transfer workflow fails a rest/middle separation premise before
+     transfers. Text selected-word exterior band lies outside narrow words ROI but inside visible paper;
+     fails premise before select/style. bake_cache_lifecycle has source-only proposals, NO edits:
+     `setup-failures115-6fb-readonly/`, receipt32a1f68a, patch71a203a2. Root must LOOK actual pose/text
+     tail images before authorizing. Reuse shared toolbar-cleared grid basis for Pose probe+mapping;
+     Text changes only containment to visible paper. Keep unchanged product outcome assertions.
+   - All30 reached named captures author-LOOKed, but Glare native-landscape capture is rotated/clipped/
+     transitional and NOT valid owner-landscape evidence. Root LOOKed all4 new Mode1 whole pictures
+     cd97179d: before black stroke, committed white textured punch, Undo restored, Redo repeated.
+     201×61 samples are not every pixel/live-field/disk/physical crash proof. Normal rebuild then whole
+     Text5/Graph6/Blend10/Pose2/Mode1 4/Glare2, stable whole owner-size LOOK, meaningful Graph3/Blend3/
+     text1/transfer/Mode1 controls remain. Normal all-green baseline required before fault driver.
+4. **Historical consumer gates/final qualification:** repin wholeUI47 +13 controls (15 unique IDs,
+   33case-bound refs), mask6 positive configs/5methods +11faults. Mask build must JOIN, restore ALL
+   source, then test-without-building. LOOK positives before faults. Compatibility-only packetc4dcc284
+   is not runtime evidence. Finish fast Debug AND Release using CLAUDE's verbatim filter/command,
+   reconcile actual/static counts, lints/PBX/graph, all touched UI and full phase. Recompute census after
+   retirement/strict/capacity; root6fb currently729source/PBX1329/fast5444/full6038 runnable.
+5. **Performance and remaining audit:** paired fill16 Release ABBA against protected old071 product;
+   final sampler/source/fence/cancel/budget counts and whole-RSS. Paired harness0a6436bb; no physical
+   timing extrapolation. Continue genuine unreviewed vector tools/undo/render/archive, graph evaluation,
+   typography/panels/import/platform/delivery coverage;19 clusters aren't all files. Prior accepted
+   clusters stay closed unless new evidence. VectorLayer8465lines was not whole-reviewed.
+6. **Erasing respring:** still unproved. After fresh saved/unlocked readiness, bounded physical Test1
+   all-process capture/real cuts may proceed under prepared plan; no new physical scenes or device
+   restarts now. Final merge must remove finished TODO items WHOLE, verify main SHA and obey deployment
+   safeguards above. Future interpolation/multi-cel/linear-light/audio/video/importer/stream-stage5 stay
+   deferred until their owner dependency/brief exists.
 
-Text author4b060d05 is harvested after independentbc23d186/root source review. ONLY two TextSession
-methods change: existing colour ROI intersects actual visible paper (61 outside columns*120=7320,
-exactly the old failure); selected-text sets existing public Size.30 before placement/keyboard and
-uses the same physical W/w key despite shift. Old colour thresholds/assertions, other3 methods and
-all drawn selection outcomes remain exact. Public Select All stays mandatory, with one whole menu
-capture before its guard. Actual larger fit/menu/key delivery and positive whole Text5 remain UNRUN;
-future selection reversal must reach the unchanged drawn far-band assertion now367, never setup.
+## Qualified evidence to preserve at its actual pin
 
-New Blend method7157 remains integrated: real rounded50% domain/two luminance patches/Merge Down/
-stripe/hide/reveal/paper controls; four outcome captures remain unreached. Existing helpers/product
-unchanged. A later input-fixture correction needs source facts and a new proof; old arithmetic/source
-packets cannot be retagged. The graph coordinate correctionbf94 is now exercised by actualGraph6.
+- Vector270/270 across9whole classes at9fee, root5b44b113.13 deliberate controls qualify29unique
+  product statements/40case-bound refs:58mapped issues/6consequences excluded; e26e4fc4. All729 restored.
+- Debug492/492 at0e215: Fill126, Text135, Graph148, Blend69, VectorTextPersistence14,17classes, zero
+  failure/skip/expected. Logic26/24recipes qualifies36IDs:80mapped/6excluded, rootb70b095a.
+- Debug260/260 atbddb includes TextBake31/Hybrid23/Commit17 and affected brush/liquify/repair/undo.
+  Selection+seed5 qualifies10IDs:15mapped/4excluded, root038b6bd7. Existing seed/UTF16 owners reused.
+- Effects121/121 at8dcb, rootd15c6f15;13controls/12recipes qualify31product+4premise IDs,53mapped/
+  11excluded, ab2ff6db. Cap beforeInt, shared periodic angles/aprons and actual GPU owner admission;
+  no new retained counters/cache/schema; no whole-RSS/crash cause inferred.
+- Fill126/wholeFillMendUI4/all29controls at83380, root5318d0cb:26product+2premise IDs; root LOOKed
+  6unique whole1080×810 pictures. Attached/detached/freecaps mend, outline/uncertain joins protected,
+  batch Undo/Redo visible. Cost/RSS remain open.
+- Root6fb old playback/pan2/2 selected tests passed, root e027eb8a; root LOOK85867188. Actual115 also
+  drove stroke, old Move-box drag/release and graph-node drag/release. These satisfy preinstall five
+  SIMULATOR workflows, not physical gestures. Source729 exact; no full-class8/4 claim for selected2.
+- Actual old-text writer1 at75365af5 is accepted42823789; old TextObjectafd/c615 exact, package produced
+  by real writer/load/resave/validation. It is not an installed-build artist export claim. Strict new44
+  is UNRUN. Whole capture test delta removed. Original256 export has no editable text.
+- Self-parent fix6fb is one existing resolver guard parent!=folderID plus one extended characterization
+  method; no state/schema/traversal. Normal RenderTree30/LayerTree56 pass in actual115. Guard-specific
+  five-statement reversal/cold exposure remains pending. Do not call red115 a normal fault baseline.
 
-**Cold selected-text scope, recorded before code:** ONE method in existing TextSession4→5, no product,
-helper or AX hook. Measured actual W/w glyph/white far band and four-letter ink prove geometry before
-public Select All, style change and actual software-key replacement. No refocus/paste/input after
-style until that same key. Assert red replacement near and zero far red while still editing; commit
-smoke follows. Author2d94b162 replaces ONLY the new longpress span: actual public textbox hull/eight grip centres
-and existing black-pixel probe choose maximum measured clearance beyond22pt plus hull rounding.
-No size/zoom/word changes; no safe point fails an input premise. All old4/prior outcomes stay exact.
-Actual UI21 at177ea278 stopped at compilation: nonexistent Self.coordinate in the new method,
-0 tests/0 pictures and all729 bytes restored. Root independent compiler review99d9e346 preserves
-that attempt. Author4c73 replaces ONLY the call with the existing TextSession.tap native app-coordinate
-chain; point/duration/oracles/line345 unchanged, independent7f8e80bc accepted. Fresh normal UI21 required.
-Root and independent821b4b7a review accepted the source; only TextSession is harvested. Public menu
-delivery remains unproved. Reverse selected-
-length collapse must reach drawn far-band assertion, not a setup/menu/input failure.
+All logs, hashes, original/display pictures and receipts remain under `~/PaintWork/s54-final-qualification/`.
+Named historical pins never inherit newer source coverage. No final fast/full/performance/physical
+crash qualification is claimed. Prior failed attempts remain immutable evidence.
 
-**Bounded effects scope recorded before implementation:** audit ec843eee freezes THREE clusters:
-existing tapCount converts finite large radius to Int before128 cap; raw periodic angle narrowing can
-diverge from the glare apron or overflow; a same-size simple→Gaussian backdrop GPU attempt prices
-only1 new picture while requesting3 logical RGBA8 pictures (24 vs8MiB at2048×1024). Correct the existing
-helper/angle planning and actual scratch/intermediate owners under the existing lock/headroom valve.
-No new retained counters/cache/renderer/format or broad scalar-validation framework. Preserve ordinary
-appearance, raw sigma behavior, static budgets/LRU/refusal/fallback and zero-growth warm reuse. Add
-actual-consumer finite boundary/periodicity/full-versus-strip and warm-first-effect/refusal/reuse
-regressions plus meaningful assertion controls. Report8b106831 under s54-architecture-audit/
-neighborhood-effect-audit-ec843eee/. Source equations predict a glare contribution25 vs cropped0;
-this is not native pixel/RSS/physical respring proof. Independent review44d0162e confirms the3 source causes and refines native controls; author
-vector_mend_proof is implementing the recorded scope in a separate worktree, without native access.
-
-**Effects source55383dd6 harvested after independent7a1b6a17/root review:** ONLY7 source/test paths;
-four production files retain the reviewed shared cap/periodic-angle/apron/actual-owner admission
-changes, no shader/PBX/schema/state added. All118 old bodies exact;4 new methods yield122 whole,
-121 ordinary excluding ONLY the existing cost opt-in.13 proposed controls/12 recipes cover31 product
-and4 explicit premise identities;25 setup/arrangement occurrences are excluded. Actual ordinary121 and13 causal controls now qualify at8dcb;
-final fast/Release/cold appearance remain pending. Source-capped kernels still use raw sigma. First-growth5-picture fixture now
-discriminates each missing owner; reuse3 remains one-readback-only. Future safe controls exercise
-real allocations/outputs, not fabricated metrics. Frozen packet neighborhood-effect-53637328/
-committed-55383dd6; root/peer reviewed every source/output hash. Root qualified actual taps/weights, CPU/GPU periodic pixels, whole/strip146vs0, true refusal/reuse
-and real allocations; invalid samplers were not run. No whole-RSS/Test1 cause is inferred.
-
-**Vector transfer scope recorded before code:** independent source/design review43957eca confirms
-TWO clusters: Duplicate/To New Layer pull selected posed ink to rest, then create a no-track cel
-without its cel-local/group pose; their undo costs also omit fresh retained split payloads. Current
-appearance contract says the transferred ink sits over its source. Share existing TransformChannel
-composition→VectorCanvas.baking preparation, preserving the existing Bake caller's fallback and
-reidentification policy; strict transfers preserve IDs and prepare ALL elements before any mutation,
-refusing unsupported/noninvertible maps. Consume only source cel/group pose, keep inherited container
-once, preserve genuine rest-walk appearance and existing group/track ownership rules. No point-only
-replacement, renderer/material/cache/schema or new animation policy. Batch actual prepared before/
-after lists through VectorUndoCost plus existing structural allowance. These commands are standalone:
-unsupported enclosing brackets refuse before earlier-tool settlement so a shallow outer snapshot cannot
-swallow the payload price. One shared narrow reversal retains atomic undo/invalidation. Add existing-fixture
-translation/parent controls, real pixels/undo/redo, fresh-split/shared-alias cost+budget eviction and
-cold artist workflows. Reports under s54-architecture-audit/vector-command-audit-53637328/ and
-vector-command-independent-design-53637328/ are source/math evidence only; native unrun.
-
-**Vector transferad1548d6 harvested after independent0241a072/roote36813c2 review:** six paths,
-three production owners. Existing Bake fallback/reidentify unchanged; shared persistent pose prep
-strictly validates every transfer/composed inverse, then reuses pure existing Move-box measurement
-before publication. One narrow shared layer/source reversal prices actual prepared lists and shares
-existing end-frame clamp. Unsupported enclosing structure/interpolation/gesture brackets refuse
-before earlier-tool settlement; later refusal promises no transfer mutation after normal settlement.
-No new retained state/renderer/schema or whole-scene geometry scan. All22 old methods exact;5new
-methods and9 affected whole classes270 require normal qualification. Candidate13 controls/29 eligible IDs
-are offline only. Own scopesb458/a793/78b5 precede code; rootb537 scope recorded both causes.
-Cold PoseBake8fc0e766 harvested after independent118bcb04/root review: ONE new method1→2,
-old method/all helpers exact, measured Select grid, hidden-source Duplicate and actual ToNew
-Undo/Redo picture comparisons,3 whole captures. Native public delivery/owner layout remain UNRUN.
-
-**Cold textured Mode1 source59a3fb51 harvested after independent3ae89df2/root review:** ONE
-new method in Mode1UITests3→4, all9 older file methods/helpers exact. Public Opaque Round input is
-committed before Texture/Splatter/Erase; one completed gesture must remove observed dark samples,
-keep distant bands and restore observed before/committed masks via Undo/Redo. Four whole captures.
-This is201×61 classified samples, not every physical pixel, live-field equality or save/reopen.
-Runtime delivery/stability/owner pictures remain UNRUN. Vector control eligible-v2 receipt67a9160a
-preserves13recipes but excludes an impossible source-suppression target:40references/29IDs. Original
-13/30 packet remains historical. Actual normal270 and13 causal controls now qualify at9fee1fcd,
-with source-suppression and nested unwraps excluded from behavior credit.
-
-**New bounded source findings, recorded before implementation:** saved-text omission scope is
-independently accepted (peerd57f89f0). Remove only21 required saved-field fallback/invalid-corner
-repairs through ordinary DecodingError and existing LossySlot→loadDamage→SaveDamageGate. Preserve
-API defaults, explicit empty values and4 legitimate optional fields; no schema/validator/new repair.
-The original256-package export has no editable text. Temporary OLD-product writer checkpoint75365af5
-has only one existing test-method delta; TextObject remains identical toafd/9fee. Capture actual
-ProjectStore package attachments and accept typed round-trip provenance before strict source edits;
-then delete temporary capture code whole. Writer capture/strict runtime are not run.
-
-Graph audit e181cc14/peers35dd576c and5f70039d confirms a direct self-parent can hide its subtree.
-Root accepts cc51444d's minimal existing resolvedContainer parent!=folderID guard plus extension of
-one existing characterization method: real nonblank image/leaf/panel uniqueness, no added method,
-state, schema or traversal. Harvest these TWO paths after this scope record; normal86 and one
-five-statement guard reversal/cold exposure remain unrun. Capacity is a separate design-only task:
-reuse existing maximum-input/direct-child truth and actual final destination/count for all creation,
-duplicate/transfer/group/promotion/Stack→Mix routes; preserve explicit existing effect setter behavior.
-No renderer truncation, fake UUID, silent reparenting, retained counter or one-off transfer cap.
-
-**Next gates, in order:**
-
-1. Diagnose actual UI21 three failures without weakening outcomes, then run normal rebuilt whole
-   Text5+GraphGesture6+Blend10+PoseBake2+Mode1 4+Glare2 (29 methods), independently extract outcomes
-   and LOOK whole owner-size pictures. First capture old-product writer1 to unblock strict text.
-   Then exact positive-source Graph3/Blend3/selected-text1 faults; actual reached assertions only.
-2. Finish scoped three effects corrections/review/logic controls and ordinary cold effects workflow.
-   Effects55383dd6 has13 finite controls (11product/2premise) independently source-reviewed;
-   first-growth5-picture fixture and removed redundant radius-identity loop only, production exactdf.
-   Actual121/13 now qualify at8dcb; cold/final gates remain.
-   Vector transfer normal270 and13 causal controls now qualify at9fee; cold drawn workflow remains.
-   Drive stored-vector eraser Splatter/Undo/Redo; no flaky expected random field/new test hooks.
-3. Repin historical UI13/mask6-positive+11-fault packets to final source; LOOK positive pictures before
-   faults. Preserve two-phase build→all-source-restore→test-without-building contract.
-4. Final fast Debug AND Release using CLAUDE verbatim command, actual/static method reconciliation,
-   lints/PBX/graph, all touched UI classes and full phase. Current census5444 fast/6038 full
-   runnable,729 source entries/PBX1329; new cold-text method is included.
-5. Fill16 paired Release ABBA, sampler/source/fence/cancel/budget counts and genuine cold256-package
-   previous-writer library UI. Preserve original export and old071 benchmark product.
-6. Genuine remaining audit coverage: vector tools/undo/invalidation, graph evaluation, fonts/panels,
-   delivery/RSS. Read returned reports; inventory is not review and qualified findings stay closed.
-7. Fresh owner save/unlock/export, signed normal Release>=5days, old five workflows, physical Test1
-   all-process erasing capture and owner artwork confirmation. Retire temporary geometry repair/UI
-   whole only after confirmation. Old readiness does not authorize restarting real artwork.
-
-Owner rulings remain: vector-only mending includes attached strokes and protects uncertain joins and
-outside edges; engineering choices need no approval. Vector Liquify moves point positions only;
-smart saving uses newest clock-bucket versions. Deferred interpolation/features stay written, not
-researched. Continue while owner sleeps; do not park for context.
-
-## Qualification and gates
+## Earlier qualification ledger — historical pins, not current status
 
 - Earlier normalf475 passed847/847 and base49 plus all52 mask/video/vector assertion-target cases
   qualify at their named pins, with ineffective/inconclusive attempts excluded. Ledger:
@@ -238,13 +156,13 @@ researched. Continue while owner sleeps; do not park for context.
   SHA70527efe has independent acceptance: build child finishes, all728 source entries restored before
   test-without-building, meaningful source-located assertions required. Repin final source; root must
   LOOK at positive pictures before granting faults. It is not a natural in-flight timing proof.
-- Current static census: fast5420/full6009, PBX1329 unique. Earlier UI lints/PBX checks passed676.
+- Historical676 static census: fast5420/full6009, PBX1329 unique. Earlier UI lints/PBX checks passed676.
   Final fast Debug/Release, graph, actual full/class UI and required old workflows remain pending.
 - Paired fill16 Release ABBA and whole256-package previous-writer cold UI are prepared, not run.
   Read-only current API readiness found no blocker; explicitly repin NEW path/SHA/DD at final source.
   Preserve old071 Release products, benchmark fixture/order/control and untouched original export.
-- Device preservation/signature/install, actual erasing all-process measurement and owner artwork
-  confirmation remain open. Raster allocation corrections do not establish the respring's cause.
+- Historical676 still lacked device preservation/signature/install; the current checkpoint above closes
+  installation/artwork confirmation. Actual erasing all-process measurement remains open. Raster allocation corrections do not establish the respring's cause.
 
 Owned iPad9 simulator56CC563F-06D0-42FC-9C18-A2B230DE2D38 is booted after the owner UI run;
 owned M5 39E84984-3C6F-4A6A-8DC8-D1098F6B623E and cold iPad9 AC8049AC remain shutdown. Only39E synthetic data was reset;
@@ -337,17 +255,15 @@ linked/plain ink. Copy-only original256packages/3180files/567855190bytes produce
 10 untouched update snapshots; retention pruned24 backups,242survivors strictly validate AND load
 (2034cels/1459vectors), second run0, originals exact.11.013s was the converter on owned M5, not iPad
 watchdog/startup time. Scheduling is now implemented; genuine cold whole-library UI still must prove
-responsive first screen. Retire temporary converter/UI WHOLE only after owner confirms current artwork.
+responsive first screen at that historical pin. Kevin has now confirmed current artwork; retire temporary converter/UI WHOLE on resume.
 
 ## Artwork, crash evidence and physical release
 
-Installed normal Release remains bcd7a6af, UUID F6102F9A-6D31-3185-B078-47B4C41981D9, provisioning expiry
-2026-10-30T00:18:54Z. No fresh saved/unlock readiness or current-library export yet. Before any physical
-restart/install: fresh readiness; read-only exportProject/exportAll; devicectl copy Export; verify index,
-paths/counts/bytes/hashes; clear only temporary Export through index hook; normal launch. Existing export
-predates later Liquify. Build signed clean Release with identical clean/build args/DD; deep verify,
-profile>=5days, binary/dSYM UUID match and required old workflows. Repin stale release plan; never use
-resetGallery, uninstall or normal scene deletion. Secrets ~/.config/paintapp/.env must never print.
+Installed current normal Release is6fb979f4, UUID AE3F2323-9760-3783-BB5A-0756F9828CCA;
+owner artwork confirmation is complete. See current checkpoint for verified250-package preservation,
+normal launch, signing exception and renewal downgrade risk. A further physical restart/install needs
+fresh saved-scene readiness. Never use resetGallery, uninstall or normal scene deletion. Secrets
+~/.config/paintapp/.env must never print.
 Device UDID00008030-000151492EC3C02E; CoreDevice E3B83820-DF74-5042-B52B-0D5BA17E4877; verify inventory.
 
 Preserved `~/PaintWork/s51-cleanup/current-library/Export/`:10Projects+228Backups+18Trash,
