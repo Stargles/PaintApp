@@ -17,6 +17,14 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Media reads produce runtime priority-inversion warnings — 2026-10-25
+
+Actualunrelated422passed atb827cbfc butrecordedthreeThreadPerformanceChecker warnings:
+H264StreamDecoder101/361 andVideoFrameReader308. HighQoS caller waits on unspecified/Utility work.
+No runtimefailure/artistlatency/eraser attribution. Traceproductionversusfixture priority and existing
+queue/read ownership beforefixing; no blanketpriority increase, duplicateddecoder ortestsilencing.
+Evidence: native/unrelated-normal422-b827cbfc-run01/root-independent-acceptance.json.
+
 ## Interior mending repaints circular outline tips — 2026-10-25
 
 Actualwhole20 at32185179 passed18/failed2: original400mask cardinal4 and production96circle

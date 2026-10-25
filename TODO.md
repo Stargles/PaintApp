@@ -60,11 +60,26 @@ playback/grey-pan/stroke/Move/graph. AgentLOOK6portraitPNG, rootLOOK4; Move/grap
 noownerlandscapeclaim. Preserve current artwork; fresh saved-scene/export/readiness whenactuallyready.
 Signedbuild is alreadybehind currentfailed321; do notinstallthatfailedcandidate. No scenecleanup.
 
-**Parallel usefulgate next:** run the alreadyreviewed18unrelated logicclasses(422methods) on this
-committedsuccessor while designwork stays external/read-only. They cover backup/brush/palette/metadata/
-raster/stream/path modules, notFillMend. Repincommand explicitly, verifyexact422/0skip and728freeze.
-This is a focusedmodule baseline, not finalwhole-product qualification. Do notrun107faults until
-source/artifact plan is explicitlyprepared/granted; unchangedmodules cancarry namedpin evidence.
+**Unrelated modulegate CLOSED:**b827cbfc actual422/422passed,0failure/skip/expected, exact18selected
+classes/selectors onownedM539E. Root independently reread xcresult/728freeze/cleanHEAD. Note original
+class-manifest also contains8UIclasses; root filtered the actual18logiccommand, notall26manifestkeys.
+FillMendEXCLUDED anditsfailed20unchanged. ThreeactualThreadPerformanceChecker warnings preserved:
+H264StreamDecoder101/361, VideoFrameReader308; main/highQoS waiter on unspecified/Utility worker.
+No artistlag/cause established; traceproduction versusfixture call ownership beforechangingQoS.
+Evidence: native/unrelated-normal422-b827cbfc-run01/root-independent-acceptance.json.
+
+**Mend scope decision being prepared, NOT applied:** freshindependentreviewer recommends current
+VECTORreference geometry ratherthan anotherpixelclassifier. ExistingVectorCanvas→BrushStamper→
+DabTarget supplies canonicalrendered dab positions/size/tips, but needs explicitfirsttangent/pose
+forwarding pluscoverage/overlap/unknown-contributor handling. Reuseonebrushwalk/renderer; this is
+moderate source-contract work, notfree metadata. Savedfills stillneednohistoricalassociation because
+MendAll alreadyuses currentreferences. Flattened/raster/image/baked/text/video refs lackthisdata;
+conservativefallback wouldleave ambiguousattachedink. Thatnarrows currentownerask and requiresa
+plain capability ruling, with an illustrativeA/B showingthevisiblegap, beforeimplementation.
+DoNOT reaskalreadyanswered attachedstems/protectuncertainjoins; askonlyreference-typecapability.
+No feature narrowing/newrenderercontract is granted untilowneranswers. Currentfailed321mustnotship.
+Reports: mend-free-caps-b865-readonly/current-vector-seam-feasibility/assessment.md andfreshdesign
+agentverdict. No more pixelclassifier productpatch granted.
 
 Finalgates remain: successorwholeFill20/coldUI4withownerlandscapeLOOK+meaningfulnewfaults; unrelated
 422/wholeUI47, logic107targets/99recipes/66selectors(247statements), UI13/7selectors/33statements,
