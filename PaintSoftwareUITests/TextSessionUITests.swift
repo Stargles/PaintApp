@@ -84,8 +84,11 @@ final class TextSessionUITests: PaintUITestCase {
     /// put down with the brush; Select, a loop round them, Edit Text; then a tap on empty canvas puts
     /// the box down and no new one comes up.
     func testATapAwayFromAnEditedBoxPlacesNoNewBox() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        XCTAssertGreaterThan(app.windows.firstMatch.frame.width, app.windows.firstMatch.frame.height,
+                             "PREMISE: the edited-text workflow is drawn in landscape")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let host = canvas.frame
@@ -100,12 +103,14 @@ final class TextSessionUITests: PaintUITestCase {
         rectangle.tap()
         let words = wordsWindow(in: host)
         let written = try inkReading(canvas, in: words)
+        attachScreenshot(XCUIScreen.main, "text-edit-1-before-reopening")
         dragInPoints(app, from: CGPoint(x: boxTopLeft.x - 0.03 * host.width, y: boxTopLeft.y - 0.015 * host.height),
                      to: CGPoint(x: boxTopLeft.x + 0.38 * host.width, y: boxTopLeft.y + 0.07 * host.height))
         let edit = app.buttons["selectPanel.editTextButton"]
         XCTAssertTrue(edit.waitForExistence(timeout: 5), "a loop round the words offers Edit Text")
         edit.tap()
         XCTAssertTrue(waitForTextState(app, "box", "editing"), "Edit Text opens the box (text:\(readTextState(app)))")
+        attachScreenshot(XCUIScreen.main, "text-edit-2-overlay-open")
 
         tap(app, at: awayPoint(in: host))
         XCTAssertTrue(waitForTextState(app, "none"), "the tap put the edited box down (text:\(readTextState(app)))")
@@ -114,7 +119,7 @@ final class TextSessionUITests: PaintUITestCase {
         let after = try inkReading(canvas, in: words)
         XCTAssertEqual(Double(after.ink), Double(written.ink), accuracy: Double(written.ink) * 0.15,
                        "the words are still there (ink \(written.ink) -> \(after.ink))")
-        attachScreenshot(app, "edit-text-tap-away")
+        attachScreenshot(XCUIScreen.main, "edit-text-tap-away")
     }
 
     /// **The text's colour is picked in the app's own colour panel, and the words being written are drawn
