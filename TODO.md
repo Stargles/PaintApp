@@ -29,15 +29,19 @@ records-only pins; do not retag the old binary. First29 fault targets are being 
 palette4, metadata4, curve7;14selectors/69 meaningful statements inherited from accepted107 map.
 Root must inspect exact recipes/source locations and explicitly grant one-Mac native execution.
 Stop on compiler/crash/setup failure or unexpected green; rebuild normal after mutations before UI.
-Stream/media are omitted from29; remaining78 targets stay queued. Native first29 STOPPED after
-its first ineffective control: actual selected palette method1/1 PASSED under inverted validation,
-28notrun,0qualifiedtargets. Root verified fresh Palette compilation in BOTH targets, exact actual
-selector/count/device and full728 restoration/clean0c417. Cause: the reversed guard rejects the
-fixture's first VALID swatch before reaching its malformed second swatch, so unreadable-library
-assertions remain correctly satisfied. Correct the EXTERNAL negative control to omit validation
-while preserving valid swatches; no product/test change justified. Rebuild normal palette class,
-independently review corrected recipes, then explicitly grant a fresh run. No native lease active.
-Evidence: native/fault-tranche29-0c4170a3-run01/root-independent-closeout.json.
+Stream/media are omitted from29; remaining78 targets stay queued. First4 corrected palette/storage
+controls now QUALIFY at21ad2b7d: root independently reread all4 actual native results,1failed method
+each,13located meaningful assertion failures, full728 exact/clean. Case3's later TrashItem unwrap169
+is the direct missing-quarantine consequence AFTER intended recovery failures166/168: it does not
+invalidate those two reached oracles, but is NOT an additional qualified assertion; final Trash-byte
+assertion170 was unreached. Earlier setup/unrelated masking failures still disqualify. All actual
+issues must remain visible. Root receipt: native/corrected-fault-tranche29-21ad2b7d-run01/
+root-independent-qualified-first4.json. Interrupted case5 and24unstarted =25stillunqualified; prepare
+ONLY those25 unchanged recipes/maps, then rootreview/grant. Do not rerun first4. Normal422 follows
+remaining25; compiled objects currently require normal rebuilding before UI/install. Native lease
+RELEASED. Prior reversed-predicate control1/1green remains excluded; corrected guardtrue reaches bad
+swatches. Restored normal ColorPicker32/32 was separately rootaccepted, fresh Palette BOTHtargets.
+No product/test change was needed for the ineffective control or the missing-Trash consequence.
 
 Media trace found a concrete final-owner defect: H264StreamDecoder deinit can invalidate its native
 session on the releasing/main thread after weak client stop loses ownership. Design a tiny transfer
