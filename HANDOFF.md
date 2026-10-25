@@ -64,13 +64,25 @@ Five runtime QoS warnings remain (four native VT waits on decoder worker, one Vi
 43 compile warnings retained. No suppression or QoS change. Receipt:
 `native/media-normal425-79a272c4-run01/root-independent-acceptance.json`.
 
-Next prepare and run the reviewed media15 production recipes as16 selector-cases/16 distinct assertion
-targets against unchanged source and the actual425 baseline. Root conversion/RAM review:
-`media-retirement-root-review-79a272c4/`. R10 retained invalid-but-CF-live native-session stress goes
-LAST on the owned simulator; crash/setup/deadlock is excluded, never assertion credit. No expected
-literal or test-source mutation. Root reviews preparation before granting one native lease. Rebuild
-normal after all mutation batches before UI/install; do not repeat normal425 merely between unchanged
-source fault tranches. Remaining78 prepared audit targets follow. Sourceauthor branch preserved.
+**Media assertions qualified at0565:** actual16 selector-cases/15 production recipes reached all16
+unique approved statements (19 case-bound primary issues), zero skips. Root independently extracted
+all16 actual xcresults, compiled hashes, native issue locations and exact728 restoration. Nine other
+post-state issues are retained without credit; R09's missing-picture counts are the intended failed
+recreation, not an initial fixture failure. R10's last retained-CF invalid-session stress reached final
+cleanup count6 versus2 without crash/hang/setup failure. No expected literal or test-source mutation.
+Receipt: `native/media16-0565e96f-run01/root-independent-qualification.json`. Normal425 remains the
+actual79a binary; no UI/fast/full/device qualification is implied. Sourceauthor branch preserved.
+
+**Next audit78:** raster43, stream14, fit8, LiveWalk10 and stream-fixture3 are mechanically prepared
+and independently RAM-reviewed against the same728 source and actual425 baseline: 70 distinct recipes,
+52 selected methods and178 case-bound receipts/126 unique statements. All original case objects,
+edits, statements and composed hashes match; only3 H264 compositions and old-method line positions
+changed with the reviewed media source. The inherited map.components summary still names107; use
+these actual selected78 counts. Receipt: `final-repin-offline/remaining78-0565e96f/root-independent-preparation-acceptance.json`.
+Repin metadata to this records-only checkpoint and review before one native grant; stop on unexpected
+green/compiler/crash/setup masking, preserve every issue, and inventory actual unique statement hits.
+Rebuild normal after all mutation batches before UI/install; do not repeat normal425 merely between
+unchanged-source fault tranches.
 
 **Fill design remains unproved, no new product patch:** independent finite models reject tangent-only
 or nearest-face shortcuts (sharp corners, non-nearest unfilled contacts and gapped centerlines whose

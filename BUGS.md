@@ -21,10 +21,12 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 Actual unrelated422 passed at b827cbfc with three ThreadPerformanceChecker warnings. Independent
 trace confirms one production-reachable ownership defect: final H264 native cleanup can execute on
-main when weak client stop is overtaken by final release. Design a narrow transfer of only that
-session to its existing serial queue, with one shared native cleanup operation; no self/client capture,
-new queue or QoS increase. A narrow fix is integrated from a58498bd; native qualification remains pending. The reset warning is already worker-owned; this run's
-video warning is the test's direct pixel oracle. Separate synchronous production video UI pulls are
+main when weak client stop is overtaken by final release. The integrated narrow fix transfers only
+that session to its existing serial queue and shares one native cleanup operation; no self/client
+capture, new queue or QoS increase. Normal425 at79a passed all425; all16 new assertion statements
+were independently hit by actual production-source faults at0565, with exact728 restoration. UI,
+final fast/full and device checks remain pending. Five warnings remain in the normal425 run: four
+worker-owned native VT waits and one direct video-test pixel oracle; they were not suppressed. Separate synchronous production video UI pulls are
 source-confirmed risks, not a measured slowdown or eraser cause. Report:
 `s54-final-qualification/media-qos-trace-683f40a3.md`; actual422 evidence remains at its true pin.
 
