@@ -48,14 +48,18 @@ Add a fresh in-memory flow regression if confirmed. RasterSource/RasterBuffer sc
 the nine-path scaled owner. Record before implementation and do not call source reasoning native proof.
 
 
-**Scaled route, separate and uncompiled:** author0cab26de in PaintApp-s54-mend-scale-stage is a frozen
-nine-path checkpoint, not harvested. Shared ImageWarp crop/inverse support and recursive cancellation
-have independent source review; actual sampling, cumulative request work/byte phases, fitted window
-consumers, old-core coexistence and final publication remain under review. No cache or renderer clone.
-Four new methods give FillMend28+FillObject28+StrokeWall17+RasterSampling13=86; no new file/PBX identifier.
-Whole4096 useful output, real source preservation, owner-size appearance A/B and cold/hot counts remain
-required. Do not call native1:1 logic proof or a conservative refusal whole-canvas completion.
-Frozen patch: `scale-live-owner-draft-v3/source.patch` (a97caabe); all9 hashes match0cab26de.
+**Scaled route, reviewed and ready for first compilation:** author94980fdb replaces the uncompiled
+0cab checkpoint with its independently reviewed allocation follow-up. Root verified the frozen nine
+source paths and their immutable commit hashes before harvest. Retire worker core/readback aliases and
+completed command wrappers before growth; incremental allocation valves and typed pool scope preserve
+failure/cancellation. The existing displayed preview and borrowed document memos remain external owners;
+this is no total-process/RSS release claim. Reuse the existing sampler and one request meter; no cache,
+renderer clone, persisted field or new file/PBX identifier. Harvest only these nine source paths, then
+commit and run first Debug FillMend28+FillObject28+StrokeWall17+RasterSampling13=86 on owned39E.
+Shared clear-raster proof must precede scaled unknown classification through an explicit worker phase;
+cheap metadata getters/snapshot remain scan-free. That contract is being coordinated separately.
+Whole4096 useful output, source preservation, owner-size appearance A/B and cold/hot counts stay OPEN.
+Evidence: `scale-stage-reviewed-94980fdb/receipt.json`; allocation review9dcac7d8; nativeUNRUN.
 
 **New assertion controls:** the locality/Reach5 plan is OFFLINE ONLY at4e2 (3 product/2 premise
 identities). Preserve its original candidate and use a separately named packet for the reviewed broad
