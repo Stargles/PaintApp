@@ -590,4 +590,54 @@ final class TextBakeCharacterizationTests: XCTestCase {
         XCTAssertTrue(manager.textGestureActive)
         XCTAssertEqual(manager.textFrame[.topLeft], CGPoint(x: 50, y: 50), "the box is where the finger was")
     }
+
+    // MARK: - The live editor's selection during a style change
+
+    @MainActor
+    func testRestylingKeepsTheActualUnicodeCaretAtTheEndBeforeFurtherTyping() throws {
+        for string in ["A😀B", "Ae\u{301}B"] {
+            let overlay = TextOverlayView(frame: CGRect(x: 0, y: 0, width: 300, height: 120))
+            let frame = TextFrame(origin: .zero, size: CGSize(width: 300, height: 120))
+            var recipe = TextRecipe(string: string)
+            defer { overlay.update(isActive: false, frame: frame, recipe: recipe, canvasScale: 1) }
+            overlay.update(isActive: true, frame: frame, recipe: recipe, canvasScale: 1)
+            let end = NSRange(location: 4, length: 0)
+            overlay.textView.selectedRange = end
+            XCTAssertEqual(overlay.textView.selectedRange, end, "PREMISE: UIKit accepted the valid UTF-16 end")
+
+            recipe.typography.pointSize = 80
+            overlay.update(isActive: true, frame: frame, recipe: recipe, canvasScale: 1)
+            let font = try XCTUnwrap(overlay.textView.attributedText.attribute(.font, at: 0,
+                                                                             effectiveRange: nil) as? UIFont)
+            XCTAssertEqual(font.pointSize, 80, "PREMISE: the real editor applied the changed style")
+            XCTAssertEqual(overlay.textView.selectedRange, end,
+                           "Restyling must keep the actual UTF-16 caret after the final character")
+            overlay.textView.insertText("C")
+            XCTAssertEqual(overlay.textView.text, string + "C",
+                           "Further typing must append after the Unicode text, not before its final character")
+        }
+    }
+
+    @MainActor
+    func testRestylingKeepsTheActualSelectedTextForTheNextReplacement() throws {
+        let overlay = TextOverlayView(frame: CGRect(x: 0, y: 0, width: 300, height: 120))
+        let frame = TextFrame(origin: .zero, size: CGSize(width: 300, height: 120))
+        var recipe = TextRecipe(string: "ABCD")
+        defer { overlay.update(isActive: false, frame: frame, recipe: recipe, canvasScale: 1) }
+        overlay.update(isActive: true, frame: frame, recipe: recipe, canvasScale: 1)
+        let selected = NSRange(location: 1, length: 2)
+        overlay.textView.selectedRange = selected
+        XCTAssertEqual(overlay.textView.selectedRange, selected, "PREMISE: UIKit selected BC")
+
+        recipe.typography.tracking = 3
+        overlay.update(isActive: true, frame: frame, recipe: recipe, canvasScale: 1)
+        let kern = try XCTUnwrap(overlay.textView.attributedText.attribute(.kern, at: 1,
+                                                                         effectiveRange: nil) as? NSNumber)
+        XCTAssertEqual(kern.doubleValue, 3, "PREMISE: the real editor applied the changed tracking")
+        XCTAssertEqual(overlay.textView.selectedRange, selected,
+                       "Restyling must preserve the complete selected range, not collapse it to a caret")
+        overlay.textView.insertText("E")
+        XCTAssertEqual(overlay.textView.text, "AED",
+                       "Further typing must replace the selected characters instead of inserting before them")
+    }
 }

@@ -381,8 +381,7 @@ final class TextOverlayView: CanvasPlaneView, UITextViewDelegate {
         textView.typingAttributes = attributes
         let selected = textView.selectedRange
         textView.attributedText = NSAttributedString(string: textView.text, attributes: attributes)
-        textView.selectedRange = NSRange(location: min(selected.location, textView.text.count),
-                                         length: 0)
+        textView.selectedRange = selected
         textView.textAlignment = TextLayout.nsAlignment(recipe.typography.clamped.alignment)
         // The caret takes the text's own colour, which is the one place the recipe's colour is
         // visible in this view. A clear caret over clear glyphs would leave nothing to aim with.
