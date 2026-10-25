@@ -67,7 +67,11 @@ commit and run first Debug FillMend28+FillObject28+StrokeWall17+RasterSampling13
 Shared clear-raster proof must precede scaled unknown classification through an explicit worker phase;
 cheap metadata getters/snapshot remain scan-free. That contract is being coordinated separately.
 Whole4096 useful output, source preservation, owner-size appearance A/B and cold/hot counts stay OPEN.
-Evidence: `scale-stage-reviewed-94980fdb/receipt.json`; allocation review9dcac7d8; nativeUNRUN.
+Evidence: `scale-stage-reviewed-94980fdb/receipt.json`; allocation review9dcac7d8.
+First root a9773c9c compiler attempt completed with0 tests: the nested typed `do` lifetime scope has
+no catch, which Swift rejects. All729 sources remain exact. Record before changing only that scope
+to plain `do`; preserve the outer typed failure boundary and inner Result/pool lifetime. Runtime,
+appearance and performance remain UNRUN. Failed result is retained at `native/scaled-normal86-a9773c9c-run01/`.
 
 **New assertion controls:** the locality/Reach5 plan is OFFLINE ONLY at4e2 (3 product/2 premise
 identities). Preserve its original candidate and use a separately named packet for the reviewed broad
