@@ -32,7 +32,7 @@ replace unsupported raster-positive premises while original FillObject result/un
 remain byte-exact. Strict OPEN-on-INK/SOURCE255 GPU coverage is added. Root reviewed the separate
 LASSO_FILL spec removal; author stale TODO/HANDOFF/BUGS are not copied. Independent receipt:
 `vector-mend-independent-proof/live-v5-source-review/receipt.json` (e0609bf3). Full three-class71
-first native71 stopped at compilation: duplicate fixture-local `refused` in FillMendLogicTests; zero methods executed. Record before the narrow rename to `refusedReference`, then rerun the same71; all result/undo/contour expectations stay intact. Both Metal targets compiled, but runtime/UI/faults remain UNRUN.
+first two native71 attempts stopped at compilation with zero methods executed: duplicate fixture locals `refused` (renamed at1ddf6eb6), then `ink`. Record before renaming the latter canonical fixture local to `referenceInk`; independently audit all three changed test files for remaining collisions before the same71 rerun. Product source and all result/undo/contour expectations stay intact. Both Metal targets compiled, but runtime/UI/faults remain UNRUN.
 Whole4096 resampling and same-budget window refinement remain required OPEN engineering work.
 The sharpened external ImageWarp scale-stage proposal retains one total work account across retries,
 prepares geometry before expensive filtering/core allocation, and samples the final picture once.
@@ -68,8 +68,9 @@ re-extracted actual results and729 freeze. All35 faults reached approved mapped 
 303 mapped issues at50 of72 selected distinct statements and22 UNHIT; two unmapped keyframe460
 consequences excluded. Root independently re-extracted all35 before changing source and accepted
 independent causal review:35 specific cases qualify at50 distinct statements/86 reached case-bound
-identities. The original126 union is now102 reached/24 UNHIT across76 qualified original cases;
-new finite-pass16 assertions are outside that inventory. Original broad load/freeze stay unresolved.
+identities. The original126 union now has118 product identities plus3 premise identities and5 explicit
+limits after root accepted the separate gap16 causal review;76 original case identities stay unchanged.
+New finite-pass16 assertions are outside that inventory. Original broad load/freeze stay unresolved.
 Exact729 restored, cleanHEAD, driver closed. Evidence: `native/remaining35-faults-b849ffc1-run01/root-independent-qualification.json`.
 Reference/arrangement checks receive no product-fault credit. Original failed/inconclusive attempts
 remain preserved. Never infer all assertions covered from all cases being red.
@@ -83,9 +84,10 @@ for cleanup after the original assertions. Root reviewed the exact two-test-only
 all existing expected values/method counts remain unchanged. No product hook or new method.
 Actual normal12 on isolated0ed passed12/12,0skip/fail/expected; root independently accepted actual
 results/729source freeze. The exact16 new controls reached19/19 targets (16 product and3 premise
-identities),27 mapped issues with15 uncredited consequences. Root re-extracted all16; independent
-causal review remains PENDING, so global coverage stays102/126 until acceptance. Five explicit limits
-remain even if accepted. Isolated0ed is source-identical to c517 at these729 files; this is not blanket
+identities),27 mapped issues with15 uncredited consequences. Root re-extracted all16 and accepted
+independent causal review after verifying139 input/4 output hashes; original126 is118 product plus3
+premise identities, with5 explicit limits. Broad load stays inconclusive; broad freeze stays unrun.
+Evidence: `native/gap16-faults-0ed70e80-run01/root-independent-qualification.json`. Isolated0ed is source-identical to c517 at these729 files; this is not blanket
 qualification of the new live replacement.
 
 **Remaining final gates:** finish live fill and its containment work; original logic/coldUI,

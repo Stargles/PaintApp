@@ -753,8 +753,8 @@ final class FillMendLogicTests: XCTestCase {
                                    CGPoint(x: 5, y: 123), CGPoint(x: 5, y: 5)], size: 2)
         let strip = supportStroke([CGPoint(x: 30, y: 50), CGPoint(x: 30, y: 70)], size: 40)
         let prepared = try supportReference([frame, strip], side: side)
-        let ink = stride(from: 3, to: prepared.rgba.count, by: 4).map { prepared.rgba[$0] != 0 }
-        let owned = supportExterior(ink, side: side, seed: 60 * side + 7).map { $0 ? UInt8(255) : 0 }
+        let referenceInk = stride(from: 3, to: prepared.rgba.count, by: 4).map { prepared.rgba[$0] != 0 }
+        let owned = supportExterior(referenceInk, side: side, seed: 60 * side + 7).map { $0 ? UInt8(255) : 0 }
         let real = try canonicalPatch([frame, strip], side: side, source: owned, reach: 40)
         XCTAssertEqual(real[60 * side + 13], 255, "a true forty-pixel crossing remains useful with four owned paper columns before the frame")
         let outline = try supportInk([frame], side: side)
