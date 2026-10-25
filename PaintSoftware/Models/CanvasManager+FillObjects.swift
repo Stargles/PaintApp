@@ -88,7 +88,7 @@ extension CanvasManager {
                                         transform: vector.transform, size: size, references: references,
                                         neighbours: neighbours, threshold: threshold, reach: reach, paper: paper,
                                         maximumPointCount: min(undoPoints, geometryPoints),
-                                        maximumPathDataBytes: remainingUndo)
+                                        maximumPathDataBytes: remainingUndo, validity: validity)
                 let patch = await withCheckedContinuation { continuation in
                     fillQueue.async {
                         let result = autoreleasepool { Self.prepareFillMend(work) }
@@ -185,22 +185,22 @@ extension CanvasManager {
         let price = MetalFillSession.bytesPerPixel(isLasso: true, twoReferenceColours: true) + 14
         let window = FillWindow.lasso(around: shown.boundingBoxOfPath, halo: work.reach + 2,
                                       in: work.size, pixelBudget: max(1, MetalFillEngine.fillBudgetBytes / price))
-        let width = window.workingWidth, height = window.workingHeight
         guard work.reach * window.scale >= 1 else { return .unchanged }
         let prepared = autoreleasepool { fillMendMask(work, shown: shown, window: window) }
-        let mask: [UInt8]
+        let mask: [UInt8], admittedWindow: FillWindow
         switch prepared {
-        case .mask(let accepted): mask = accepted
+        case .mask(let accepted, let actualWindow): mask = accepted; admittedWindow = actualWindow
         case .unchanged: return .unchanged
         case .needsMoreMemory: return .needsMoreMemory
         }
-        guard let traced = PixelOps.contourPath(selected: mask.map { $0 != 0 }, width: width, height: height,
+        guard let traced = PixelOps.contourPath(selected: mask.map { $0 != 0 },
+                                                width: admittedWindow.workingWidth, height: admittedWindow.workingHeight,
                                                 maximumPointCount: work.maximumPointCount) else {
             // fillMendMask only returns a nonempty mask. A refused contour must not masquerade as
             // "no gaps", and the entire atomic plan is discarded by the caller on either refusal.
             return .exceedsBudget
         }
-        var toLocal = window.transform.inverted().concatenating(work.transform.inverted())
+        var toLocal = admittedWindow.transform.inverted().concatenating(work.transform.inverted())
         guard let local = traced.copy(using: &toLocal) else { return .needsMoreMemory }
         let combined = work.path.normalized(using: rule).union(local, using: .winding)
         let updated = work.fill.reshaped(to: combined)
@@ -209,23 +209,29 @@ extension CanvasManager {
         return .fill(updated)
     }
 
-    private static func fillMendMask(_ work: FillMendWork, shown: CGPath, window: FillWindow) -> FillMendMask {
+    private static func fillMendMask(_ work: FillMendWork, shown: CGPath, window initialWindow: FillWindow) -> FillMendMask {
+        guard let prepared = prepareFillReference(references: work.references, window: initialWindow,
+            excludingElement: (celID: work.celID, elementID: work.fill.id), isLasso: true,
+            isCurrent: { !work.validity.superseded }) else { return .needsMoreMemory }
+        let window = prepared.window
         let width = window.workingWidth, height = window.workingHeight
+        guard work.reach * window.scale >= 1 else { return .unchanged }
         guard let source = LassoFillMask.rasterize(path: shown, width: width, height: height,
-                                                  transform: window.transform),
-              let prepared = makeFillReference(references: work.references, window: window,
-                  excludingElement: (celID: work.celID, elementID: work.fill.id), isLasso: true) else { return .needsMoreMemory }
-        guard let engine = MetalFillEngine.shared,
-              let session = engine.makeMendSession(referenceRGBA: prepared.rgba, width: width, height: height,
-                                                    sourceMask: source, pathWall: prepared.pathWall(in: window)).session else { return .needsMoreMemory }
-        session.installVectorReference(prepared.support)
-        guard var neighbours = neighbourMask(of: work.neighbours, in: window) else { return .needsMoreMemory }
+                                                  transform: window.transform) else { return .needsMoreMemory }
+        let held = [UndoBudget.addingCost(32, prepared.rgba.capacity), prepared.support.retainedBytes,
+                    UndoBudget.addingCost(32, source.capacity)].reduce(0, UndoBudget.addingCost)
+        guard var neighbours = neighbourMask(of: work.neighbours, in: window,
+                                             reserving: window.scale < 1 ? held : 0) else { return .needsMoreMemory }
         for index in source.indices where source[index] != 0 { neighbours[index] = 0 }
+        guard !work.validity.superseded, let engine = MetalFillEngine.shared,
+              let session = engine.makeMendSession(referenceRGBA: prepared.rgba, width: width, height: height,
+                                                    sourceMask: source, pathWall: prepared.pathWall()).session else { return .needsMoreMemory }
+        session.installVectorReference(prepared.support)
         session.installNeighbours(neighbours)
         guard let mask = session.mendMask(sourceMask: source, threshold: work.threshold,
                                           artworkRect: work.paper?.applying(window.transform),
                                           reach: Float(work.reach * window.scale)) else { return .needsMoreMemory }
-        return mask.contains(where: { $0 != 0 }) ? .mask(mask) : .unchanged
+        return mask.contains(where: { $0 != 0 }) ? .mask(mask, window) : .unchanged
     }
 
     // MARK: - Solid shapes
@@ -444,7 +450,12 @@ struct GradientEditSession {
 }
 
 private final class FillMendValidity {
-    var superseded = false
+    private let lock = NSLock()
+    private var invalidated = false
+    var superseded: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return invalidated }
+        set { lock.lock(); invalidated = newValue; lock.unlock() }
+    }
 }
 
 private struct FillMendEdit {
@@ -469,6 +480,7 @@ private struct FillMendWork: @unchecked Sendable {
     let paper: CGRect?
     let maximumPointCount: Int
     let maximumPathDataBytes: Int
+    let validity: FillMendValidity
 }
 
 private enum FillMendPatch: @unchecked Sendable {
@@ -479,7 +491,7 @@ private enum FillMendPatch: @unchecked Sendable {
 }
 
 private enum FillMendMask {
-    case mask([UInt8])
+    case mask([UInt8], FillWindow)
     case unchanged
     case needsMoreMemory
 }

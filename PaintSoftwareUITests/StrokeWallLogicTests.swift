@@ -495,11 +495,11 @@ final class StrokeWallLogicTests: XCTestCase {
 
         let window = FillWindow.fitting(CGRect(origin: .zero, size: size), in: size,
                                         pixelBudget: Int(size.width * size.height))
-        let actual = CanvasManager.makeFillReference(references: references, window: window)?.pathWall(in: window)
+        let actual = CanvasManager.makeFillReference(references: references, window: window)?.pathWall()
         let vectorOnly = CanvasManager.makeFillReference(references: references.filter { $0.layer.kind == .vector },
-                                                        window: window)?.pathWall(in: window)
+                                                        window: window)?.pathWall()
         let rasterOnly = CanvasManager.makeFillReference(references: references.filter { $0.layer.kind == .raster },
-                                                        window: window)?.pathWall(in: window)
+                                                        window: window)?.pathWall()
         XCTAssertEqual(manager.layers.count, 2, "premise: one vector layer and one raster layer")
         XCTAssertNotNil(vectorOnly, "the real vector-reference factory draws a path wall")
         XCTAssertEqual(actual, vectorOnly, "only the vector layer walls, though both cels carry display lists")
@@ -564,10 +564,10 @@ final class StrokeWallLogicTests: XCTestCase {
 
         let window = FillWindow.fitting(CGRect(origin: .zero, size: size), in: size,
                                         pixelBudget: Int(size.width * size.height))
-        XCTAssertNil(CanvasManager.makeFillReference(references: manager.fillReferenceSources(), window: window)?.pathWall(in: window),
+        XCTAssertNil(CanvasManager.makeFillReference(references: manager.fillReferenceSources(), window: window)?.pathWall(),
                      "a layer excluded from the actual reference factory contributes no wall")
         manager.layers[0].fillReferenceOverride = true
-        XCTAssertNotNil(CanvasManager.makeFillReference(references: manager.fillReferenceSources(), window: window)?.pathWall(in: window),
+        XCTAssertNotNil(CanvasManager.makeFillReference(references: manager.fillReferenceSources(), window: window)?.pathWall(),
                         "the same layer contributes its actual wall when selected")
     }
 }

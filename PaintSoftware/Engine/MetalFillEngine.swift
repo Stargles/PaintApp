@@ -346,10 +346,24 @@ final class MetalFillSession {
         let cutReserve = count * (isLasso ? 4 : 2) + 512
         let available = max(0, MetalFillEngine.fillBudgetBytes - allocatedBytes - cutReserve - reference.retainedBytes)
         let budget = available / 2
-        guard budget > 0, CompositorBudget.hasHeadroom(for: available + cutReserve) else { return }
+        guard budget > 0 else { return }
+        // A completed packet already owns its CPU rows. The native lazy constructor still
+        // needs its construction allowance; prepared rows only need the actual upload below.
+        if reference.preparedPacket == nil,
+           !CompositorBudget.hasHeadroom(for: available + cutReserve) { return }
         do throws(VectorMendSupport.Failure) {
-            let packet = try VectorMendSupport.produce(reference, admission: .init(bytes: budget, work: 64_000_000))
+            let packet: VectorMendSupport.Packet
+            if let prepared = reference.preparedPacket { packet = prepared }
+            else { packet = try VectorMendSupport.produce(reference, admission: .init(bytes: budget, work: 64_000_000)) }
             guard !packet.patches.isEmpty else { return }
+            let uploadBytes = [max(4, UndoBudget.payloadBytes(count: packet.patches.count,
+                                                            stride: MemoryLayout<VectorMendSupport.Patch>.stride)),
+                               max(4, UndoBudget.payloadBytes(count: packet.contacts.count,
+                                                            stride: MemoryLayout<VectorMendSupport.Contact>.stride)),
+                               max(4, UndoBudget.payloadBytes(count: packet.canonicalCoverage.count,
+                                                            stride: MemoryLayout<VectorMendSupport.Span>.stride))]
+                .reduce(0, UndoBudget.addingCost)
+            guard uploadBytes <= available, CompositorBudget.hasHeadroom(for: uploadBytes) else { return }
             func upload<T>(_ rows: [T]) -> MTLBuffer? {
                 let (length, overflow) = rows.count.multipliedReportingOverflow(by: MemoryLayout<T>.stride)
                 guard !overflow else { return nil }

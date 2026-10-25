@@ -54,6 +54,113 @@ struct RasterWarpParams {
 /// the way `EffectReference` backs `applyEffect`.
 enum ImageWarp {
 
+    /// The scale-only subset of the existing sampler. Its conservative source intervals are
+    /// shared by tile crops and inverse support propagation; they describe READ influence, not
+    /// an alpha mask (Lanczos has negative lobes). Geometry never substitutes a guessed UIKit filter.
+    struct RasterScaleSupport {
+        private struct Axis {
+            let scale: Double, translation: Double, radius: Double, error: Double
+            let sourceCount: Int, output: Range<Int>
+            func taps(at pixel: Int, apron: Double) -> Range<Int> {
+                let centre = scale * (Double(pixel) + 0.5) + translation - 0.5
+                let low = max(0, min(sourceCount, Int(ceil(centre - radius - apron))))
+                let high = max(low, min(sourceCount, Int(floor(centre + radius + apron)) + 1))
+                return low..<high
+            }
+            func crop(_ output: Range<Int>) -> Range<Int> {
+                guard let last = output.last else { return 0..<0 }
+                let lowCentre = scale * (Double(output.lowerBound) + 0.5) + translation - 0.5
+                let highCentre = scale * (Double(last) + 0.5) + translation - 0.5
+                let low = max(0, min(sourceCount, Int(floor(lowCentre - radius - 1 - error))))
+                let high = max(low, min(sourceCount, Int(ceil(highCentre + radius + 2 + error))))
+                return low..<high
+            }
+            func influence<E: Error>(_ source: Range<Int>, visit: () throws(E) -> Void) throws(E) -> Range<Int> {
+                func first(_ predicate: (Range<Int>) -> Bool, visit: () throws(E) -> Void) throws(E) -> Int {
+                    var low = output.lowerBound, high = output.upperBound
+                    while low < high {
+                        try visit()
+                        let mid = low + (high - low) / 2
+                        if predicate(crop(mid..<(mid + 1))) { high = mid }
+                        else { low = mid + 1 }
+                    }
+                    return low
+                }
+                let low = try first({ $0.upperBound > source.lowerBound }, visit: visit)
+                let high = try first({ $0.lowerBound >= source.upperBound }, visit: visit)
+                return low..<max(low, high)
+            }
+            func reads<E: Error>(visit: () throws(E) -> Void) throws(E) -> Int? {
+                var sum = 0
+                for pixel in output {
+                    try visit()
+                    let (next, overflow) = sum.addingReportingOverflow(taps(at: pixel, apron: error).count)
+                    guard !overflow else { return nil }
+                    sum = next
+                }
+                return sum
+            }
+        }
+        private let x: Axis, y: Axis
+        let sourceSize: CGSize
+        let destination: CGRect
+        let inverseTexelMap: Homography
+
+        init?(sourceSize: CGSize, destination: CGRect, inverseTexelMap: Homography) {
+            let p = WarpParams(inverseTexelMap), limit = Double(Int32.max / 4)
+            guard p.m1 == 0, p.m3 == 0, p.m6 == 0, p.m7 == 0, p.m8 == 1,
+                  p.m0 > 0, p.m4 > 0, p.m0.isFinite, p.m4.isFinite,
+                  p.m2.isFinite, p.m5.isFinite, sourceSize.width > 0, sourceSize.height > 0,
+                  sourceSize.width < limit, sourceSize.height < limit,
+                  sourceSize.width.rounded() == sourceSize.width, sourceSize.height.rounded() == sourceSize.height,
+                  !destination.isEmpty, !destination.isNull, destination == destination.integral,
+                  [destination.minX, destination.minY, destination.maxX, destination.maxY]
+                    .allSatisfy({ $0.isFinite && abs($0) < limit }) else { return nil }
+            let rx = Double(3 / (1 / max(1, p.m0))), ry = Double(3 / (1 / max(1, p.m4)))
+            let x0 = Double(p.m0) * (destination.minX + 0.5) + Double(p.m2)
+            let x1 = Double(p.m0) * (destination.maxX - 0.5) + Double(p.m2)
+            let y0 = Double(p.m4) * (destination.minY + 0.5) + Double(p.m5)
+            let y1 = Double(p.m4) * (destination.maxY - 0.5) + Double(p.m5)
+            let peak = max(abs(x0), abs(x1), abs(y0), abs(y1), rx, ry)
+            guard peak.isFinite, peak < limit / 2 else { return nil }
+            // Bound the Float INPUT terms, not only the mapped result: a large global output
+            // coordinate can lose bits before an opposite translation cancels it in the shader.
+            // Both axes include the whole output, so a lookup at one row cannot under-bound another.
+            let terms = max(peak, abs(Double(p.m0) * destination.minX), abs(Double(p.m0) * destination.maxX),
+                            abs(Double(p.m4) * destination.minY), abs(Double(p.m4) * destination.maxY),
+                            abs(Double(p.m2)), abs(Double(p.m5)))
+            let error = 8 * Double(Float.ulpOfOne) * terms
+            guard error.isFinite, error < limit / 4 else { return nil }
+            x = Axis(scale: Double(p.m0), translation: Double(p.m2), radius: rx, error: error,
+                     sourceCount: Int(sourceSize.width), output: Int(destination.minX)..<Int(destination.maxX))
+            y = Axis(scale: Double(p.m4), translation: Double(p.m5), radius: ry, error: error,
+                     sourceCount: Int(sourceSize.height), output: Int(destination.minY)..<Int(destination.maxY))
+            self.sourceSize = sourceSize; self.destination = destination; self.inverseTexelMap = inverseTexelMap
+        }
+        var sourceRect: CGRect {
+            let xs = x.crop(x.output), ys = y.crop(y.output)
+            return xs.isEmpty || ys.isEmpty ? .zero
+                : CGRect(x: xs.lowerBound, y: ys.lowerBound, width: xs.count, height: ys.count)
+        }
+        func influencedOutput<E: Error>(by source: CGRect, visit: () throws(E) -> Void) throws(E) -> CGRect {
+            guard !source.isEmpty, !source.isNull,
+                  [source.minX, source.minY, source.maxX, source.maxY].allSatisfy(\.isFinite) else { return .null }
+            let clipped = source.integral.intersection(CGRect(origin: .zero, size: sourceSize))
+            guard !clipped.isNull, !clipped.isEmpty else { return .null }
+            let xs = try x.influence(Int(clipped.minX)..<Int(clipped.maxX), visit: visit)
+            let ys = try y.influence(Int(clipped.minY)..<Int(clipped.maxY), visit: visit)
+            return xs.isEmpty || ys.isEmpty ? .null
+                : CGRect(x: xs.lowerBound, y: ys.lowerBound, width: xs.count, height: ys.count)
+        }
+        /// Crop/upload requests are sourceRect.area per admitted tile. This separate bound sums
+        /// every output's clipped filter reads, including repeated reads of the same source cell.
+        func tapReadBound<E: Error>(visit: () throws(E) -> Void) throws(E) -> Int? {
+            guard let xs = try x.reads(visit: visit), let ys = try y.reads(visit: visit) else { return nil }
+            let (reads, overflow) = xs.multipliedReportingOverflow(by: ys)
+            return overflow ? nil : reads
+        }
+    }
+
     /// A source apron and its complete transient byte charge. Source coordinates are global
     /// texels, destination coordinates are global output texels; the matrix includes output scale
     /// but never the output window's origin. Source pixels outside the canvas are transparent.
@@ -107,7 +214,10 @@ enum ImageWarp {
                                             height: y1 - y0 + 2 * (ry + apron) + 1))
                 return true
             }
-            if let minimum = weights.min(), minimum > 0 {
+            if let scale = RasterScaleSupport(sourceSize: sourceSize, destination: destination,
+                                               inverseTexelMap: inverseTexelMap) {
+                needed = scale.sourceRect
+            } else if let minimum = weights.min(), minimum > 0 {
                 guard include(corners, minimumWeight: minimum) else { return nil }
             } else if weights.contains(where: { $0 > 0 }) {
                 // A tile crosses the horizon. Only actual positive-weight pixel centres matter;
@@ -137,7 +247,23 @@ enum ImageWarp {
     /// false; a failed tile must not become an intentional clear or certify an edit.
     static func drawRaster(sourceSize: CGSize, destination: CGRect, inverseTexelMap: Homography,
                            maximumWorkingBytes: Int = CompositorBudget.textureBudgetBytes,
+                           isCurrent: () -> Bool = { true },
                            source: (CGRect) -> CGImage?, consume: (CGImage, CGRect) -> Void) -> Bool {
+        forEachRasterPlan(sourceSize: sourceSize, destination: destination, inverseTexelMap: inverseTexelMap,
+                          maximumWorkingBytes: maximumWorkingBytes) { plan in
+            autoreleasepool {
+                guard isCurrent(), let image = rasterImage(plan: plan,
+                    maximumWorkingBytes: maximumWorkingBytes, source: source), isCurrent() else { return false }
+                consume(image, plan.destinationRect)
+                return true
+            }
+        }
+    }
+
+    /// Planning and drawing traverse the same bounded children. Returning false stops before the
+    /// next child; the caller owns and discards any partial destination picture.
+    static func forEachRasterPlan(sourceSize: CGSize, destination: CGRect, inverseTexelMap: Homography,
+                                  maximumWorkingBytes: Int, consume: (RasterPlan) -> Bool) -> Bool {
         guard !destination.isNull, !destination.isEmpty, destination == destination.integral,
               [destination.minX, destination.minY, destination.maxX, destination.maxY]
                 .allSatisfy({ $0.isFinite && abs($0) < CGFloat(Int32.max / 4) }),
@@ -156,11 +282,7 @@ enum ImageWarp {
                                height: vertical ? rect.height : rect.height - first)
                 return draw(a) && draw(b)
             }
-            return autoreleasepool {
-                guard let image = rasterImage(plan: plan, maximumWorkingBytes: maximumWorkingBytes, source: source) else { return false }
-                consume(image, rect)
-                return true
-            }
+            return consume(plan)
         }
         for y in stride(from: destination.minY, to: destination.maxY, by: 512) {
             for x in stride(from: destination.minX, to: destination.maxX, by: 512) {

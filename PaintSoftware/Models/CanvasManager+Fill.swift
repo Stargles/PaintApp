@@ -347,25 +347,60 @@ extension CanvasManager {
     @discardableResult
     private func installFillSession(for window: FillWindow, context: FillGestureContext,
                                     lassoMask: [UInt8]?) -> Bool {
+        guard isCurrentFillGeneration(context.generation) else { return false }
+        // Replacements enter with no caller-local core alias. Retire the field and stale
+        // worker readback before preparing another picture/core beside the same gesture.
+        fillSession = nil
+        fillWindow = nil
+        fillLock.lock(); fillRenderedRegion = nil; fillLock.unlock()
         let references = fillGestureReferences
-        let width = window.workingWidth, height = window.workingHeight
+        var admittedWindow = window
         var outcome: MetalFillEngine.SessionOutcome?
-        if let prepared = Self.makeFillReference(references: references, window: window, isLasso: lassoMask != nil) {
-            outcome = MetalFillEngine.shared?.makeSession(referenceRGBA: prepared.rgba, width: width,
-                                                          height: height, lassoMask: lassoMask,
-                                                          pathWall: prepared.pathWall(in: window),
-                                                          gapWidthLimit: Float(Self.fillGapRange.upperBound * window.scale))
+        let maskBytes = lassoMask.map { UndoBudget.addingCost(32, $0.capacity) } ?? 0
+        if let prepared = Self.prepareFillReference(references: references, window: window,
+            isLasso: lassoMask != nil, reserving: maskBytes,
+            isCurrent: { self.isCurrentFillGeneration(context.generation) }) {
+            admittedWindow = prepared.window
+            var admittedMask = lassoMask
+            if lassoMask != nil && admittedWindow != window {
+                guard let path = fillGestureLoopPath,
+                      let resized = LassoFillMask.rasterize(path: path, width: admittedWindow.workingWidth,
+                        height: admittedWindow.workingHeight, transform: admittedWindow.transform) else {
+                    reportFillRefusal(context); fillSession = nil; fillWindow = nil; return false
+                }
+                admittedMask = resized
+            }
+            guard isCurrentFillGeneration(context.generation) else { return false }
+            let neighbours: [UInt8]?
+            if admittedWindow.scale < 1 {
+                let held = [UndoBudget.addingCost(32, prepared.rgba.capacity), prepared.support.retainedBytes,
+                            maskBytes, admittedWindow != window
+                                ? (admittedMask.map { UndoBudget.addingCost(32, $0.capacity) } ?? 0) : 0]
+                    .reduce(0, UndoBudget.addingCost)
+                guard let mask = Self.neighbourMask(of: fillGestureNeighbours, in: admittedWindow,
+                                                    reserving: held) else {
+                    reportFillRefusal(context); fillSession = nil; fillWindow = nil; return false
+                }
+                neighbours = mask
+            } else { neighbours = nil }
+            guard isCurrentFillGeneration(context.generation) else { return false }
+            outcome = MetalFillEngine.shared?.makeSession(referenceRGBA: prepared.rgba,
+                width: admittedWindow.workingWidth, height: admittedWindow.workingHeight, lassoMask: admittedMask,
+                pathWall: prepared.pathWall(),
+                gapWidthLimit: Float(Self.fillGapRange.upperBound * admittedWindow.scale))
             outcome?.session?.installVectorReference(prepared.support)
+            if let neighbours { outcome?.session?.installNeighbours(neighbours) }
         }
+        guard isCurrentFillGeneration(context.generation) else { return false }
         let session = outcome?.session
         if session == nil { reportFillRefusal(context) }
         fillSession = session
-        fillWindow = session == nil ? nil : window
+        fillWindow = session == nil ? nil : admittedWindow
         if let session {
             // A lasso session derives the collar's reference colours from the ring itself (§6 2a)
             // and ignores whatever is handed to `fill(seedColor:)`. Mirroring its answer here keeps
             // the two from reading differently to anyone debugging a gesture.
-            let seed = window.workingPixel(of: CGPoint(x: context.seedX, y: context.seedY))
+            let seed = admittedWindow.workingPixel(of: CGPoint(x: context.seedX, y: context.seedY))
             fillSeedColor = session.isLasso ? session.referenceColours.0
                 : session.seedColor(atX: seed.x, y: seed.y)
         }
@@ -995,8 +1030,9 @@ extension CanvasManager {
     /// breaks it"*: it renders the new seed against the old session, it overwrites the bytes the new
     /// gesture's commit bakes, and its picture installs itself as the new gesture's preview.
     private func renderFill(_ key: FillKey, for context: FillGestureContext) -> FillRenderOutcome? {
-        guard isCurrentFillGeneration(context.generation), var session = fillSession, var window = fillWindow
+        guard isCurrentFillGeneration(context.generation), fillSession != nil, var window = fillWindow
         else { return nil }
+        var session = fillSession
         var bytes: [UInt8]?
         // **The bucket's window grows here, and the lasso's never does** (`FillWindow`). A fill
         // is run, and if its paint reaches the halo band along a side that is not the canvas's
@@ -1010,24 +1046,32 @@ extension CanvasManager {
             // worth of drawing the artist who has not asked for it should not pay for. Here rather
             // than where the session is made so that switching the mend on over a fill already
             // on screen, and a window grown for a bigger flood, both find it in place.
-            if key.mendReach > 0, !session.hasNeighbours {
-                guard let neighbours = Self.neighbourMask(of: fillGestureNeighbours, in: window) else {
-                    reportFillRefusal(context)
-                    return nil
+            bytes = autoreleasepool {
+                if key.mendReach > 0, session?.hasNeighbours == false {
+                    guard let neighbours = Self.neighbourMask(of: fillGestureNeighbours, in: window) else {
+                        reportFillRefusal(context)
+                        return nil
+                    }
+                    session?.installNeighbours(neighbours)
                 }
-                session.installNeighbours(neighbours)
-            }
-            bytes = Self.runFill(session, in: window, key: key, context: context, seedColor: fillSeedColor)
-            guard bytes != nil, !session.isLasso else { break }
-            let reached = session.paintedReaches(band: window.band(forHalo: Self.fillWindowHalo),
-                                                 of: window.growableSides)
+                return session.flatMap {
+                    Self.runFill($0, in: window, key: key, context: context, seedColor: fillSeedColor)
+                }
+            } // GPU work is complete; drain command/encoder retainers before any replacement.
+            guard bytes != nil, session?.isLasso == false else { break }
+            guard let reached = session?.paintedReaches(band: window.band(forHalo: Self.fillWindowHalo),
+                                                        of: window.growableSides) else { return nil }
             guard let grown = window.grown(toward: reached,
                                            pixelBudget: MetalFillEngine.workingPixelBudget(isLasso: false)),
                   grown != window else { break }
+            // The old core has finished. Neither this local nor the property may retain it
+            // during the replacement's capture/render/core peak; the old readback is stale too.
+            session = nil
+            bytes = nil
             guard installFillSession(for: grown, context: context, lassoMask: nil),
-                  let next = fillSession else { return nil }
+                  let next = fillSession, let nextWindow = fillWindow else { return nil }
             session = next
-            window = grown
+            window = nextWindow
         }
         // **The lasso's empty result, and it must leave no trace** (LASSO_FILL.md §6 step 5, §7.1).
         // A loop that encloses nothing — because it leaked through a gap, or because there was
@@ -1039,6 +1083,7 @@ extension CanvasManager {
         // `session.isLasso` rather than `fillGestureIsLasso`: this runs on `fillQueue` and that
         // flag is main-thread state. The count is the session's own, read on the same queue that
         // just wrote it.
+        guard let session else { return nil }
         let enclosedNothing = session.isLasso && session.lastFilledPixelCount < Self.lassoFillMinimumArea
         // **Publish to the commit path before publishing to the screen.** `commitInteractiveFill`
         // reads this the moment a second tap arrives, which is long before the landing runs.
@@ -1181,13 +1226,40 @@ extension CanvasManager {
     struct FillReference {
         let rgba: [UInt8]
         let support: VectorMendSupport.Reference
+        let window: FillWindow
         private let walls: [VectorCanvas.Frozen]
-        init(rgba: [UInt8], support: VectorMendSupport.Reference, walls: [VectorCanvas.Frozen]) {
-            self.rgba = rgba; self.support = support; self.walls = walls
+        init(rgba: [UInt8], support: VectorMendSupport.Reference, walls: [VectorCanvas.Frozen], window: FillWindow) {
+            self.rgba = rgba; self.support = support; self.walls = walls; self.window = window
         }
-        func pathWall(in window: FillWindow) -> [UInt8]? {
+        func pathWall() -> [UInt8]? {
             StrokeWallMask.mask(of: walls, width: window.workingWidth, height: window.workingHeight,
                                 transform: window.transform)
+        }
+    }
+
+    private struct FillReferenceSnapshot {
+        let baked: RasterSource?, raster: RasterSource?, vector: VectorCanvas.Frozen?
+        let kind: LayerKind, celID: UUID
+        func nativeImageBytes(in size: CGSize) -> Int {
+            let pixels = size.width * size.height
+            guard pixels.isFinite, pixels > 0, pixels < CGFloat(Int.max / 8) else { return Int.max }
+            let one = Int(pixels) * 4
+            var peak = baked.map({ !$0.isCertainlyTransparent }) == true
+                || raster.map({ !$0.isCertainlyTransparent }) == true ? one : 0
+            if let vector { peak = max(peak, vector.fillReferenceImageBytes) }
+            return peak
+        }
+    }
+
+    private static func fillReferenceListBytes(_ count: Int) -> Int {
+        UndoBudget.addingCost(96, UndoBudget.payloadBytes(count: count,
+            stride: 2 * (MemoryLayout<FillReferenceSnapshot>.stride + MemoryLayout<VectorCanvas.Frozen>.stride)))
+    }
+
+    private static func freezeFillReferences(_ references: [(layer: Layer, cel: Cel)]) -> [FillReferenceSnapshot] {
+        references.map { source in
+            FillReferenceSnapshot(baked: source.cel.bakedImage, raster: source.cel.raster.snapshot(),
+                vector: source.cel.vector?.freezeFillReference(), kind: source.layer.kind, celID: source.cel.id)
         }
     }
 
@@ -1195,46 +1267,253 @@ extension CanvasManager {
     /// snapshots are immutable source handles; nil is their existing exact transparency proof.
     static func makeFillReference(references: [(layer: Layer, cel: Cel)], window: FillWindow,
                                   excludingElement: (celID: UUID, elementID: UUID)? = nil,
-                                  isLasso: Bool = false) -> FillReference? {
+                                  isLasso: Bool = false, reserving reservedBytes: Int = 0) -> FillReference? {
+        let listBytes = fillReferenceListBytes(references.count)
+        guard reservedBytes >= 0, reservedBytes < MetalFillEngine.fillBudgetBytes,
+              listBytes < MetalFillEngine.fillBudgetBytes - reservedBytes,
+              CompositorBudget.hasHeadroom(for: listBytes) else { return nil }
+        return drawFillReference(snapshots: freezeFillReferences(references), window: window,
+                          excludingElement: excludingElement, isLasso: isLasso,
+                          supportOverride: window.scale < 1 ? .unavailable(width: window.workingWidth,
+                              height: window.workingHeight) : nil, reservedBytes: reservedBytes, isCurrent: { true })
+    }
+
+    /// A scaled request plans geometry before allocating the core or filtering any image. Native
+    /// windows keep the existing lazy recipe. This local owner dies at publication; hot SOURCE,
+    /// Reach, Overlap and colour ticks use the session's one completed geometry packet.
+    static func prepareFillReference(references: [(layer: Layer, cel: Cel)], window original: FillWindow,
+                                     excludingElement: (celID: UUID, elementID: UUID)? = nil,
+                                     isLasso: Bool = false, reserving reservedBytes: Int = 0,
+                                     isCurrent: () -> Bool) -> FillReference? {
+        guard isCurrent() else { return nil }
+        guard original.scale < 1 else {
+            return makeFillReference(references: references, window: original,
+                                     excludingElement: excludingElement, isLasso: isLasso, reserving: reservedBytes)
+        }
+        guard reservedBytes >= 0, reservedBytes < MetalFillEngine.fillBudgetBytes else { return nil }
+        let budget = MetalFillEngine.fillBudgetBytes - reservedBytes
+        let listBytes = fillReferenceListBytes(references.count)
+        guard listBytes < budget, CompositorBudget.hasHeadroom(for: listBytes) else { return nil }
+        let snapshots = freezeFillReferences(references)
+        let size = original.canvasSize
+        guard size.width > 0, size.height > 0, size.width <= 16_383, size.height <= 16_383,
+              size.width.rounded() == size.width, size.height.rounded() == size.height else { return nil }
+        let sourceCapacity = UndoBudget.payloadBytes(count: snapshots.capacity, stride: MemoryLayout<FillReferenceSnapshot>.stride)
+        guard sourceCapacity <= UndoBudget.addingCost(16,
+            UndoBudget.payloadBytes(count: references.count, stride: 2 * MemoryLayout<FillReferenceSnapshot>.stride)) else { return nil }
+        var maximumRecords = snapshots.count
+        for source in snapshots {
+            maximumRecords = UndoBudget.addingCost(maximumRecords, source.vector?.fillReferenceRecordCount ?? 0)
+        }
+        var request = VectorMendSupport.Meter(admission: .init(bytes: budget - listBytes, work: 64_000_000))
+        var proposed = original
+        do throws(VectorMendSupport.Failure) {
+            var recipe: VectorMendSupport.Reference?
+            do {
+                var builder: VectorMendSupport.Reference.Builder? = try .init(width: Int(size.width),
+                    height: Int(size.height), maximumRecords: maximumRecords, admission: request.admission)
+                for source in snapshots {
+                    guard isCurrent() else { throw .cancelled }
+                    if source.baked.map({ !$0.isCertainlyTransparent }) == true
+                        || source.raster.map({ !$0.isCertainlyTransparent }) == true {
+                        try builder?.appendUnknown(CGRect(origin: .zero, size: size))
+                    }
+                    let excluded = excludingElement.flatMap { $0.celID == source.celID ? $0.elementID : nil }
+                    source.vector?.stageFillReference(into: &builder, nativeSize: size, excludingElement: excluded)
+                    guard builder != nil else { throw .exceedsBudget }
+                }
+                recipe = builder?.finish()
+            }
+            var captured: VectorMendSupport.Preparation?
+            do throws(VectorMendSupport.Failure) {
+                guard let sourceRecipe = recipe else { throw .exceedsBudget }
+                captured = try VectorMendSupport.prepare(sourceRecipe, meter: &request, isCurrent: isCurrent)
+            }
+            recipe = nil
+            let captureCharge = request.bytes
+            var reservation = 0
+            var packet: VectorMendSupport.Packet?
+            // A reservation grows geometrically only when required; the SAME work account can
+            // refuse sooner. At most32 positive doublings fit the existing <=768MiB budget.
+            for _ in 0..<32 {
+                guard isCurrent(), captured != nil else { throw .cancelled }
+                do {
+                    let result: Result<VectorMendSupport.Packet, VectorMendSupport.Failure> = autoreleasepool {
+                        do throws(VectorMendSupport.Failure) {
+                            return .success(try VectorMendSupport.produce(captured!, in: proposed,
+                                meter: &request, isCurrent: isCurrent))
+                        } catch { return .failure(error) }
+                    }
+                    packet = try result.get()
+                } // The result has no surviving packet alias when retry storage is retired.
+                guard packet != nil else { throw .exceedsBudget }
+                let rows = packet!.retainedBytes
+                let upload = [UndoBudget.payloadBytes(count: packet!.patches.count, stride: MemoryLayout<VectorMendSupport.Patch>.stride),
+                    UndoBudget.payloadBytes(count: packet!.contacts.count, stride: MemoryLayout<VectorMendSupport.Contact>.stride),
+                    UndoBudget.payloadBytes(count: packet!.canonicalCoverage.count, stride: MemoryLayout<VectorMendSupport.Span>.stride),
+                    12].reduce(0, UndoBudget.addingCost)
+                let required = UndoBudget.addingCost(rows, upload)
+                if required > reservation {
+                    reservation = max(required, UndoBudget.addingCost(reservation, reservation))
+                }
+                let fixed = [listBytes, reservation, 512].reduce(0, UndoBudget.addingCost)
+                let perPixel = MetalFillSession.bytesPerPixel(isLasso: isLasso, twoReferenceColours: true)
+                    + 14 + (isLasso ? 4 : 2)
+                guard fixed < budget, (budget - fixed) / perPixel > 0 else { throw .exceedsBudget }
+                let pixelBudget = min(original.workingWidth * original.workingHeight, (budget - fixed) / perPixel)
+                let fitted = FillWindow.fitting(original.rect, in: size, pixelBudget: pixelBudget)
+                if fitted != proposed {
+                    packet = nil // retire attempt rows before crediting their storage
+                    proposed = fitted
+                    request.bytes = captureCharge
+                    continue
+                }
+                let pixels = proposed.workingWidth * proposed.workingHeight
+                let nativeBytes = snapshots.reduce(0) { max($0, $1.nativeImageBytes(in: size)) }
+                let renderFixed = [listBytes, rows, nativeBytes, pixels * 14].reduce(0, UndoBudget.addingCost)
+                guard renderFixed < budget, isCurrent(),
+                      let sampling = ImageWarp.RasterScaleSupport(sourceSize: size,
+                        destination: CGRect(x: 0, y: 0, width: proposed.workingWidth, height: proposed.workingHeight),
+                        inverseTexelMap: Homography(proposed.transform.inverted())) else { throw .exceedsBudget }
+                let tileAllowance = budget - renderFixed
+                var planningFailure: VectorMendSupport.Failure?
+                var cropRequests = 0, planLeaves = 0
+                let plansFit = ImageWarp.forEachRasterPlan(sourceSize: size, destination: sampling.destination,
+                    inverseTexelMap: sampling.inverseTexelMap, maximumWorkingBytes: tileAllowance) { plan in
+                        do throws(VectorMendSupport.Failure) {
+                            // A split tree has fewer than twice as many nodes as leaves.
+                            try request.visit(2)
+                            planLeaves += 1
+                            let (total, overflow) = cropRequests.addingReportingOverflow(
+                                Int(plan.sourceRect.width * plan.sourceRect.height))
+                            guard !overflow else { throw .exceedsWork }
+                            cropRequests = total
+                        } catch { planningFailure = error; return false }
+                        return isCurrent()
+                    }
+                if let planningFailure { throw planningFailure }
+                guard plansFit, isCurrent() else { throw .cancelled }
+                guard let taps = try sampling.tapReadBound(visit: {
+                    () throws(VectorMendSupport.Failure) in try request.visit(1)
+                }) else { throw .exceedsWork }
+                var imageStages = 0
+                for source in snapshots {
+                    try request.visit(1)
+                    if source.baked.map({ !$0.isCertainlyTransparent }) == true { imageStages += 1 }
+                    if source.raster.map({ !$0.isCertainlyTransparent }) == true { imageStages += 1 }
+                    if (source.vector?.fillReferenceRecordCount ?? 0) > 0 { imageStages += 1 }
+                }
+                // Drawing repeats this same bounded planning walk once for each image stage.
+                try request.visit(planLeaves, times: 2 * imageStages)
+                // Upload/crop requests and repeated shader reads are DISTINCT finite bounds.
+                // Neither is relabelled as the64M canonical-construction work allowance.
+                guard !cropRequests.multipliedReportingOverflow(by: imageStages).overflow,
+                      !taps.multipliedReportingOverflow(by: imageStages).overflow else { throw .exceedsWork }
+                try request.visit(pixels, times: 2) // composite/copy initialization, separate from GPU filter taps
+                captured = nil
+                // Only completed rows survive capture retirement. The actual chosen image stages
+                // still have to validate and draw successfully before this value can be returned.
+                let reference = VectorMendSupport.Reference.completed(packet!)
+                return autoreleasepool {
+                    drawFillReference(snapshots: snapshots, window: proposed, excludingElement: excludingElement,
+                        isLasso: isLasso, supportOverride: reference,
+                        maximumWorkingBytes: tileAllowance, reservedBytes: reservedBytes, isCurrent: isCurrent)
+                }
+            }
+            throw .exceedsBudget
+        } catch {
+            guard isCurrent() else { return nil }
+            // An incomplete certificate disables only new interior acceptance; the existing
+            // basin fill and neighbour seam still use the same actual frozen picture.
+            return autoreleasepool {
+                drawFillReference(snapshots: snapshots, window: proposed, excludingElement: excludingElement,
+                    isLasso: isLasso, supportOverride: .unavailable(width: proposed.workingWidth,
+                        height: proposed.workingHeight), reservedBytes: reservedBytes, isCurrent: isCurrent)
+            }
+        }
+    }
+
+    /// Both fixed-grid neighbours and fitted fill preparation draw this one frozen list in the
+    /// same order. A prepared support value is still private until every actual image succeeds.
+    private static func drawFillReference(snapshots: [FillReferenceSnapshot], window: FillWindow,
+                                         excludingElement: (celID: UUID, elementID: UUID)?, isLasso: Bool,
+                                         supportOverride: VectorMendSupport.Reference?,
+                                         maximumWorkingBytes: Int = CompositorBudget.textureBudgetBytes, reservedBytes: Int = 0,
+                                         isCurrent: () -> Bool) -> FillReference? {
         let width = window.workingWidth, height = window.workingHeight
         let (count, overflow) = width.multipliedReportingOverflow(by: height)
-        guard width > 0, height > 0, !overflow, count <= Int.max / 64 else { return nil }
-        typealias Snapshot = (baked: RasterSource?, raster: RasterSource?, vector: VectorCanvas.Frozen?, kind: LayerKind, celID: UUID)
+        guard width > 0, height > 0, !overflow, count <= Int.max / 64,
+              reservedBytes >= 0, reservedBytes < MetalFillEngine.fillBudgetBytes,
+              supportOverride.map({ $0.width == width && $0.height == height }) ?? true else { return nil }
         // Reserve the impending session and old/new SOURCE cuts before support metadata. The
         // frozen draw list and path-wall list coexist with that one output pair during preparation.
         let cutReserve = UndoBudget.addingCost(512,
             UndoBudget.payloadBytes(count: count, stride: isLasso ? 4 : 2))
-        let listReserve = UndoBudget.addingCost(96, UndoBudget.payloadBytes(count: references.count,
-            stride: 2 * (MemoryLayout<Snapshot>.stride + MemoryLayout<VectorCanvas.Frozen>.stride)))
+        let listReserve = fillReferenceListBytes(snapshots.count)
         let reserved = [MetalFillSession.predictedBytes(width: width, height: height, isLasso: isLasso),
-                        cutReserve, listReserve].reduce(0, UndoBudget.addingCost)
+                        cutReserve, listReserve, reservedBytes].reduce(0, UndoBudget.addingCost)
         let allowance = max(0, MetalFillEngine.fillBudgetBytes - reserved)
-        let snapshots: [Snapshot] = references.map { source in
-            (baked: source.cel.bakedImage, raster: source.cel.raster.snapshot(),
-             vector: source.cel.vector?.freezeFillReference(), kind: source.layer.kind, celID: source.cel.id)
-        }
-        var maximumRecords = references.count
+        var maximumRecords = snapshots.count
         for snapshot in snapshots {
             maximumRecords = UndoBudget.addingCost(maximumRecords, snapshot.vector?.fillReferenceRecordCount ?? 0)
         }
         var support: VectorMendSupport.Reference.Builder?
+        var acceptedOverride = supportOverride
         do throws(VectorMendSupport.Failure) {
-            guard UndoBudget.payloadBytes(count: snapshots.capacity, stride: MemoryLayout<Snapshot>.stride)
-                <= UndoBudget.addingCost(16, UndoBudget.payloadBytes(count: references.count,
-                    stride: 2 * MemoryLayout<Snapshot>.stride)) else { throw .exceedsBudget }
-            support = try .init(width: width, height: height, maximumRecords: maximumRecords,
-                admission: .init(bytes: allowance, work: 64_000_000))
-        } catch { support = nil }
+            guard UndoBudget.payloadBytes(count: snapshots.capacity, stride: MemoryLayout<FillReferenceSnapshot>.stride)
+                <= UndoBudget.addingCost(16, UndoBudget.payloadBytes(count: snapshots.count,
+                    stride: 2 * MemoryLayout<FillReferenceSnapshot>.stride)) else { throw .exceedsBudget }
+            if supportOverride == nil {
+                support = try .init(width: width, height: height, maximumRecords: maximumRecords,
+                    admission: .init(bytes: allowance, work: 64_000_000))
+            }
+        } catch {
+            support = nil
+            if acceptedOverride != nil { acceptedOverride = .unavailable(width: width, height: height) }
+        }
+        var tileAllowance = maximumWorkingBytes
+        if window.scale < 1 {
+            let nativeBytes = snapshots.reduce(0) { max($0, $1.nativeImageBytes(in: window.canvasSize)) }
+            let fixed = [reservedBytes, nativeBytes, count * 8, listReserve,
+                         acceptedOverride?.retainedBytes ?? 0].reduce(0, UndoBudget.addingCost)
+            guard fixed < MetalFillEngine.fillBudgetBytes else { return nil }
+            tileAllowance = min(tileAllowance, MetalFillEngine.fillBudgetBytes - fixed)
+            guard tileAllowance > 0, CompositorBudget.hasHeadroom(for: fixed) else { return nil }
+        }
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: PixelOps.transparentFormat())
         var completed = true
         var walls: [VectorCanvas.Frozen] = []
-        walls.reserveCapacity(references.count)
+        walls.reserveCapacity(snapshots.count)
+        let sampling = window.scale < 1 ? ImageWarp.RasterScaleSupport(sourceSize: window.canvasSize,
+            destination: CGRect(x: 0, y: 0, width: width, height: height),
+            inverseTexelMap: Homography(window.transform.inverted())) : nil
+        if window.scale < 1 && sampling == nil { return nil }
         let composited = renderer.image { context in
             let rect = window.canvasInWorking
             for source in snapshots {
+                guard isCurrent() else { completed = false; return }
                 do {
-                    try source.baked?.resolveImage().get().draw(in: rect)
-                    try source.raster?.resolveImage().get().draw(in: rect)
+                    for value in [source.baked, source.raster] {
+                        guard let raster = value, !raster.isCertainlyTransparent else { continue }
+                        let drawn = try autoreleasepool { () throws -> Bool in
+                            let image = try raster.resolveImage().get()
+                            guard let sampling else { image.draw(in: rect); return true }
+                            guard image.scale == 1, image.imageOrientation == .up,
+                                  image.size == window.canvasSize, let pixels = image.cgImage,
+                                  pixels.width == Int(window.canvasSize.width),
+                                  pixels.height == Int(window.canvasSize.height) else { return false }
+                            context.cgContext.saveGState(); context.cgContext.interpolationQuality = .none
+                            let completed = ImageWarp.drawRaster(sourceSize: sampling.sourceSize,
+                                destination: sampling.destination, inverseTexelMap: sampling.inverseTexelMap,
+                                maximumWorkingBytes: tileAllowance, isCurrent: isCurrent,
+                                source: { pixels.cropping(to: $0) }, consume: { tile, rect in
+                                    UIImage(cgImage: tile, scale: 1, orientation: .up).draw(in: rect)
+                                })
+                            context.cgContext.restoreGState()
+                            return completed
+                        }
+                        guard drawn else { completed = false; return }
+                    }
                 } catch { completed = false; return }
                 if source.baked.map({ !$0.isCertainlyTransparent }) == true
                     || source.raster.map({ !$0.isCertainlyTransparent }) == true {
@@ -1244,16 +1523,19 @@ extension CanvasManager {
                 }
                 if let vector = source.vector {
                     let excluded = excludingElement.flatMap { $0.celID == source.celID ? $0.elementID : nil }
-                    guard let drawn = vector.drawFillReference(into: context.cgContext, frameRect: rect,
-                                                              width: width, height: height,
-                                                              excludingElement: excluded, support: &support) else {
+                    let drawn = autoreleasepool {
+                        vector.drawFillReference(into: context.cgContext, frameRect: rect,
+                            width: width, height: height, excludingElement: excluded, support: &support,
+                            sampling: sampling, maximumWorkingBytes: tileAllowance, isCurrent: isCurrent)
+                    }
+                    guard let drawn else {
                         completed = false; return
                     }
                     if source.kind == .vector { walls.append(drawn) }
                 }
             }
         }
-        guard completed, composited.scale == 1, composited.imageOrientation == .up,
+        guard completed, isCurrent(), composited.scale == 1, composited.imageOrientation == .up,
               composited.size == CGSize(width: width, height: height), let cg = composited.cgImage,
               cg.width == width, cg.height == height else { return nil }
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
@@ -1266,17 +1548,23 @@ extension CanvasManager {
             ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
             return true
         }
-        guard ok else { return nil }
+        guard ok, isCurrent() else { return nil }
         if UndoBudget.payloadBytes(count: walls.capacity, stride: MemoryLayout<VectorCanvas.Frozen>.stride)
-            > UndoBudget.addingCost(16, UndoBudget.payloadBytes(count: references.count,
-                stride: 2 * MemoryLayout<VectorCanvas.Frozen>.stride)) { support = nil }
+            > UndoBudget.addingCost(16, UndoBudget.payloadBytes(count: snapshots.count,
+                stride: 2 * MemoryLayout<VectorCanvas.Frozen>.stride)) {
+            support = nil
+            if acceptedOverride != nil { acceptedOverride = .unavailable(width: width, height: height) }
+        }
         return FillReference(rgba: bytes,
-            support: support?.finish() ?? .unavailable(width: width, height: height), walls: walls)
+            support: acceptedOverride ?? support?.finish() ?? .unavailable(width: width, height: height),
+            walls: walls, window: window)
     }
 
     static func compositeReferenceRGBA(references: [(layer: Layer, cel: Cel)], window: FillWindow,
-                                        excludingElement: (celID: UUID, elementID: UUID)? = nil) -> [UInt8]? {
-        makeFillReference(references: references, window: window, excludingElement: excludingElement)?.rgba
+                                        excludingElement: (celID: UUID, elementID: UUID)? = nil,
+                                        reserving reservedBytes: Int = 0) -> [UInt8]? {
+        makeFillReference(references: references, window: window, excludingElement: excludingElement,
+                          reserving: reservedBytes)?.rgba
     }
 
     /// Where `sources` have any paint at all, in the window's working pixels — the mend's neighbour set
@@ -1284,9 +1572,12 @@ extension CanvasManager {
     /// vector cel's fills are drawn the way the artist sees them and a raster cel's committed fills
     /// are in it however they were baked. Unavailable pixels are a refusal, never an empty set:
     /// an empty fallback could let mending paint over content that was not rendered.
-    static func neighbourMask(of sources: [(layer: Layer, cel: Cel)], in window: FillWindow) -> [UInt8]? {
+    static func neighbourMask(of sources: [(layer: Layer, cel: Cel)], in window: FillWindow,
+                              reserving reservedBytes: Int = 0) -> [UInt8]? {
         let count = window.workingWidth * window.workingHeight
-        guard let rgba = compositeReferenceRGBA(references: sources, window: window) else {
+        guard let rgba = autoreleasepool(invoking: {
+            compositeReferenceRGBA(references: sources, window: window, reserving: reservedBytes)
+        }) else {
             return nil
         }
         return (0..<count).map { rgba[$0 * 4 + 3] != 0 ? 255 : 0 }

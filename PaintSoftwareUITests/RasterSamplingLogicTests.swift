@@ -194,6 +194,81 @@ final class RasterSamplingLogicTests: XCTestCase {
         XCTAssertEqual(pictures, 0)
     }
 
+    func testScaleInfluenceContainsActualFilterOutputAcrossPhaseAndCropBoundaries() throws {
+        let output = CGRect(x: 0, y: 0, width: 48, height: 36)
+        let sourcePixel = CGRect(x: 22, y: 31, width: 1, height: 1)
+        var bytes = [UInt8](repeating: 0, count: 96 * 72 * 4)
+        let offset = (31 * 96 + 22) * 4
+        bytes[offset..<(offset + 4)] = [255, 127, 63, 255]
+        for phase in [CGFloat(-0.75), 0, 0.25, 0.75] {
+            let map = Homography(a: 2, b: 0, c: Double(phase), d: 0, e: 2,
+                                 f: Double(-phase), g: 0, h: 0, i: 1)
+            let support = try XCTUnwrap(ImageWarp.RasterScaleSupport(sourceSize: size,
+                destination: output, inverseTexelMap: map))
+            var comparisons = 0
+            let influence = support.influencedOutput(by: sourcePixel) { comparisons += 1 }
+            let actual = try sample(bytes, size: size, output: output, map: map)
+            let active = (0..<(48 * 36)).filter { actual[$0 * 4 + 3] != 0 }
+            XCTAssertFalse(active.isEmpty, "the actual shared filter must draw the sparse source control")
+            XCTAssertTrue(active.allSatisfy {
+                influence.contains(CGPoint(x: CGFloat($0 % 48) + 0.5, y: CGFloat($0 / 48) + 0.5))
+            }, "inverse canonical influence must contain every nonzero filtered pixel, including fractional phase")
+            XCTAssertGreaterThan(comparisons, 0)
+            let crop = CGRect(x: 7, y: 9, width: 19, height: 17)
+            let croppedSupport = try XCTUnwrap(ImageWarp.RasterScaleSupport(sourceSize: size,
+                destination: crop, inverseTexelMap: map))
+            let plan = try XCTUnwrap(ImageWarp.RasterPlan(sourceSize: size, destination: crop, inverseTexelMap: map))
+            XCTAssertEqual(croppedSupport.sourceRect, plan.sourceRect,
+                           "crop planning and support propagation must share the actual Float map/support rule")
+            let small = try sample(bytes, size: size, output: crop, map: map)
+            XCTAssertEqual(small, cropped(actual, size: output.size, rect: crop),
+                           "the scale-only crop must retain the whole picture's exact filter phase")
+        }
+        // Global integer-to-Float conversion happens BEFORE the map. Opposite large terms
+        // cannot use their small cancelled result as a rounding bound.
+        let distantPixel = CGRect(x: 268_435_471, y: 0, width: 1, height: 1)
+        let cancellationMap = Homography.translation(x: -268_435_456, y: 0)
+        let cancelled = try XCTUnwrap(ImageWarp.RasterScaleSupport(sourceSize: CGSize(width: 8, height: 8),
+            destination: distantPixel, inverseTexelMap: cancellationMap))
+        XCTAssertTrue(cancelled.sourceRect.contains(CGPoint(x: 0.5, y: 0.5)),
+                      "large opposite map terms must not crop away the shader's actual first source cell")
+        XCTAssertTrue(cancelled.influencedOutput(by: CGRect(x: 0, y: 0, width: 1, height: 1), visit: {})
+            .contains(CGPoint(x: distantPixel.minX + 0.5, y: 0.5)))
+        let whole = try XCTUnwrap(ImageWarp.RasterScaleSupport(sourceSize: CGSize(width: 4096, height: 4096),
+            destination: CGRect(x: 0, y: 0, width: 2048, height: 2048), inverseTexelMap: .scale(x: 2, y: 2)))
+        var visits = 0
+        XCTAssertEqual(whole.tapReadBound { visits += 1 }, 603_095_364,
+                       "whole2:1 shader reads count repeated filter taps, not just cropped uploads")
+        XCTAssertEqual(visits, 4096, "tap preflight visits two axes, not every output pixel")
+        var crops = 0, tiles = 0
+        XCTAssertTrue(ImageWarp.forEachRasterPlan(sourceSize: whole.sourceSize, destination: whole.destination,
+            inverseTexelMap: whole.inverseTexelMap, maximumWorkingBytes: 32 * 1024 * 1024) {
+                crops += Int($0.sourceRect.width * $0.sourceRect.height); tiles += 1; return true
+            })
+        XCTAssertEqual(tiles, 16)
+        XCTAssertEqual(crops, 17_123_044, "cropped normalization/upload requests are a separate quantity")
+    }
+
+    func testCancellationStopsInsideTheExistingRecursiveTileBeforeReadAndConsume() throws {
+        let sourceSize = CGSize(width: 192, height: 192), output = CGRect(x: 0, y: 0, width: 96, height: 96)
+        let bytes = pixels(sourceSize)
+        for cancelDuringRead in [false, true] {
+            var current = true, reads = 0, pictures = 0
+            let result = ImageWarp.drawRaster(sourceSize: sourceSize, destination: output,
+                inverseTexelMap: .scale(x: 2, y: 2), maximumWorkingBytes: 300_000,
+                isCurrent: { current }, source: { rect in
+                    reads += 1
+                    if cancelDuringRead { current = false }
+                    return CoreGraphicsCompositor.makeImage(fromPremultiplied: self.cropped(bytes, size: sourceSize, rect: rect),
+                        width: Int(rect.width), height: Int(rect.height))
+                }, consume: { _, _ in pictures += 1; current = false })
+            XCTAssertFalse(result, "a cancelled staged picture is discarded whole")
+            XCTAssertEqual(reads, 1, "cancellation must stop before requesting the next recursive child")
+            XCTAssertEqual(pictures, cancelDuringRead ? 0 : 1,
+                           "a generation lost during sampling cannot publish that child")
+        }
+    }
+
     private func reference(_ bytes: [UInt8], size: CGSize, output: CGRect, map: Homography) -> [UInt8] {
         let width = Int(output.width), height = Int(output.height), sw = Int(size.width), sh = Int(size.height)
         var result = [UInt8](repeating: 0, count: width*height*4)

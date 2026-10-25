@@ -1322,6 +1322,94 @@ final class FillMendLogicTests: XCTestCase {
         }
     }
 
+    func testCanonicalSupportRetargetsOneCaptureWithCumulativeWorkAndCancellation() throws {
+        let stroke = supportStroke([CGPoint(x: 20, y: 30), CGPoint(x: 76, y: 30)], size: 10)
+        let native = try supportReference([stroke])
+        var meter = VectorMendSupport.Meter(admission: .init(bytes: 64 * 1024 * 1024, work: 64_000_000))
+        let preparation = try VectorMendSupport.prepare(native.support, meter: &meter, isCurrent: { true })
+        let captureBytes = meter.bytes, captureWork = meter.work
+        let image = try XCTUnwrap(CanvasManager.imageFromRGBA(native.rgba, width: 96, height: 96)?.cgImage)
+        var firstAttemptWork = 0
+        for side in [48, 32] {
+            try autoreleasepool {
+                let window = FillWindow.fitting(CGRect(x: 0, y: 0, width: 96, height: 96),
+                    in: CGSize(width: 96, height: 96), pixelBudget: side * side)
+                let packet = try VectorMendSupport.produce(preparation, in: window, meter: &meter, isCurrent: { true })
+                let plan = try XCTUnwrap(ImageWarp.RasterPlan(sourceSize: CGSize(width: 96, height: 96),
+                    destination: CGRect(x: 0, y: 0, width: side, height: side),
+                    inverseTexelMap: Homography(window.transform.inverted())))
+                let filtered = try XCTUnwrap(ImageWarp.rasterImage(plan: plan, source: { image.cropping(to: $0) }))
+                let actual = try XCTUnwrap(CanvasFixture.rgbaBytes(filtered))
+                let ink = (0..<(side * side)).map { actual[$0 * 4 + 3] != 0 }
+                let eligible = supportEligible(packet, ink: ink, source: ink.map { !$0 })
+                XCTAssertTrue(ink.contains(true) && ink.indices.allSatisfy { !ink[$0] || eligible[$0] },
+                              "a resampled packet must cover the whole actual shared-filter body and free caps")
+                XCTAssertGreaterThan(packet.retainedBytes, 0)
+            }
+            // The attempt's packet/scratch have retired, while the once-captured owner remains.
+            meter.bytes = captureBytes
+            if side == 48 { firstAttemptWork = meter.work }
+        }
+        XCTAssertGreaterThan(firstAttemptWork, captureWork)
+        XCTAssertGreaterThan(meter.work, firstAttemptWork,
+                             "retiring attempt bytes must never refund spent construction work")
+        let next = FillWindow.fitting(CGRect(x: 0, y: 0, width: 96, height: 96),
+            in: CGSize(width: 96, height: 96), pixelBudget: 48 * 48)
+        XCTAssertThrowsError(try VectorMendSupport.produce(preparation, in: next, meter: &meter, isCurrent: { false })) {
+            XCTAssertEqual($0 as? VectorMendSupport.Failure, .cancelled)
+        }
+        var bounded = VectorMendSupport.Meter(admission: .init(bytes: 64 * 1024 * 1024, work: firstAttemptWork + 1))
+        let boundedCapture = try VectorMendSupport.prepare(native.support, meter: &bounded, isCurrent: { true })
+        let boundedBytes = bounded.bytes
+        try autoreleasepool {
+            _ = try VectorMendSupport.produce(boundedCapture, in: next, meter: &bounded, isCurrent: { true })
+        }
+        bounded.bytes = boundedBytes
+        XCTAssertThrowsError(try VectorMendSupport.produce(boundedCapture, in: next, meter: &bounded, isCurrent: { true })) {
+            XCTAssertEqual($0 as? VectorMendSupport.Failure, .exceedsWork,
+                           "a second window attempt uses the same finite request work allowance")
+        }
+    }
+
+    func testWhole4096ReferenceFitsTheOwnerBudgetAndCertifiesItsActualFilteredInk() throws {
+        let prior = CompositorBudget.budgetOverrideBytes
+        defer { CompositorBudget.budgetOverrideBytes = prior }
+        CompositorBudget.budgetOverrideBytes = 192 * 1024 * 1024
+        let manager = CanvasManager()
+        let size = CGSize(width: 4096, height: 4096)
+        manager.canvasSize = size
+        manager.addVectorLayer()
+        let canvas = try XCTUnwrap(manager.layers[manager.currentLayerIndex].cels[0].vector)
+        let stroke = supportStroke([CGPoint(x: 512, y: 512), CGPoint(x: 576, y: 520),
+                                    CGPoint(x: 650, y: 528)], size: 16)
+        canvas.restoreElements([.stroke(stroke)], changedInk: nil)
+        let original = FillWindow.fitting(CGRect(origin: .zero, size: size), in: size,
+            pixelBudget: MetalFillEngine.workingPixelBudget(isLasso: false))
+        XCTAssertLessThan(original.scale, 1, "PREMISE: ordinary whole4096 requires the resampled owner-budget route")
+        let reference = try XCTUnwrap(CanvasManager.prepareFillReference(
+            references: manager.fillReferenceSources(), window: original, isCurrent: { true }))
+        XCTAssertLessThan(reference.window.workingWidth * reference.window.workingHeight,
+                          original.workingWidth * original.workingHeight,
+                          "core fitting must reserve the actual packet/upload and adjacent working owners")
+        let packet = try XCTUnwrap(reference.support.preparedPacket,
+                                  "ordinary whole4096 must produce useful completed rows, never silently remain unknown")
+        XCTAssertEqual(reference.rgba.count, packet.width * packet.height * 4)
+        let ink = stride(from: 3, to: reference.rgba.count, by: 4).map { reference.rgba[$0] != 0 }
+        let eligible = supportEligible(packet, ink: ink, source: ink.map { !$0 })
+        XCTAssertTrue(ink.contains(true) && ink.indices.allSatisfy { !ink[$0] || eligible[$0] },
+                      "all actual shared-filter curved body and free-cap pixels remain certifiable")
+        let source = ink.map { $0 ? UInt8(0) : 255 }
+        let session = try XCTUnwrap(MetalFillEngine.shared?.makeMendSession(referenceRGBA: reference.rgba,
+            width: packet.width, height: packet.height, sourceMask: source).session)
+        session.installVectorReference(reference.support)
+        let mended = try XCTUnwrap(session.mendMask(sourceMask: source, threshold: 0, artworkRect: nil,
+            reach: Float(40 * reference.window.scale)))
+        XCTAssertTrue(ink.indices.allSatisfy { !ink[$0] || mended[$0] == 255 },
+                      "the real whole4096 GPU mend covers every shared-filter curved body and free-cap pixel")
+        XCTAssertNil(CanvasManager.prepareFillReference(references: manager.fillReferenceSources(),
+            window: original, isCurrent: { false }), "a cancelled request publishes no partial picture or rows")
+    }
+
     func testCanonicalSupportCertifiesWholeStraightCurvedAndScatteredFreeCaps() throws {
         let paths = [[CGPoint(x: 20, y: 20), CGPoint(x: 76, y: 20)],
                      [CGPoint(x: 20, y: 20), CGPoint(x: 20, y: 76)],

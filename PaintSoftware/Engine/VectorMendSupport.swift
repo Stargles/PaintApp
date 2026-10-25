@@ -8,6 +8,7 @@ enum VectorMendSupport {
         case invalidWindow
         case exceedsBudget
         case exceedsWork
+        case cancelled
     }
 
     struct Admission {
@@ -48,18 +49,105 @@ enum VectorMendSupport {
         /// Conservative canonical support; never a claim of physical painted coverage. Patch span
         /// offsets address these rows. The final consumer must also require actual reference INK.
         let canonicalCoverage: [Span]
+        var retainedBytes: Int {
+            [UndoBudget.payloadBytes(count: patches.capacity, stride: MemoryLayout<Patch>.stride),
+             UndoBudget.payloadBytes(count: contacts.capacity, stride: MemoryLayout<Contact>.stride),
+             UndoBudget.payloadBytes(count: canonicalCoverage.capacity, stride: MemoryLayout<Span>.stride),
+             96].reduce(0, UndoBudget.addingCost)
+        }
     }
 
-    private struct Dab {
+    fileprivate struct Dab {
         let bounds: CGRect
         let parameter: CGFloat?
     }
 
-    private struct Captured {
+    fileprivate struct Captured {
+        struct Sampling {
+            let plan: ImageWarp.RasterScaleSupport
+            let nativeTransform: CGAffineTransform
+        }
         let walk: VectorStrokeRenderWalk
         let dabs: [Dab]
         let blendMode: CGBlendMode
         let transform: CGAffineTransform
+        var sampling: Sampling? = nil
+    }
+
+    /// Request-scoped canonical capture. Window retries remap these already captured bounds;
+    /// neither a completed session nor a document retains this owner or its frozen input list.
+    struct Preparation {
+        fileprivate let captured: [Captured]
+        fileprivate let unknown: [CGRect]
+        let sourceSize: CGSize
+    }
+
+    static func prepare(_ reference: Reference, meter: inout Meter,
+                        isCurrent: () -> Bool) throws(Failure) -> Preparation {
+        guard isCurrent() else { throw .cancelled }
+        try meter.visit(reference.constructionWork)
+        guard let (inputs, unknown) = reference.geometry() else { throw .invalidWindow }
+        // The returned unknown array shares the original reserved container, whose capacity
+        // can exceed its current count. Admit that real owner while capture/input values coexist.
+        try meter.retain(1, stride: reference.retainedBytes)
+        let groups = try capture(inputs, meter: &meter, isCurrent: isCurrent)
+        return Preparation(captured: groups, unknown: unknown,
+                           sourceSize: CGSize(width: reference.width, height: reference.height))
+    }
+
+    static func produce(_ preparation: Preparation, in window: FillWindow, meter: inout Meter,
+                        isCurrent: () -> Bool) throws(Failure) -> Packet {
+        guard isCurrent() else { throw .cancelled }
+        if preparation.captured.isEmpty {
+            return Packet(width: window.workingWidth, height: window.workingHeight,
+                          patches: [], contacts: [], canonicalCoverage: [])
+        }
+        guard preparation.sourceSize == window.canvasSize,
+              let sampling = ImageWarp.RasterScaleSupport(sourceSize: preparation.sourceSize,
+                destination: CGRect(x: 0, y: 0, width: window.workingWidth, height: window.workingHeight),
+                inverseTexelMap: Homography(window.transform.inverted())) else { throw .invalidWindow }
+        try meter.retainArray(Captured.self, count: preparation.captured.count)
+        try meter.visit(preparation.captured.count)
+        var groups: [Captured] = []; groups.reserveCapacity(preparation.captured.count)
+        for group in preparation.captured {
+            groups.append(Captured(walk: group.walk, dabs: group.dabs, blendMode: group.blendMode,
+                transform: group.transform.concatenating(window.transform),
+                sampling: .init(plan: sampling, nativeTransform: group.transform)))
+        }
+        try meter.checkCapacity(groups, chargedCount: groups.count)
+        var rows = 0
+        try meter.visit(preparation.unknown.count, times: 2)
+        for rect in preparation.unknown {
+            let mapped = try sampling.influencedOutput(by: rect) { () throws(Failure) in try meter.visit(1) }
+            if !mapped.isNull { rows = UndoBudget.addingCost(rows, Int(mapped.height)) }
+        }
+        guard rows < Int(UInt32.max) else { throw .exceedsBudget }
+        try meter.retainArray(Span.self, count: rows)
+        var unknown: [Span] = []; unknown.reserveCapacity(rows)
+        for rect in preparation.unknown {
+            guard isCurrent() else { throw .cancelled }
+            let mapped = try sampling.influencedOutput(by: rect) { () throws(Failure) in try meter.visit(1) }
+            guard !mapped.isNull else { continue }
+            try meter.visit(Int(mapped.height))
+            for y in Int(mapped.minY)..<Int(mapped.maxY) {
+                unknown.append(Span(start: UInt32(y * window.workingWidth + Int(mapped.minX)), count: UInt32(mapped.width)))
+            }
+        }
+        try meter.checkCapacity(unknown, chargedCount: rows)
+        return try packet(groups, unknownCoverage: unknown, width: window.workingWidth,
+                          height: window.workingHeight, meter: &meter, isCurrent: isCurrent)
+    }
+
+    private static func supportBounds(_ dab: Dab, group: Captured, window: CGRect,
+                                      meter: inout Meter) throws(Failure) -> CGRect {
+        let raw = dab.bounds
+        guard raw.minX.isFinite, raw.minY.isFinite, raw.width.isFinite, raw.height.isFinite else { throw .invalidWindow }
+        if let sampling = group.sampling {
+            return try sampling.plan.influencedOutput(by: raw.integral.applying(sampling.nativeTransform).integral) {
+                () throws(Failure) in try meter.visit(1)
+            }.intersection(window)
+        }
+        return raw.integral.applying(group.transform).integral.intersection(window)
     }
 
     private struct Curve: Equatable {
@@ -275,8 +363,12 @@ enum VectorMendSupport {
         /// Reserve before allocation; a thousand small arrays pay a thousand allowances instead
         /// of competing for a fixed global slack pool. Payload growth remains charged separately.
         mutating func retainArray<T>(_ type: T.Type, count: Int) throws(Failure) {
+            let before = bytes
             try retain(count, stride: 2 * MemoryLayout<T>.stride)
             try retain(1, stride: 32 + 16)
+            // This seam precedes a container's reservation, never a pixel/visit or spare-slot
+            // append. Zero-count headers allocate no payload; their later growth pays here.
+            guard count == 0 || CompositorBudget.hasHeadroom(for: bytes - before) else { throw .exceedsBudget }
         }
         func checkCapacity<T>(_ array: [T], chargedCount: Int) throws(Failure) {
             try checkCapacity(array.capacity, stride: MemoryLayout<T>.stride,
@@ -296,18 +388,24 @@ enum VectorMendSupport {
 
     /// Conservative preflight bounds the walk before it allocates a collector: spacing has the
     /// shared one-point floor, and at most one extra site per segment covers roundoff/carry.
-    private static func capture(_ inputs: [Input], meter: inout Meter) throws(Failure) -> [Captured] {
+    private static func capture(_ inputs: [Input], meter: inout Meter,
+                                isCurrent: () -> Bool = { true }) throws(Failure) -> [Captured] {
         var recipes: [(VectorStrokeRenderWalk, Int)] = []
         try meter.retainArray((VectorStrokeRenderWalk, Int).self, count: inputs.count)
         try meter.retainArray(Captured.self, count: inputs.count)
         recipes.reserveCapacity(inputs.count)
         var upperDabs = 0
         for input in inputs {
+            guard isCurrent() else { throw .cancelled }
             // A derived placement can materialize both native runs while resolving the shared
             // recipe. Admit that worst case before asking effectiveWalk; borrowed rest/retained
             // buffers need no additional storage, so this allowance is deliberately conservative.
+            let sampleStart = meter.bytes
             try meter.retain(input.stroke.samples.count, stride: 2 * MemoryLayout<VectorSample>.stride)
             try meter.retain(input.stroke.lattice?.samples.count ?? 0, stride: 2 * MemoryLayout<VectorSample>.stride)
+            if input.stroke.restWalk == nil, input.stroke.placement != nil {
+                guard CompositorBudget.hasHeadroom(for: meter.bytes - sampleStart) else { throw .exceedsBudget }
+            }
             let walk = VectorStrokeRenderWalk(input.stroke)
             if input.stroke.opacity <= 0 { recipes.append((walk, 0)); continue }
             // Admit repeated-position neighbour searches as well as the shared <=64 subdivisions;
@@ -324,10 +422,14 @@ enum VectorMendSupport {
             recipes.append((walk, upper))
         }
         try meter.visit(upperDabs)
+        let captureStart = meter.bytes
         try meter.retain(upperDabs, stride: 2 * MemoryLayout<Dab>.stride)
+        // All collectors coexist; admit their forthcoming payload together, not once per dab.
+        guard CompositorBudget.hasHeadroom(for: meter.bytes - captureStart) else { throw .exceedsBudget }
         var captured: [Captured] = []
         captured.reserveCapacity(inputs.count)
         for (input, recipe) in zip(inputs, recipes) {
+            guard isCurrent() else { throw .cancelled }
             let (walk, capacity) = recipe
             try meter.visit(capacity, times: max(1, walk.samples.count))
             try meter.retainArray(Dab.self, count: 0) // its payload was precharged in upperDabs
@@ -382,7 +484,8 @@ enum VectorMendSupport {
     private static func certify(_ captured: [Captured], addresses: [Address], spans: [Span],
                                 unknownCoverage: [Span], width: Int, height: Int,
                                 patches: inout [Patch], contacts: inout [Contact],
-                                support: inout [UInt8], meter: inout Meter) throws(Failure) {
+                                support: inout [UInt8], meter: inout Meter,
+                                isCurrent: () -> Bool) throws(Failure) {
         try meter.retainArray(Trace?.self, count: captured.count)
         var traces: [Trace?] = []; traces.reserveCapacity(captured.count)
         for group in captured { traces.append(try trace(group, meter: &meter)) }
@@ -421,6 +524,7 @@ enum VectorMendSupport {
         var paidContactCapacity = 0
         var dirty = CGRect.null
         for target in addresses.indices {
+            guard isCurrent() else { throw .cancelled }
             if !dirty.isNull {
                 try meter.visit(Int(dirty.width), times: Int(dirty.height))
                 for y in Int(dirty.minY)..<Int(dirty.maxY) {
@@ -628,31 +732,46 @@ enum VectorMendSupport {
     /// Complete contributor/contact checks can only protect extra ink; final physical INK prevents
     /// rectangle-only paper or synthetic path walls from becoming painted eligibility.
     static func produce(_ reference: Reference, admission: Admission) throws(Failure) -> Packet {
+        if let packet = reference.preparedPacket {
+            guard packet.retainedBytes <= admission.bytes, admission.work >= 0 else { throw .exceedsBudget }
+            return packet
+        }
         let width = reference.width, height = reference.height
         let (count, overflow) = width.multipliedReportingOverflow(by: height)
         guard width > 0, height > 0, !overflow, count < Int(Contact.openBit),
               width <= 16_383, height <= 16_383 else { throw .invalidWindow }
         var meter = Meter(admission: admission)
+        try meter.visit(reference.constructionWork)
         let (inputs, unknownCoverage) = try reference.resolve(meter: &meter)
+        if inputs.isEmpty {
+            return Packet(width: width, height: height, patches: [], contacts: [], canonicalCoverage: [])
+        }
+        let captured = try capture(inputs, meter: &meter)
+        return try packet(captured, unknownCoverage: unknownCoverage, width: width, height: height,
+                          meter: &meter, isCurrent: { true })
+    }
+
+    private static func packet(_ captured: [Captured], unknownCoverage: [Span], width: Int, height: Int,
+                               meter: inout Meter, isCurrent: () -> Bool) throws(Failure) -> Packet {
+        let (count, overflow) = width.multipliedReportingOverflow(by: height)
+        guard width > 0, height > 0, !overflow, count < Int(Contact.openBit),
+              width <= 16_383, height <= 16_383 else { throw .invalidWindow }
         try meter.retainArray(UInt8.self, count: count)
+        try meter.visit(count) // initialization is real CPU work on every grid attempt
         // These growing containers pay one header/rounding allowance now; every later append
         // retains its existing doubled payload charge before growth.
         try meter.retainArray(Patch.self, count: 0)
         try meter.retainArray(Span.self, count: 0)
         try meter.retainArray(Address.self, count: 0)
         try meter.retainArray(Contact.self, count: 0)
-        let captured = try capture(inputs, meter: &meter)
         let window = CGRect(x: 0, y: 0, width: width, height: height)
         var support = [UInt8](repeating: 0, count: count)
         var patchCount = 0, rowCount = 0
         for group in captured {
             for dab in group.dabs {
                 try meter.visit(1)
-                let raw = dab.bounds
-                guard raw.minX.isFinite, raw.minY.isFinite, raw.width.isFinite, raw.height.isFinite else {
-                    throw .invalidWindow
-                }
-                let bounds = raw.integral.applying(group.transform).integral.intersection(window)
+                guard isCurrent() else { throw .cancelled }
+                let bounds = try supportBounds(dab, group: group, window: window, meter: &meter)
                 let rows = bounds.isNull || bounds.isEmpty ? 0 : Int(bounds.height)
                 let (nextRows, rowOverflow) = rowCount.addingReportingOverflow(rows)
                 let (nextPatch, patchOverflow) = patchCount.addingReportingOverflow(1)
@@ -661,8 +780,10 @@ enum VectorMendSupport {
                 rowCount = nextRows; patchCount = nextPatch
             }
         }
+        let rowStart = meter.bytes
         try meter.retain(rowCount, stride: MemoryLayout<Span>.stride * 2)
         try meter.retain(patchCount, stride: 2 * (MemoryLayout<Patch>.stride + MemoryLayout<Address>.stride))
+        guard CompositorBudget.hasHeadroom(for: meter.bytes - rowStart) else { throw .exceedsBudget }
         var patches: [Patch] = [], spans: [Span] = [], addresses: [Address] = []
         patches.reserveCapacity(patchCount); spans.reserveCapacity(rowCount); addresses.reserveCapacity(patchCount)
         try meter.checkCapacity(patches, chargedCount: patchCount)
@@ -671,11 +792,8 @@ enum VectorMendSupport {
         for (groupIndex, group) in captured.enumerated() {
             for (dabIndex, dab) in group.dabs.enumerated() {
                 try meter.visit(1)
-                let raw = dab.bounds
-                guard raw.minX.isFinite, raw.minY.isFinite, raw.width.isFinite, raw.height.isFinite else {
-                    throw .invalidWindow
-                }
-                let bounds = dab.bounds.integral.applying(group.transform).integral.intersection(window)
+                guard isCurrent() else { throw .cancelled }
+                let bounds = try supportBounds(dab, group: group, window: window, meter: &meter)
                 let start = spans.count
                 if !bounds.isNull, !bounds.isEmpty {
                     try meter.visit(Int(bounds.height))
@@ -691,7 +809,7 @@ enum VectorMendSupport {
         var contacts: [Contact] = []
         try certify(captured, addresses: addresses, spans: spans, unknownCoverage: unknownCoverage,
                     width: width, height: height, patches: &patches, contacts: &contacts,
-                    support: &support, meter: &meter)
+                    support: &support, meter: &meter, isCurrent: isCurrent)
         try meter.checkCapacity(support, chargedCount: count)
         try meter.checkCapacity(patches, chargedCount: patches.count)
         try meter.checkCapacity(spans, chargedCount: spans.count)

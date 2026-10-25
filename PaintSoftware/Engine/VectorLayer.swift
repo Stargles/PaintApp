@@ -267,8 +267,19 @@ extension VectorMendSupport {
 
     struct Reference {
         let width: Int, height: Int
-        private let inputs: [Input]
-        private let unknown: [CGRect]
+        private enum Geometry {
+            case recipe(inputs: [Input], unknown: [CGRect], work: Int)
+            case packet(Packet)
+        }
+        private let geometryValue: Geometry
+        var constructionWork: Int {
+            if case .recipe(_, _, let work) = geometryValue { return work }
+            return 0
+        }
+        var preparedPacket: Packet? {
+            if case .packet(let packet) = geometryValue { return packet }
+            return nil
+        }
 
         /// Only the narrow, admitted geometry recipe survives the draw. The frozen canvas's
         /// memo, source, footprint dictionary and suppression set are not packet owners.
@@ -277,14 +288,25 @@ extension VectorMendSupport {
                 values.capacity == 0 ? 0 : UndoBudget.addingCost(32,
                     UndoBudget.payloadBytes(count: values.capacity, stride: MemoryLayout<T>.stride))
             }
-            return UndoBudget.addingCost(array(inputs), array(unknown))
+            switch geometryValue {
+            case .recipe(let inputs, let unknown, _): return UndoBudget.addingCost(array(inputs), array(unknown))
+            case .packet(let packet): return packet.retainedBytes
+            }
         }
-        private init(width: Int, height: Int, inputs: [Input], unknown: [CGRect]) {
-            self.width = width; self.height = height; self.inputs = inputs; self.unknown = unknown
+        private init(width: Int, height: Int, inputs: [Input], unknown: [CGRect], constructionWork: Int = 0) {
+            self.width = width; self.height = height
+            geometryValue = .recipe(inputs: inputs, unknown: unknown, work: constructionWork)
+        }
+        private init(packet: Packet) {
+            width = packet.width; height = packet.height; geometryValue = .packet(packet)
+        }
+        static func completed(_ packet: Packet) -> Reference { Reference(packet: packet) }
+        func geometry() -> ([Input], [CGRect])? {
+            if case .recipe(let inputs, let unknown, _) = geometryValue { return (inputs, unknown) }
+            return nil
         }
         static func unavailable(width: Int, height: Int) -> Reference {
-            Reference(width: width, height: height, inputs: [],
-                      unknown: [CGRect(x: 0, y: 0, width: width, height: height)])
+            Reference(packet: Packet(width: width, height: height, patches: [], contacts: [], canonicalCoverage: []))
         }
         /// One transient aggregate collector for the actual chosen reference list. Its two arrays
         /// are admitted before either allocates; no per-reference slices or merge copies survive.
@@ -311,12 +333,13 @@ extension VectorMendSupport {
                 unknown.append(rect)
             }
             fileprivate mutating func append(_ canvas: VectorCanvas.Frozen,
-                                              transform: CGAffineTransform?) throws(Failure) {
+                                              transform: CGAffineTransform?, excludingElement: UUID? = nil) throws(Failure) {
                 // The exact empty-list fast path is transparent at any pose, even its1×1 memo.
                 guard !canvas.elements.isEmpty else { return }
                 let window = CGRect(x: 0, y: 0, width: width, height: height)
                 guard let transform else { try appendUnknown(window); return }
                 for element in canvas.elements where !canvas.suppressed.contains(element.id) {
+                    if let excludingElement, element.id == excludingElement { continue }
                     var footprint = canvas.known[element.id]
                     if footprint == nil && element.stroke == nil {
                         switch element {
@@ -354,10 +377,11 @@ extension VectorMendSupport {
                 }
             }
             func finish() -> Reference {
-                Reference(width: width, height: height, inputs: inputs, unknown: unknown)
+                Reference(width: width, height: height, inputs: inputs, unknown: unknown, constructionWork: meter.work)
             }
         }
         func resolve(meter: inout Meter) throws(Failure) -> ([Input], [Span]) {
+            guard let (inputs, unknown) = geometry() else { throw .invalidWindow }
             let window = CGRect(x: 0, y: 0, width: width, height: height)
             var rows = 0
             for rect in unknown {
@@ -6220,15 +6244,38 @@ final class VectorCanvas {
         /// Draw the exact ordinary image route or saved-fill direct route, and mint support only
         /// after inspecting their actual stages. No composed affine can certify a resampled image.
         var fillReferenceRecordCount: Int { elements.count }
+        var fillReferenceImageBytes: Int {
+            guard !elements.isEmpty else { return 0 }
+            let pixels = size.width * size.height
+            guard pixels.isFinite, pixels > 0, pixels < CGFloat(Int.max / 8) else { return Int.max }
+            // A nonidentity overall image stage holds native content beside its transformed image.
+            return Int(pixels) * (transform.isIdentity ? 4 : 8)
+        }
+
+        func fillReferenceSnapshot(excludingElement: UUID?) -> Frozen {
+            guard let excludingElement else { return self }
+            let retained = elements.filter { $0.id != excludingElement }
+            return replacingDisplayElements(retained, rewriting: [excludingElement],
+                referenceIDs: Set(retained.lazy.filter(\.isReference).map(\.id)))
+        }
+
+        /// This is only an uncommitted geometry promise. The factory must validate and draw this
+        /// same snapshot's actual native image before publishing any packet made from it.
+        func stageFillReference(into support: inout VectorMendSupport.Reference.Builder?, nativeSize: CGSize,
+                                excludingElement: UUID?) {
+            let mapping: CGAffineTransform? = size == nativeSize && transform.isIdentity ? .identity : nil
+            do throws(VectorMendSupport.Failure) {
+                try support?.append(self, transform: mapping, excludingElement: excludingElement)
+            }
+            catch { support = nil }
+        }
 
         func drawFillReference(into cg: CGContext, frameRect: CGRect, width: Int, height: Int,
-                               excludingElement: UUID?, support: inout VectorMendSupport.Reference.Builder?) -> Frozen? {
-            let snapshot: Frozen
-            if let excludingElement {
-                let retained = elements.filter { $0.id != excludingElement }
-                snapshot = replacingDisplayElements(retained, rewriting: [excludingElement],
-                    referenceIDs: Set(retained.lazy.filter(\.isReference).map(\.id)))
-            } else { snapshot = self }
+                               excludingElement: UUID?, support: inout VectorMendSupport.Reference.Builder?,
+                               sampling: ImageWarp.RasterScaleSupport? = nil,
+                               maximumWorkingBytes: Int = CompositorBudget.textureBudgetBytes,
+                               isCurrent: () -> Bool = { true }) -> Frozen? {
+            let snapshot = fillReferenceSnapshot(excludingElement: excludingElement)
             let ctm = cg.ctm
             let nativeContext = ctm.a == 1 && ctm.b == 0 && ctm.c == 0 && ctm.d == -1
                 && ctm.tx == 0 && ctm.ty == CGFloat(height)
@@ -6237,7 +6284,31 @@ final class VectorCanvas {
                 && size.width.rounded() == size.width && size.height.rounded() == size.height
                 && frameRect.size == size && frameRect.minX.rounded() == frameRect.minX
                 && frameRect.minY.rounded() == frameRect.minY && transform.isIdentity
-            if excludingElement != nil {
+            if let sampling {
+                guard isCurrent(), nativeContext, sampling.sourceSize == snapshot.size,
+                      sampling.destination == CGRect(x: 0, y: 0, width: width, height: height) else { return nil }
+                if !snapshot.elements.isEmpty {
+                    // A captured document memo is borrowed. Otherwise the existing detached
+                    // renderer owns one request image; filling must not install native images
+                    // into every selected live canvas while their scaled pictures are consumed.
+                    guard let image = snapshot.memoized ?? snapshot.detached().render(quality: .full),
+                          let pixels = image.cgImage,
+                          image.scale == 1, image.imageOrientation == .up, image.size == snapshot.size,
+                          pixels.width == Int(snapshot.size.width), pixels.height == Int(snapshot.size.height),
+                          isCurrent() else { return nil }
+                    cg.saveGState(); cg.interpolationQuality = .none
+                    let drawn = ImageWarp.drawRaster(sourceSize: snapshot.size, destination: sampling.destination,
+                        inverseTexelMap: sampling.inverseTexelMap, maximumWorkingBytes: maximumWorkingBytes,
+                        isCurrent: isCurrent, source: { pixels.cropping(to: $0) }, consume: { image, rect in
+                            UIImage(cgImage: image, scale: 1, orientation: .up).draw(in: rect)
+                        })
+                    cg.restoreGState()
+                    guard drawn, isCurrent() else { return nil }
+                }
+                // Geometry was prepared by the private factory stage; an uncommitted image
+                // route must never mint a separate lazy native recipe for this resampled grid.
+                return snapshot
+            } else if excludingElement != nil {
                 guard snapshot.draw(into: cg, frameRect: frameRect, quality: .full) != nil else { return nil }
             } else {
                 guard let image = snapshot.render(quality: .full), let pixels = image.cgImage else { return nil }
