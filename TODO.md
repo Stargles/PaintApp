@@ -29,7 +29,15 @@ records-only pins; do not retag the old binary. First29 fault targets are being 
 palette4, metadata4, curve7;14selectors/69 meaningful statements inherited from accepted107 map.
 Root must inspect exact recipes/source locations and explicitly grant one-Mac native execution.
 Stop on compiler/crash/setup failure or unexpected green; rebuild normal after mutations before UI.
-Stream/media are omitted from29; remaining78 targets stay queued. No native lease currently active.
+Stream/media are omitted from29; remaining78 targets stay queued. Native first29 STOPPED after
+its first ineffective control: actual selected palette method1/1 PASSED under inverted validation,
+28notrun,0qualifiedtargets. Root verified fresh Palette compilation in BOTH targets, exact actual
+selector/count/device and full728 restoration/clean0c417. Cause: the reversed guard rejects the
+fixture's first VALID swatch before reaching its malformed second swatch, so unreadable-library
+assertions remain correctly satisfied. Correct the EXTERNAL negative control to omit validation
+while preserving valid swatches; no product/test change justified. Rebuild normal palette class,
+independently review corrected recipes, then explicitly grant a fresh run. No native lease active.
+Evidence: native/fault-tranche29-0c4170a3-run01/root-independent-closeout.json.
 
 Media trace found a concrete final-owner defect: H264StreamDecoder deinit can invalidate its native
 session on the releasing/main thread after weak client stop loses ownership. Design a tiny transfer
