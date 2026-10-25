@@ -78,6 +78,12 @@ add an explicit nonnil assertion for the valid fractional-scale contract before 
 distinguishes a product refusal from an uncredited setup error. No old assertion changes. Keep a
 separate exact-source text qualification tree so integration can advance. No full text/font audit claim.
 
+**Combined first478 attempt — actual compiler0, recorded before correction:** clean5f91c954
+selected Fill126+Text135+Graph148+Blend69, but TextLayoutLogicTests' new CGSize(width:.infinity,
+height:200) is ambiguous, so0 tests ran. Source729/HEAD remained exact. Qualify the new invalid-input
+fixture's infinity/NaN literals explicitly as CGFloat; values, assertions, methods and production stay
+unchanged. Preserve `native/combined-normal478-5f91c954-run01/`; a fresh committed rerun is required.
+
 **New bounded graph-drag fix — recorded before harvest:** source83380 has three related lifecycle
 bugs: focus follows only the first moved frame; a nil readout leaves an old value visible; returning
 inside initial tap slop can commit the earlier displacement. Identity ticks also need to replace
