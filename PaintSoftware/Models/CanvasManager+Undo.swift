@@ -125,12 +125,18 @@ extension CanvasManager {
         // *restored* document. It used to read a snapshotted field, which is the field TODO (50)
         // removed — and which, because nothing ever lowered it, made this clamp looser than it
         // claimed to be.
-        currentFrame = min(currentFrame, max(contentEndFrame - 1, 0))
+        clampPlayheadToContent()
         motionGroups = snapshot.motionGroups
         guideStrokes = snapshot.guideStrokes
         animationGroups = snapshot.animationGroups
         // After `layers`, because it writes through the canvases the restored cels name.
         restoreVideoCrops(snapshot.videoCrops)
+    }
+
+    /// Structural history can remove the last held frame without moving the artist's playhead.
+    /// Shared by snapshot restores and narrow layer transfers, after their structure is restored.
+    func clampPlayheadToContent() {
+        currentFrame = min(currentFrame, max(contentEndFrame - 1, 0))
     }
 
     /// Registers one undo step for a discrete (non-gesture) structural edit — call after the

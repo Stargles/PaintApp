@@ -6,32 +6,35 @@ Integration remains unmerged/uninstalled; main/origin remain afd2030c. Root acce
 492/492 at0e215 and260/260 atbddb, zero failures/skips/expected failures. Logic26 qualifies36 intended
 statements and selection/seed5 qualifies10; actual source/device/method identities and729 immutable
 entries reconcile. Fill126/owner UI4/all29 controls qualify at83380 with whole pictures inspected.
-Named evidence and limits are in HANDOFF.md. Last compiled UI app is normal94fed; effects/Text fixture successors still require normal rebuilds.
+Named evidence and limits are in HANDOFF.md. Last compiled app is an effects mutant; new source requires a normal rebuild before UI/install.
 
 Current queue (items remain until merged):
 
 - Resolve actual cold UI21 atc4df:18pass3fail; allGraph6 pass and root LOOKed3 whole pictures.
   Exact Blend diagnostic94fed proves brush input199/200/201, invalidating near-tie premises; scoped
-  public solid-fill fixture retains exact outcomes and fixed uniformity checks, source in progress.
+  public solid-fill6c5d1003 fixture harvested after root review, exact outcomes/fixed uniformity checks.
   Text4b060d05 harvested after independent review: clip existing colour ROI to actual visible paper
   (exact7320 margin samples); set public size before keyboard and preserve W/w physical key.
   Whole Text5+Graph6+Blend10 and meaningful Graph3/Blend3/text1 UI controls remain pending.
 - Correct THREE scoped effects audit clusters via existing owners: cap radius before Int; normalize
   periodic angles/shared apron inputs; price actual missing GPU scratch/intermediate pictures plus
   readback at warm first-effect growth. Source55383dd6 independently7a1b6a17 reviewed and harvested7paths, old118 exact/four newmethods.
-  Native ordinary121 and13controls/35behavior+premise identities remain UNRUN. Actual consumer, refusal,
+  Actual ordinary121/121 and13controls/all31product+4premise identities qualify at8dcb, root ab2ff6db.
+  Cold appearance and final fast/Release remain pending. Actual consumer, refusal,
   strip/periodicity/reuse and meaningful fault controls. Preserve sigma/appearance/budgets/fallback;
   no new retained counter/cache/renderer/schema. Audit8b106831 is source/model evidence, not RSS.
 - Cold stored-vector eraser Splatter/Undo/Redo. Existing-seed handoff and UTF-16 selection are
   integrated and pass related260 plus all5 meaningful faults; no new state and no Mode3 cause claim.
 - Repin historical UI13/mask6-positive+11-fault gates; final fast Debug AND Release, counts/lints/PBX/
-  graph, touched UI classes/full phase. Current5439 fast/6031 full runnable with cold-text harvested.
+  graph, touched UI classes/full phase. Current5444 fast/6036 full runnable with cold-text harvested.
 - Final fill sampler/count/cost gates,16 paired Release trials and genuine cold previous-writer
   library UI; untouched original256-package export and old071 product stay preserved.
 - TWO source-confirmed vector transfer defects: missing cel/group pose on Duplicate/To New Layer,
   and fresh split payloads omitted from undo cost. Use one existing pose/bake preflight with strict
   transfer refusal/ID preservation and normal rest-walk appearance; existing Bake policy stays.
-  Price actual prepared lists with VectorUndoCost and nest-safe explicit structural cost. Existing
+  Sourcead1548d6 harvested after independent0241a072/root review: price actual prepared lists with
+  VectorUndoCost through one shared standalone reversal, refuse enclosing brackets before tool
+  settlement, reuse existing end-frame clamp. Normal9classes270/13controls and cold UI pending. Existing
   parent/pose/pixel/undo/cost/eviction and cold controls required; independent43957eca design accepted.
 - Genuine remaining architecture coverage: vector tools/undo/render, graph evaluation, remaining
   fonts/panels/platform/RSS. Read prior reports before reopening anything; inventory is not review.
@@ -360,7 +363,7 @@ Inventory-only files are not reviewed code. New source is not called complete be
       VectorCanvas.erase/hybrid punch and universal commit. Actual pixel/undo/archive and cold artist
       controls required; do not attribute the owner's Mode3 respring to this independent issue.
 - [ ] Text style update: reviewed minimal direct full UTF-16 range restoration is integrated17026caf;
-      actual-view class31/2reverse faults remain unrun. Add one cold TextSession method using measured
+      actual-view class31 and2reverse faults qualify within260/seed-selection5; cold route remains pending. Add one cold TextSession method using measured
       one-glyph/old-word far band, public Select All, actual text-colour change and same software key.
       Read drawn replacement while editing, before keyboard/commit can move the canvas; no hidden AX,
       app.typeText, post-style refocus/paste or product/helper changes. Normal/reverse/LOOK required.

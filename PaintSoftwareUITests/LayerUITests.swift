@@ -1802,10 +1802,6 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
                              "PREMISE: the cold artist control is actually landscape")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        openBrushLibrary(app)
-        tapWhenHittable(app.buttons["brushPanel.brush.Opaque Round"], "Select the opaque core explicitly")
-        app.buttons["toolbar.brushButton"].tap()
-        XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5))
 
         let paper = visiblePaperRect(app, in: canvas)
         XCTAssertGreaterThan(paper.height, 0, "PREMISE: the measured paper is exposed above the dock")
@@ -1817,39 +1813,58 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
         for point in [stripe, minus, plus, source, outside] {
             assertAboveTheDock(app, canvas, dy: Double(point.dy), "A measured colour core or untouched paper")
         }
-        let drawings: [[(hex: String, from: CGVector, to: CGVector, probe: CGVector, rgba: [UInt8])]] = [
-            [("00FF00", onHost(paper, 0.2, 0.2), onHost(paper, 0.3, 0.2), stripe, [0, 255, 0, 255])],
-            [("004E7F", onHost(paper, 0.4, 0.35), onHost(paper, 0.4, 0.65), minus, [0, 78, 127, 255]),
-             ("00499A", onHost(paper, 0.6, 0.35), onHost(paper, 0.6, 0.65), plus, [0, 73, 154, 255])],
-            [("C80000", onHost(paper, 0.32, 0.5), onHost(paper, 0.68, 0.5), source, [200, 0, 0, 255])]
+        // The Add menu's solid fills avoid a radial-gradient brush ingredient in this exact-byte
+        // near tie. A rectangle is centred on its press; the existing final endpoint sizes it.
+        let fills: [[(hex: String, edge: CGVector, probes: [CGVector], rgba: [UInt8])]] = [
+            [("00FF00", onHost(paper, 0.3, 0.2), [stripe], [0, 255, 0, 255])],
+            [("004E7F", onHost(paper, 0.4, 0.65), [minus], [0, 78, 127, 255]),
+             ("00499A", onHost(paper, 0.6, 0.65), [plus], [0, 73, 154, 255])],
+            [("C80000", onHost(paper, 0.68, 0.5), [source, minus, plus], [200, 0, 0, 255])]
         ]
-        for (layer, strokes) in drawings.enumerated() {
+        for (layer, rectangles) in fills.enumerated() {
             if layer > 0 {
                 openLayerPanel(app)
                 addVectorLayerFromOpenPanel(app)
                 XCTAssertTrue(app.staticTexts["layerPanel.row.\(layer)"].waitForExistence(timeout: 5))
+                XCTAssertEqual(readVectorMarker(app, layerIndex: layer)?.isVector, true,
+                               "PREMISE: each upper input is placed on an actual vector layer")
                 closeLayerRail(app)
             }
-            for stroke in strokes {
-                for endpoint in [stroke.from, stroke.to] {
-                    assertAboveTheDock(app, canvas, dy: Double(endpoint.dy), "Both ink endpoints are exposed")
+            for fill in rectangles {
+                let centre = try XCTUnwrap(fill.probes.first, "PREMISE: each input has its actual centre")
+                for endpoint in [centre, fill.edge] {
+                    assertAboveTheDock(app, canvas, dy: Double(endpoint.dy), "Both fill placement endpoints are exposed")
                 }
-                setBrushColor(app, hex: stroke.hex)
-                drawLine(on: canvas, from: stroke.from, to: stroke.to)
-                var lastObserved: [UInt8] = []
-                let sampledCore = waitForPixel(canvas, at: stroke.probe, matches: { pixel in
-                    lastObserved = [pixel.r, pixel.g, pixel.b, pixel.a]
-                    return lastObserved == stroke.rgba
-                })
-                if case .none = sampledCore {
-                    attachScreenshot(XCUIScreen.main, "blend-opaque-input-core-failure-whole")
+                setBrushColor(app, hex: fill.hex)
+                placeFromTheAddMenu(app, row: "add.rectangleRow", primedName: "rectangle",
+                                    from: centre, to: fill.edge)
+                for probe in fill.probes {
+                    var lastObserved: [UInt8] = []
+                    let sampledCore = waitForPixel(canvas, at: probe, matches: { pixel in
+                        lastObserved = [pixel.r, pixel.g, pixel.b, pixel.a]
+                        return lastObserved == fill.rgba
+                    })
+                    if case .none = sampledCore {
+                        attachScreenshot(XCUIScreen.main, "blend-opaque-input-core-failure-whole")
+                    }
+                    let core = try XCTUnwrap(sampledCore,
+                        "PREMISE: actual opaque \(fill.hex) core; last sample \(lastObserved); stop if coverage or colour conversion differs")
+                    XCTAssertEqual([core.r, core.g, core.b, core.a], fill.rgba,
+                                   "PREMISE: exact artist-entered input, not a blend result")
+                    let host = canvas.frame
+                    let pixels = try pixelProbe(canvas)
+                    for dx in [-1.0, 0, 1] {
+                        for dy in [-1.0, 0, 1] {
+                            let pixel = pixels(Double(probe.dx) + dx / Double(host.width),
+                                               Double(probe.dy) + dy / Double(host.height))
+                            XCTAssertEqual([pixel.r, pixel.g, pixel.b, pixel.a], fill.rgba,
+                                           "PREMISE: the actual \(fill.hex) input is uniform within one point of its future core")
+                        }
+                    }
                 }
-                let core = try XCTUnwrap(sampledCore,
-                    "PREMISE: actual opaque \(stroke.hex) core; last sample \(lastObserved); stop if coverage or colour conversion differs")
-                XCTAssertEqual([core.r, core.g, core.b, core.a], stroke.rgba,
-                               "PREMISE: exact artist-entered input, not a blend result")
             }
         }
+        attachScreenshot(XCUIScreen.main, "blend-flat-inputs-before-fade-whole")
         setBlendMode(app, layerIndex: 2, to: "lighterColor")
         openLayerPanel(app)
         let opacity = app.sliders["layerPanel.row.2.opacity"]

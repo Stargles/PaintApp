@@ -265,4 +265,174 @@ final class MoveToNewLayerLogicTests: XCTestCase {
         XCTAssertEqual(added.cels[0].startFrame, 3, "starts where the source cel started")
         XCTAssertEqual(added.cels[0].frameCount, 3, "lasts exactly as long as the source cel — frames 3–5")
     }
+    /// Unsupported placed geometry and a below-bound composed inverse are separate refusals. Each
+    /// runs through the actual command with healthy selection premises and the same state oracles.
+    func testSelectionTransfersRefuseAnUnsupportedLocalPoseBeforePublishingAnyElement() throws {
+        for copying in [true, false] {
+          for belowInverseBound in [false, true] {
+            let (manager, sourceIndex, vector, _, _) = vectorFixture()
+            let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+            if belowInverseBound {
+                let group = UUID()
+                manager.animationGroups.append(AnimationGroup(id: group, displayName: "tiny local group",
+                    tagColor: CodableColor(red: 0, green: 0, blue: 0, alpha: 1)))
+                vector.elements = vector.elements.map { $0.taggedForAnimation(group) }
+                let reference = CGRect(x: 0, y: 0, width: 1024, height: 1024)
+                let small = PoseQuad(box: reference, mappedBy: CGAffineTransform(scaleX: 0.001, y: 0.001))
+                let track = CanvasFixture.poseTrack([(0, small)])
+                manager.layers[sourceIndex].cels[0].transformTracks = [TransformChannelID.cel.id: track,
+                                                                    TransformChannelID.group(group).id: track]
+                let mappings = CanvasManager.poseMappings(manager.layers[sourceIndex].cels[0].transformTracks,
+                                                          atCelLocalFrame: 0)
+                XCTAssertEqual(mappings.count, 2, "PREMISE: both finite local channels are admitted")
+                XCTAssertTrue(mappings.allSatisfy { $0.1.inverse != nil }, "PREMISE: each channel has a usable inverse")
+                let composed = mappings.reduce(PoseMap.identity) { $0.concatenating($1.1) }
+                XCTAssertNil(composed.inverse, "PREMISE: two determinant1e-6 maps compose below the existing1e-9 bound")
+                XCTAssertTrue(manager.celPoseMaps(vector.elements, layerID: manager.layers[sourceIndex].id,
+                    celID: manager.layers[sourceIndex].cels[0].id, atFrame: 0).isEmpty,
+                    "PREMISE: the target's map filter omits this composition rather than refusing the target")
+            } else {
+                let image = VectorImageElement(image: CanvasFixture.solidImage(.red,
+                    rect: CGRect(x: 0, y: 0, width: 8, height: 8)),
+                    transform: LayerTransform(position: CGPoint(x: 32, y: 32), scale: 1, rotation: 0))
+                vector.addImage(image)
+                let pose = PoseQuad(box: box, corners: Quad(CGPoint(x: 8, y: 0), CGPoint(x: 56, y: 0),
+                                                           CGPoint(x: 64, y: 64), CGPoint(x: 0, y: 64)))
+                manager.layers[sourceIndex].cels[0].transformTracks = [TransformChannelID.cel.id:
+                    CanvasFixture.poseTrack([(0, pose)])]
+            }
+            let loop = CGPath(rect: box, transform: nil)
+            manager.selection = Selection(path: loop, bounds: box)
+            manager.setSelectionMembership(.touching)
+            XCTAssertEqual(vector.elementIDs(insideLocalPath: loop, membership: .touching).count,
+                           vector.elements.count, "PREMISE: a full-window loop admits every stored element")
+            let before = vector.elements.map(\.id)
+            let version = vector.contentVersion
+            let layers = manager.layers.map(\.id)
+            let history = manager.history.currentCost
+            if copying { manager.beginDuplicate() } else { manager.moveSelectionToNewLayer() }
+            XCTAssertEqual(manager.layers.map(\.id), layers, "no prefix of the refused selection was published")
+            XCTAssertEqual(vector.elements.map(\.id), before)
+            XCTAssertEqual(vector.contentVersion, version)
+            XCTAssertEqual(manager.currentLayerIndex, sourceIndex)
+            XCTAssertEqual(manager.selection?.bounds, box)
+            XCTAssertTrue(vector.suppressedElementIDs.isEmpty)
+            XCTAssertNil(manager.vectorFloat)
+            XCTAssertEqual(manager.history.currentCost, history)
+          }
+        }
+    }
+
+    /// These public commands have no enclosing production owner. Their explicit refusal is before
+    /// tool settlement, so unsupported capture cannot swallow either payload price or pending ink.
+    func testSelectionTransfersLeaveAnOpenOwnerAndItsPendingShapeUntouched() throws {
+        for copying in [true, false] {
+            for owner in 0..<3 {
+                let (manager, sourceIndex, vector, _, _) = vectorFixture()
+                let loop = CGPath(rect: aroundLeft, transform: nil)
+                manager.selection = Selection(path: loop, bounds: aroundLeft)
+                let attempt = {
+                    manager.beginInteractiveShape(ShapeGeometry(kind: .line,
+                        startPoint: CGPoint(x: 8, y: 12), endPoint: CGPoint(x: 24, y: 12)),
+                        samples: [VectorSample(x: 8, y: 12, pressure: 1), VectorSample(x: 24, y: 12, pressure: 1)])
+                    manager.endInteractiveShape()
+                    let version = vector.contentVersion
+                    let ids = vector.elements.map(\.id)
+                    let layers = manager.layers.map(\.id)
+                    let steps = manager.history.undoStack.count
+                    let cost = manager.history.currentCost
+                    if copying { manager.beginDuplicate() } else { manager.moveSelectionToNewLayer() }
+                    XCTAssertNotNil(manager.activeShape, "the refused transfer must not settle the earlier tool")
+                    XCTAssertEqual(vector.elements.map(\.id), ids)
+                    XCTAssertEqual(vector.contentVersion, version)
+                    XCTAssertEqual(manager.layers.map(\.id), layers)
+                    XCTAssertEqual(manager.currentLayerIndex, sourceIndex)
+                    XCTAssertEqual(manager.selection?.bounds, self.aroundLeft)
+                    XCTAssertNil(manager.vectorFloat)
+                    XCTAssertEqual(manager.history.undoStack.count, steps)
+                    XCTAssertEqual(manager.history.currentCost, cost)
+                    manager.cancelInteractiveShape()
+                }
+                switch owner {
+                case 0: manager.withStructureUndo(label: .moveToNewLayer) { attempt() }
+                case 1: manager.withInterpolationUndo(label: .moveToNewLayer) { attempt() }
+                default:
+                    XCTAssertTrue(manager.beginStructureGesture(), "PREMISE: the capture is open")
+                    attempt()
+                    manager.cancelStructureGesture()
+                }
+            }
+        }
+    }
+
+    /// Real clipped archives are new owners; an uncut copy shares the original heap archive. The
+    /// action price, undo pixels and ordinary eviction are read from the actual transfer consumer.
+    @MainActor
+    func testSelectionTransfersPriceTheirActualFreshAndSharedArchivesAndEvictByThatPrice() throws {
+        for copying in [true, false] {
+            for cutting in [true, false] {
+                let manager = CanvasFixture.manager(layerCount: 1)
+                manager.addVectorLayer()
+                let sourceIndex = manager.currentLayerIndex
+                let vector = try XCTUnwrap(manager.layers[sourceIndex].cels[0].vector)
+                let path = CGMutablePath()
+                path.move(to: CGPoint(x: 4, y: 8))
+                for tooth in 1...1024 {
+                    path.addLine(to: CGPoint(x: 4 + CGFloat(tooth) * 56 / 1024,
+                                            y: tooth.isMultiple(of: 2) ? 8 : 10))
+                }
+                path.addLine(to: CGPoint(x: 60, y: 56)); path.addLine(to: CGPoint(x: 4, y: 56))
+                path.closeSubpath()
+                let fill = VectorFillElement(path: path, color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1))
+                vector.addFill(fill)
+                let original = try XCTUnwrap(vector.render(quality: .full)?.cgImage)
+                let originalBytes = try XCTUnwrap(CanvasFixture.rgbaBytes(original))
+                let loop = CGPath(rect: CGRect(x: 0, y: 0, width: 32, height: 64), transform: nil)
+                manager.selection = Selection(path: loop, bounds: loop.boundingBoxOfPath)
+                manager.setSelectionMembership(cutting ? .cutting : .touching)
+                manager.history.removeAll()
+                // Keep a distinguishable earlier step until the transfer's actual price trims it.
+                manager.recordUndo(label: .renameLayer, cost: 256, undo: {}, redo: {})
+                if copying { manager.beginDuplicate() } else { manager.moveSelectionToNewLayer() }
+                manager.commitVectorFloatIfNeeded()
+                let destination = try XCTUnwrap(manager.layers[sourceIndex + 1].cels[0].vector)
+                let inside = try XCTUnwrap(destination.fills.first)
+                let slots = 2 * MemoryLayout<VectorElement>.stride
+                var expected = 4096 + slots
+                if cutting {
+                    XCTAssertGreaterThan(inside.pathData.count, 4096, "PREMISE: the actual inside archive is heap-backed")
+                    fill.pathData.withUnsafeBytes { before in inside.pathData.withUnsafeBytes { after in
+                        XCTAssertNotEqual(before.baseAddress, after.baseAddress, "PREMISE: clipping made a fresh inside owner")
+                    } }
+                    expected += inside.pathData.count
+                    if !copying {
+                        let outside = try XCTUnwrap(vector.fills.first)
+                        XCTAssertGreaterThan(outside.pathData.count, 4096, "PREMISE: the outside archive is also a real heap owner")
+                        expected += fill.pathData.count + outside.pathData.count
+                    }
+                } else {
+                    fill.pathData.withUnsafeBytes { before in inside.pathData.withUnsafeBytes { after in
+                        XCTAssertEqual(before.baseAddress, after.baseAddress, "PREMISE: the uncut archive really is shared")
+                    } }
+                }
+                XCTAssertEqual(manager.history.undoStack.last?.cost, expected,
+                               "price actual retained archives across both lists, without recharging shared owners")
+                let destinationBytes = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(destination.render()?.cgImage)))
+                manager.undo()
+                XCTAssertEqual(manager.layers.count, 2)
+                XCTAssertTrue(try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage)))
+                    .elementsEqual(originalBytes), "one undo restores the source's real pixels")
+                manager.redo()
+                let redone = try XCTUnwrap(manager.layers[sourceIndex + 1].cels[0].vector)
+                XCTAssertTrue(try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(redone.render()?.cgImage)))
+                    .elementsEqual(destinationBytes), "redo retains the transferred picture")
+                manager.history.maxCost = expected
+                manager.recordUndo(label: .opacity, cost: 1, undo: {}, redo: {})
+                XCTAssertEqual(manager.history.undoStack.count, 1,
+                               "ordinary cost trimming must evict the retained transfer, not leave a cheap zombie step")
+                XCTAssertEqual(manager.history.currentCost, 1)
+            }
+        }
+    }
+
 }

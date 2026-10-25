@@ -342,6 +342,17 @@ with the source's inside removed, as one undo step; the vector arm floats the mo
 layer as Duplicate floats its copy. Starting a selection over is the Deselect tab or a tap on the
 Select icon itself (TODO (94)), which now clears the loop as it puts the panel away.
 
+Selection Duplicate and To New Layer prepare the selected stored elements through the source
+cel/group channels at the current frame before creating the new cel. They share the existing
+persistent pose bake, so textured rest-space walks survive JSON; the same parent/container and
+VectorCanvas placement still act once. The new cel keeps element IDs and document group membership,
+with no copied source tracks or baselines. After normal earlier-tool settlement, unsupported
+preparation refuses the whole transfer before its source-list rewrite, selection clear, suppression
+or layer insertion. Both use one transfer reversal and
+price actual before/after source and prepared destination lists through VectorUndoCost. They are
+standalone Select-panel commands; an already-open structure/interpolation/gesture owner is refused
+before any pending tool is settled, rather than losing the payload price in a shallow snapshot.
+
 **Select ▸ Tap (TODO (147), 2026-10-02) is a fourth way to make the same `Selection`, naming objects
 instead of a region.** The path is the union of the objects' own outlines (`VectorHitTest.outline(of:)`, a
 quad for text and placed pictures and the box round its ink for a stroke or a fill, standing 2 pt off

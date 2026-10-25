@@ -584,14 +584,15 @@ extension CanvasManager {
     /// (`registerVectorFloatNudgeUndo`, `endsFloat`) sit on top of a step that removes the layer
     /// rather than under one. So: one press puts the box away, a second takes the copy back.
     ///
-    /// **It refuses on a derived in-between**, through `activeVectorMoveTarget()`'s own guard and its
-    /// banner. The stored geometry there is at rest and what the artist lassoed is the posed picture,
-    /// so a copy taken from it would be of ink that is not where they drew the loop.
+    /// A derived in-between has no editable display list and refuses through the existing target
+    /// guard. A cel/group pose is prepared persistently in the copy; its parent still acts once.
+    /// These standalone commands refuse an enclosing structural bracket before settling any tool.
     ///
-    /// - Returns: whether a copy was lifted. False leaves the document and the loop exactly as they
-    ///   were — nothing here mutates before the last refusal.
+    /// - Returns: whether a copy was lifted. After normal earlier-tool settlement, refusal performs
+    ///   no transfer edits: no source-list rewrite, inserted layer, selection clear or suppression.
     @discardableResult
     func beginVectorLassoDuplicate() -> Bool {
+        guard structureUndoDepth == 0, gestureSnapshot == nil else { return false }
         guard commitAllInteractiveState() else { return false }
         guard let selection, let target = activeVectorMoveTarget(),
               selection.acts(onLayer: target.layerID, cel: target.celID) else { return false }
@@ -601,70 +602,24 @@ extension CanvasManager {
             noteALassoThatCaughtNothing(vector: source, loops: loops)
             return false
         }
-        let copies = split.elements.filter { split.insideIDs.contains($0.id) }
-        guard !copies.isEmpty else { return false }
-        let copiedIDs = Set(copies.map(\.id))
-
-        let sourceIndex = currentLayerIndex
-        let size = source.size
-        // TODO (108): the new layer's cel spans exactly the source cel it was lifted from, not the
-        // whole scene — `SelectionModels`' raster arm had the identical defect.
-        let sourceCel = layers[sourceIndex].cels.first(where: { $0.id == target.celID })
-        let sourceStartFrame = sourceCel?.startFrame ?? 0
-        let sourceFrameCount = sourceCel?.frameCount ?? newLayerBlockLength
-        withStructureUndo(label: .duplicatePiece) {
-            // **The source canvas's own `transform`**, so the copy sits exactly over the ink it was
-            // taken from: the elements are in the source's local space and would land somewhere else
-            // under an identity.
-            let canvas = VectorCanvas(size: size, elements: copies, transform: source.transform)
-            let cel = Cel(id: UUID(), startFrame: sourceStartFrame, frameCount: sourceFrameCount,
-                          raster: .empty(size: canvasSize ?? size), vector: canvas)
-            let layer = Layer(id: UUID(), name: defaultLayerName(for: .vector), opacity: 1.0,
-                              isVisible: true, kind: .vector,
-                              parentFolderID: layers[sourceIndex].parentFolderID, cels: [cel])
-            layers.insert(layer, at: sourceIndex + 1)
-            currentLayerIndex = sourceIndex + 1
-        }
-        // §5.6's stated exception, in the raster arm's own words: "a copy is not a region the artist
-        // is still holding", so Duplicate clears its ants at the lift where Move keeps them to the
-        // bake. Cleared before the lift so `selectionBeforeLift` is nil and a cancel does not put a
-        // loop back over a layer the loop was never drawn on.
-        self.selection = nil
-        return beginVectorMove(ofElementIDs: copiedIDs)
+        let selected = split.elements.filter { split.insideIDs.contains($0.id) }
+        guard !selected.isEmpty,
+              let at = celIndices(forCel: target.celID, inLayer: target.layerID) else { return false }
+        let cel = layers[at.layer].cels[at.cel]
+        guard let copies = Self.bakedForTransfer(selected,
+            through: Self.poseMappings(cel.transformTracks, atCelLocalFrame: currentFrame - cel.startFrame))
+        else { return false }
+        return commitVectorSelectionTransfer(copies, fromLayer: target.layerID, cel: target.celID,
+                                              sourceReplacement: nil, label: .duplicatePiece)
     }
 
-    /// **"To New Layer" on a vector layer: the lassoed elements leave this layer for a new one above
-    /// it** — TODO (93), the owner's *"duplicate the selection, then erase it, so that the stuff in the
-    /// selection is put into another layer and removed from the original."*
-    ///
-    /// **`beginVectorLassoDuplicate`'s copy and `clearSelectionPixels`' removal, as one step.** The
-    /// split is the same one call under the same rule (§5.26 — membership belongs to the selection,
-    /// and this is one more consumer of it): under Cut the ink is bisected at the loop and the inside
-    /// halves travel, under Touching and Enclosed whole elements do. The new layer takes the inside
-    /// list, the source keeps the survivors *in the order the split produced them* — both halves of a
-    /// cut stroke replace their parent at the parent's index, so dropping the inside ids leaves every
-    /// survivor's z-position where it was.
-    ///
-    /// **One undo step, by construction rather than by bracket.** `withStructureUndo` snapshots
-    /// `layers` by value and `Cel.vector` is a class, so a structure step would put the layer away
-    /// and leave the source's display list as the removal left it. The step here is one `recordUndo`
-    /// whose two closures each do both halves — the layer's existence and the source's elements — so
-    /// one press gives back the drawing exactly, and there is no order of two steps to get wrong.
-    ///
-    /// **The moved ink comes up in the Move box on its new layer**, as Duplicate's copy does, and for
-    /// the same reason: it is sitting where it was, and the artist who wanted it on its own layer
-    /// very often wants it somewhere else next. Putting the box down without a nudge records nothing,
-    /// so the one step above is the whole cost of the verb.
-    ///
-    /// **It refuses what a Move refuses**: a derived in-between through `activeVectorMoveTarget()`'s
-    /// own banner, and a loop that would tear an animation group apart
-    /// (`refusesToDamageAnAnimation`) — a group's members belong to one cel's pose channel, and half
-    /// of them on another layer is exactly the partial move that rule exists to stop.
-    ///
-    /// - Returns: whether anything moved. False leaves the document and the loop exactly as they
-    ///   were — nothing here mutates before the last refusal.
+    /// Puts the selected vector elements on a fresh layer above and removes them from the source as
+    /// one undoable transfer. Cut pieces retain order, IDs and membership; the current local pose is
+    /// prepared into their geometry, while the new cel has no source tracks to apply it again.
+    /// A loop that would tear an animated group still refuses before changing either list.
     @discardableResult
     func moveVectorSelectionToNewLayer() -> Bool {
+        guard structureUndoDepth == 0, gestureSnapshot == nil else { return false }
         guard commitAllInteractiveState() else { return false }
         guard let selection, let target = activeVectorMoveTarget(),
               selection.acts(onLayer: target.layerID, cel: target.celID) else { return false }
@@ -675,60 +630,78 @@ extension CanvasManager {
             return false
         }
         guard !refusesToDamageAnAnimation(split.elements, movedIDs: split.insideIDs) else { return false }
-        let moved = split.elements.filter { split.insideIDs.contains($0.id) }
-        guard !moved.isEmpty else { return false }
+        let selected = split.elements.filter { split.insideIDs.contains($0.id) }
+        guard !selected.isEmpty,
+              let at = celIndices(forCel: target.celID, inLayer: target.layerID) else { return false }
+        let cel = layers[at.layer].cels[at.cel]
+        guard let moved = Self.bakedForTransfer(selected,
+            through: Self.poseMappings(cel.transformTracks, atCelLocalFrame: currentFrame - cel.startFrame))
+        else { return false }
         let remaining = split.elements.filter { !split.insideIDs.contains($0.id) }
+        return commitVectorSelectionTransfer(moved, fromLayer: target.layerID, cel: target.celID,
+                                              sourceReplacement: remaining, label: .moveToNewLayer)
+    }
+
+    /// Both standalone transfers own the new layer and, when supplied, the source-list rewrite in
+    /// the same reversal. A shallow structure snapshot cannot restore an in-place source edit.
+    /// Only these actual lists are priced; no document-wide payload walk or pending transaction state.
+    private func commitVectorSelectionTransfer(_ prepared: [VectorElement], fromLayer sourceLayerID: UUID,
+                                                cel sourceCelID: UUID,
+                                                sourceReplacement: [VectorElement]?,
+                                                label: HistoryActionLabel) -> Bool {
+        guard let at = celIndices(forCel: sourceCelID, inLayer: sourceLayerID),
+              let source = layers[at.layer].cels[at.cel].vector else { return false }
+        let sourceCel = layers[at.layer].cels[at.cel]
         let elementsBefore = source.elements
-
-        let sourceIndex = currentLayerIndex
-        let sourceLayerID = target.layerID
-        let sourceCelID = target.celID
-        let insertAt = sourceIndex + 1
-        // TODO (108): span exactly the source cel, not the whole scene — see the identical note on
-        // `beginVectorLassoDuplicate` above.
-        let sourceCel = layers[sourceIndex].cels.first(where: { $0.id == sourceCelID })
-        let sourceStartFrame = sourceCel?.startFrame ?? 0
-        let sourceFrameCount = sourceCel?.frameCount ?? newLayerBlockLength
-        // The source canvas's own `transform`, so the ink sits exactly over where it was taken from —
-        // `beginVectorLassoDuplicate`'s reason.
-        let canvas = VectorCanvas(size: source.size, elements: moved, transform: source.transform)
-        let cel = Cel(id: UUID(), startFrame: sourceStartFrame, frameCount: sourceFrameCount,
+        let canvas = VectorCanvas(size: source.size, elements: prepared, transform: source.transform)
+        let cel = Cel(id: UUID(), startFrame: sourceCel.startFrame, frameCount: sourceCel.frameCount,
                       raster: .empty(size: canvasSize ?? source.size), vector: canvas)
-        let layer = Layer(id: UUID(), name: defaultLayerName(for: .vector), opacity: 1.0,
+        let layer = Layer(id: UUID(), name: defaultLayerName(for: .vector), opacity: 1,
                           isVisible: true, kind: .vector,
-                          parentFolderID: layers[sourceIndex].parentFolderID, cels: [cel])
-        let layerID = layer.id
-
+                          parentFolderID: layers[at.layer].parentFolderID, cels: [cel])
+        let ids = Set(prepared.map(\.id))
+        let poses = Self.poseMaps(prepared, through: [],
+                                 inheriting: containerPose(ofLayerAt: at.layer, atFrame: currentFrame))
+        // The same pure lift/measurement the ordinary Move uses, before any transfer is published.
+        guard let lift = canvas.lift(elementIDs: ids),
+              let float = preparedVectorFloat(target: (layer.id, cel.id, canvas, poses), lift: lift)
+        else { return false }
+        let cost = UndoBudget.addingCost(4096, VectorUndoCost.bytes(
+            fromLists: [elementsBefore, []], toLists: [sourceReplacement ?? elementsBefore, prepared]))
+        let insertAt = at.layer + 1
         layers.insert(layer, at: insertAt)
-        // The same seam Clear uses, for the same bound: what leaves is measured, and what arrives
-        // under Cut — the outside halves, under fresh ids — is bounded by the canvas's own hint.
-        source.restoreElements(remaining, changedInk: nil)
+        if let sourceReplacement {
+            source.restoreElements(sourceReplacement, changedInk: nil)
+            celContentChangedOutsideStroke(layerID: sourceLayerID, celID: sourceCelID)
+        }
         currentLayerIndex = insertAt
-        // The region left the layer the loop was drawn on, so the loop has nothing left to be about —
-        // Duplicate's rule, one verb over.
         self.selection = nil
-        celContentChangedOutsideStroke(layerID: sourceLayerID, celID: sourceCelID)
-
-        recordUndo(label: .moveToNewLayer,
-                   cost: UndoBudget.addingCost(VectorUndoCost.bytes(from: elementsBefore, to: remaining), 4096),
+        recordUndo(label: label, cost: cost,
                    undo: { [weak self] in
                        guard let self else { return }
-                       if let index = self.layers.firstIndex(where: { $0.id == layerID }) {
+                       if let index = self.layers.firstIndex(where: { $0.id == layer.id }) {
                            self.layers.remove(at: index)
                        }
-                       source.restoreElements(elementsBefore, changedInk: nil)
+                       if sourceReplacement != nil {
+                           source.restoreElements(elementsBefore, changedInk: nil)
+                           self.celContentChangedOutsideStroke(layerID: sourceLayerID, celID: sourceCelID)
+                       }
                        self.currentLayerIndex = self.layerIndex(ofID: sourceLayerID)
                            ?? min(self.currentLayerIndex, max(0, self.layers.count - 1))
-                       self.celContentChangedOutsideStroke(layerID: sourceLayerID, celID: sourceCelID)
+                       self.clampPlayheadToContent()
                    }, redo: { [weak self] in
                        guard let self else { return }
                        let at = min(insertAt, self.layers.count)
                        self.layers.insert(layer, at: at)
-                       source.restoreElements(remaining, changedInk: nil)
+                       if let sourceReplacement {
+                           source.restoreElements(sourceReplacement, changedInk: nil)
+                           self.celContentChangedOutsideStroke(layerID: sourceLayerID, celID: sourceCelID)
+                       }
                        self.currentLayerIndex = at
-                       self.celContentChangedOutsideStroke(layerID: sourceLayerID, celID: sourceCelID)
+                       self.clampPlayheadToContent()
                    })
-        return beginVectorMove(ofElementIDs: Set(moved.map(\.id)))
+        publishVectorFloat(float, in: canvas)
+        return true
     }
 
     /// **A lift that caught nothing says so under `Enclosed`, and stays silent otherwise** — the
@@ -1139,14 +1112,12 @@ extension CanvasManager {
         return beginVectorFloat(target: target, lift: lift)
     }
 
-    /// The tail both un-split lifts share: suppress, measure the box on the ink where it is *shown*,
-    /// and hand the float over. Extracted when the channel lift arrived rather than duplicated,
-    /// because every line of it is a decision with a reason recorded above and two copies would be
-    /// two places to keep them.
-    private func beginVectorFloat(target: (layerID: UUID, celID: UUID, vector: VectorCanvas,
+    /// The ordinary single-target lift as a value, measured on the shown ink before suppression or
+    /// publication. A selection transfer can therefore prepare its complete Move box before editing.
+    private func preparedVectorFloat(target: (layerID: UUID, celID: UUID, vector: VectorCanvas,
                                            poses: [UUID: PoseMap]),
                                   lift: (elements: [VectorElement], insideIDs: Set<UUID>,
-                                         mayDiverge: Bool)) -> Bool {
+                                         mayDiverge: Bool)) -> VectorFloat? {
         let vector = target.vector
         let elementsBeforeLift = vector.elements
         // **Filtered by `insideIDs`, which is an identity on the whole-cel arm and is not on the
@@ -1156,11 +1127,6 @@ extension CanvasManager {
         // entire drawing in the float and the box around all of it.
         let carried = lift.elements.filter { lift.insideIDs.contains($0.id) }
         let lifted = Dictionary(uniqueKeysWithValues: carried.map { ($0.id, $0) })
-        // No assignment to `vector.elements`: the lift splits nothing, so `lift.elements` *is* the
-        // list already there. Assigning the suppression is therefore the lift's one invalidation,
-        // exactly as it is on the lasso arm.
-        vector.suppressedElementIDs = lift.insideIDs
-
         // No re-take here, unlike the lasso arm: nothing was cut, so no id changed and
         // `target.poses` already describes exactly these elements — narrowed to the ones travelling,
         // for the reason the line above gives.
@@ -1168,11 +1134,7 @@ extension CanvasManager {
         // Measured on the ink where it is *shown* — `VectorFloatPart.poses`, and the lasso arm's reason.
         let ink = MoveBoxInk(of: Self.posed(carried, by: poses))
         guard let bounds = ink.bounds() else {
-            // A cel whose every element is degenerate — nothing measurable to put a box around.
-            // Clear rather than leave a suppression nothing will ever come back for.
-            vector.suppressedElementIDs = []
-            vector.bumpVersion()
-            return false
+            return nil
         }
         let pivot = CGPoint(x: bounds.midX, y: bounds.midY)
         let part = VectorFloatPart(layerID: target.layerID, celID: target.celID,
@@ -1181,12 +1143,28 @@ extension CanvasManager {
                                    elementsBeforeLift: elementsBeforeLift,
                                    sourceVersion: vector.contentVersion, mayDiverge: lift.mayDiverge,
                                    isShown: true)
-        vectorFloat = Self.float(parts: [part], ink: ink, bounds: bounds,
-                                 boxTransform: vector.layerTransform(pivot: pivot),
-                                 selectionBeforeLift: nil)
-        celContentChangedOutsideStroke(layerID: target.layerID, celID: target.celID)
-        refreshUndoRedoState()
+        return Self.float(parts: [part], ink: ink, bounds: bounds,
+                          boxTransform: vector.layerTransform(pivot: pivot), selectionBeforeLift: nil)
+    }
+
+    private func beginVectorFloat(target: (layerID: UUID, celID: UUID, vector: VectorCanvas,
+                                           poses: [UUID: PoseMap]),
+                                  lift: (elements: [VectorElement], insideIDs: Set<UUID>,
+                                         mayDiverge: Bool)) -> Bool {
+        guard let float = preparedVectorFloat(target: target, lift: lift) else { return false }
+        publishVectorFloat(float, in: target.vector)
         return true
+    }
+
+    /// Suppression is the lift's invalidation, so the optimistic content version is taken after it.
+    /// Preparation has already measured the complete piece and cannot leave a partial suppression.
+    private func publishVectorFloat(_ prepared: VectorFloat, in vector: VectorCanvas) {
+        var float = prepared
+        vector.suppressedElementIDs = float.parts[0].insideIDs
+        float.parts[0].sourceVersion = vector.contentVersion
+        vectorFloat = float
+        celContentChangedOutsideStroke(layerID: float.parts[0].layerID, celID: float.parts[0].celID)
+        refreshUndoRedoState()
     }
 
     /// Settles a float that was lifted from `layerID` (and, when given, `celID`) — for the structural

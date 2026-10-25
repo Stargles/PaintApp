@@ -504,4 +504,160 @@ final class PoseBakeLogicTests: XCTestCase {
         XCTAssertTrue(video.contains("47 more cels"), video)
         XCTAssertTrue(video.contains(CanvasManager.saveCostPhrase(addedCels: 47, millisecondsPerCel: raster) + " more"), video)
     }
+    /// A transfer consumes only its cel/group channels. The same parent acts on both layers, and
+    /// the new cel keeps membership but does not borrow the old cel's tracks or held baselines.
+    func testBothSelectionTransfersKeepTheirCurrentPoseAndSharedParentInPixelsAndHistory() throws {
+        for copying in [true, false] {
+            let (manager, layerID, celID) = fixture()
+            let group = UUID(), motion = UUID()
+            manager.animationGroups.append(AnimationGroup(id: group, displayName: "pose group",
+                tagColor: CodableColor(red: 0, green: 0, blue: 0, alpha: 1)))
+            manager.motionGroups.append(MotionGroup(id: motion, displayName: "motion group",
+                tagColor: CodableColor(red: 0, green: 0, blue: 0, alpha: 1)))
+            let ink = try XCTUnwrap(manager.layers[1].cels[0].vector)
+            var tagged = stroke([CGPoint(x: 6, y: 30), CGPoint(x: 14, y: 30), CGPoint(x: 22, y: 30)],
+                                brush: TestBrushes.hardRound)
+            tagged.animationGroupID = group
+            tagged.motionGroupID = motion
+            ink.restoreElements([.stroke(tagged)], changedInk: nil)
+            let localBox = CGRect(origin: .zero, size: size)
+            let celTrack = CanvasFixture.poseTrack([(0, PoseQuad(restingIn: localBox)),
+                (12, PoseQuad(box: localBox, mappedBy: .init(translationX: 40, y: 0)))], interpolation: .linear)
+            let groupTrack = CanvasFixture.poseTrack([(0, PoseQuad(box: localBox,
+                                                    mappedBy: .init(translationX: 4, y: 0)))])
+            manager.layers[1].cels[0].transformTracks = [TransformChannelID.cel.id: celTrack,
+                                                        TransformChannelID.group(group).id: groupTrack]
+            manager.layers[1].cels[0].pendingPoseBaselines = [TransformChannelID.cel.id: moved(-2)]
+            let tracks = manager.layers[1].cels[0].transformTracks
+            let baselines = manager.layers[1].cels[0].pendingPoseBaselines
+            let folder = LayerFolder(id: UUID(), name: "same parent")
+            manager.folders.append(folder)
+            manager.layers[1].parentFolderID = folder.id
+            manager.addTransformLayer(name: "parent move")
+            manager.layers[2].parentFolderID = folder.id
+            manager.layers[2].transform = LayerPose(pose: PoseQuad(box: localBox,
+                                                        mappedBy: .init(translationX: 7, y: 0)))
+            manager.currentLayerIndex = 1
+            manager.addViewPreset()
+            let preset = try XCTUnwrap(manager.viewPresets.first)
+            manager.currentFrame = 6
+            let original = try compositeBytes(manager, atFrame: 6)
+            XCTAssertTrue(stride(from: 3, to: original.count, by: 4).contains { original[$0] > 0 },
+                          "PREMISE: the posed source really draws ink")
+            manager.selection = Selection(path: CGPath(rect: CGRect(x: 34, y: 15, width: 26, height: 30),
+                                                         transform: nil),
+                                          bounds: CGRect(x: 34, y: 15, width: 26, height: 30))
+            manager.setSelectionMembership(.touching)
+            manager.history.removeAll()
+            let sourceVersion = ink.contentVersion
+            if copying { manager.beginDuplicate() } else { manager.moveSelectionToNewLayer() }
+            let transferred = try XCTUnwrap(manager.layers[2].cels.first?.vector)
+            let held = try XCTUnwrap(manager.vectorFloat)
+            XCTAssertEqual(held.pivot.x, 45, accuracy: 1e-6,
+                           "6...22 plus group4, cel20 and parent7 keeps the handles at the shown centre")
+            manager.commitVectorFloatIfNeeded()
+            manager.layers[1].isVisible = false
+            let actual = try compositeBytes(manager, atFrame: 6)
+            manager.layers[1].isVisible = true
+            XCTAssertTrue(actual.elementsEqual(original), "the transferred layer draws the source frame in place")
+            XCTAssertEqual(transferred.elements.map(\.id), [tagged.id])
+            XCTAssertEqual(transferred.strokes.first?.animationGroupID, group)
+            XCTAssertEqual(transferred.strokes.first?.motionGroupID, tagged.motionGroupID)
+            XCTAssertTrue(manager.layers[2].cels[0].transformTracks.isEmpty)
+            XCTAssertTrue(manager.layers[2].cels[0].pendingPoseBaselines.isEmpty)
+            XCTAssertEqual(manager.layers[2].parentFolderID, folder.id)
+            XCTAssertEqual(manager.layers[1].cels[0].transformTracks, tracks)
+            XCTAssertEqual(manager.layers[1].cels[0].pendingPoseBaselines, baselines)
+            XCTAssertEqual(ink.elements.count, copying ? 1 : 0)
+            if copying { XCTAssertEqual(ink.contentVersion, sourceVersion, "Duplicate never rewrites its source") }
+            XCTAssertEqual(manager.history.undoStack.count, 1)
+            XCTAssertEqual(manager.history.undoStack.last?.cost,
+                4096 + 2 * MemoryLayout<VectorElement>.stride + 3 * MemoryLayout<CGPoint>.stride,
+                "the translated spine is a new buffer; its retained rest/pressure owners are shared with the source")
+            manager.currentFrame = 20
+            manager.undo()
+            XCTAssertEqual(manager.currentFrame, 11, "structural undo clamps a playhead beyond this twelve-frame scene")
+            XCTAssertEqual(manager.layers.count, 3)
+            XCTAssertEqual(manager.layers[1].id, layerID)
+            XCTAssertEqual(manager.layers[1].cels[0].id, celID)
+            XCTAssertEqual(manager.activeViewPresetIndex, 0)
+            XCTAssertEqual(manager.viewPresets.first?.layerVisibility, preset.layerVisibility,
+                           "the transfer never edits the view preset it arrived under")
+            XCTAssertTrue(try compositeBytes(manager, atFrame: 6).elementsEqual(original))
+            manager.currentFrame = 20
+            manager.redo()
+            XCTAssertEqual(manager.currentFrame, 11, "redo uses the same structural end-frame safety")
+            XCTAssertEqual(manager.viewPresets.first?.layerVisibility, preset.layerVisibility)
+            manager.layers[1].isVisible = false
+            XCTAssertTrue(try compositeBytes(manager, atFrame: 6).elementsEqual(original))
+            XCTAssertTrue(try compositeBytes(manager, atFrame: 9).elementsEqual(original),
+                          "the fresh cel cannot reapply the source's later animation")
+            manager.layers[1].isVisible = true
+        }
+    }
+
+    /// The actual canonical walk, including a prior placement, must persist through the new layer's
+    /// JSON. A transient pose or a re-walk can look right in memory and lose its dab phase on reopen.
+    func testSelectionTransfersPersistTheirCanonicalPosedWalkThroughJSON() throws {
+        try onBothBackends { _ in
+            for copying in [true, false] {
+                for projective in [false, true] {
+                    for previouslyPlaced in [false, true] {
+                        for brush in [TestBrushes.pencil, BrushLibrary.splatter] {
+                        let (manager, _, _) = fixture()
+                        let ink = try XCTUnwrap(manager.layers[1].cels[0].vector)
+                        var painted = stroke([CGPoint(x: 9, y: 22), CGPoint(x: 15, y: 25),
+                                              CGPoint(x: 21, y: 29), CGPoint(x: 27, y: 30)], size: 9, brush: brush)
+                        painted.seed = 132
+                        let raw: VectorElement = .stroke(painted)
+                        let element = previouslyPlaced
+                            ? try XCTUnwrap(VectorCanvas.baking(raw, through: PoseMap(CGAffineTransform(translationX: 2, y: 0))))
+                            : raw
+                        let fill = VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 38, width: 10, height: 8),
+                                                                  transform: nil),
+                                                     color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1))
+                        let text = VectorTextElement(recipe: TextRecipe(string: "I", typography: Typography(pointSize: 8)),
+                            frame: TextFrame(origin: CGPoint(x: 12, y: 10), size: CGSize(width: 12, height: 12),
+                                             autoSize: false))
+                        ink.restoreElements([element], changedInk: nil)
+                        ink.transform = CGAffineTransform(translationX: 1, y: 0)
+                        let box = CGRect(origin: .zero, size: size)
+                        let pose = projective
+                            ? PoseQuad(box: box, corners: Quad(CGPoint(x: 8, y: 2), CGPoint(x: 58, y: 0),
+                                                              CGPoint(x: 62, y: 61), CGPoint(x: 2, y: 62)))
+                            : PoseQuad(box: box, mappedBy: CGAffineTransform(a: 1.25, b: 0.125, c: 0.25,
+                                                                           d: 0.875, tx: 3, ty: 2))
+                        manager.layers[1].cels[0].transformTracks = [TransformChannelID.cel.id:
+                            CanvasFixture.poseTrack([(0, pose)])]
+                        manager.currentFrame = 4
+                        let brushOnly = try compositeBytes(manager, atFrame: 4)
+                        XCTAssertTrue(stride(from: 3, to: brushOnly.count, by: 4).contains { brushOnly[$0] > 0 },
+                                      "PREMISE: the canonical brush itself draws before fill or text can hide an empty fixture")
+                        ink.addFill(fill)
+                        ink.upsertText(text)
+                        let original = try compositeBytes(manager, atFrame: 4)
+                        let loop = CGPath(rect: CGRect(origin: .zero, size: size), transform: nil)
+                        manager.selection = Selection(path: loop, bounds: loop.boundingBoxOfPath)
+                        manager.setSelectionMembership(.touching)
+                        if copying { manager.beginDuplicate() } else { manager.moveSelectionToNewLayer() }
+                        let transferred = try XCTUnwrap(manager.layers[2].cels.first?.vector)
+                        XCTAssertEqual(transferred.transform, ink.transform, "the existing canvas placement is carried once")
+                        manager.commitVectorFloatIfNeeded()
+                        manager.layers[1].isVisible = false
+                        XCTAssertTrue(try compositeBytes(manager, atFrame: 4).elementsEqual(original),
+                                      "the actual transferred stroke, fill and text keep the current picture")
+                        let payload = VectorCanvasData(from: transferred, imageFileNames: [:])
+                        let decoded = try JSONDecoder().decode(VectorCanvasData.self, from: JSONEncoder().encode(payload))
+                        let reopened = decoded.canvasSpaceElements(resolvingImages: { _ in nil },
+                                                                   resolvingVideos: { _ in nil })
+                        manager.layers[2].cels[0].vector = VectorCanvas(size: size, elements: reopened)
+                        XCTAssertTrue(try compositeBytes(manager, atFrame: 4).elementsEqual(original),
+                                      "JSON keeps the rest walk, local width and dab phase after the transient is gone")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 }

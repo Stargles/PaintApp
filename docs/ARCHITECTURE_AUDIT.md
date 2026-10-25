@@ -17,6 +17,13 @@ failure paths; do not add a parallel cache/job system. Commit before deliberate 
 source afterward, drive affected UI and inspect pictures. Protect real artwork and keep format repairs
 one-shot. No evidence below establishes the cause of the Test1/backboardd respring.
 
+The per-cluster prepared/unqualified notes below are historical at their named initial revisions.
+Current component/native/fault status is in HANDOFF.md and its immutable evidence references; do not
+reopen a qualified finding solely because an old entry says pending. Coverage remains bounded:
+FontLibrary384/TextSettings25 whole lines additionally reviewed at8dcb without a new concrete defect;
+remaining typography/archive/panel and graph/tool file gaps stay open. External root font receipt
+78ff10a8 and coverage-gap-reconciliation-5b8e5738 distinguish review from inventory.
+
 ## Findings queue
 
 ### Migration identity

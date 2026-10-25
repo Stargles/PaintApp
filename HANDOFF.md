@@ -12,8 +12,10 @@ is authorized by an old readiness answer: obtain fresh saved-scene readiness whe
 
 Main/origin remain afd2030c. Latest accepted logic source is bddb83db; integration has advanced cold UI fixtures and remains
 unmerged/uninstalled. Root owns integration, independent evidence and ONE Mac native lease. Native
-is idle after exact Blend diagnostic94fed (sample199vs200) and normal-built UI21 atc4df:18pass3fail. Source compiled/executed normally; the UI
-gate remains red, with no install/full/performance qualification.
+is idle after normal effects121 and13 causal controls at8dcb, both root accepted. The last compiled
+product is a mutant: rebuild normal before UI/install. New vector transfer and solid-fill Blend
+fixture are harvested below; their native gates remain pending. Cold UI21 atc4df is18pass3fail;
+no install/final fast/full/performance qualification is claimed.
 All historical attempts remain at named immutable pins; do not retag them.
 
 **Actual root-accepted results:**
@@ -30,6 +32,10 @@ All historical attempts remain at named immutable pins; do not retag them.
   root causally accepted15 mapped issues, excluded4 later consequences. Unicode insertion/range,
   selected replacement, actual live/commit removal, per-target field and reopened pixels all expose
   their intended defects. Receipt038b6bd7 under native/text-selection-eraser-seed5-bddb83db-run01/.
+- Effects121/121 at8dcb, zero failures/skips/expected failures, exact121 selectors/729 entries;
+  only existing cost opt-in omitted. Rootd15c6f15 independently accepted. Effects13 controls qualify
+  all31 product+4 premise identities:53 mapped actual issues,11 later consequences excluded. Root
+  ab2ff6db under native/effects-controls13-8dcb01a2-run01/;11product/2premise cases,12 recipes.
 - Fill126 and whole owner FillMendUITests4/4 at83380. Root LOOKed six unique whole1080×810 pictures
   (nine named files): attached/detached bodies and free caps mend; outside/uncertain joins protected;
   extension/seam controls and batch undo/redo assertions reached. All29 controls root-qualified:
@@ -68,8 +74,10 @@ lossless failure PNG; exact floor-row sampling matches the callback. A local bru
 is established. Root review7bc71fff and exact trace00e10812 are under native/blend-core-diagnostic1-
 94fedfee-run01/ and blend-core-trace-94fedfee/. Native is idle. Public Add Rectangle solid fills are
 now scoped in ONLY the new Blend method, retaining exact colours/probes/all outcomes and diagnostic;
-prove fixed local input uniformity and capture whole inputs before fade. Author startup_repair owns
-that fixture correction, proposal75c4b25d/scope85b2b938, no native grant yet.
+prove fixed local input uniformity and capture whole inputs before fade. Author startup_repair
+froze6c5d1003 after scope85b2b938/proposal75c4b25d. Rootef094758 source-reviewed and harvested ONLY
+that new method: public solid rectangles, exact9-neighbourhood premises and red3sites, whole input
+capture before fade. Other9 bodies/all blend+merge outcomes exact; native delivery/uniformity unrun.
 
 Text author4b060d05 is harvested after independentbc23d186/root source review. ONLY two TextSession
 methods change: existing colour ROI intersects actual visible paper (61 outside columns*120=7320,
@@ -116,12 +124,12 @@ vector_mend_proof is implementing the recorded scope in a separate worktree, wit
 four production files retain the reviewed shared cap/periodic-angle/apron/actual-owner admission
 changes, no shader/PBX/schema/state added. All118 old bodies exact;4 new methods yield122 whole,
 121 ordinary excluding ONLY the existing cost opt-in.13 proposed controls/12 recipes cover31 product
-and4 explicit premise identities;25 setup/arrangement occurrences are excluded. All native/compiler
-results remain UNRUN. Source-capped kernels still use raw sigma. First-growth5-picture fixture now
+and4 explicit premise identities;25 setup/arrangement occurrences are excluded. Actual ordinary121 and13 causal controls now qualify at8dcb;
+final fast/Release/cold appearance remain pending. Source-capped kernels still use raw sigma. First-growth5-picture fixture now
 discriminates each missing owner; reuse3 remains one-readback-only. Future safe controls exercise
 real allocations/outputs, not fabricated metrics. Frozen packet neighborhood-effect-53637328/
-committed-55383dd6; root/peer reviewed every source/output hash. Next native: ordinary121 exact
-methods (no opt-in), then separate13-control grant only after actual positive root acceptance.
+committed-55383dd6; root/peer reviewed every source/output hash. Root qualified actual taps/weights, CPU/GPU periodic pixels, whole/strip146vs0, true refusal/reuse
+and real allocations; invalid samplers were not run. No whole-RSS/Test1 cause is inferred.
 
 **Vector transfer scope recorded before code:** independent source/design review43957eca confirms
 TWO clusters: Duplicate/To New Layer pull selected posed ink to rest, then create a no-track cel
@@ -132,11 +140,23 @@ reidentification policy; strict transfers preserve IDs and prepare ALL elements 
 refusing unsupported/noninvertible maps. Consume only source cel/group pose, keep inherited container
 once, preserve genuine rest-walk appearance and existing group/track ownership rules. No point-only
 replacement, renderer/material/cache/schema or new animation policy. Batch actual prepared before/
-after lists through VectorUndoCost plus existing structural allowance; explicit payload cost must
-survive nesting. Existing separate-verb closures/undo/invalidation remain atomic. Add existing-fixture
+after lists through VectorUndoCost plus existing structural allowance. These commands are standalone:
+unsupported enclosing brackets refuse before earlier-tool settlement so a shallow outer snapshot cannot
+swallow the payload price. One shared narrow reversal retains atomic undo/invalidation. Add existing-fixture
 translation/parent controls, real pixels/undo/redo, fresh-split/shared-alias cost+budget eviction and
 cold artist workflows. Reports under s54-architecture-audit/vector-command-audit-53637328/ and
 vector-command-independent-design-53637328/ are source/math evidence only; native unrun.
+
+**Vector transferad1548d6 harvested after independent0241a072/roote36813c2 review:** six paths,
+three production owners. Existing Bake fallback/reidentify unchanged; shared persistent pose prep
+strictly validates every transfer/composed inverse, then reuses pure existing Move-box measurement
+before publication. One narrow shared layer/source reversal prices actual prepared lists and shares
+existing end-frame clamp. Unsupported enclosing structure/interpolation/gesture brackets refuse
+before earlier-tool settlement; later refusal promises no transfer mutation after normal settlement.
+No new retained state/renderer/schema or whole-scene geometry scan. All22 old methods exact;5new
+methods and9 affected whole classes270 require normal qualification. Candidate13 controls/30 IDs
+are offline only. Own scopesb458/a793/78b5 precede code; rootb537 scope recorded both causes.
+Cold single PoseBake method1→2 is authorized from proposalaf3fd23e, not yet harvested/executed.
 
 **Next gates, in order:**
 
@@ -146,13 +166,13 @@ vector-command-independent-design-53637328/ are source/math evidence only; nativ
 2. Finish scoped three effects corrections/review/logic controls and ordinary cold effects workflow.
    Effects55383dd6 has13 finite controls (11product/2premise) independently source-reviewed;
    first-growth5-picture fixture and removed redundant radius-identity loop only, production exactdf.
-   Ordinary121 must pass before a separate controls grant; all effects native/compiler remain UNRUN.
-   Then implement/qualify the TWO recorded vector transfer/undo clusters at shared existing owners.
+   Actual121/13 now qualify at8dcb; cold/final gates remain.
+   Qualify harvested vector transfer/undo source at shared existing owners: normal whole270 then13 meaningful controls.
    Drive stored-vector eraser Splatter/Undo/Redo; no flaky expected random field/new test hooks.
 3. Repin historical UI13/mask6-positive+11-fault packets to final source; LOOK positive pictures before
    faults. Preserve two-phase build→all-source-restore→test-without-building contract.
 4. Final fast Debug AND Release using CLAUDE verbatim command, actual/static method reconciliation,
-   lints/PBX/graph, all touched UI classes and full phase. Current census5439 fast/6031 full
+   lints/PBX/graph, all touched UI classes and full phase. Current census5444 fast/6036 full
    runnable,729 source entries/PBX1329; new cold-text method is included.
 5. Fill16 paired Release ABBA, sampler/source/fence/cancel/budget counts and genuine cold256-package
    previous-writer library UI. Preserve original export and old071 benchmark product.

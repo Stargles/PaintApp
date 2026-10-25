@@ -186,11 +186,33 @@ extension CanvasManager {
                       through mappings: [(TransformChannelID, PoseMap)],
                       inheriting inherited: PoseMap? = nil) -> [VectorElement] {
         elements.map { element in
-            guard let composed = composedPose(of: element, through: mappings, inheriting: inherited) else {
-                return element.reidentified()
-            }
-            return (VectorCanvas.baking(element, through: composed) ?? element).reidentified()
+            let map = composedPose(of: element, through: mappings, inheriting: inherited)
+            return (persistedPose(of: element, through: map) ?? element).reidentified()
         }
+    }
+
+    /// The persistent geometry both a frame bake and a selection transfer prepare. Identity keeps
+    /// the original value; a failed nonidentity bake remains nil so each caller owns its policy.
+    private static func persistedPose(of element: VectorElement, through map: PoseMap?) -> VectorElement? {
+        guard let map else { return element }
+        return VectorCanvas.baking(element, through: map)
+    }
+
+    /// A selection arriving in a fresh cel consumes its source cel/group pose once, without carrying
+    /// those tracks. Unlike Bake's display fallback, a transfer must prepare every element or refuse
+    /// before publishing any of them. IDs and document-level group memberships stay on the elements.
+    static func bakedForTransfer(_ elements: [VectorElement],
+                                 through mappings: [(TransformChannelID, PoseMap)]) -> [VectorElement]? {
+        var prepared: [VectorElement] = []
+        prepared.reserveCapacity(elements.count)
+        for element in elements {
+            let map = composedPose(of: element, through: mappings, inheriting: nil)
+            guard map == nil || map?.inverse != nil,
+                  VectorCanvas.canBeMapped(element),
+                  let baked = persistedPose(of: element, through: map) else { return nil }
+            prepared.append(baked)
+        }
+        return prepared
     }
 
     /// **The affine each element is *shown* through, kept rather than applied** — `posed(_:through:)`

@@ -26,9 +26,12 @@ layer. Existing translation fixture predicts a20pt jump; this is source/math, no
 Prepare selected elements through one shared existing TransformChannel/VectorCanvas.baking seam,
 strict/atomic for transfers, retaining existing Bake fallback/reidentify policy and inherited parent
 once. Preserve current-frame/rest-walk appearance and valid group ownership, no new animation policy.
-Batch actual lists through VectorUndoCost, with explicit nest-safe structure cost. Source-independent
+Batch actual lists through VectorUndoCost in one standalone reversal; enclosing brackets refuse
+before earlier-tool settlement so a shallow snapshot cannot swallow the price. Source-independent
 reports are frozen under s54-architecture-audit/vector-command-{audit,independent-design}-53637328/.
-Implementation/logic/mutation/cold qualification remain pending; no RSS/respring attribution.
+Sourcead1548d6 is harvested after independent0241a072/root review; normal270,13controls and cold
+qualification remain pending. One shared strict bake/preflight and narrow transfer reversal, no new
+state; existing frame clamp shared after metadata parity review. No RSS/respring attribution.
 
 ## Neighborhood effect limits, apron and warm admission — 2026-10-25
 
@@ -44,7 +47,8 @@ Scope: correct existing cap and periodic planning helpers; price actual missing 
 existing engine lock/headroom valve. Preserve raw sigma, ordinary appearance, budgets/LRU/refusal and
 warm reuse; no new retained state/framework/schema. Independent review before implementation; actual
 consumer regressions and meaningful controls remain required. Receipt8b106831 under
-s54-architecture-audit/neighborhood-effect-audit-ec843eee/.
+s54-architecture-audit/neighborhood-effect-audit-ec843eee/. Source553 is integrated; actual ordinary121
+and13 controls qualify at8dcb, root ab2ff6db. Final fast/Release/cold and whole-RSS remain pending.
 
 ## Text style updates move a Unicode caret and discard selection — 2026-10-25
 
