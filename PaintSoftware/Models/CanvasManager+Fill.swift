@@ -1253,7 +1253,9 @@ extension CanvasManager {
                 }
             }
         }
-        guard completed, let cg = composited.cgImage else { return nil }
+        guard completed, composited.scale == 1, composited.imageOrientation == .up,
+              composited.size == CGSize(width: width, height: height), let cg = composited.cgImage,
+              cg.width == width, cg.height == height else { return nil }
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
         let ok: Bool = bytes.withUnsafeMutableBytes { raw in
             guard let ctx = CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,

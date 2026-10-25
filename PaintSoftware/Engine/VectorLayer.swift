@@ -6208,8 +6208,7 @@ final class VectorCanvas {
                     referenceIDs: Set(retained.lazy.filter(\.isReference).map(\.id)))
             } else { snapshot = self }
             let ctm = cg.ctm
-            let nativeContext = cg.width == width && cg.height == height
-                && ctm.a == 1 && ctm.b == 0 && ctm.c == 0 && ctm.d == -1
+            let nativeContext = ctm.a == 1 && ctm.b == 0 && ctm.c == 0 && ctm.d == -1
                 && ctm.tx == 0 && ctm.ty == CGFloat(height)
                 && cg.boundingBoxOfClipPath == CGRect(x: 0, y: 0, width: width, height: height)
             var native = nativeContext && size.width > 0 && size.height > 0
