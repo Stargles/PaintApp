@@ -58,6 +58,14 @@ caps pass. Remaining FillMend assertions:1362 local unknown protection must rema
 uncovered body after Edge Overlap,850 remote attached body. Record before diagnosing those two shared
 geometry/Reach cases; keep all original expectations. Whole4096 and ordinary UI remain on hold until
 the native path is qualified. Evidence: `native/v5-normal71-c2678676-run01/`.
+Source confirms nonstroke objects never populate Frozen.known; a finite unknown fill became full-window
+unknown. Reuse existing derivedFootprint and the builder's one transient meter; encoded bytes are an
+input/work proxy, not a native decode peak bound. Keep unbounded autosize text and invalid geometry
+unknown, draining temporary decode owners before credit. The Reach fixture has actual neighboring/
+overlapping detached-cap and attached-stem ink; record before one bounded existing-selector test-only
+diagnostic of missing coordinates, actual ink topology and CPUeligible interpretation. No production,
+shader, fixture, assertion or limit changes in that diagnostic; do not call CPUeligible GPU readback.
+Do not move the fixture until actual evidence distinguishes join protection from Reach arithmetic.
 Whole4096 resampling and same-budget window refinement remain required OPEN engineering work.
 The reviewed ImageWarp scale-stage proposal shares one work account and prepares geometry before
 filtering/core allocation. Its isolated source grant is paused after actual71 failures, before any

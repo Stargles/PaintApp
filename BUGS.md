@@ -64,7 +64,11 @@ to the actual completed UIImage/CGImage; preserve the per-stage geometry/image c
 print instrumentation and compare restored729source before harvesting the narrow fix. Actualc267
 rerun69/71 resolves15 failures, including every whole cap and all28FillObject. Two FillMend methods
 still fail at1362(unknown locality),844/850(Reach after Overlap). Preserve these assertions and trace
-the shared contact/width proof before changing source; final71/UI/whole4096 gates remain open.
+the shared contact/width proof before changing source; final71/UI/whole4096 gates remain open. Source
+proves nonstroke objects have no entry in stroke-only known bounds, so a finite fill is wrongly global
+UNKNOWN. Reuse the existing derived-footprint seam with admitted input/work and honest opaque-decode
+cost limits. Reach's fixture may physically join its nominally separate strokes; one test-only native
+coordinate/CPUeligible diagnostic is recorded before edits, with all original assertions retained.
 Evidence: s54-final-qualification/native/geodesic-logic20-32185179-run01/root-independent-acceptance.json.
 
 ## FillMend ON cold setup taps a moving opacity control — 2026-10-24
