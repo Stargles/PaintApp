@@ -1792,6 +1792,118 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
                        "The picker should reflect the layer's blendMode, not reset when the panel reopens")
     }
 
+    /// Two backgrounds bracket the source's luminosity, so the old byte fade loses a winner
+    /// throughout the actual rounded 50% readout interval, without assuming an exact slider value.
+    func testFadingAndMergingANearTieKeepsBothWholeColorWinnersAndThePaperOpen() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app))
+        XCTAssertGreaterThan(app.windows.firstMatch.frame.width, app.windows.firstMatch.frame.height,
+                             "PREMISE: the cold artist control is actually landscape")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        openBrushLibrary(app)
+        tapWhenHittable(app.buttons["brushPanel.brush.Opaque Round"], "Select the opaque core explicitly")
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5))
+
+        let paper = visiblePaperRect(app, in: canvas)
+        XCTAssertGreaterThan(paper.height, 0, "PREMISE: the measured paper is exposed above the dock")
+        let stripe = onHost(paper, 0.25, 0.2)
+        let minus = onHost(paper, 0.4, 0.5)
+        let plus = onHost(paper, 0.6, 0.5)
+        let source = onHost(paper, 0.5, 0.5)
+        let outside = onHost(paper, 0.8, 0.2)
+        for point in [stripe, minus, plus, source, outside] {
+            assertAboveTheDock(app, canvas, dy: Double(point.dy), "A measured colour core or untouched paper")
+        }
+        let drawings: [[(hex: String, from: CGVector, to: CGVector, probe: CGVector, rgba: [UInt8])]] = [
+            [("00FF00", onHost(paper, 0.2, 0.2), onHost(paper, 0.3, 0.2), stripe, [0, 255, 0, 255])],
+            [("004E7F", onHost(paper, 0.4, 0.35), onHost(paper, 0.4, 0.65), minus, [0, 78, 127, 255]),
+             ("00499A", onHost(paper, 0.6, 0.35), onHost(paper, 0.6, 0.65), plus, [0, 73, 154, 255])],
+            [("C80000", onHost(paper, 0.32, 0.5), onHost(paper, 0.68, 0.5), source, [200, 0, 0, 255])]
+        ]
+        for (layer, strokes) in drawings.enumerated() {
+            if layer > 0 {
+                openLayerPanel(app)
+                addVectorLayerFromOpenPanel(app)
+                XCTAssertTrue(app.staticTexts["layerPanel.row.\(layer)"].waitForExistence(timeout: 5))
+                closeLayerRail(app)
+            }
+            for stroke in strokes {
+                for endpoint in [stroke.from, stroke.to] {
+                    assertAboveTheDock(app, canvas, dy: Double(endpoint.dy), "Both ink endpoints are exposed")
+                }
+                setBrushColor(app, hex: stroke.hex)
+                drawLine(on: canvas, from: stroke.from, to: stroke.to)
+                let core = try XCTUnwrap(waitForPixel(canvas, at: stroke.probe, matches: { pixel in
+                    [pixel.r, pixel.g, pixel.b, pixel.a] == stroke.rgba
+                }), "PREMISE: actual opaque \(stroke.hex) core; stop if coverage or colour conversion differs")
+                XCTAssertEqual([core.r, core.g, core.b, core.a], stroke.rgba,
+                               "PREMISE: exact artist-entered input, not a blend result")
+            }
+        }
+        setBlendMode(app, layerIndex: 2, to: "lighterColor")
+        openLayerPanel(app)
+        let opacity = app.sliders["layerPanel.row.2.opacity"]
+        XCTAssertTrue(opacity.waitForExistence(timeout: 5))
+        opacity.adjust(toNormalizedSliderPosition: 0.5)
+        let readout = app.staticTexts["layerPanel.row.2.opacityReadout"]
+        XCTAssertEqual(readout.value as? String, "50%",
+                       "PREMISE: read the actual slider immediately; 50% means [0.495, 0.505), not exact 0.5")
+        closeLayerRail(app)
+        waitForSandwichState(app, "rest")
+
+        for phase in 0...3 {
+            if phase == 1 {
+                openLayerPanel(app)
+                let top = app.staticTexts["layerPanel.row.2"]
+                tapWhenHittable(top, "Select the same faded source")
+                tapWhenHittable(top, "Open its actual options")
+                tapWhenHittable(app.buttons["layerOptions.mergeDown"], "Merge the upper pair only")
+                XCTAssertTrue(top.waitForNonExistence(timeout: 5), "The consumed source layer must be removed")
+                XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.isVector, false,
+                               "A faded blend merges into the actual raster survivor")
+                XCTAssertTrue(app.staticTexts["layerPanel.row.0"].exists,
+                              "The unrelated lower picture must survive the pair merge")
+                closeLayerRail(app)
+                XCTAssertEqual(sandwichState(app), "off", "The merged raster no longer needs a blend sandwich")
+            } else if phase >= 2 {
+                openLayerPanel(app)
+                tapWhenHittable(app.buttons["layerPanel.row.0.visibility"], "Hide or reveal only the external stripe")
+                closeLayerRail(app)
+            }
+            let pixels = try XCTUnwrap(ScreenshotPixels(XCUIScreen.main.screenshot().image))
+            let host = canvas.frame
+            for (name, point) in [("minus", minus), ("plus", plus), ("stripe", stripe), ("outside", outside)] {
+                let pixel = try XCTUnwrap(pixels.pixel(at: CGPoint(x: host.minX + host.width * point.dx,
+                                                                   y: host.minY + host.height * point.dy)))
+                let actual = [pixel.r, pixel.g, pixel.b, pixel.a]
+                switch name {
+                case "minus":
+                    XCTAssertTrue([UInt8(99), 100, 101].contains(pixel.r),
+                                  "Phase \(phase): source wins below its luminosity; red follows the actual 50% interval")
+                    XCTAssertEqual(pixel.g, 39, "Phase \(phase): exact lower-patch green after source-over")
+                    XCTAssertTrue([UInt8(63), 64].contains(pixel.b),
+                                  "Phase \(phase): lower-patch blue follows only the declared opacity interval")
+                    XCTAssertEqual(pixel.a, 255, "Phase \(phase): the displayed opaque pair remains opaque")
+                case "plus":
+                    XCTAssertEqual(actual, [0, 73, 154, 255],
+                                   "Phase \(phase): the slightly brighter background wins as one whole colour")
+                case "stripe":
+                    XCTAssertEqual(actual, phase == 2 ? [255, 255, 255, 255] : [0, 255, 0, 255],
+                                   "Phase \(phase): the merged pair's untouched region reveals only the independent lower layer")
+                default:
+                    XCTAssertEqual(actual, [255, 255, 255, 255],
+                                   "Phase \(phase): neither drawing nor merge changes untouched white paper")
+                }
+            }
+            attachScreenshot(XCUIScreen.main, ["blend-near-tie-before-merge-whole",
+                "blend-near-tie-after-merge-whole", "blend-merge-external-hidden-whole",
+                "blend-merge-external-revealed-whole"][phase])
+        }
+    }
+
     /// **TODO (66)** — the owner: *"The Effect / blend mode option menu should be organized. Use
     /// headers to organize them into groups."* The groups already existed as bare `Section { }`s;
     /// this pins that `Section("Title") { }` inside a SwiftUI `Menu` actually shows a header on
