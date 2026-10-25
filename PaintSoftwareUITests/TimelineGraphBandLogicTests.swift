@@ -1346,6 +1346,170 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         manager.cancelStructureGesture()
     }
 
+    // MARK: - The coordinator's multi-tick drag ownership
+
+    func testGraphDragFollowsItsCapturedFocusAcrossTicksClampsAndCancellation() throws {
+        let manager = gradedManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 0), (6, 1), (12, 1.5), (20, 2)]))
+        let drawn = channels(manager)
+        let selected: Set<TimelineGraphBand.KeyRef> = [node(6), node(12)]
+        // A focus carried by another selected node must keep its own identity too.
+        for grabbed in [node(6), node(12)] {
+            var progress = TimelineGraphBand.DragProgress(selection: selected, focus: node(6))
+            for (travel, landed) in [(base, 7), (base * 2, 8), (base * 100, 13)] {
+                let translation = CGSize(width: travel, height: 0)
+                XCTAssertTrue(progress.advance(translation: translation))
+                let current = progress.moveNodes(selected, grabbed: grabbed, in: drawn,
+                                                 translation: translation, pixelsPerFrame: base,
+                                                 bandHeight: TimelineGraphBand.height)
+                XCTAssertEqual(progress.focus, node(landed), "Focus follows the original key on every tick")
+                XCTAssertNotNil(current[brightnessID]?.key(atFrame: landed),
+                                "The handles must still name a real key after the authoritative clamp")
+            }
+            progress.end(cancelled: true)
+            XCTAssertEqual(progress.focus, node(6), "Cancel restores the captured focus with its curves")
+            XCTAssertEqual(progress.selection, selected, "…and restores this drag's original selection")
+        }
+    }
+
+    func testGraphDragReplacesItsReadoutWhenTheValueReturnsToItsStartingValue() throws {
+        let manager = gradedManager()
+        manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
+                                        to: linear([(0, 0), (6, 1), (12, 2)]))
+        let drawn = channels(manager)
+        var progress = TimelineGraphBand.DragProgress(selection: [node(6)], focus: node(6))
+        let away = CGSize(width: base * 2, height: -20)
+        XCTAssertTrue(progress.advance(translation: away))
+        _ = progress.moveNodes([node(6)], grabbed: node(6), in: drawn, translation: away,
+                               pixelsPerFrame: base, bandHeight: TimelineGraphBand.height)
+        XCTAssertEqual(progress.readout, TimelineGraphBand.Readout(node: node(8), text: "1.50"))
+        let returned = CGSize(width: base * 2, height: 0)
+        XCTAssertTrue(progress.advance(translation: returned))
+        let current = progress.moveNodes([node(6)], grabbed: node(6), in: drawn, translation: returned,
+                                         pixelsPerFrame: base, bandHeight: TimelineGraphBand.height)
+        XCTAssertEqual(current[brightnessID]?.key(atFrame: 8)?.value, 1)
+        XCTAssertNil(progress.readout, "The current nil replaces the preceding tick's value plate")
+    }
+
+    func testGraphDragReturningToOriginRestoresHeldAndWrittenCurvesWithoutAnUndoEntry() throws {
+        for held in [true, false] {
+            let manager = gradedManager()
+            let original = linear([(0, 0), (6, 1), (12, 2)])
+            manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID, to: original)
+            let subject = target(manager), drawn = channels(manager)
+            let history = manager.history.undoStack.count
+            var progress = TimelineGraphBand.DragProgress(selection: [node(6)], focus: node(6))
+            XCTAssertFalse(progress.advance(translation: .zero), "Touch-down is still a tap candidate")
+            if !held { XCTAssertTrue(manager.beginStructureGesture()) }
+            for translation in [CGSize(width: 0, height: -20), .zero] {
+                let applies = progress.advance(translation: translation)
+                XCTAssertTrue(applies, "Once movement begins, an identity tick must apply too")
+                if applies {
+                    let current = progress.moveNodes([node(6)], grabbed: node(6), in: drawn,
+                                                     translation: translation, pixelsPerFrame: base,
+                                                     bandHeight: TimelineGraphBand.height)
+                    if held {
+                        manager.holdEffectCurves(subject, current)
+                    } else {
+                        for (id, curve) in current {
+                            _ = manager.writeGraphNodeCurve(target: subject, parameterID: id, to: curve)
+                        }
+                    }
+                }
+            }
+            progress.end(cancelled: false)
+            XCTAssertFalse(progress.hasChanges, "The current result is baseline, despite an earlier changed tick")
+            if held {
+                _ = manager.commitHeldGrade()
+            } else if progress.hasChanges {
+                manager.commitStructureGesture(label: .effectKeys)
+            } else {
+                manager.cancelStructureGesture()
+            }
+            XCTAssertEqual(manager.keyframeState(of: subject).tracks[brightnessID], original,
+                           "Baseline replacements must overwrite the preceding held or written curve")
+            XCTAssertEqual(manager.history.undoStack.count, history, "A returned drag leaves no empty undo step")
+            XCTAssertFalse(TimelineGraphBand.isTap(didMove: progress.didMove, translation: .zero),
+                           "Returning does not turn a completed drag into a tap")
+        }
+    }
+
+    func testGraphHandleReturningToOriginRestoresItsCapturedTangentMode() throws {
+        let manager = rampedManager()
+        let drawn = [brightnessChannel(manager)]
+        let original = drawn[0].curve
+        let handle = TimelineGraphBand.HandleRef(key: node(10), side: .outgoing)
+        var progress = TimelineGraphBand.DragProgress(selection: [], focus: node(10))
+        let away = CGSize(width: 12, height: -18)
+        XCTAssertTrue(progress.advance(translation: away))
+        let shaped = progress.shapeHandle(handle, in: drawn, translation: away,
+                                          pixelsPerFrame: base, bandHeight: TimelineGraphBand.height)
+        XCTAssertEqual(shaped[brightnessID]?.key(atFrame: 10)?.tangentMode, .free)
+        XCTAssertTrue(progress.advance(translation: .zero))
+        let returned = progress.shapeHandle(handle, in: drawn, translation: .zero,
+                                            pixelsPerFrame: base, bandHeight: TimelineGraphBand.height)
+        XCTAssertEqual(returned[brightnessID], original, "The identity restores geometry and the original derived mode")
+        XCTAssertFalse(progress.hasChanges)
+    }
+
+    func testGraphDragRestoresOnlyItsOwnConsumedMarksInsideAnEnclosingEdit() throws {
+        for cancelled in [false, true] {
+            let manager = gradedManager()
+            let subject = target(manager)
+            let original = linear([(0, 0), (6, 1), (12, 2)])
+            let contrast = linear([(0, 1), (12, 2)])
+            manager.setEffectParameterTrack(subject, parameterID: brightnessID, to: original)
+            manager.setEffectParameterTrack(subject, parameterID: contrastID, to: contrast)
+            manager.addKeys(subject, atFrame: 8)
+            manager.addKeys(subject, atFrame: 18)
+            let drawn = channels(manager)
+            let history = manager.history.undoStack.count
+            XCTAssertTrue(manager.beginStructureGesture(), "The other edit owns the outer bracket")
+            XCTAssertTrue(manager.beginStructureGesture(), "The graph drag owns only its nested bracket")
+            var progress = TimelineGraphBand.DragProgress(selection: [node(6)], focus: node(6))
+            let away = CGSize(width: base * 2, height: 0)
+            XCTAssertTrue(progress.advance(translation: away))
+            let moved = progress.moveNodes([node(6)], grabbed: node(6), in: drawn, translation: away,
+                                           pixelsPerFrame: base, bandHeight: TimelineGraphBand.height)
+            let before = manager.keyframeState(of: subject).marks
+            for (id, curve) in moved { _ = manager.writeGraphNodeCurve(target: subject, parameterID: id, to: curve) }
+            progress.recordWrite(from: before, to: manager.keyframeState(of: subject).marks)
+            XCTAssertEqual(progress.consumedMarks, [8], "Only this drag's actual write consumed mark8")
+            manager.restoreUnkeyedMarks(progress.consumedMarks, to: subject)
+            XCTAssertEqual(manager.keyframeState(of: subject).marks, [18],
+                           "A key still landed on its consumed mark must not resurrect that mark")
+
+            manager.removeKeys(subject, atFrame: 18)
+            manager.addKeys(subject, atFrame: 22)
+            let otherCurve = linear([(0, 0.5), (12, 1.5)])
+            manager.setEffectParameterTrack(subject, parameterID: contrastID, to: otherCurve)
+            let restored: [String: AnimationCurve]
+            if cancelled {
+                restored = [brightnessID: original]
+            } else {
+                XCTAssertTrue(progress.advance(translation: .zero))
+                restored = progress.moveNodes([node(6)], grabbed: node(6), in: drawn, translation: .zero,
+                                              pixelsPerFrame: base, bandHeight: TimelineGraphBand.height)
+            }
+            for (id, curve) in restored { _ = manager.writeGraphNodeCurve(target: subject, parameterID: id, to: curve) }
+            progress.end(cancelled: cancelled)
+            manager.restoreUnkeyedMarks(progress.consumedMarks, to: subject)
+            manager.cancelStructureGesture()
+
+            let current = manager.keyframeState(of: subject)
+            XCTAssertEqual(current.marks, [8, 22], "Own consumed mark returns; another deletion/addition stays current")
+            XCTAssertEqual(current.tracks[brightnessID], original)
+            XCTAssertEqual(current.tracks[contrastID], otherCurve, "No unrelated channel snapshot is restored")
+            XCTAssertEqual(manager.history.undoStack.count, history, "Closing the graph drag records no inner step")
+            manager.commitStructureGesture(label: .effectKeys)
+            XCTAssertEqual(manager.history.undoStack.count, history + 1, "The enclosing edit keeps its own undo owner")
+            manager.undo()
+            XCTAssertEqual(manager.keyframeState(of: subject).marks, [8, 18])
+            XCTAssertEqual(manager.keyframeState(of: subject).tracks[contrastID], contrast)
+        }
+    }
+
     // MARK: - A node and a keyframe indicator are the same thing
 
     /// **Every frame the graph editor draws a node on**, for the band's target — the left-hand side

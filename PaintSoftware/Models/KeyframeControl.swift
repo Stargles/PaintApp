@@ -1093,6 +1093,19 @@ extension CanvasManager {
         layers[index].transform = container
     }
 
+    /// Ends a graph drag's transient mark pruning. Only its own consumed marks are candidates, so
+    /// another edit's mark removal is not rolled back. Final keyed frames still consume their marks.
+    /// The drag's existing bracket owns this write and its undo; no whole target state is restored.
+    func restoreUnkeyedMarks(_ consumed: Set<Int>, to target: KeyframeTarget) {
+        guard gestureSnapshot != nil, targetExists(target), !consumed.isEmpty else { return }
+        var current = keyframeState(of: target)
+        let restored = Self.marks(Set(current.marks).union(consumed).sorted(),
+                                  droppingKeyed: keyedFrames(of: target))
+        guard restored != current.marks else { return }
+        current.marks = restored
+        applyKeyframeState(current, to: target)
+    }
+
     /// The one mutation every direction of every undo above goes through. **The target is re-resolved
     /// on every call rather than captured as a position**, which is what `KeyframeTarget`'s all-ids
     /// shape buys: a restack between the edit and the undo moves an index and cannot move an id, and a

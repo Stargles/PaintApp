@@ -557,6 +557,85 @@ final class GraphEditorUITests: PaintUITestCase {
 /// here is eaten by the scroll view and the band is a picture, which is exactly what D2 shipped.
 final class GraphEditorGestureUITests: PaintUITestCase {
 
+    /// The artist focuses a node, carries it through several ticks, then returns a later value drag
+    /// to its start. Focus is the actual handle drawing's reference; the slider and next Undo expose
+    /// the landed curve and whether a returned drag incorrectly left a history entry.
+    func testFocusedNodeKeepsItsHandlesAcrossTicksAndAReturnedDragLeavesNoEdit() throws {
+        let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(launchIntoEditor(app))
+        let window = app.windows.firstMatch
+        XCTAssertGreaterThan(window.frame.width, window.frame.height, "PREMISE: the actual graph window is landscape")
+        let authored = try authorAnAnimatedBrightnessCurve(app, from: 0, to: 6)
+        app.buttons["timeline.graphEditorButton"].tap()
+        let band = app.otherElements["timeline.graphBand"]
+        XCTAssertTrue(band.waitForExistence(timeout: 5))
+        let id = "brightnessContrast.brightness"
+        let original = "\(id):0,6"
+        XCTAssertEqual(band.value as? String, original)
+        let ppf = TimelineKeyMarkers.basePixelsPerFrame
+        let point = band.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: TimelineGraphBand.x(ofFrame: 0, pixelsPerFrame: ppf),
+            dy: TimelineGraphBand.y(ofValue: authored.start, in: 0...2, bandHeight: band.frame.height)))
+        point.tap()
+        let startFocus = TimelineGraphBand.encodeGesture(
+            focus: .init(parameterID: id, frame: 0), readout: nil, selectedCount: 1)
+        _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", startFocus),
+                                                           object: band)], timeout: 5)
+        XCTAssertEqual(band.label, startFocus, "The first tap exposes the focused node's handles")
+
+        let origin = point.screenPoint
+        try fingerStroke(through: [origin,
+            CGPoint(x: origin.x + ppf, y: origin.y),
+            CGPoint(x: origin.x + ppf * 2, y: origin.y),
+            CGPoint(x: origin.x + ppf * 3, y: origin.y)], interval: 0.25)
+        let landed = TimelineGraphBand.encodeGesture(
+            focus: .init(parameterID: id, frame: 3), readout: nil, selectedCount: 1)
+        _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", landed),
+                                                           object: band)], timeout: 5)
+        XCTAssertEqual(band.label, landed, "The focused handles follow the node through every tick")
+        XCTAssertEqual(band.value as? String, "\(id):3,6", "The other node stays where the artist left it")
+        attachScreenshot(XCUIScreen.main, "graph-drag-1-focused-handles-after-continuation")
+
+        app.buttons["sideToolbar.undoButton"].tap()
+        _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", original),
+                                                           object: band)], timeout: 5)
+        XCTAssertEqual(band.value as? String, original, "One Undo restores the continued node drag")
+        let block = app.otherElements["timeline.cel.1.0"]
+        let cel = try XCTUnwrap(readCel(app, layerIndex: 1, celIndex: 0))
+        block.coordinate(withNormalizedOffset: CGVector(dx: 0.5 / Double(cel.length), dy: 0.5)).tap()
+        XCTAssertEqual(readFrameLabel(app)?.current, 1, "The playhead observes the node about to move")
+        let returnedPoint = band.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: TimelineGraphBand.x(ofFrame: 0, pixelsPerFrame: ppf),
+            dy: TimelineGraphBand.y(ofValue: authored.start, in: 0...2, bandHeight: band.frame.height)))
+        returnedPoint.tap()
+        let returnOrigin = returnedPoint.screenPoint
+        try fingerStroke(through: [returnOrigin,
+            CGPoint(x: returnOrigin.x, y: returnOrigin.y + 20),
+            CGPoint(x: returnOrigin.x, y: returnOrigin.y + 35),
+            CGPoint(x: returnOrigin.x, y: returnOrigin.y + 20), returnOrigin], interval: 0.25)
+        let slider = app.sliders["effectSettings.brightness"]
+        let restored = NSPredicate { _, _ in
+            guard let text = slider.value as? String, let value = Double(text) else { return false }
+            return abs(value - authored.start) < 0.01
+        }
+        _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: restored, object: nil)], timeout: 5)
+        let returnedValue = try XCTUnwrap(Double(try XCTUnwrap(slider.value as? String)))
+        XCTAssertLessThan(abs(returnedValue - authored.start), 0.01,
+                          "The actual slider returns to the value the node had at touch-down")
+        XCTAssertEqual(band.value as? String, original)
+        XCTAssertEqual(band.label, startFocus, "Returning keeps the original focused handles")
+        attachScreenshot(XCUIScreen.main, "graph-drag-2-returned-to-the-original-value")
+
+        // The preceding authoring step is the slider that created the curve. A returned drag must
+        // not consume this Undo with an empty step of its own.
+        app.buttons["sideToolbar.undoButton"].tap()
+        _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "empty"),
+                                                           object: band)], timeout: 5)
+        XCTAssertEqual(band.value as? String, "empty", "Undo reaches authoring without an empty returned-drag step")
+        attachScreenshot(XCUIScreen.main, "graph-drag-3-undo-reaches-the-preceding-authoring-step")
+    }
+
     /// **A key travels under a finger, and the keyframe travels with it.**
     ///
     /// **The assertion that a moved key moves its keyframe is the one this feature could get wrong

@@ -825,24 +825,13 @@ struct TimelineTrackView: UIViewRepresentable {
             /// resolves to one or the other at touch-down (`TimelineGraphBand.grab`) and never
             /// changes its mind, which is this file's rule for every recogniser it owns.
             let handle: TimelineGraphBand.HandleRef?
-            /// The standing selection as it stood once touch-down had resolved — equal to `carried`
-            /// when a key was grabbed, and the pre-marquee set when one was not.
-            ///
-            /// **A cancelled drag restores this alongside the curves.** Both are live state the drag
-            /// rewrites every tick, and putting one back without the other leaves the rings naming
-            /// frames the restored curves no longer key: nothing draws them, grabbing a member no
-            /// longer carries the group, and nothing repairs it — `layoutGraphBand` clears the
-            /// selection when the band changes layer but never recomputes it.
-            let startSelection: Set<TimelineGraphBand.KeyRef>
+            /// The captured selection/focus and current presentation, shared with logic controls.
+            var progress: TimelineGraphBand.DragProgress
             /// **What a second finger held on the glass does to this drag** — TODO (166), keeping a node
             /// or a handle to one axis (`AxisLock`). Taken at touch-down, with the touch count that
             /// includes the dragging finger; a marquee never reads it, because a rubber band held to
             /// an axis would be a line.
             var axisLock: AxisLock
-            /// Set once travel passes `tapSlop`. Until then the touch is still a candidate tap, and
-            /// **no undo bracket is open** — `CurveEditor`'s rule: a drag that never moved closes no
-            /// bracket, because it never opened one.
-            var didMove = false
             /// Whether any write actually changed the document, so a drag that resolved to the frame
             /// and value it started on cancels its bracket instead of recording an empty undo step.
             /// Only a drag that writes as it goes sets it — a held drag holds its curves.
@@ -997,7 +986,7 @@ struct TimelineTrackView: UIViewRepresentable {
                                           frameCount: content.frameCount, bandHeight: height,
                                           carried: carried,
                                           grabbed: hit, handle: handle,
-                                          startSelection: graphBandSelection,
+                                          progress: .init(selection: graphBandSelection, focus: graphBandFocus),
                                           axisLock: AxisLock(touchesDown: canvasManager.modifierHold.touchesDown(
                                               including: graphBandTouch)))
             // **A finger on a pose node is a live transform edit** (TODO (140)): the canvas re-poses
@@ -1022,7 +1011,8 @@ struct TimelineTrackView: UIViewRepresentable {
         private func updateGraphBandTouch(at point: CGPoint) {
             guard var drag = graphBandDrag else { return }
             let raw = CGSize(width: point.x - drag.start.x, height: point.y - drag.start.y)
-            guard hypot(raw.width, raw.height) > TimelineGraphBand.tapSlop else { return }
+            let hadMoved = drag.progress.didMove
+            guard drag.progress.advance(translation: raw) else { return }
             // **A finger held down anywhere keeps a node or a handle to one axis** (TODO (166)). The
             // lock sits in front of everything below, which reads `translation` and nothing else, so
             // neither the moves nor the handle shaping know it is there. A marquee is not held: a
@@ -1031,8 +1021,7 @@ struct TimelineTrackView: UIViewRepresentable {
                 ? drag.axisLock.translation(for: raw, touchesDown: canvasManager.modifierHold.touchesDown(including: graphBandTouch))
                 : raw
 
-            if !drag.didMove {
-                drag.didMove = true
+            if !hadMoved {
                 // One bracket for the whole drag, opened here rather than at touch-down: this is the
                 // moment the gesture stops being a candidate tap. `writeGraphNodeCurve`'s stores record
                 // nothing while a gesture snapshot is open, so the N writes below — one per channel
@@ -1049,10 +1038,11 @@ struct TimelineTrackView: UIViewRepresentable {
             // the value the node holds has not changed, so a number that appeared here would be
             // answering a question (38)(d) did not ask.
             if let handle = drag.handle {
-                carry(TimelineGraphBand.draggingHandle(handle, in: drag.channels, translation: translation,
-                                                       pixelsPerFrame: pixelsPerFrame,
-                                                       bandHeight: drag.bandHeight),
-                      of: drag)
+                let curves = drag.progress.shapeHandle(handle, in: drag.channels, translation: translation,
+                                                      pixelsPerFrame: pixelsPerFrame, bandHeight: drag.bandHeight)
+                graphBandDrag = drag
+                showGraphBandProgress(drag.progress)
+                carry(curves, of: drag)
                 redrawGraphBand(after: drag)
                 return
             }
@@ -1064,51 +1054,30 @@ struct TimelineTrackView: UIViewRepresentable {
                 let rect = CGRect(x: drag.start.x, y: drag.start.y,
                                   width: translation.width, height: translation.height)
                 graphBandView.setMarquee(rect)
-                graphBandSelection = TimelineGraphBand.keys(in: rect, channels: drag.channels,
-                                                            pixelsPerFrame: pixelsPerFrame,
-                                                            bandHeight: drag.bandHeight)
-                graphBandView.setSelection(graphBandSelection)
+                drag.progress.select(TimelineGraphBand.keys(in: rect, channels: drag.channels,
+                                                           pixelsPerFrame: pixelsPerFrame,
+                                                           bandHeight: drag.bandHeight))
+                graphBandDrag = drag
+                showGraphBandProgress(drag.progress)
                 return
             }
 
-            let moves = TimelineGraphBand.moves(of: drag.carried, in: drag.channels,
-                                                translation: translation,
-                                                pixelsPerFrame: pixelsPerFrame,
+            let curves = drag.progress.moveNodes(drag.carried, grabbed: drag.grabbed, in: drag.channels,
+                                                translation: translation, pixelsPerFrame: pixelsPerFrame,
                                                 bandHeight: drag.bandHeight)
-            carry(TimelineGraphBand.applying(moves, to: drag.channels), of: drag)
-            // The rings follow the keys rather than staying on the frames they were picked up from,
-            // so a selection dragged four frames right is still drawn around itself.
-            graphBandSelection = Set(moves.map {
-                TimelineGraphBand.KeyRef(parameterID: $0.key.parameterID, frame: $0.value.frame)
-            })
-            graphBandView.setSelection(graphBandSelection)
-            // **(38)(d): the node under the finger reads its own value while it is being dragged.**
-            //
-            // **Gated on the value having changed rather than on the direction of travel**, which is
-            // the ask's *"dragged up or down"* expressed as a property of the edit instead of as a
-            // test on the translation. A purely horizontal drag retimes the node and changes nothing
-            // the readout could report, so it silently shows none — by construction, with no
-            // `abs(dy) > k` threshold for an artist to fight at the boundary. The focus follows the
-            // node too, so the handles stay on the thing being dragged.
-            if let grabbed = drag.grabbed, let move = moves[grabbed],
-               let text = TimelineGraphBand.readout(forNodeAt: grabbed, movedTo: move,
-                                                    in: drag.channels) {
-                graphBandView.setReadout(.init(node: TimelineGraphBand.KeyRef(
-                                                    parameterID: grabbed.parameterID,
-                                                    frame: move.frame),
-                                               text: text))
-            }
-            // **The focus follows the node it is on, and only that one.** A drag does not *take* the
-            // focus — that is the tap's job, and the two-stage contract says so — but a focused node
-            // dragged three frames right would otherwise leave the focus naming a frame it no longer
-            // keys, `layoutGraphBand` would prune it, and the handles would vanish mid-gesture from
-            // under the finger shaping them.
-            if let grabbed = drag.grabbed, grabbed == graphBandFocus, let move = moves[grabbed] {
-                graphBandFocus = TimelineGraphBand.KeyRef(parameterID: grabbed.parameterID,
-                                                         frame: move.frame)
-                graphBandView.setFocus(graphBandFocus)
-            }
+            graphBandDrag = drag
+            showGraphBandProgress(drag.progress)
+            carry(curves, of: drag)
             redrawGraphBand(after: drag)
+        }
+
+        /// One complete presentation, including nil, replaces the preceding tick's chrome.
+        private func showGraphBandProgress(_ progress: TimelineGraphBand.DragProgress) {
+            graphBandSelection = progress.selection
+            graphBandFocus = progress.focus
+            graphBandView.setSelection(progress.selection)
+            graphBandView.setFocus(progress.focus)
+            graphBandView.setReadout(progress.readout)
         }
 
         /// **Hands one tick's curves on.** A held drag holds them off the document (`GraphBandHold`): a
@@ -1124,7 +1093,9 @@ struct TimelineTrackView: UIViewRepresentable {
             case .channels: canvasManager.holdChannelCurves(drag.target, curves)
             case .groupPose: canvasManager.holdGroupPose(curves, of: drag.target)
             case nil:
+                let before = canvasManager.keyframeState(of: drag.target).marks
                 if writeGraphBandCurves(curves, target: drag.target) { graphBandDrag?.didWrite = true }
+                graphBandDrag?.progress.recordWrite(from: before, to: canvasManager.keyframeState(of: drag.target).marks)
             }
         }
 
@@ -1169,6 +1140,7 @@ struct TimelineTrackView: UIViewRepresentable {
         }
 
         private func finishGraphBandTouch(at point: CGPoint) {
+            updateGraphBandTouch(at: point)
             guard let drag = graphBandDrag else { return }
             let translation = CGSize(width: point.x - drag.start.x, height: point.y - drag.start.y)
             // **Closed here rather than in a `defer`, and that ordering is load-bearing.** A tap
@@ -1184,7 +1156,7 @@ struct TimelineTrackView: UIViewRepresentable {
             // is there rather than here so the fast tier can read it: this file is not compiled into
             // `PaintSoftwareUITests`, and the rule it used to spell inline was wrong for a year of
             // reading because it had been copied from a file where the flag means something else.
-            guard TimelineGraphBand.isTap(didMove: drag.didMove, translation: translation)
+            guard TimelineGraphBand.isTap(didMove: drag.progress.didMove, translation: translation)
             else { return }
 
             resolveGraphBandTap(at: point, target: drag.target, channels: drag.channels,
@@ -1263,13 +1235,14 @@ struct TimelineTrackView: UIViewRepresentable {
             // The readout is the drag's own chrome and belongs to nothing else — (38)(d). Cleared
             // here rather than in each of the three exits, so a cancelled drag cannot leave a number
             // hanging over a node that has gone back where it came from.
-            graphBandView.setReadout(nil)
             // Thawed with the readout and for the same reason: both are the drag's own chrome, and a
             // frozen axis outliving its drag would leave the band drawn against a window the document
             // no longer justifies.
             graphBandView.setFrozenAxes([:])
-            guard let drag = graphBandDrag else { return }
+            guard var drag = graphBandDrag else { return }
             graphBandDrag = nil
+            drag.progress.end(cancelled: cancelled)
+            showGraphBandProgress(drag.progress)
             // **The drag's live transform edit ends with the drag, however it ends.** A pose drag wrote
             // nothing while the finger was down (TODO (154)), so the lift is its one write — a single
             // undo step, or none for a drag that came back to where it began — committed before the
@@ -1301,11 +1274,7 @@ struct TimelineTrackView: UIViewRepresentable {
             case nil:
                 break
             }
-            guard drag.didMove else { return }
-            if cancelled {
-                graphBandSelection = drag.startSelection
-                graphBandView.setSelection(graphBandSelection)
-            }
+            guard drag.progress.didMove else { return }
             guard drag.holding == nil, !drag.carried.isEmpty || drag.handle != nil else { return }
             if cancelled {
                 var restored: [String: AnimationCurve] = [:]
@@ -1315,8 +1284,9 @@ struct TimelineTrackView: UIViewRepresentable {
                     restored[channel.parameterID] = channel.curve
                 }
                 _ = writeGraphBandCurves(restored, target: drag.target)
-                canvasManager.cancelStructureGesture()
-            } else if drag.didWrite {
+            }
+            canvasManager.restoreUnkeyedMarks(drag.progress.consumedMarks, to: drag.target)
+            if !cancelled && drag.didWrite && drag.progress.hasChanges {
                 canvasManager.commitStructureGesture(label: .effectKeys)
             } else {
                 // `recordStructureChange` records unconditionally, so a bracket that spanned no write
@@ -2061,11 +2031,7 @@ private final class TimelineGraphBandView: UIView {
     /// **What a dragged node is reading** — TODO (38)(d). The node is named rather than positioned,
     /// so the label follows the dot through the same two mappings the dot itself is drawn with and
     /// the two cannot come apart at a zoom.
-    struct Readout: Equatable {
-        let node: TimelineGraphBand.KeyRef
-        let text: String
-    }
-    private var readout: Readout?
+    private var readout: TimelineGraphBand.Readout?
 
     /// **The axes a live drag is drawing against, by parameter id** — empty except between touch-down
     /// and lift, and the second half of 2026-09-03's *"the nodes just stay still"*.
@@ -2217,7 +2183,7 @@ private final class TimelineGraphBandView: UIView {
     /// The dragged node's number, or nil for no drag. Gated the same way — a drag's `.changed` fires
     /// many times a second and most ticks leave the printed string identical, since the readout is
     /// rounded to the parameter's own precision.
-    func setReadout(_ value: Readout?) {
+    func setReadout(_ value: TimelineGraphBand.Readout?) {
         guard value != readout else { return }
         readout = value
         refreshGestureAccessibility()

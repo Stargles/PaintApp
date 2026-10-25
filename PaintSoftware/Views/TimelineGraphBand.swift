@@ -895,6 +895,98 @@ enum TimelineGraphBand {
         let value: Double
     }
 
+    /// The node's live value plate. The same value is owned by a drag and drawn by the band.
+    struct Readout: Equatable {
+        let node: KeyRef
+        let text: String
+    }
+
+    /// The progress and chrome of the coordinator's one drag, captured at touch-down. The
+    /// coordinator still owns its target, held edit and undo bracket; every tick consumes this
+    /// value's complete presentation and affected-curve replacements.
+    struct DragProgress {
+        private let startSelection: Set<KeyRef>
+        private let startFocus: KeyRef?
+        private(set) var selection: Set<KeyRef>
+        private(set) var focus: KeyRef?
+        private(set) var readout: Readout?
+        private(set) var didMove = false
+        private(set) var hasChanges = false
+        /// Only marks removed by this drag's actual unheld writes, not every mark at touch-down.
+        private(set) var consumedMarks: Set<Int> = []
+
+        init(selection: Set<KeyRef>, focus: KeyRef?) {
+            startSelection = selection
+            startFocus = focus
+            self.selection = selection
+            self.focus = focus
+        }
+
+        /// Slop decides onset once. A drag returning to its origin must still apply that tick.
+        mutating func advance(translation: CGSize) -> Bool {
+            guard didMove || hypot(translation.width, translation.height) > tapSlop else { return false }
+            didMove = true
+            return true
+        }
+
+        mutating func select(_ keys: Set<KeyRef>) { selection = keys }
+
+        mutating func recordWrite(from before: [Int], to after: [Int]) {
+            consumedMarks.formUnion(Set(before).subtracting(after))
+        }
+
+        mutating func moveNodes(_ carried: Set<KeyRef>, grabbed: KeyRef?, in channels: [Channel],
+                                translation: CGSize, pixelsPerFrame: CGFloat,
+                                bandHeight: CGFloat) -> [String: AnimationCurve] {
+            let moves = TimelineGraphBand.moves(of: carried, in: channels, translation: translation,
+                                                 pixelsPerFrame: pixelsPerFrame, bandHeight: bandHeight)
+            selection = Set(moves.map { KeyRef(parameterID: $0.key.parameterID, frame: $0.value.frame) })
+            focus = startFocus.map { original in
+                guard let moved = moves[original] else { return original }
+                return KeyRef(parameterID: original.parameterID, frame: moved.frame)
+            }
+            readout = grabbed.flatMap { original in
+                guard let moved = moves[original],
+                      let text = TimelineGraphBand.readout(forNodeAt: original, movedTo: moved, in: channels)
+                else { return nil }
+                return Readout(node: KeyRef(parameterID: original.parameterID, frame: moved.frame), text: text)
+            }
+            return replacements(TimelineGraphBand.applying(moves, to: channels),
+                                affected: Set(carried.map(\.parameterID)), in: channels)
+        }
+
+        mutating func shapeHandle(_ handle: HandleRef, in channels: [Channel], translation: CGSize,
+                                  pixelsPerFrame: CGFloat, bandHeight: CGFloat) -> [String: AnimationCurve] {
+            // An identity tick restores even the starting tangent mode, rather than converting an
+            // untouched auto handle to free merely because the finger once travelled away.
+            let changed: [String: AnimationCurve] = translation == .zero ? [:] : TimelineGraphBand.draggingHandle(
+                handle, in: channels, translation: translation,
+                pixelsPerFrame: pixelsPerFrame, bandHeight: bandHeight)
+            return replacements(changed, affected: [handle.key.parameterID], in: channels)
+        }
+
+        private mutating func replacements(_ changed: [String: AnimationCurve], affected: Set<String>,
+                                           in channels: [Channel]) -> [String: AnimationCurve] {
+            hasChanges = !changed.isEmpty
+            // Held owners merge ticks. A returned channel must replace its previous held curve
+            // with the captured baseline; an empty changes dictionary cannot express that reset.
+            var current = changed
+            for channel in channels where affected.contains(channel.parameterID) && current[channel.parameterID] == nil {
+                current[channel.parameterID] = channel.curve
+            }
+            return current
+        }
+
+        mutating func end(cancelled: Bool) {
+            readout = nil
+            if cancelled {
+                selection = startSelection
+                focus = startFocus
+                hasChanges = false
+            }
+        }
+    }
+
     /// **Where a drag puts every key it is carrying** — one key or a marquee's worth, one function.
     ///
     /// **The collision rule: a key is stopped by its neighbour rather than allowed to consume it.**

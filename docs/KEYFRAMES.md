@@ -2545,6 +2545,13 @@ It sits above the node, beside it when there is no room above, clamped to the *v
 than the band's bounds, and appears only when the drag has changed the node's **value**, so a pure
 retiming drag shows nothing by construction rather than by a threshold.
 
+The drag captures its focus and selection once. Every cumulative tick after movement starts,
+including a return to its origin, replaces that drag's current curves and complete optional readout;
+the focus follows the original key's landed frame even when a different selected node is grabbed.
+Cancellation restores that captured focus/selection. A returned edit leaves no undo step. Mixed
+channel drags that write during the gesture also restore only the bare marks consumed by their own
+transient writes and still unkeyed at lift/cancel; unrelated mark changes remain current.
+
 ### 11.5 Stage D4 — the channel list is a filter — **done 2026-08-29, amended by §11.7**
 
 **Its title said *"a filter, not a navigator"* and the owner reversed exactly that half.** The list is
