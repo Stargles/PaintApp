@@ -2,7 +2,7 @@
 
 ## Current source and next actions — 2026-10-25
 
-Integration bddb83db is unmerged/uninstalled; main/origin remain afd2030c. Root accepted actual Debug
+Integration remains unmerged/uninstalled; main/origin remain afd2030c. Root accepted actual Debug
 492/492 at0e215 and260/260 atbddb, zero failures/skips/expected failures. Logic26 qualifies36 intended
 statements and selection/seed5 qualifies10; actual source/device/method identities and729 immutable
 entries reconcile. Fill126/owner UI4/all29 controls qualify at83380 with whole pictures inspected.
@@ -11,7 +11,9 @@ Named evidence and limits are in HANDOFF.md. Last compiled app is a mutant: rebu
 Current queue (items remain until merged):
 
 - Cold selected-text longpress now uses actual ink clear of every exposed grip; reviewed2d94 is
-  harvested with old4/outcomes exact, no geometry changes. Run whole Text5+
+  harvested with old4/outcomes exact, no geometry changes. UI21 at177 stopped at compiler0 (new
+  nonexistent Self.coordinate); one native-coordinate-call correction4c73 is reviewed/harvested.
+  Run fresh whole Text5+
   GraphGesture6+Blend10 (21), LOOK owner pictures. Historical UI10 was8pass2fail: graph delivery and
   portrait toolbar clearance, not proven product focus/colour failures. Corrected sources are
   integrated; actual final colour video is#FA0505. Then meaningful Graph3/Blend3/text1 UI controls.
@@ -23,7 +25,7 @@ Current queue (items remain until merged):
 - Cold stored-vector eraser Splatter/Undo/Redo. Existing-seed handoff and UTF-16 selection are
   integrated and pass related260 plus all5 meaningful faults; no new state and no Mode3 cause claim.
 - Repin historical UI13/mask6-positive+11-fault gates; final fast Debug AND Release, counts/lints/PBX/
-  graph, touched UI classes/full phase. Current5435 fast/6026 full runnable before cold-text harvest.
+  graph, touched UI classes/full phase. Current5435 fast/6027 full runnable with cold-text harvested.
 - Final fill sampler/count/cost gates,16 paired Release trials and genuine cold previous-writer
   library UI; untouched original256-package export and old071 product stay preserved.
 - Genuine remaining architecture coverage: vector tools/undo/render, graph evaluation, remaining

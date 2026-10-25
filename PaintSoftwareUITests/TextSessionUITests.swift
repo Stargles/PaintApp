@@ -298,7 +298,7 @@ final class TextSessionUITests: PaintUITestCase {
                              "PREMISE: actual word ink has a point outside every text-grip target")
         let pressPoint = try XCTUnwrap(selectionPoint, "PREMISE: a measured glyph-interior longpress point")
         assertAboveTheDock(app, canvas, dy: (pressPoint.y - host.minY) / host.height, "the selection longpress")
-        Self.coordinate(app, at: pressPoint).press(forDuration: 1.0)
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: pressPoint.x, dy: pressPoint.y)).press(forDuration: 1.0)
         let selectAll = app.menuItems["Select All"]
         XCTAssertTrue(selectAll.waitForExistence(timeout: 5), "PREMISE: the public edit menu offers Select All")
         XCTAssertTrue(tapWhenHittable(selectAll, "Select All"), "PREMISE: Select All was delivered")

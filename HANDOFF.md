@@ -10,9 +10,9 @@ is authorized by an old readiness answer: obtain fresh saved-scene readiness whe
 
 ## Current source and next actions — 2026-10-25
 
-Main/origin remain afd2030c. Current integration bddb83db is clean and unmerged; no push or physical
-iPad operation. Root owns integration, independent evidence and ONE Mac native lease. Native is idle
-and released. The last compiled app contains the archive-seed mutant: rebuild normal source before UI.
+Main/origin remain afd2030c. Latest accepted logic source is bddb83db; integration has advanced cold UI fixtures and remains
+unmerged/uninstalled. Root owns integration, independent evidence and ONE Mac native lease. Native
+is idle after the compiler0 attempt; normal source still needs a successful rebuild before UI.
 All historical attempts remain at named immutable pins; do not retag them.
 
 **Actual root-accepted results:**
@@ -72,6 +72,10 @@ style until that same key. Assert red replacement near and zero far red while st
 smoke follows. Author2d94b162 replaces ONLY the new longpress span: actual public textbox hull/eight grip centres
 and existing black-pixel probe choose maximum measured clearance beyond22pt plus hull rounding.
 No size/zoom/word changes; no safe point fails an input premise. All old4/prior outcomes stay exact.
+Actual UI21 at177ea278 stopped at compilation: nonexistent Self.coordinate in the new method,
+0 tests/0 pictures and all729 bytes restored. Root independent compiler review99d9e346 preserves
+that attempt. Author4c73 replaces ONLY the call with the existing TextSession.tap native app-coordinate
+chain; point/duration/oracles/line345 unchanged, independent7f8e80bc accepted. Fresh normal UI21 required.
 Root and independent821b4b7a review accepted the source; only TextSession is harvested. Public menu
 delivery remains unproved. Reverse selected-
 length collapse must reach drawn far-band assertion, not a setup/menu/input failure.
@@ -99,8 +103,8 @@ vector_mend_proof is implementing the recorded scope in a separate worktree, wit
 3. Repin historical UI13/mask6-positive+11-fault packets to final source; LOOK positive pictures before
    faults. Preserve two-phase build→all-source-restore→test-without-building contract.
 4. Final fast Debug AND Release using CLAUDE verbatim command, actual/static method reconciliation,
-   lints/PBX/graph, all touched UI classes and full phase. Current bddb census5435 fast/6026 full
-   runnable,729 source entries/PBX1329; cold-text method adds1 full only after harvest.
+   lints/PBX/graph, all touched UI classes and full phase. Current census5435 fast/6027 full
+   runnable,729 source entries/PBX1329; new cold-text method is included.
 5. Fill16 paired Release ABBA, sampler/source/fence/cancel/budget counts and genuine cold256-package
    previous-writer library UI. Preserve original export and old071 benchmark product.
 6. Genuine remaining audit coverage: vector tools/undo/invalidation, graph evaluation, fonts/panels,
