@@ -86,7 +86,7 @@ actual79a binary; no repeat baseline was inferred. Receipts:
 negative control continues; the sample alone proves neither a fixed deadlock nor a production crash.
 Repin/review remaining recipes after source changes; rebuild normal before UI/install.
 
-**Fill producer committed, native unrun:** root harvested only the eight source/PBX/test paths
+**Fill producer compiled, native refused:** root harvested only the eight source/PBX/test paths
 from independently reviewed324c0ccd. VectorStrokeRenderWalk shares the renderer's existing rest/
 lattice/pose recipe, and VectorMendSupport records only canonical primitive bounds and path
 parameters. It adds no bitmap renderer, per-dab drawing, saved stroke fields or live fill changes.
@@ -94,11 +94,26 @@ Local indexed closure covers complete support and gate halos, including hidden u
 contributors; compressed contacts require every OPEN/SOURCE cell. Conservative bounds are potential
 support, never a claim of physical painted coverage. Runtime bounds/capacity/work admission is
 explicit; allocator peaks and latency remain unmeasured. The failed321 live algorithm remains unchanged
-and unshippable. Seven focused native controls are next, then meaningful production-source faults.
+and unshippable. At7cbe, actual7 controls ran: spatial-index1 passed; all6 support methods threw
+exceedsBudget before semantic assertions. All729 source entries remained exact; compiler succeeded
+in both targets. No behavior qualification. Root-cause collection admission review is underway; do
+not raise fixture budgets or weaken safety guards. Actual receipt:
+`native/canonical7-7cbe0f42-run01/root-independent-review.json`. Re-run the corrected seven, then
+meaningful production-source faults.
 Before live wiring, review each reference-image resampling stage, source-keyed stencil ownership,
 physical-ink bits versus synthetic walls, whole failed-path deletion and unchanged neighbor mending.
 No live-wiring grant yet. Author pin324c0ccd and root receipt: `canonical-producer-harvest/`;
 independent review: `vector-mend-independent-proof/bound-superset-review.md`.
+
+**New audit finding, recorded before correction:** RasterResidency admission/mutation repeatedly
+filter/min the whole candidate dictionary after each unsuccessful fit. A finite population can cost
+O(N²) metadata scans under its mutex. The case28 sample supports contention, not a deadlock claim.
+Root accepts one shared finite weak-registration snapshot, oldest-first ordering outside the lock,
+actual accounting checks before each callback/final return, and no callback/final strong release
+under the owner lock. Entries touched/re-registered since capture are skipped; new entries remain
+for the next request; live cold registrations must remain. Only unchanged expired weak entries may
+be pruned. No persistent heap/cache/queue or product telemetry. Source-only correction/tests assigned
+to a separate task tree; native/performance unrun. Trace: `raster-admission-case28-readonly/report.md`.
 
 **Device:** install is off immediate priority; owner authorizes future qualified installs. Review
 Releaseee36770d built/signature verified (UUIDF699A856-9C3F-34F1-AE99-E7C221BF9FF8), but profile

@@ -17,6 +17,18 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Raster admission repeatedly scans cold registrations — 2026-10-25
+
+Source a699acbc and the bounded case28 sample identify repeated full candidate filtering/minimum
+selection while holding RasterResidency's mutex. Trying N ineligible/cold entries can require O(N²)
+metadata scans. Cold handles register once and must remain eligible after future rehydration; dropping
+them is not a valid fix. Ordinary window pressure after 1,000-handle cold load can reach this seam.
+The deliberately eager-load control stalled and remains inconclusive; no fixed deadlock, corruption
+or iPad respring cause is proved. Root accepted a finite weak ordered pass shared by admit and
+prepareMutation, retaining accounting/reserve/refusal semantics and live registrations. Source-only
+work is separate; no native/performance qualification yet. Evidence:
+`s54-final-qualification/raster-admission-case28-readonly/report.md`.
+
 ## Media reads produce runtime priority-inversion warnings — 2026-10-25
 
 Actual unrelated422 passed at b827cbfc with three ThreadPerformanceChecker warnings. Independent
