@@ -140,6 +140,7 @@ final class FillMendUITests: PaintUITestCase {
         let seed: CGVector
         let attached: CGVector
         let detached: CGVector
+        let caps: [(name: String, rect: CGRect)]
         let outline: CGVector
         let outside: CGVector
     }
@@ -226,9 +227,25 @@ final class FillMendUITests: PaintUITestCase {
         app.buttons["layerPanel.row.2.visibility"].tap()
         app.buttons["layerOptions.close"].tap()
         closeLayerRail(app)
+        // Square collars include each entire ~6 pt free cap and surrounding interior paint.
+        // Their half-width is 2% of the enclosure (20.48 canvas points), well clear of its outline.
+        let halfWidth = (right - left) * 0.02
+        let halfHeight = halfWidth * Double(canvas.frame.width / canvas.frame.height)
+        let caps = [("detached left", detachedLeft, detachedRow),
+                    ("detached right", detachedRight, detachedRow),
+                    ("attached free end", branchStart, middle)].map { name, x, y in
+            (name: name, rect: CGRect(x: x - halfWidth, y: y - halfHeight,
+                                     width: 2 * halfWidth, height: 2 * halfHeight))
+        }
+        let enclosure = CGRect(x: left, y: top, width: right - left, height: bottom - top)
+        for cap in caps {
+            XCTAssertTrue(enclosure.contains(cap.rect), "PREMISE: \(cap.name) collar is inside the outline")
+            assertAboveTheDock(app, canvas, dy: cap.rect.maxY, "the complete \(cap.name) collar")
+        }
         let scene = InternalMendScene(canvas: canvas, seed: seed,
             attached: CGVector(dx: branchStart + (right - branchStart) * 0.4, dy: middle),
             detached: CGVector(dx: (detachedLeft + detachedRight) / 2, dy: detachedRow),
+            caps: caps,
             outline: CGVector(dx: right, dy: top + (bottom - top) * 0.65),
             outside: CGVector(dx: right + (right - left) * 0.04, dy: middle))
         for (name, probe) in [("attached stroke", scene.attached), ("detached stroke", scene.detached),
@@ -251,6 +268,11 @@ final class FillMendUITests: PaintUITestCase {
         XCTAssertTrue(isRed(rgbaPixel(of: scene.canvas, at: scene.seed)), "the original fill is still red")
         XCTAssertTrue(isWhitish(rgbaPixel(of: scene.canvas, at: scene.outline)), "the outer outline footprint stays bare")
         XCTAssertTrue(isWhitish(rgbaPixel(of: scene.canvas, at: scene.outside)), "exterior paper stays bare")
+        let picture = try screen(of: scene.canvas)
+        for cap in scene.caps {
+            XCTAssertEqual(picture.pixelCount(in: cap.rect, matching: { !isRed($0) }), 0,
+                           "one fill covers the complete \(cap.name) footprint and interior collar")
+        }
         attachScreenshot(XCUIScreen.main, "mend-one-fill-on-line-art-hidden")
     }
 
@@ -263,6 +285,11 @@ final class FillMendUITests: PaintUITestCase {
         let scene = try makeInternalMendScene(app, mendsGaps: false)
         XCTAssertTrue(waitUntil(scene.canvas, scene.attached, isWhitish), "PREMISE: Mend OFF leaves the attached stroke bare")
         XCTAssertTrue(waitUntil(scene.canvas, scene.detached, isWhitish), "PREMISE: Mend OFF also leaves the detached stroke bare")
+        let before = try screen(of: scene.canvas)
+        for cap in scene.caps {
+            XCTAssertGreaterThan(before.pixelCount(in: cap.rect, matching: { isWhitish($0) }), 0,
+                                 "PREMISE: Mend OFF leaves bare ink in the \(cap.name) collar")
+        }
         attachScreenshot(XCUIScreen.main, "mend-all-before-line-art-hidden")
 
         openLayerPanel(app)
@@ -276,6 +303,7 @@ final class FillMendUITests: PaintUITestCase {
         XCTAssertTrue(waitUntil(scene.canvas, scene.detached, isRed), "the action covers the detached stroke")
         XCTAssertTrue(isWhitish(rgbaPixel(of: scene.canvas, at: scene.outline)), "the outer outline footprint stays bare")
         XCTAssertTrue(isWhitish(rgbaPixel(of: scene.canvas, at: scene.outside)), "the outside edge stays fixed")
+        let mended = try screen(of: scene.canvas)
         attachScreenshot(XCUIScreen.main, "mend-all-after-line-art-hidden")
         app.buttons["sideToolbar.undoButton"].tap()
         XCTAssertTrue(waitUntil(scene.canvas, scene.attached, isWhitish), "one undo restores the attached gap")
@@ -284,6 +312,13 @@ final class FillMendUITests: PaintUITestCase {
         app.buttons["sideToolbar.redoButton"].tap()
         XCTAssertTrue(waitUntil(scene.canvas, scene.attached, isRed), "redo restores the attached stem")
         XCTAssertTrue(waitUntil(scene.canvas, scene.detached, isRed), "redo restores the detached stroke")
+        let redone = try screen(of: scene.canvas)
+        for (phase, picture) in [("Mend All", mended), ("redo", redone)] {
+            for cap in scene.caps {
+                XCTAssertEqual(picture.pixelCount(in: cap.rect, matching: { !isRed($0) }), 0,
+                               "\(phase) covers the complete \(cap.name) footprint and interior collar")
+            }
+        }
     }
 
     // MARK: - (114) The extension buffer
@@ -355,6 +390,18 @@ final class FillMendUITests: PaintUITestCase {
 }
 
 private extension ScreenshotPixels {
+    /// Every displayed native pixel center in a host-normalized rectangle, through the shared reader.
+    func pixelCount(in rect: CGRect, matching matches: (RGBA) -> Bool) -> Int {
+        let columns = Int(floor(Double(rect.minX) * Double(width)))..<Int(ceil(Double(rect.maxX) * Double(width)))
+        let rows = Int(floor(Double(rect.minY) * Double(height)))..<Int(ceil(Double(rect.maxY) * Double(height)))
+        return rows.reduce(0) { total, y in
+            total + columns.filter { x in
+                matches(pixel(normalizedX: (Double(x) + 0.5) / Double(width),
+                              normalizedY: (Double(y) + 0.5) / Double(height)))
+            }.count
+        }
+    }
+
     func light(_ dx: Double, _ dy: Double) -> Bool {
         let p = pixel(normalizedX: dx, normalizedY: dy)
         return p.r > 150 && p.g > 150 && p.b > 150
