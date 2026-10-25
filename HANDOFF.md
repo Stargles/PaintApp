@@ -74,8 +74,11 @@ frame interior except ink/hole. Integer tracing predicts0ring additions atReach6
 IDENTICAL under8bb andfbb; all56accepting nearest witnesses are axial, so the endpoint edit is not
 implicated by this source-only comparison. This is NOT native proof. Add only bounded assertions
 inside the EXISTING protected-contour method, reusing mendPatch: full448remain0at6/12/40, preserve
-all prior400/source/outside oracles, no new method/helper/file. Exact test proposal/root record and
-commit precede an actual one-method GPU reproduction. Keep this within the existing Mend task.
+all prior400/source/outside oracles, no new method/helper/file. Root accepts exact31-line
+TEST-ONLY proposalSHAf8ee5b0e055f970bf9186bf7d29ce30d6c9f11ffe987d7d49a95d070b3117064,
+frozen under square-ring-gpu-proposal-fbb0e182. This record grants ONLY FillMendLogicTests.swift;
+root commits before one-method GPU reproduction. No product change/normal green claim. Keep this
+within the existing Mend task and preserve all earlier actual evidence.
 Commit before meaningful faults; compiler/timeout/crash/skip cannot qualify. No UI completion claim.
 
 Final gates remain: successor normal422 and wholeUI47; meaningful new107logic/99recipes/66selectors
