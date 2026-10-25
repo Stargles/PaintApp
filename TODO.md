@@ -3,8 +3,9 @@
 ## Current source and next actions — 2026-10-24
 
 Main/origin remain afd2030c; no merge, push or iPad install. Consolidated product code is8bb68907
-in final-integration/final-check. The active mend-free-caps task isfbb0e1820f9191b8246873d42b0cb23762f7323d:
-the small shared endpoint correction and its tests are committed; the full cap defect remains open.
+in final-integration/final-check. The active mend-free-caps tip is0ca9d75951850e5c89e6c9865bbba87fa6ccccfb
+(productfbb0e182; later commit adds test-only coverage). The narrow endpoint correction is qualified;
+free caps and high-Reach square-hole protection remain open.
 All728 source entries were exact/clean at the last native closure. Root owns docs/Git and the single Mac native lease;
 agents own bounded implementation, native verification and independent review. Native lease RELEASED.
 
@@ -60,17 +61,24 @@ remains intentionally RED. All this is a qualified narrow correction, not featur
 Staged-head V1 is frozen external NOT READY:45degree/default-overlap cap holes remain predicted.
 No staged product edit is granted. Prefer one coherent shared proof over additional case exemptions.
 
-New candidate recorded BEFORE test edits: a96square scene with original inkframe8..<88 minus
-12..<84 and448pixel square-hole ringx28..<58/y24..<58 minusholex32..<54/y28..<54. Source fills the
-frame interior except ink/hole. Integer tracing predicts0ring additions atReach6/12 but48at40,
-IDENTICAL under8bb andfbb; all56accepting nearest witnesses are axial, so the endpoint edit is not
-implicated by this source-only comparison. This is NOT native proof. Add only bounded assertions
-inside the EXISTING protected-contour method, reusing mendPatch: full448remain0at6/12/40, preserve
-all prior400/source/outside oracles, no new method/helper/file. Root accepts exact31-line
-TEST-ONLY proposalSHAf8ee5b0e055f970bf9186bf7d29ce30d6c9f11ffe987d7d49a95d070b3117064,
-frozen under square-ring-gpu-proposal-fbb0e182. This record grants ONLY FillMendLogicTests.swift;
-root commits before one-method GPU reproduction. No product change/normal green claim. Keep this
-within the existing Mend task and preserve all earlier actual evidence.
+Actual square-hole GPU reproduction is now closed at0ca9d759 (productfbb). The existing protected-
+contour method has31 added test-only lines, preserving all prior assertions and20methods. The96square
+fixture has a448pixel ring around an intentional empty rectangle. One actual method failed ONLY at
+line646: Reach40 grows48of448ring pixels; Reach6/12 and all prior400contour/ink-only controls reported
+no other failures. Native65/wrapper1,0skip/expected, correct owner9; all728source bytes/kind/modes match
+before/after/current and HEAD is clean. Root independently reread the actual xcresult and source.
+Only first8sorted coordinates are printed; do not invent the complete48. Original8bb versusfbb
+agreement remains source-only, not native causal proof. Evidence:
+s54-final-qualification/native/square-ring-red-0ca9d759-run01/root-independent-acceptance.json.
+
+The direct point-normal rule is insufficient at visible hole corners. A common radius-ascent rule
+is under finite independent assessment ONLY, with no product grant: convenient selected paths can
+avoid an unowned boundary, while maximal-center-only rules can miss square free caps. Retain ALL
+nearest/contact/domain vetoes. Staged-head V1 remains external NOT READY; no exception stack, new
+full-image CPU work per tick or extra retained map/cache is accepted. Check existing reference stroke
+metadata as an architectural seam; saved fills have no historical reference/seed provenance. Next:
+settle a coherent bounded shared proof for BOTH observed defects, then implement/test before repinning
+final gates. Native lease RELEASED; no simulator or device operation is active.
 Commit before meaningful faults; compiler/timeout/crash/skip cannot qualify. No UI completion claim.
 
 Final gates remain: successor normal422 and wholeUI47; meaningful new107logic/99recipes/66selectors
