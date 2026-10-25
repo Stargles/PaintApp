@@ -31,13 +31,20 @@ failed path; no new file, method, persisted field or PBX identifier. Actual cano
 replace unsupported raster-positive premises while original FillObject result/undo/exterior assertions
 remain byte-exact. Strict OPEN-on-INK/SOURCE255 GPU coverage is added. Root reviewed the separate
 LASSO_FILL spec removal; author stale TODO/HANDOFF/BUGS are not copied. Independent receipt:
-`vector-mend-independent-proof/live-v5-source-review/receipt.json` (e0609bf3). Full three-class71
-actual Debug71 at2972c7c4 compiled and executed all71:54pass/17fail,0skip/expected, exact729source/owned39E. All17 StrokeWall pass;12FillMend and5FillObject fail. Factory-driven canonical coverage is empty, contacts are absent, live preparation never publishes and batch reports unchanged. First two compiler-only attempts remain preserved; their two local-name fixes do not alter product behavior. Record before one isolated native factory diagnostic (actual context/image metadata, builder admission and packet counts); establish which stage rejects before changing any guard. No assertion weakening, ordinary UI or whole4096 implementation until the shared native path is corrected. Runtime is NOT qualified.
+`vector-mend-independent-proof/live-v5-source-review/receipt.json` (e0609bf3).
+Actual Debug71 at2972c7c4 compiled and executed71:54pass/17fail,0skip/expected, exact729source
+on owned39E. All17 StrokeWall pass;12FillMend and5FillObject fail. Factory-driven canonical coverage
+is empty, contacts are absent, live preparation never publishes and batch reports unchanged. The two
+earlier compiler-only attempts and their local-name corrections remain preserved; product behavior
+was unchanged. Record before one isolated factory diagnostic of context/image metadata, builder
+admission and packet counts. Identify the rejected stage before changing any guard. Preserve all
+cap/contour/batch assertions. Ordinary UI and whole4096 source work wait for this shared native path.
+Runtime is NOT qualified.
 Whole4096 resampling and same-budget window refinement remain required OPEN engineering work.
-The sharpened external ImageWarp scale-stage proposal retains one total work account across retries,
-prepares geometry before expensive filtering/core allocation, and samples the final picture once.
-Its isolated implementation grant is paused after actual71 failures, before any sampler/producer edits.
-Diagnose and fix native factory acceptance first; native1:1 source review is not a runtime certificate. Proposal: `imagewarp-scale-extension-v2/plan.md`.
+The reviewed ImageWarp scale-stage proposal shares one work account and prepares geometry before
+filtering/core allocation. Its isolated source grant is paused after actual71 failures, before any
+sampler/producer edit. Diagnose native factory acceptance first; source review is not runtime proof.
+Proposal: `imagewarp-scale-extension-v2/plan.md`.
 
 **Raster admission correction:** root integrated the reviewed finite weak-metadata eviction pass
 at d4d7c523. It orders candidates once outside the mutex, rechecks current accounting/registration

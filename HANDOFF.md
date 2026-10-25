@@ -39,13 +39,20 @@ failed path; no new file, method, persisted field or PBX identifier. Actual cano
 replace unsupported raster-positive premises while original FillObject result/undo/exterior assertions
 remain byte-exact. Strict OPEN-on-INK/SOURCE255 GPU coverage is added. Root reviewed the separate
 LASSO_FILL spec removal; author stale TODO/HANDOFF/BUGS are not copied. Independent receipt:
-`vector-mend-independent-proof/live-v5-source-review/receipt.json` (e0609bf3). Full three-class71
-first two native71 attempts stopped at compilation with zero methods executed: duplicate fixture locals `refused` (renamed at1ddf6eb6), then `ink`. Record before renaming the latter canonical fixture local to `referenceInk`; independently audit all three changed test files for remaining collisions before the same71 rerun. Product source and all result/undo/contour expectations stay intact. Both Metal targets compiled, but runtime/UI/faults remain UNRUN.
+`vector-mend-independent-proof/live-v5-source-review/receipt.json` (e0609bf3).
+Actual Debug71 at2972c7c4 compiled and executed71:54pass/17fail,0skip/expected, exact729source
+on owned39E. All17 StrokeWall pass;12FillMend and5FillObject fail. Factory-driven canonical coverage
+is empty, contacts are absent, live preparation never publishes and batch reports unchanged. The two
+earlier compiler-only attempts and their local-name corrections remain preserved; product behavior
+was unchanged. Record before one isolated factory diagnostic of context/image metadata, builder
+admission and packet counts. Identify the rejected stage before changing any guard. Preserve all
+cap/contour/batch assertions. Ordinary UI and whole4096 source work wait for this shared native path.
+Runtime is NOT qualified.
 Whole4096 resampling and same-budget window refinement remain required OPEN engineering work.
-The sharpened external ImageWarp scale-stage proposal retains one total work account across retries,
-prepares geometry before expensive filtering/core allocation, and samples the final picture once.
-Review its finite retry/retirement/peak constraints and actual tap cost before implementation; native1:1
-source acceptance is not a universal certificate. Proposal: `imagewarp-scale-extension-v2/plan.md`.
+The reviewed ImageWarp scale-stage proposal shares one work account and prepares geometry before
+filtering/core allocation. Its isolated source grant is paused after actual71 failures, before any
+sampler/producer edit. Diagnose native factory acceptance first; source review is not runtime proof.
+Proposal: `imagewarp-scale-extension-v2/plan.md`.
 
 **Raster admission correction:** root integrated the reviewed finite weak-metadata eviction pass
 at d4d7c523. It orders candidates once outside the mutex, rechecks current accounting/registration

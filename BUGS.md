@@ -53,8 +53,11 @@ Rawthrough-ink dangerD2/4 exceeds a true onepixel tangent crossingW1, soV1'sloca
 insufficient. Caps/square/notch/diagonalcontrols reportnoissues; thisdoesnotqualifythefeature.
 Preserve actualcircle/400/448oracles; no shapeexception ormagicmargin. The reviewed f75a900c
 replacement removes the failed distance/circle ownership path whole and shares actual frozen vector
-support with the real reference draw. Canonical support7 passed at b849; new live71/compiler/GPU/UI
-qualification remains open: first two71 attempts stopped before tests on duplicate local test names; both Metal targets compiled. Aggregate-reference local is renamed at1ddf6eb6; record before renaming the later canonical ink local and audit all changed fixture scopes before rerunning71. Required whole4096 extension remains unrun. Source review is not a runtime fix claim.
+support with the real reference draw. Canonical support7 passed at b849; actual Debug71 at2972 compiled and ran54pass/17fail
+(12FillMend,5FillObject),0skip, exact729. Factory-driven support is empty for ordinary native strokes;
+contacts are absent and batch is unchanged. Record before one bounded isolated factory diagnostic
+of actual context/image/budget admission. Keep every cap/contour/batch assertion and do not loosen
+provenance guards without evidence. Whole4096 source work is paused before sampler edits.
 Evidence: s54-final-qualification/native/geodesic-logic20-32185179-run01/root-independent-acceptance.json.
 
 ## FillMend ON cold setup taps a moving opacity control — 2026-10-24
