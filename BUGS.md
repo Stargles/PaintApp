@@ -260,6 +260,16 @@ Existing contour callers must use the same helper; no batch-only alternative. Fr
 refusal, exact-area, touching-corner and undo tests plus native memory/latency gates remain pending.
 
 
+## CPU opacity rounding can reverse a whole-color blend winner (2026-10-25)
+
+Source-traced at83380b76: CoreGraphicsCompositor.drawHandRolled rounds faded source bytes before
+unpremultiplying, while Composite.metal keeps Float. SourceRGBA(200,0,0,255), backdropRGBA(0,101,2,255)
+and opacity0.5 put their Lighter/Darker Color decisions on opposite sides of the luminance comparison;
+the arithmetic witness predicts roughly100 channel steps. Ordinary layers/groups and Merge Down use
+the affected seam. Actual native parity and drawn reproduction remain UNRUN. Minimal shared-seam
+correction and regression are queued in TODO; do not infer an owner-observed symptom or device failure.
+Evidence: `~/PaintWork/s54-final-qualification/blend-effect-bounded-audit-83380/report.md`.
+
 ## A value-layer Blend Mode tap does not open its menu in the Fog Glow drive (2026-10-15)
 
 `GlareUITests.testFogGlowSizePreviewKeepsItsDrawnFootprintThroughLift` stops at the Glare menu

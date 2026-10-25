@@ -70,8 +70,8 @@ shares one finite raster-scale function among overlay, warped source and rasteri
 cap/floor spellings and preserves unlimited document geometry. Four actual raw UIKit probe controls
 refuted an unnecessarily strict raw-short-axis>=1 premise: positive fractional axes render within the
 cap. The corrected source accepts them. No schema, cache, renderer or point-size limit is added.
-Root will harvest ONLY the four reviewed source/test/spec paths; author scope bcfd and corrected
-review417ea63d precede harvest. All27 old TextLayout bodies remain exact;3new methods give30, with
+Root harvested ONLY the four reviewed source/test/spec paths byte-exact at24d96652; author scope
+bcfd and corrected review417ea63d precede harvest. All27 old TextLayout bodies remain exact;3new methods give30, with
 TextTransform52/Homography18 targeted (100 total) and whole TextSessionUITests4. App compilation,
 normal tests, meaningful fault checks and appearance are UNRUN. No full text/font audit claim.
 
@@ -83,6 +83,17 @@ graph tree before implementation. Reuse TimelineGraphBand's shared value transit
 coordinator/hold/undo owners; preserve unrelated channels. No new framework, persistent state, cache,
 file/PBX entry or evaluation/interpolation redesign. Logic controls must exercise the state actually
 consumed by the coordinator; cold drawn continuation/return/cancel controls remain required.
+
+**New bounded blend-opacity audit fix — recorded before implementation:** the CPU hand-rolled
+blend seam quantizes faded source RGBA to8bits before unpremultiplying; Metal keeps Float until final
+output. Exact source(200,0,0,255), backdrop(0,101,2,255), opacity0.5 can reverse the whole-color winner
+in Lighter/Darker Color (about100 channel steps predicted, native UNRUN). Ordinary layers, buffered
+groups and Merge Down use the affected seam. Existing all-mode sweep uses opacity1. Preserve exact
+RGBA premises and independent expected winner/output alpha in existing parity/merge tests; remove the
+whole-source byte rewrite and apply fade in Float in the existing CPU loop. No new backend, per-mode
+exception, tolerance relaxation, color-space policy, cache or flag. Agent records scope before source,
+preserves a committed old-code regression checkpoint, and freezes a separately reviewed correction.
+Report: `blend-effect-bounded-audit-83380/report.md`; not whole-effects or native qualification.
 
 **Raster admission correction:** root integrated the reviewed finite weak-metadata eviction pass
 at d4d7c523. It orders candidates once outside the mutex, rechecks current accounting/registration
