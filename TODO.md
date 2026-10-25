@@ -2,6 +2,16 @@
 
 ## Current source and next actions — 2026-10-24
 
+Owner priority —2026-10-24 evening: “status report and install the latest build to ipad, and continue.”
+Prepare the latest clean integrated candidate (productfbb) for a REVIEW install while the two known
+Mend defects and final combined gates remain open; do not label it final qualification. Drive required
+old workflows, rebuild normal optimized Release, verify whole signature and at least5days profile
+life. Preserve a fresh current saved library/export before a repair-bearing install. Obtain fresh
+saved/unlocked readiness immediately before the necessary device restart/export/install; earlier
+readiness is stale. No destructive scene cleanup. Continue independent fill design work externally
+while candidate source is frozen for native preparation. If current signing cannot satisfy5days,
+report the exact portal/profile result; do not silently reuse the expiring profile.
+
 Main/origin remain afd2030c; no merge, push or iPad install. Consolidated product code is8bb68907
 in final-integration/final-check. The active mend-free-caps tip is0ca9d75951850e5c89e6c9865bbba87fa6ccccfb
 (productfbb0e182; later commit adds test-only coverage). The narrow endpoint correction is qualified;
