@@ -1325,7 +1325,7 @@ extension CanvasManager {
                 recipe = builder?.finish()
             }
             var captured: VectorMendSupport.Preparation?
-            do throws(VectorMendSupport.Failure) {
+            do {
                 guard let sourceRecipe = recipe else { throw .exceedsBudget }
                 captured = try VectorMendSupport.prepare(sourceRecipe, meter: &request, isCurrent: isCurrent)
             }
