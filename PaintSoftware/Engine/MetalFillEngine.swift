@@ -35,7 +35,7 @@ final class MetalFillEngine {
         let unionMask: MTLComputePipelineState
         let lassoInvert, paintAlpha, lassoEdgeErode: MTLComputePipelineState
         /// Mending (TODO (113)): internal ink gaps and seams to neighboring paint, folded in by `unionMask`.
-        let mendGap: MTLComputePipelineState
+        let mendDistanceSeed, mendDistanceStep, mendGap: MTLComputePipelineState
 
         /// Nil when any kernel is missing from `library`, which is the engine failing to exist.
         init?(device: MTLDevice, library: MTLLibrary) {
@@ -55,6 +55,8 @@ final class MetalFillEngine {
                   let lassoInvert = pipeline("lassoInvert"),
                   let paintAlpha = pipeline("paintRegionAlpha"),
                   let lassoEdgeErode = pipeline("lassoEdgeErode"),
+                  let mendDistanceSeed = pipeline("mendDistanceSeed"),
+                  let mendDistanceStep = pipeline("mendDistanceStep"),
                   let mendGap = pipeline("mendGap") else { return nil }
             self.walls = walls; self.edtVerticalSeeds = edtVerticalSeeds
             self.edtHorizontalEnvelope = edtHorizontalEnvelope
@@ -63,6 +65,7 @@ final class MetalFillEngine {
             self.edgeDilate = edgeDilate; self.paint = paint
             self.unionMask = unionMask
             self.lassoInvert = lassoInvert; self.paintAlpha = paintAlpha; self.lassoEdgeErode = lassoEdgeErode
+            self.mendDistanceSeed = mendDistanceSeed; self.mendDistanceStep = mendDistanceStep
             self.mendGap = mendGap
         }
     }
@@ -1045,6 +1048,34 @@ final class MetalFillSession {
         var circleRangeCount = UInt32(engine.mendLookup.ranges.length / MemoryLayout<SIMD2<UInt16>>.stride)
         var references = refCount
         var hasFence = UInt32(fence == nil ? 0 : 1)
+        // The full digital walk can accumulate sqrt(2) per major-axis step. Two byte planes
+        // fit in the existing8N scratch beside its firstN public mend output; no retained map.
+        let pixelCount = UInt32(width * height)
+        var distanceLimit = UInt32(ceil(sqrt(Float(2)) * ceil(proofSpan)))
+        enc.setComputePipelineState(p.mendDistanceSeed)
+        enc.setBuffer(source, offset: 0, index: 0)
+        enc.setBuffer(neighbourBuf, offset: 0, index: 1)
+        enc.setBuffer(wallBuf, offset: 0, index: 2)
+        enc.setBuffer(wall2Buf ?? wallBuf, offset: 0, index: 3)
+        enc.setBuffer(fence ?? wallBuf, offset: 0, index: 4)
+        enc.setBuffer(featureWorkspace, offset: 0, index: 5)
+        enc.setBuffer(paramsBuf, offset: 0, index: 6)
+        enc.setBytes(&references, length: MemoryLayout<UInt32>.stride, index: 7)
+        enc.setBytes(&hasFence, length: MemoryLayout<UInt32>.stride, index: 8)
+        enc.setBytes(&distanceLimit, length: MemoryLayout<UInt32>.stride, index: 9)
+        engine.dispatch2D(enc, p.mendDistanceSeed, width: width, height: height)
+        var distanceOffset = pixelCount
+        var nextDistanceOffset = 2 * pixelCount
+        for _ in 0..<Int(distanceLimit) {
+            enc.setComputePipelineState(p.mendDistanceStep)
+            enc.setBuffer(featureWorkspace, offset: 0, index: 0)
+            enc.setBuffer(paramsBuf, offset: 0, index: 1)
+            enc.setBytes(&distanceOffset, length: MemoryLayout<UInt32>.stride, index: 2)
+            enc.setBytes(&nextDistanceOffset, length: MemoryLayout<UInt32>.stride, index: 3)
+            enc.setBytes(&distanceLimit, length: MemoryLayout<UInt32>.stride, index: 4)
+            engine.dispatch2D(enc, p.mendDistanceStep, width: width, height: height)
+            swap(&distanceOffset, &nextDistanceOffset)
+        }
         enc.setComputePipelineState(p.mendGap)
         enc.setBuffer(painted, offset: 0, index: 0)
         enc.setBuffer(source, offset: 0, index: 1)
@@ -1062,6 +1093,8 @@ final class MetalFillSession {
         enc.setBytes(&hasFence, length: MemoryLayout<UInt32>.size, index: 13)
         enc.setBytes(&proofSpan, length: MemoryLayout<Float>.size, index: 14)
         enc.setBytes(&circleRangeCount, length: MemoryLayout<UInt32>.size, index: 15)
+        enc.setBytes(&distanceOffset, length: MemoryLayout<UInt32>.stride, index: 16)
+        enc.setBytes(&distanceLimit, length: MemoryLayout<UInt32>.stride, index: 17)
         engine.dispatch2D(enc, p.mendGap, width: width, height: height)
         if mergeIntoPainted {
             engine.encode2D(enc, p.unionMask, width: width, height: height,
