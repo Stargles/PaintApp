@@ -68,7 +68,10 @@ the shared contact/width proof before changing source; final71/UI/whole4096 gate
 proves nonstroke objects have no entry in stroke-only known bounds, so a finite fill is wrongly global
 UNKNOWN. Reuse the existing derived-footprint seam with admitted input/work and honest opaque-decode
 cost limits. Reach's fixture may physically join its nominally separate strokes; one test-only native
-coordinate/CPUeligible diagnostic is recorded before edits, with all original assertions retained.
+coordinate/CPUeligible diagnostic retained1RED and proves actual ink contact; every missing pixel
+is CPU-ineligible (not GPU stencil readback). No Reach arithmetic defect is established. Keep all
+original result assertions on a genuinely separated fixture; preserve connected uncertain-join
+safety, verify disjointness in actual rendered ink and mutation-test new premises after green.
 Evidence: s54-final-qualification/native/geodesic-logic20-32185179-run01/root-independent-acceptance.json.
 
 ## FillMend ON cold setup taps a moving opacity control — 2026-10-24

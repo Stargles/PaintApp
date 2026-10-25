@@ -5,8 +5,8 @@
 Main/origin remain afd2030c; no merge, push or iPad install this pass. Integration tree is
 PaintApp-s54-mend-free-caps. Root accepted the exact ten-path replacement from committed f75a900c
 for harvest after independent V5 source review. The old32185179 distance-wave/circle-lookup path
-failed18/20 and is removed whole by this replacement. New live Swift/Metal/GPU/UI/performance gates
-are UNRUN; whole4096 remains required. Do not ship or call a producer-only pass feature completion.
+failed18/20 and is removed whole by this replacement. Live compiler/GPU controls have run but remain RED (latest69/71);
+UI/performance are UNRUN and whole4096 remains required. Do not ship or call a producer-only pass feature completion.
 
 **Owner ruling, recorded before implementation:** Kevin says new interior Mend Gaps is required
 only for vector and engineering choices need no further approval. Continue while he sleeps. Cover
@@ -57,7 +57,12 @@ unknown, draining temporary decode owners before credit. The Reach fixture has a
 overlapping detached-cap and attached-stem ink; record before one bounded existing-selector test-only
 diagnostic of missing coordinates, actual ink topology and CPUeligible interpretation. No production,
 shader, fixture, assertion or limit changes in that diagnostic; do not call CPUeligible GPU readback.
-Do not move the fixture until actual evidence distinguishes join protection from Reach arithmetic.
+Actual test-only Reach diagnostic at5df128ea retained1RED and0skips. It records0/60 missing
+body/attached pixels for10px/Overlap2,0/100 for10px/Overlap0,28/0 for16px/Overlap6. Every missing
+pixel is CPU-ineligible in the actual factory packet; actual reference ink confirms the unintended
+contact/overlap. This is not GPU stencil readback. No Reach arithmetic defect is established. Record
+before restoring the temporary test file whole and considering a separated geometry premise with
+all original width/short-Reach/outside assertions retained plus an explicit joined safety control.
 Whole4096 resampling and same-budget window refinement remain required OPEN engineering work.
 The reviewed ImageWarp scale-stage proposal shares one work account and prepares geometry before
 filtering/core allocation. Its isolated source grant is paused after actual71 failures, before any

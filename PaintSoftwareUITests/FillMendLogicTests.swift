@@ -837,28 +837,6 @@ final class FillMendLogicTests: XCTestCase {
                     fillColor: SIMD4(1, 0, 0, 1))), width: 96)
             }
             let off = try render(0), exact = try render(reach), tooShort = try render(short)
-            let diagnosticInk = stride(from: 3, to: prepared.rgba.count, by: 4).map { prepared.rgba[$0] != 0 }
-            let diagnosticSource = supportExterior(diagnosticInk, side: 96, seed: 16 * 96 + 16)
-            let diagnosticPacket = try VectorMendSupport.produce(prepared.support,
-                admission: .init(bytes: 64 * 1024 * 1024, work: 64_000_000))
-            let diagnosticEligible = supportEligible(diagnosticPacket, ink: diagnosticInk, source: diagnosticSource)
-            let diagnosticLow = 33 - Int(size / 2) + Int(overlap)
-            let diagnosticHigh = 33 + Int(size / 2) - Int(overlap)
-            let diagnosticBody = (34..<54).flatMap { y in (diagnosticLow..<diagnosticHigh).map { (x: $0, y: y) } }
-            let diagnosticAttached = size == 10
-                ? ((70 + Int(overlap))..<(80 - Int(overlap))).flatMap { y in (30..<40).map { (x: $0, y: y) } } : []
-            print("REACH_DIAGNOSTIC tuple", size, overlap, reach, short)
-            for (label, points) in [("body", diagnosticBody), ("attached", diagnosticAttached)] {
-                let missing = points.filter { !exact.isRed($0.x, $0.y) }
-                print("REACH_DIAGNOSTIC missing", label, missing.count, missing.map {
-                    "\($0.x),\($0.y):CPUeligible=\(diagnosticEligible[$0.y * 96 + $0.x])"
-                }.joined(separator: ";"))
-            }
-            for y in 64..<81 {
-                print("REACH_DIAGNOSTIC contact", y, (25..<43).map {
-                    diagnosticInk[y * 96 + $0] ? "#" : (diagnosticSource[y * 96 + $0] ? "." : "?")
-                }.joined())
-            }
             XCTAssertTrue(off.isRed(16, 16) && off.isBare(70, 34), "PREMISE: actual source owns paper but not the intentional hole")
             let low = 33 - Int(size / 2) + Int(overlap), high = 33 + Int(size / 2) - Int(overlap)
             for y in 34..<54 { for x in low..<high {
