@@ -106,7 +106,11 @@ Remove any now-unused snapshot binding whole. No separate unsuppress setter, dup
 new cache/state/format or weakened assertion. Existing TextBake459 and VectorTextPersistence two-
 invalidation oracle must pass, together with interactive-commit/atomic-failure coverage and cold
 TextSession edited-box visible-ink workflow. Native reproduction is the actual76aff failure, not a
-new speculative symptom. Source implementation/review/fault reversal remain pending.
+new speculative symptom. Source implementation/review/fault reversal remain pending. Before cold UI, improve ONLY the
+existing edited-box TextSession method's evidence: prelaunch landscape, assert its actual window is
+landscape (owner dimensions verified by the runner), and capture XCUIScreen.main before/open/after.
+Retain all original behavior/pixel oracles and4 methods; no wrapper test, app hook or shared-helper
+change. This closes the known app.screenshot landscape crop premise without weakening a product test.
 
 **New bounded graph-drag fix — recorded before harvest:** source83380 has three related lifecycle
 bugs: focus follows only the first moved frame; a nil readout leaves an old value visible; returning
