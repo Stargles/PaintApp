@@ -292,9 +292,10 @@ extension VectorMendSupport {
             private let width: Int, height: Int, maximum: Int
             private var inputs: [Input] = []
             private var unknown: [CGRect] = []
+            private var meter: Meter
             init(width: Int, height: Int, maximumRecords: Int, admission: Admission) throws(Failure) {
                 self.width = width; self.height = height; maximum = maximumRecords
-                var meter = Meter(admission: admission)
+                meter = Meter(admission: admission)
                 try meter.retainArray(Input.self, count: maximumRecords)
                 try meter.retainArray(CGRect.self, count: maximumRecords)
                 try meter.visit(maximumRecords)
@@ -316,7 +317,28 @@ extension VectorMendSupport {
                 let window = CGRect(x: 0, y: 0, width: width, height: height)
                 guard let transform else { try appendUnknown(window); return }
                 for element in canvas.elements where !canvas.suppressed.contains(element.id) {
-                    let known = canvas.known[element.id].flatMap { bounds -> CGRect? in
+                    var footprint = canvas.known[element.id]
+                    if footprint == nil && element.stroke == nil {
+                        switch element {
+                        case .fill(let fill):
+                            // Serialized input/work admission, not a claim about the opaque
+                            // unarchiver's native allocation peak. The bound retains no path.
+                            let inputBytes = fill.pathData.count
+                            try meter.visit(inputBytes)
+                            try meter.retain(inputBytes, stride: 1)
+                            guard CompositorBudget.hasHeadroom(for: inputBytes) else { throw .exceedsBudget }
+                            footprint = autoreleasepool {
+                                VectorCanvas.derivedFootprint(of: element, lowestResolution: 1)
+                            }
+                            meter.bytes -= inputBytes
+                        case .text(let text) where text.frame.autoSize:
+                            break // Glyph layout has no admitted work bound here.
+                        default:
+                            try meter.visit(1)
+                            footprint = VectorCanvas.derivedFootprint(of: element, lowestResolution: 1)
+                        }
+                    }
+                    let known = footprint.flatMap { bounds -> CGRect? in
                         let mapped = bounds.applying(transform)
                         guard mapped.minX.isFinite, mapped.minY.isFinite,
                               mapped.maxX.isFinite, mapped.maxY.isFinite else { return nil }
@@ -2939,7 +2961,7 @@ final class VectorCanvas {
     /// one level down.
     ///
     /// Strokes answer nil, which is not a limitation but the rule: see `inkOfArrivals(in:standing:)`.
-    private static func derivedFootprint(of element: VectorElement, lowestResolution: CGFloat) -> CGRect? {
+    fileprivate static func derivedFootprint(of element: VectorElement, lowestResolution: CGFloat) -> CGRect? {
         // The float32/antialias slack `addFill(canvasSpacePath:)` measured, in canvas points.
         let slack: CGFloat = 1
         switch element {
