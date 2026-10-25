@@ -95,6 +95,19 @@ restoration:0covered pixels versus1095 before editing. Root cause is UNPROVED; t
 equality/cache invalidation and commit ownership at immutable76aff before changing code or tests.
 Preserve actual `native/combined-normal478-76affba3-run01/`; no retry or green qualification yet.
 
+**Text commit ownership root cause — recorded before implementation:** read-only trace at76aff
+finds prepareInteractiveText verifies a detached copy with VectorCanvas.commitTextEdit, but publishes
+via live restoreElements. The live editingElementID/suppressed ID survives; ending the manager session
+alone cannot clear vector suppression, and unchanged element geometry does not invalidate its hidden
+memo. This regression entered the earlier99070b06 atomic-preparation refactor; it is independent of
+the new glyph cap. Reuse the existing atomic live commitTextEdit(editingID:element:) primitive at
+publication; preserve admission/copy preflight, staged fill→shape→text ordering and undo registration.
+Remove any now-unused snapshot binding whole. No separate unsuppress setter, duplicate invalidation,
+new cache/state/format or weakened assertion. Existing TextBake459 and VectorTextPersistence two-
+invalidation oracle must pass, together with interactive-commit/atomic-failure coverage and cold
+TextSession edited-box visible-ink workflow. Native reproduction is the actual76aff failure, not a
+new speculative symptom. Source implementation/review/fault reversal remain pending.
+
 **New bounded graph-drag fix — recorded before harvest:** source83380 has three related lifecycle
 bugs: focus follows only the first moved frame; a nil readout leaves an old value visible; returning
 inside initial tap slop can commit the earlier displacement. Identity ticks also need to replace
