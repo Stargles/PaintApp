@@ -10,12 +10,14 @@ is authorized by an old readiness answer: obtain fresh saved-scene readiness whe
 
 ## Current source and next actions — 2026-10-25
 
-Main/origin remain afd2030c. Latest accepted logic source is bddb83db; integration has advanced cold UI fixtures and remains
-unmerged/uninstalled. Root owns integration, independent evidence and ONE Mac native lease. Native
-is idle after normal effects121 and13 causal controls at8dcb, both root accepted. The last compiled
-product is a mutant: rebuild normal before UI/install. New vector transfer and solid-fill Blend
-fixture are harvested below; their native gates remain pending. Cold UI21 atc4df is18pass3fail;
-no install/final fast/full/performance qualification is claimed.
+Main/origin remain afd2030c; integration is unmerged/uninstalled. Latest accepted normal vector
+source is9fee1fcd:270/270 across9wholeclasses, zero failures/skips/expected failures and729 exact
+entries (root5b44b113). All13 deliberate vector transfer controls causally qualify29unique behavior
+statements/40case-bound references:58 mapped actual issues,6 later consequences excluded; root
+e26e4fc4 under native/vector-controls13-9fee1fcd-run01/. All source restored. Root owns ONE native
+lease; last compiled product is a mutant, so normal rebuild is mandatory. Cold UI21 atc4df remains
+18pass3fail; corrected fixtures and new cold PoseBake2/Mode1 4 are unrun. No install/final fast/full/
+performance qualification is claimed.
 All historical attempts remain at named immutable pins; do not retag them.
 
 **Actual root-accepted results:**
@@ -167,25 +169,38 @@ keep distant bands and restore observed before/committed masks via Undo/Redo. Fo
 This is201×61 classified samples, not every physical pixel, live-field equality or save/reopen.
 Runtime delivery/stability/owner pictures remain UNRUN. Vector control eligible-v2 receipt67a9160a
 preserves13recipes but excludes an impossible source-suppression target:40references/29IDs. Original
-13/30 packet remains historical; exact actual faults still required after healthy normal270.
+13/30 packet remains historical. Actual normal270 and13 causal controls now qualify at9fee1fcd,
+with source-suppression and nested unwraps excluded from behavior credit.
 
-**New bounded source findings awaiting implementation scope/peer:** current text omissions/nulls
-bypass existing known-text damage and silently produce empty/identity values (reportb6582fb1,
-receipt133f2e95 at0fb). Current TextObject bytes equal previous writerafd; propose strict required
-saved fields through existing LossySlot→loadDamage→SaveDamageGate, retain API defaults/explicit
-empty/legitimate nils, no blank-text repair/new validator/schema. Actual package control unrun.
-Graph grammar/creation-capacity audit is still finishing its spec/consumer trace; no fix authorized.
+**New bounded source findings, recorded before implementation:** saved-text omission scope is
+independently accepted (peerd57f89f0). Remove only21 required saved-field fallback/invalid-corner
+repairs through ordinary DecodingError and existing LossySlot→loadDamage→SaveDamageGate. Preserve
+API defaults, explicit empty values and4 legitimate optional fields; no schema/validator/new repair.
+The original256-package export has no editable text. Temporary OLD-product writer checkpoint75365af5
+has only one existing test-method delta; TextObject remains identical toafd/9fee. Capture actual
+ProjectStore package attachments and accept typed round-trip provenance before strict source edits;
+then delete temporary capture code whole. Writer capture/strict runtime are not run.
+
+Graph audit e181cc14/peers35dd576c and5f70039d confirms a direct self-parent can hide its subtree.
+Root accepts cc51444d's minimal existing resolvedContainer parent!=folderID guard plus extension of
+one existing characterization method: real nonblank image/leaf/panel uniqueness, no added method,
+state, schema or traversal. Harvest these TWO paths after this scope record; normal86 and one
+five-statement guard reversal/cold exposure remain unrun. Capacity is a separate design-only task:
+reuse existing maximum-input/direct-child truth and actual final destination/count for all creation,
+duplicate/transfer/group/promotion/Stack→Mix routes; preserve explicit existing effect setter behavior.
+No renderer truncation, fake UUID, silent reparenting, retained counter or one-off transfer cap.
 
 **Next gates, in order:**
 
 1. Diagnose actual UI21 three failures without weakening outcomes, then run normal rebuilt whole
-   Text5+GraphGesture6+Blend10 (21 methods), independently extract outcomes and LOOK whole pictures.
+   Text5+GraphGesture6+Blend10+PoseBake2+Mode1 4+Glare2 (29 methods), independently extract outcomes
+   and LOOK whole owner-size pictures. First capture old-product writer1 to unblock strict text.
    Then exact positive-source Graph3/Blend3/selected-text1 faults; actual reached assertions only.
 2. Finish scoped three effects corrections/review/logic controls and ordinary cold effects workflow.
    Effects55383dd6 has13 finite controls (11product/2premise) independently source-reviewed;
    first-growth5-picture fixture and removed redundant radius-identity loop only, production exactdf.
    Actual121/13 now qualify at8dcb; cold/final gates remain.
-   Qualify harvested vector transfer/undo source at shared existing owners: normal whole270 then13 meaningful controls.
+   Vector transfer normal270 and13 causal controls now qualify at9fee; cold drawn workflow remains.
    Drive stored-vector eraser Splatter/Undo/Redo; no flaky expected random field/new test hooks.
 3. Repin historical UI13/mask6-positive+11-fault packets to final source; LOOK positive pictures before
    faults. Preserve two-phase build→all-source-restore→test-without-building contract.

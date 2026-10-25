@@ -17,6 +17,20 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Direct folder self-parent hides its artwork; creators bypass fixed input limits — 2026-10-25
+
+Source audit e181cc14 and independent peers confirm two separate causes. Existing resolvedContainer
+excludes proper descendants but not equality, so F.parent=F drops its subtree from the render/panel
+projection. The recorded minimal cc51444d guard/test extension reuses that resolver, preserves proper
+isFolder descendant semantics, and adds no state/schema/traversal; native86/control/cold gates unrun.
+
+Creators and transfer destinations do not all consult existing canonical maxInputCount/direct child
+admission. A two-input Mix can receive a third child, which both renderers fold. Design one shared
+preflight of ACTUAL final destination/net child count across producers; preserve current effect setter
+behavior. Raster Duplicate goes to root while other transfers may keep their parent, and grouping/
+folder promotion/Stack→Mix need their actual final deltas. No renderer truncation, invented ID or
+silent reparenting. Capacity source implementation is not yet authorized; proposal pending.
+
 ## Missing saved text fields bypass the existing damage gate — 2026-10-25
 
 Read-only source0fb/reportb6582fb1/receipt133f2e95 traces required recipe.string missing/null to
@@ -26,8 +40,9 @@ text already reaches the existing damage owner. ID/frame/required typography def
 corner-count repair share this policy cluster. Source counterexample only; no actual damaged owner
 package or runtime reproduction claimed. Immediately previous writerafd has exact same TextObject
 bytes and emits required keys. Proposed strict current decoding reuses existing loss/damage/gate,
-keeps API defaults/explicit empty/legitimate nils; no new validator/schema/blank-text repair. Scope,
-peer and actual current/previous-writer package tests remain pending before source changes.
+keeps API defaults/explicit empty/legitimate nils; no new validator/schema/blank-text repair. Independent
+peerd57f89f0 accepts scope. Capture actual old-product writer package at75365af5 before strict source
+edits; original export has no text. Runtime/package/mutation/cold gates remain pending.
 
 
 ## Vector selection transfers lose cel pose and omit fresh undo payload — 2026-10-25

@@ -6,7 +6,9 @@ Integration remains unmerged/uninstalled; main/origin remain afd2030c. Root acce
 492/492 at0e215 and260/260 atbddb, zero failures/skips/expected failures. Logic26 qualifies36 intended
 statements and selection/seed5 qualifies10; actual source/device/method identities and729 immutable
 entries reconcile. Fill126/owner UI4/all29 controls qualify at83380 with whole pictures inspected.
-Named evidence and limits are in HANDOFF.md. Last compiled app is an effects mutant; new source requires a normal rebuild before UI/install.
+Named evidence and limits are in HANDOFF.md. Vector normal270/270 and13 deliberate controls qualify
+at9fee:29unique behavior statements,58mapped issues/6excluded consequences. Last compiled app is
+a vector mutant; new source requires a normal rebuild before UI/install.
 
 Current queue (items remain until merged):
 
@@ -15,7 +17,8 @@ Current queue (items remain until merged):
   public solid-fill6c5d1003 fixture harvested after root review, exact outcomes/fixed uniformity checks.
   Text4b060d05 harvested after independent review: clip existing colour ROI to actual visible paper
   (exact7320 margin samples); set public size before keyboard and preserve W/w physical key.
-  Whole Text5+Graph6+Blend10 and meaningful Graph3/Blend3/text1 UI controls remain pending.
+  Whole Text5+Graph6+Blend10+PoseBake2+Mode1 4+Glare2 (29) and meaningful Graph3/Blend3/text1
+  plus transfer UI controls remain pending.
 - Correct THREE scoped effects audit clusters via existing owners: cap radius before Int; normalize
   periodic angles/shared apron inputs; price actual missing GPU scratch/intermediate pictures plus
   readback at warm first-effect growth. Source55383dd6 independently7a1b6a17 reviewed and harvested7paths, old118 exact/four newmethods.
@@ -35,7 +38,8 @@ Current queue (items remain until merged):
   transfer refusal/ID preservation and normal rest-walk appearance; existing Bake policy stays.
   Sourcead1548d6 harvested after independent0241a072/root review: price actual prepared lists with
   VectorUndoCost through one shared standalone reversal, refuse enclosing brackets before tool
-  settlement, reuse existing end-frame clamp. Normal9classes270/13controls and cold UI pending. Existing
+  settlement, reuse existing end-frame clamp. Actual normal9classes270/13causalcontrols qualify at9fee;
+  cold UI pending. Existing
   parent/pose/pixel/undo/cost/eviction and cold controls required; independent43957eca design accepted.
 - Genuine remaining architecture coverage: vector tools/undo/render, graph evaluation, remaining
   fonts/panels/platform/RSS. Read prior reports before reopening anything; inventory is not review.
@@ -371,11 +375,17 @@ Inventory-only files are not reviewed code. New source is not called complete be
 - [ ] Resolve actual UI10 graph gesture delivery and text-colour safe-dismissal premise without
       weakening product oracles, then fresh whole-class runs and whole owner pictures.
 - [ ] Current saved text omission/null defaults: source reportb6582fb1/receipt133f2e95 shows a
-      required string can become empty without existing text-damage/save gating. Peer/scope pending;
+      required string can become empty without existing text-damage/save gating. Peer/scope accepted;
       remove saved required-field fallbacks through existing owners, preserve API defaults/explicit
       empty/legitimate nils. Current writer equals previousafd; no invented blank repair/schema.
-      Actual real-package/mutation/cold qualification required. Graph creation-capacity trace also
-      remains source-only pending current spec/consumer reconciliation.
+      Actual old-product writer capture1 at75365af5 must provide typed package provenance before strict
+      source edits; temporary capture delta is then removed whole. Original export has no text.
+      Real-package/mutation/cold qualification remains required.
+- [ ] Graph self-parent: harvest reviewed cc51444d TWO-path guard/test extension after recorded scope;
+      keep existing proper-descendant semantics, recover leaf/panel/pixels through one resolver. Normal
+      whole86, five-statement guard control and cold exposure remain unrun. Graph capacity remains
+      DESIGN ONLY: shared actual destination/net-child admission for every producer and Stack→Mix,
+      preserving existing effect setter behavior; no renderer truncation/fake ID/reparent/state.
 - [ ] Finish file-level/independent review, new affected zero-skip baseline, actual assertion mutants,
       exact final fast Debug/Release, lints/PBX/graph, cold workflows/pictures and paired performance.
       Then fresh owner save/unlock/export, signed clean Release/device checks and actual eraser cause.
