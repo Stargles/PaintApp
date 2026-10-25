@@ -279,13 +279,13 @@ final class RegionRepairLogicTests: XCTestCase {
     func testACutDeclaresARectangleOnlyWhenItCanMeasureOne() {
         let neverDrawn = Self.canvas(12)
         XCTAssertTrue(neverDrawn.erase(alongPath: Self.flick(over: 0), brush: Self.brush(),
-                                       size: 14, opacity: 1, mode: .cutPoints))
+                                       size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         XCTAssertEqual(neverDrawn.lastDamage, .everything,
                        "a cel with no measured footprints cannot bound its own damage")
 
         let drawn = Self.drawnCanvas(12)
         XCTAssertTrue(drawn.erase(alongPath: Self.flick(over: 0), brush: Self.brush(),
-                                  size: 14, opacity: 1, mode: .cutPoints))
+                                  size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         XCTAssertTrue(isRegion(drawn.lastDamage),
                       "Mode 2 replaces strokes in place and knows where they were")
 
@@ -303,7 +303,7 @@ final class RegionRepairLogicTests: XCTestCase {
     func testACutRepairedInPlaceIsByteIdenticalToTheFullWalk() throws {
         let canvas = Self.drawnCanvas(48)
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 19), brush: Self.brush(),
-                                   size: 14, opacity: 1, mode: .cutPoints))
+                                   size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         let repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, 1, "the repair must have run, or this pins nothing")
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0,
@@ -357,7 +357,7 @@ final class RegionRepairLogicTests: XCTestCase {
         let canvas = VectorCanvas(size: Self.canvasSize, elements: elements)
         _ = canvas.render()
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: cell), brush: Self.brush(),
-                                   size: 12, opacity: 1, mode: .cutPoints))
+                                   size: 12, opacity: 1, mode: .cutPoints, seed: 0))
 
         // **The operand check, on the list the repair is about to draw.** Two cold canvases over
         // the post-cut elements, one of them with the punch removed: if they agree, the punch has
@@ -428,7 +428,7 @@ final class RegionRepairLogicTests: XCTestCase {
         let canvas = VectorCanvas(size: Self.canvasSize, elements: elements)
         _ = canvas.render()
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 11), brush: Self.brush(),
-                                   size: 14, opacity: 1, mode: .cutPoints))
+                                   size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         let repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, 1)
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0)
@@ -491,7 +491,7 @@ final class RegionRepairLogicTests: XCTestCase {
         let nib = StrokeSamples([VectorSample(x: 40, y: 90, pressure: 1),
                                  VectorSample(x: 40, y: 91, pressure: 1)], channels: .pressureOnly)
         XCTAssertTrue(canvas.erase(alongPath: nib, brush: Self.brush(),
-                                   size: 8, opacity: 1, mode: .cutPoints))
+                                   size: 8, opacity: 1, mode: .cutPoints, seed: 0))
         let repaired = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, 1)
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0)
@@ -576,7 +576,7 @@ final class RegionRepairLogicTests: XCTestCase {
         let nib = StrokeSamples([VectorSample(x: 80, y: 100, pressure: 1),
                                  VectorSample(x: 80, y: 101, pressure: 1)], channels: .pressureOnly)
         XCTAssertTrue(canvas.erase(alongPath: nib, brush: Self.brush(),
-                                   size: 6, opacity: 1, mode: .cutPoints))
+                                   size: 6, opacity: 1, mode: .cutPoints, seed: 0))
         _ = canvas.render()
         XCTAssertEqual(canvas.regionRepairs, 1, "the repair must have run, or the count below is a full walk")
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0)
@@ -619,7 +619,7 @@ final class RegionRepairLogicTests: XCTestCase {
         _ = canvas.render()
 
         XCTAssertTrue(canvas.erase(alongPath: Self.sweep(), brush: Self.brush(),
-                                   size: 16, opacity: 1, mode: .cutPoints))
+                                   size: 16, opacity: 1, mode: .cutPoints, seed: 0))
         let drawn = (try XCTUnwrap(canvas.render()))
         XCTAssertEqual(canvas.regionRepairs, 0,
                        "a canvas-sized rectangle must take the slow path outright, not through a clip")
@@ -639,7 +639,7 @@ final class RegionRepairLogicTests: XCTestCase {
         moved.setTransform(CGAffineTransform(translationX: 5, y: 3))
         _ = moved.render()
         XCTAssertTrue(moved.erase(alongPath: Self.flick(over: 9), brush: Self.brush(),
-                                  size: 14, opacity: 1, mode: .cutPoints))
+                                  size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         _ = moved.render()
         XCTAssertEqual(moved.regionRepairs, 0, "a transformed cel cannot repair in place")
 
@@ -647,7 +647,7 @@ final class RegionRepairLogicTests: XCTestCase {
         hidden.suppressedElementIDs = [hidden.elements[0].id]
         _ = hidden.render()
         XCTAssertTrue(hidden.erase(alongPath: Self.flick(over: 9), brush: Self.brush(),
-                                   size: 14, opacity: 1, mode: .cutPoints))
+                                   size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         _ = hidden.render()
         XCTAssertEqual(hidden.regionRepairs, 0, "a cel with something suppressed cannot repair in place")
     }
@@ -658,7 +658,7 @@ final class RegionRepairLogicTests: XCTestCase {
     func testAnAppendAfterARepairIsStillIncrementalAndStillByteIdentical() throws {
         let canvas = Self.drawnCanvas(48)
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 19), brush: Self.brush(),
-                                   size: 14, opacity: 1, mode: .cutPoints))
+                                   size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         _ = canvas.render()
 
         let added = Self.mark(700)
@@ -702,7 +702,7 @@ final class RegionRepairLogicTests: XCTestCase {
         let canvas = Self.drawnCanvas(24)
         let snapshot = canvas.elements
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 9), brush: Self.brush(),
-                                   size: 14, opacity: 1, mode: .cutPoints))
+                                   size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         XCTAssertTrue(isRegion(canvas.lastDamage), "setup: the cut must have taken a region base")
 
         // **No render here, and that is the whole fixture.** The base is standing and unconsumed.
@@ -723,7 +723,7 @@ final class RegionRepairLogicTests: XCTestCase {
         // And the cel still works afterwards: the next cut repairs, and still draws the walk's
         // picture over a base taken from the list it actually belongs to.
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 9), brush: Self.brush(),
-                                   size: 14, opacity: 1, mode: .cutPoints))
+                                   size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         _ = canvas.render()
         XCTAssertEqual(canvas.regionRepairs, 1, "the cut after the replacement should repair")
         XCTAssertEqual(canvas.regionRepairsAbandoned, 0)

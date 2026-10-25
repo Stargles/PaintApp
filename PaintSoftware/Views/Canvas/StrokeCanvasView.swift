@@ -2580,7 +2580,7 @@ final class StrokeCanvasView: CanvasPlaneView {
             } else {
                 changed = canvasManager?.commitUniversalErase(runs: sampleRuns, brush: profile.preset,
                                                               size: gestureBrushSize, opacity: profile.opacity,
-                                                              mode: vectorEraserMode) ?? []
+                                                              mode: vectorEraserMode, seed: strokeSeed) ?? []
             }
             vectorContentChanged = changed.contains { $0 === vectorCanvas }
         } else if strokeTool == .eraser {
@@ -2591,7 +2591,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                     // Samples and brush, not bare points/radius: the eraser's footprint is the same
                     // pressure-driven capsule chain `BrushStamper` would stamp.
                     if vectorCanvas.erase(alongPath: run, brush: profile.preset, size: gestureBrushSize,
-                                          opacity: profile.opacity, mode: vectorEraserMode) {
+                                          opacity: profile.opacity, mode: vectorEraserMode, seed: strokeSeed) {
                         vectorContentChanged = true
                         foldGestureDamage(vectorCanvas)
                     }

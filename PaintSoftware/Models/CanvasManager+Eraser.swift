@@ -78,7 +78,7 @@ extension CanvasManager {
     ///   them; empty when it landed nowhere, in which case no step was recorded.
     @discardableResult
     func commitUniversalErase(runs: [StrokeSamples], brush: Brush, size: CGFloat, opacity: Double,
-                              mode: VectorEraserMode) -> [VectorCanvas] {
+                              mode: VectorEraserMode, seed: UInt64) -> [VectorCanvas] {
         var edits: [UniversalEraseEdit] = []
         for target in universalEraseTargets() {
             let before = target.canvas.elements
@@ -87,7 +87,7 @@ extension CanvasManager {
             for drawn in runs where !drawn.isEmpty {
                 guard let own = target.inOwnSpace(drawn, size: size),
                       target.canvas.erase(alongPath: own.run, brush: brush, size: own.size,
-                                          opacity: opacity, mode: mode) else { continue }
+                                          opacity: opacity, mode: mode, seed: seed) else { continue }
                 changed = true
                 changedInk = Self.folded(changedInk, with: target.canvas.lastDamage)
             }

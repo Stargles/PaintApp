@@ -898,7 +898,7 @@ final class PerfBaselineTests: XCTestCase {
         // the geometry, which would otherwise be charged entirely to gesture 0.
         _ = autoreleasepool {
             canvas.erase(alongPath: Self.eraseSceneGesture(0), brush: Self.eraseSceneEraserBrush,
-                         size: Self.eraseSceneEraserSize, mode: .erase)
+                         size: Self.eraseSceneEraserSize, mode: .erase, seed: 0)
         }
 
         let baseline = residentBytes()
@@ -910,7 +910,7 @@ final class PerfBaselineTests: XCTestCase {
                     let start = CFAbsoluteTimeGetCurrent()
                     let changed = canvas.erase(alongPath: Self.eraseSceneGesture(g),
                                                brush: Self.eraseSceneEraserBrush,
-                                               size: Self.eraseSceneEraserSize, mode: .erase)
+                                               size: Self.eraseSceneEraserSize, mode: .erase, seed: 0)
                     perGesture.append(CFAbsoluteTimeGetCurrent() - start)
                     if changed { committed += 1 }
                 }

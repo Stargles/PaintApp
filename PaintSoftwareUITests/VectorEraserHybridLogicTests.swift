@@ -120,7 +120,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let canvas = VectorCanvas(size: scenario.canvasSize, elements: elements)
         let changed = canvas.erase(alongPath: scenario.eraserSamples, brush: scenario.eraserBrush,
                                    size: scenario.eraserSize, opacity: scenario.eraserOpacity,
-                                   mode: .erase)
+                                   mode: .erase, seed: DabRandom.seed(for: scenario.eraserID))
         return (canvas, backdrop, changed)
     }
 
@@ -130,13 +130,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// gesture whole with `isEraser: true`. The vector side is whatever `eraseHybrid` decided to
     /// leave in the display list — the stroke plus a punch, a punch alone, or nothing at all.
     ///
-    /// The punch mints a fresh `id`, so it seeds a different dab RNG than the eraser stroke the raster
-    /// tier stamped. That is invisible only while the eraser brush has `scatter == 0` and
-    /// `rotationJitter == 0` — `BrushStamper.stampDab` consumes the RNG nowhere else for a round
-    /// shape — which is true of every brush this file compares. A scattering *eraser* is gated out of
-    /// deletion by `supportsCleanCut` but still produces a punch, and comparing one here would
-    /// measure the seed rather than the eraser; `testAScatteringEraserIsNotComparedBySeed` pins that
-    /// this restriction is understood rather than forgotten.
+    /// Both actual commits receive the scenario's field, independently of each element's identity.
     private func parityOfHybrid(_ scenario: ParityScenario) throws -> ParityReport? {
         let (canvas, backdrop, _) = erased(scenario)
         let texture = try RasterVectorParity.rasterBase(scenario, backdrop: backdrop)
@@ -504,10 +498,10 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let paint = RasterVectorParity.paintStroke(scene)
         let canvas = VectorCanvas(size: scene.canvasSize, elements: [.stroke(paint)])
         canvas.erase(alongPath: first, brush: scene.eraserBrush, size: scene.eraserSize,
-                     opacity: 1, mode: .erase)
+                     opacity: 1, mode: .erase, seed: DabRandom.seed(for: scene.eraserID))
         XCTAssertEqual(strokes(canvas, .paint).count, 2, "The first gesture should have split the line")
         canvas.erase(alongPath: second, brush: scene.eraserBrush, size: scene.eraserSize,
-                     opacity: 1, mode: .erase)
+                     opacity: 1, mode: .erase, seed: DabRandom.seed(for: scene.eraserID))
 
         let pieces = strokes(canvas, .paint)
         XCTAssertGreaterThanOrEqual(pieces.count, 2, "The second gesture should have cut again")
@@ -594,7 +588,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
 
         let canvas = VectorCanvas(size: scene.canvasSize, elements: [.stroke(paint)])
         canvas.erase(alongPath: short, brush: TestBrushes.hardRound, size: Self.wideNib,
-                     opacity: 1, mode: .erase)
+                     opacity: 1, mode: .erase, seed: DabRandom.seed(for: scene.eraserID))
         XCTAssertEqual(strokes(canvas, .paint).count, 1, "…so it must survive")
     }
 
@@ -622,7 +616,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                                   elements: [.stroke(RasterVectorParity.paintStroke(scene)),
                                              .stroke(second)])
         canvas.erase(alongPath: drag, brush: scene.eraserBrush, size: scene.eraserSize,
-                     opacity: 1, mode: .erase)
+                     opacity: 1, mode: .erase, seed: DabRandom.seed(for: scene.eraserID))
 
         let punches = strokes(canvas, .erase)
         XCTAssertEqual(punches.count, 1,
@@ -671,7 +665,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let canvas = VectorCanvas(size: scene.canvasSize,
                                   elements: [.stroke(target), .stroke(bystander)])
         canvas.erase(alongPath: scene.eraserSamples, brush: scene.eraserBrush, size: scene.eraserSize,
-                     opacity: 1, mode: .erase)
+                     opacity: 1, mode: .erase, seed: DabRandom.seed(for: scene.eraserID))
         XCTAssertEqual(strokes(canvas, .erase).count, 1, "The first erase should retain a punch")
 
         // Delete everything the punch was over, leaving it stranded.
@@ -682,7 +676,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         // Any later erase collects it — here, one over the bystander down the left edge.
         canvas.erase(alongPath: Self.ramp(from: CGPoint(x: 8, y: 96), to: CGPoint(x: 8, y: 124),
                                           count: 5, from: 1, to: 1),
-                     brush: scene.eraserBrush, size: scene.eraserSize, opacity: 1, mode: .erase)
+                     brush: scene.eraserBrush, size: scene.eraserSize, opacity: 1, mode: .erase, seed: DabRandom.seed(for: scene.eraserID))
         let remaining = strokes(canvas, .erase)
         XCTAssertEqual(remaining.count, 1,
                        "The stranded punch should be collected, leaving only the punch the second erase made")
@@ -706,7 +700,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [.fill(fill)])
         let gesture = Gesture.squareCut.samples
         XCTAssertTrue(canvas.erase(alongPath: gesture, brush: TestBrushes.hardRound, size: 16,
-                                   opacity: 1, mode: .erase),
+                                   opacity: 1, mode: .erase, seed: 0),
                       "Mode 1 has work to do on a strokeless layer")
         XCTAssertEqual(canvas.elements.filter { $0.stroke?.composite == .erase }.count, 1)
 
@@ -747,7 +741,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         XCTAssertEqual(strokes(canvas, .erase).count, 1)
 
         canvas.erase(alongPath: scene.eraserSamples, brush: scene.eraserBrush, size: scene.eraserSize,
-                     opacity: 1, mode: .erase)
+                     opacity: 1, mode: .erase, seed: DabRandom.seed(for: scene.eraserID))
         XCTAssertEqual(strokes(canvas, .erase).count, 2,
                        "One gesture, one element — and never more than one")
 
@@ -764,11 +758,55 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         XCTAssertTrue(report.isExact, "Stacked punches must still be exact: \(report.diagnostic)")
     }
 
-    /// The restriction `parityOfHybrid` documents, made explicit: a scattering eraser is admitted as a
-    /// punch (it is only barred from *splitting*), and the punch is a **new stroke** with an id and a
-    /// random field of its own rather than the gesture's. Pinning the behaviour here is what stops
-    /// someone later "fixing" the parity gap by comparing a scattering eraser and concluding the
-    /// hybrid is broken.
+    /// A tap has no refit or chord/curve difference: only the field can move its scattered removal.
+    /// Exercise the actual subtractive live scratch and the real Mode1 producer, then its saved list.
+    func testModeOneKeepsTheLiveGestureFieldThroughCommitAndArchive() throws {
+        var brush = TestBrushes.hardRound
+        brush.dab.scatterAcross = 1
+        let sample = VectorSample(x: 64, y: 64, pressure: 1)
+        let run = StrokeSamples([sample], channels: .pressureOnly)
+        let fill = VectorFillElement(path: CGPath(rect: CGRect(origin: .zero, size: Self.canvasSize), transform: nil),
+                                     color: CodableColor(red: 0.1, green: 0.3, blue: 0.9, alpha: 1))
+        for seed in [UInt64(0x84), 0x85] {
+            let canvas = VectorCanvas(size: Self.canvasSize, elements: [.fill(fill)])
+            let before = try XCTUnwrap(canvas.render())
+            func liveImage(seed: UInt64) throws -> UIImage {
+                let texture = try CanvasFixture.rasterTexture(before, size: Self.canvasSize)
+                let scratch = StrokeScratch(canvasSize: Self.canvasSize, role: .subtractive(backdrop: before),
+                                            texture: brush.texture)
+                var walk = BrushStamper.LiveWalk(seed: seed)
+                walk.stamp(to: sample, into: scratch, brush: brush, color: .black, brushSize: 8)
+                walk.finish(into: scratch, brush: brush, color: .black, brushSize: 8)
+                try scratch.commit(into: texture).get()
+                return try texture.renderToUIImage().get()
+            }
+            let live = try liveImage(seed: seed)
+            let wrongField = try XCTUnwrap(RasterVectorParity.report(
+                raster: live, vector: try liveImage(seed: seed ^ 1), size: Self.canvasSize))
+            XCTAssertFalse(wrongField.isExact, "PREMISE: this actual dab distinguishes the two fixed fields")
+            XCTAssertTrue(canvas.erase(alongPath: run, brush: brush, size: 8, mode: .erase, seed: seed),
+                          "PREMISE: the real Mode1 producer retains a punch over the fill")
+            let committed = try XCTUnwrap(canvas.render())
+            let report = try XCTUnwrap(RasterVectorParity.report(raster: live, vector: committed, size: Self.canvasSize))
+            XCTAssertTrue(report.isExact, "Lift must retain the live removal: \(report.diagnostic)")
+            let punch = try XCTUnwrap(canvas.elements.compactMap(\.stroke).first { $0.composite == .erase })
+            XCTAssertEqual(punch.seed, seed, "The punch keeps the pen-down field independently of its new identity")
+
+            let data = try JSONEncoder().encode(VectorCanvasData(from: canvas, imageFileNames: [:]))
+            let decoded = try JSONDecoder().decode(VectorCanvasData.self, from: data)
+            XCTAssertTrue(decoded.decodeReport.isClean, "PREMISE: the current saved display list decodes cleanly")
+            let restored = VectorCanvas(size: Self.canvasSize, elements: decoded.canvasSpaceElements(
+                resolvingImages: { _ in nil }, resolvingVideos: { _ in nil }))
+            XCTAssertEqual(restored.strokes.first { $0.composite == .erase }?.seed, seed,
+                           "Save/load retains the gesture field")
+            let reopened = try XCTUnwrap(RasterVectorParity.report(
+                raster: committed, vector: try XCTUnwrap(restored.render()), size: Self.canvasSize))
+            XCTAssertTrue(reopened.isExact, "The saved punch reopens without moving its removal: \(reopened.diagnostic)")
+        }
+    }
+
+    /// A scattering eraser is a distinct retained element and punches without deleting paint.
+    /// Its field ownership is checked through the live consumer and saved display list above.
     func testAScatteringEraserPunchIsANewStrokeRatherThanTheGesture() {
         var scattering = TestBrushes.hardRound
         scattering.dab.scatterAcross = 0.5
@@ -778,7 +816,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let punches = strokes(canvas, .erase)
         XCTAssertEqual(punches.count, 1, "A scattering eraser still punches")
         XCTAssertNotEqual(punches.first?.id, Self.eraserID,
-                          "The punch is its own stroke, with its own random field, so its dab scatter cannot be compared against a raster tier drawing from the gesture's")
+                          "The punch is its own display-list element while keeping the gesture's field")
         XCTAssertEqual(strokes(canvas, .paint).count, 1, "…and it must not delete")
     }
 

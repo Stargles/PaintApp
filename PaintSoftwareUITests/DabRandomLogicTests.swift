@@ -341,7 +341,7 @@ final class DabRandomLogicTests: XCTestCase {
 
         let canvas = VectorCanvas(size: CGSize(width: 260, height: 120), elements: [.stroke(stroke)])
         let nib: StrokeSamples = [VectorSample(x: 120, y: 40, pressure: 1), VectorSample(x: 120, y: 80, pressure: 1)]
-        XCTAssertTrue(canvas.erase(alongPath: nib, brush: TestBrushes.hardRound, size: 14, mode: .cutPoints))
+        XCTAssertTrue(canvas.erase(alongPath: nib, brush: TestBrushes.hardRound, size: 14, mode: .cutPoints, seed: 0))
         let pieces = canvas.strokes
         guard pieces.count == 2 else { return XCTFail("a mid-line cut should leave two pieces, got \(pieces.count)") }
 

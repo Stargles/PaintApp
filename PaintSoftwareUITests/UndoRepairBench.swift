@@ -203,7 +203,7 @@ final class UndoRepairBench: XCTestCase {
                 }
                 let cutStart = CFAbsoluteTimeGetCurrent()
                 let changed = canvas.erase(alongPath: samples, brush: Self.eraserBrush,
-                                           size: Self.eraserSize, mode: .cutPoints)
+                                           size: Self.eraserSize, mode: .cutPoints, seed: 0)
                 // What the cut declared, read before the render so nothing can have invalidated in
                 // between. This is exactly what `StrokeCanvasView.foldGestureDamage` accumulates and
                 // hands to both closures: Mode 2 commits once, so the gesture's union is this one

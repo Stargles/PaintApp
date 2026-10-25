@@ -239,7 +239,7 @@ final class LiquifyLogicTests: XCTestCase {
             samples: StrokeSamples(points: [CGPoint(x: 12, y: 72), CGPoint(x: 180, y: 72)]), seed: 19)
         let canvas = VectorCanvas(size: CGSize(width: 192, height: 160), elements: [.stroke(parent)])
         XCTAssertTrue(canvas.erase(alongPath: StrokeSamples(points: [CGPoint(x: 155, y: 72)]),
-            brush: TestBrushes.hardRound, size: 12, mode: .cutPoints))
+            brush: TestBrushes.hardRound, size: 12, mode: .cutPoints, seed: 0))
         let piece = try XCTUnwrap(canvas.elements.compactMap(\.stroke).first { $0.samples.positions.contains { $0.x < 40 } })
         let field = LiquifyField(gesture(points: [CGPoint(x: 70, y: 72), CGPoint(x: 70, y: 104)]))
         let moved = try XCTUnwrap(field.mapping([.stroke(piece)]).first?.stroke)

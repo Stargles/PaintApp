@@ -593,7 +593,7 @@ final class InkDistortLogicTests: XCTestCase {
         // Mode 1; the Mode 2 arm below makes the same claim through the other cutter.
         let midpoint = try XCTUnwrap(committed.stroke).samples.positions[15]
         XCTAssertTrue(canvas.erase(alongPath: StrokeSamples(points: [midpoint]),
-                                   brush: TestBrushes.hardRound, size: 40, opacity: 1, mode: .erase),
+                                   brush: TestBrushes.hardRound, size: 40, opacity: 1, mode: .erase, seed: 0),
                       "setup: the sweep cut the line")
         let pieces = canvas.elements.compactMap(\.stroke).filter { $0.composite == .paint }
         XCTAssertGreaterThan(pieces.count, 1, "setup: it really did split")
@@ -622,7 +622,7 @@ final class InkDistortLogicTests: XCTestCase {
         let canvas = VectorCanvas(size: CGSize(width: 400, height: 400), elements: [committed])
         let midpoint = try XCTUnwrap(committed.stroke).samples.positions[15]
         XCTAssertTrue(canvas.erase(alongPath: StrokeSamples(points: [midpoint]),
-                                   brush: TestBrushes.hardRound, size: 40, mode: .cutPoints),
+                                   brush: TestBrushes.hardRound, size: 40, mode: .cutPoints, seed: 0),
                       "setup: Mode 2 cut the line")
         let pieces = canvas.elements.compactMap(\.stroke).filter { $0.composite == .paint }
         XCTAssertGreaterThan(pieces.count, 1, "setup: it really did split")
@@ -1092,7 +1092,7 @@ final class InkDistortLogicTests: XCTestCase {
         ink = ink.markedPrecise()
         let canvas = VectorCanvas(size: CGSize(width: 80, height: 40), elements: [.stroke(ink)])
         XCTAssertTrue(canvas.erase(alongPath: StrokeSamples(points: [CGPoint(x: 32.0625, y: 20.0625)]),
-            brush: TestBrushes.hardRound, size: 8, mode: .cutPoints))
+            brush: TestBrushes.hardRound, size: 8, mode: .cutPoints, seed: 0))
         let pieces = canvas.elements.compactMap(\.stroke).filter { $0.composite == .paint }
         XCTAssertGreaterThan(pieces.count, 1, "PREMISE: the actual cutter made separate native fragments")
         XCTAssertTrue(pieces.allSatisfy { $0.precise && $0.lattice?.precise == true },

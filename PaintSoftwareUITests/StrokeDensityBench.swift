@@ -259,7 +259,7 @@ final class StrokeDensityBench: XCTestCase {
         }, channels: .pressureOnly)
         let erase = step("erase") {
             _ = canvas.erase(alongPath: erasePath, brush: Self.benchBrush,
-                             size: 40, mode: .erase)
+                             size: 40, mode: .erase, seed: 0)
         }
         XCTAssertTrue(erase.rewalked, "an eraser stroke must invalidate")
         XCTAssertLessThanOrEqual(erase.dabs, baseDabs + oneStrokeDabs * 2)
@@ -991,7 +991,7 @@ final class StrokeDensityBench: XCTestCase {
                 }
                 let t0 = CFAbsoluteTimeGetCurrent()
                 let changed = canvas.erase(alongPath: samples, brush: Self.eraserBrush,
-                                           size: Self.eraserSize, mode: .cutPoints)
+                                           size: Self.eraserSize, mode: .cutPoints, seed: 0)
                 let cutSeconds = CFAbsoluteTimeGetCurrent() - t0
                 let t1 = CFAbsoluteTimeGetCurrent()
                 _ = canvas.render()
@@ -1022,7 +1022,7 @@ final class StrokeDensityBench: XCTestCase {
                 }
                 let t0 = CFAbsoluteTimeGetCurrent()
                 let changed = canvas.erase(alongPath: samples, brush: Self.eraserBrush,
-                                           size: Self.eraserSize, mode: .cutPoints)
+                                           size: Self.eraserSize, mode: .cutPoints, seed: 0)
                 let cutSeconds = CFAbsoluteTimeGetCurrent() - t0
                 let t1 = CFAbsoluteTimeGetCurrent()
                 _ = canvas.render()

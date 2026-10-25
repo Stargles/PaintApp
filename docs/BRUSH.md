@@ -1269,6 +1269,11 @@ replayed — true of the raster tier, and beside the point on the vector one, wh
 scattering stroke under the pen and the stored stroke re-rolled it at lift. The two now address the same
 field; what is left between them is the refit's 0.25 pt of geometry, not the randomness.
 
+The Mode1 eraser's retained punch has a fresh element identity and keeps that same pen-down seed.
+The universal eraser passes one gesture field to every target and every admitted run. Both existing
+commit entry points require the seed explicitly; cutting modes accept it without changing their
+geometry. Selection-clipped runs retain their existing walk-phase behavior.
+
 **What is not preserved, correctly**: editing a brush's spacing changes which arc lengths carry a dab, so
 different randoms land. Those are different dabs. What is preserved is that no *existing* dab's randomness
 moves.

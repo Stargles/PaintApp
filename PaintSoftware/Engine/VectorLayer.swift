@@ -3708,9 +3708,10 @@ final class VectorCanvas {
     /// dabs are the parent's dabs — BRUSH.md §4 and TODO (85).
     ///
     /// `.erase` strokes are skipped: cutting a span out of one would *restore* the ink beneath it.
+    /// Mode1's retained punch keeps the pen-down `seed`; the geometry-only modes do not read it.
     @discardableResult
     func erase(alongPath canvasSpaceSamples: StrokeSamples, brush: Brush, size: CGFloat,
-               opacity: Double = 1, mode: VectorEraserMode) -> Bool {
+               opacity: Double = 1, mode: VectorEraserMode, seed: UInt64) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         guard !canvasSpaceSamples.isEmpty else { return false }
@@ -3731,7 +3732,7 @@ final class VectorCanvas {
         switch mode {
         case .erase:
             (changed, damage) = eraseHybrid(sweep: sweep, samples: localSamples, brush: brush,
-                                            size: localSize, opacity: opacity)
+                                            size: localSize, opacity: opacity, seed: seed)
         case .cutPoints:
             (changed, damage) = cutAlongFootprint(sweep: sweep)
         case .cutToIntersection:
@@ -3818,7 +3819,7 @@ final class VectorCanvas {
     /// eraser gesture, since steps 1 and 2 only fire for a hard brush at full opacity and pressure.
     private func eraseHybrid(sweep: VectorEraser.Sweep, samples localSamples: StrokeSamples,
                              brush: Brush, size: CGFloat,
-                             opacity: Double) -> (changed: Bool, damage: Damage) {
+                             opacity: Double, seed: UInt64) -> (changed: Bool, damage: Damage) {
         var changed = false
         var damage: Damage = .appended(count: 0)
 
@@ -3854,7 +3855,7 @@ final class VectorCanvas {
             let punch = VectorStroke(brush: brush,
                                      color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                      size: size, opacity: opacity, samples: localSamples,
-                                     composite: .erase)
+                                     composite: .erase, seed: seed)
             _elements.append(.stroke(punch))
             changed = true
             if case .appended(let count) = damage { damage = .appended(count: count + 1) }

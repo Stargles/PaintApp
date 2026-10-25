@@ -83,7 +83,7 @@ final class VectorEraserCommitLogicTests: XCTestCase {
                                   elements: scene.short.map(VectorElement.stroke) + [.stroke(scene.long)])
         let nib = Self.brush(size: 40)
         let dab = Self.gesture([centre])
-        XCTAssertTrue(canvas.erase(alongPath: dab, brush: nib, size: 40, mode: .cutPoints),
+        XCTAssertTrue(canvas.erase(alongPath: dab, brush: nib, size: 40, mode: .cutPoints, seed: 0),
                       "the dab covers twenty strokes and crosses a twenty-first")
 
         let survivors = canvas.strokes
@@ -108,7 +108,7 @@ final class VectorEraserCommitLogicTests: XCTestCase {
                                   elements: scene.short.map(VectorElement.stroke) + [.stroke(scene.long)])
         let nib = Self.brush(size: 40)
         let drag = Self.gesture((0...8).map { CGPoint(x: 128, y: 100 + CGFloat($0) * 7) })
-        XCTAssertTrue(canvas.erase(alongPath: drag, brush: nib, size: 40, mode: .cutPoints))
+        XCTAssertTrue(canvas.erase(alongPath: drag, brush: nib, size: 40, mode: .cutPoints, seed: 0))
         let survivors = canvas.strokes
         XCTAssertEqual(survivors.count, 2, "only the long stroke's two halves survive")
         XCTAssertTrue(stubs(in: canvas, gesture: drag, nibRadius: 20).isEmpty,
@@ -126,7 +126,7 @@ final class VectorEraserCommitLogicTests: XCTestCase {
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stroke(thick)])
         // Radius 4, crossing the centreline 10 pt from the stroke's end at x == 200.
         let drag = Self.gesture([CGPoint(x: 190, y: 100), CGPoint(x: 190, y: 156)])
-        XCTAssertTrue(canvas.erase(alongPath: drag, brush: Self.brush(size: 8), size: 8, mode: .cutPoints))
+        XCTAssertTrue(canvas.erase(alongPath: drag, brush: Self.brush(size: 8), size: 8, mode: .cutPoints, seed: 0))
         XCTAssertEqual(canvas.strokes.count, 1, "the 10 pt piece beyond the crossing is a stub and goes")
         guard let survivor = canvas.strokes.first else { return }
         XCTAssertEqual(survivor.samples.last?.x ?? 0, 186, accuracy: 0.01,
@@ -139,7 +139,7 @@ final class VectorEraserCommitLogicTests: XCTestCase {
         let thick = Self.stroke((0...10).map { CGPoint(x: 20 + CGFloat($0) * 18, y: 128) }, size: 40)
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stroke(thick)])
         let drag = Self.gesture([CGPoint(x: 110, y: 100), CGPoint(x: 110, y: 156)])
-        XCTAssertTrue(canvas.erase(alongPath: drag, brush: Self.brush(size: 8), size: 8, mode: .cutPoints))
+        XCTAssertTrue(canvas.erase(alongPath: drag, brush: Self.brush(size: 8), size: 8, mode: .cutPoints, seed: 0))
         XCTAssertEqual(canvas.strokes.count, 2)
         XCTAssertTrue(stubs(in: canvas, gesture: drag, nibRadius: 4).isEmpty)
     }
@@ -169,7 +169,7 @@ final class VectorEraserCommitLogicTests: XCTestCase {
         // below the stroke's ink (y ≤ 33).
         let miss = Self.gesture([CGPoint(x: 150, y: 60), CGPoint(x: 200, y: 60)])
         XCTAssertFalse(canvas.eraserTouchesInk(alongPath: miss, brush: nib, size: 20))
-        XCTAssertFalse(canvas.erase(alongPath: miss, brush: nib, size: 20, mode: .erase),
+        XCTAssertFalse(canvas.erase(alongPath: miss, brush: nib, size: 20, mode: .erase, seed: 0),
                        "an eraser over nothing must report that nothing changed")
         XCTAssertEqual(canvas.elements.count, 2, "nothing lands")
         XCTAssertTrue(canvas.strokes.allSatisfy { $0.composite == .paint }, "no punch is retained")
@@ -183,7 +183,7 @@ final class VectorEraserCommitLogicTests: XCTestCase {
         // Radius 10 at y == 42 reaches down to y == 32; the stroke's ink reaches up to y == 33.
         let graze = Self.gesture([CGPoint(x: 150, y: 42), CGPoint(x: 200, y: 42)])
         XCTAssertTrue(canvas.eraserTouchesInk(alongPath: graze, brush: nib, size: 20))
-        XCTAssertTrue(canvas.erase(alongPath: graze, brush: nib, size: 20, mode: .erase))
+        XCTAssertTrue(canvas.erase(alongPath: graze, brush: nib, size: 20, mode: .erase, seed: 0))
         XCTAssertEqual(canvas.strokes.filter { $0.composite == .erase }.count, 1, "the gesture is retained as a punch")
         XCTAssertEqual(canvas.elements.count, 3)
     }
@@ -244,7 +244,7 @@ final class VectorEraserCommitLogicTests: XCTestCase {
         let nib = Self.brush(size: 6)
         let steps = manager.history.undoStack.count
 
-        let landed = manager.commitUniversalErase(runs: [drag], brush: nib, size: 6, opacity: 1, mode: .cutPoints)
+        let landed = manager.commitUniversalErase(runs: [drag], brush: nib, size: 6, opacity: 1, mode: .cutPoints, seed: 0)
         XCTAssertEqual(landed.count, 2, "the two visible layers with ink under the gesture, and no other")
         XCTAssertTrue(landed.contains { $0 === canvases[stack.under] })
         XCTAssertTrue(landed.contains { $0 === canvases[stack.alsoUnder] })
@@ -269,7 +269,7 @@ final class VectorEraserCommitLogicTests: XCTestCase {
         let canvases = stack.canvases
         let drag = Self.gesture([CGPoint(x: 32, y: 20), CGPoint(x: 32, y: 44)])
         let nib = Self.brush(size: 6)
-        let landed = stack.manager.commitUniversalErase(runs: [drag], brush: nib, size: 6, opacity: 1, mode: .erase)
+        let landed = stack.manager.commitUniversalErase(runs: [drag], brush: nib, size: 6, opacity: 1, mode: .erase, seed: 0)
         XCTAssertEqual(landed.count, 2)
         for index in [stack.under, stack.alsoUnder] {
             XCTAssertEqual(canvases[index]?.strokes.filter { $0.composite == .erase }.count, 1,
@@ -281,13 +281,62 @@ final class VectorEraserCommitLogicTests: XCTestCase {
         }
     }
 
+    /// Two identical visible targets share one gesture field across both admitted runs.
+    /// The real manager owns one history step, whose snapshots must retain both actual pictures.
+    func testUniversalPunchSharesTheGestureFieldAcrossTargetsRunsAndUndo() throws {
+        let manager = CanvasFixture.manager()
+        var canvases: [VectorCanvas] = []
+        let size = CanvasFixture.canvasSize
+        for _ in 0..<2 {
+            manager.addVectorLayer()
+            let canvas = try XCTUnwrap(manager.layers.last?.cels.first?.vector)
+            canvas.addFill(canvasSpacePath: CGPath(rect: CGRect(origin: .zero, size: size), transform: nil),
+                           color: CodableColor(red: 0.1, green: 0.3, blue: 0.9, alpha: 1))
+            canvases.append(canvas)
+        }
+        var brush = TestBrushes.hardRound
+        brush.dab.scatterAcross = 1
+        let runs = [Self.gesture([CGPoint(x: 20, y: 20)]), Self.gesture([CGPoint(x: 44, y: 44)])]
+        let seed: UInt64 = 0x84
+        let before = try XCTUnwrap(RasterVectorParity.premultipliedBytes(
+            of: try XCTUnwrap(canvases[0].render()), size: size))
+        let steps = manager.history.undoStack.count
+        let landed = manager.commitUniversalErase(runs: runs, brush: brush, size: 8, opacity: 1, mode: .erase, seed: seed)
+        XCTAssertEqual(landed.count, 2, "The real visible-target walk reaches both identical canvases")
+        let first = try XCTUnwrap(RasterVectorParity.premultipliedBytes(
+            of: try XCTUnwrap(canvases[0].render()), size: size))
+        XCTAssertTrue(first != before, "PREMISE: the gesture actually removed visible ink")
+        for canvas in canvases {
+            let punches = canvas.strokes.filter { $0.composite == .erase }
+            XCTAssertEqual(punches.map(\.seed), [seed, seed], "Every target/run keeps the one pen-down field")
+            let pixels = try XCTUnwrap(RasterVectorParity.premultipliedBytes(
+                of: try XCTUnwrap(canvas.render()), size: size))
+            XCTAssertTrue(pixels == first, "Identical targets must receive identical textured holes")
+        }
+        XCTAssertEqual(manager.history.undoStack.count - steps, 1, "One gesture records one step for both targets")
+        manager.undo()
+        for canvas in canvases {
+            let pixels = try XCTUnwrap(RasterVectorParity.premultipliedBytes(
+                of: try XCTUnwrap(canvas.render()), size: size))
+            XCTAssertTrue(pixels == before, "One Undo restores both original pictures")
+            XCTAssertTrue(canvas.strokes.isEmpty, "Undo removes both retained punches")
+        }
+        manager.redo()
+        for canvas in canvases {
+            let pixels = try XCTUnwrap(RasterVectorParity.premultipliedBytes(
+                of: try XCTUnwrap(canvas.render()), size: size))
+            XCTAssertTrue(pixels == first, "Redo restores the same removal, rather than resampling a field")
+            XCTAssertEqual(canvas.strokes.filter { $0.composite == .erase }.map(\.seed), [seed, seed])
+        }
+    }
+
     /// A gesture that reaches no ink on any layer records nothing at all.
     func testUniversalEraseOverNothingRecordsNoStep() {
         let stack = Self.stack()
         let steps = stack.manager.history.undoStack.count
         let miss = Self.gesture([CGPoint(x: 32, y: 50), CGPoint(x: 32, y: 60)])
         let landed = stack.manager.commitUniversalErase(runs: [miss], brush: Self.brush(size: 6), size: 6,
-                                                        opacity: 1, mode: .erase)
+                                                        opacity: 1, mode: .erase, seed: 0)
         XCTAssertTrue(landed.isEmpty)
         XCTAssertEqual(stack.manager.history.undoStack.count, steps, "no step for a gesture that landed nowhere")
     }
@@ -356,7 +405,7 @@ final class VectorEraserCommitLogicTests: XCTestCase {
                                   elements: [.fill(fill), .stroke(crossed), .stroke(grazed), .stroke(far)])
         let nib = Self.brush(size: 40)
         XCTAssertTrue(canvas.erase(alongPath: Self.gesture([CGPoint(x: 128, y: 128)]), brush: nib, size: 40,
-                                   mode: .wholeStroke))
+                                   mode: .wholeStroke, seed: 0))
         let survivors = canvas.strokes
         XCTAssertEqual(survivors.map(\.id), [far.id],
                        "the crossed line and the grazed line go whole; the far one stays")
@@ -369,7 +418,7 @@ final class VectorEraserCommitLogicTests: XCTestCase {
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stroke(line)])
         // Radius 20 about y == 160 reaches y == 140; the line's ink ends at y == 131.
         XCTAssertFalse(canvas.erase(alongPath: Self.gesture([CGPoint(x: 128, y: 160)]), brush: Self.brush(size: 40),
-                                    size: 40, mode: .wholeStroke))
+                                    size: 40, mode: .wholeStroke, seed: 0))
         XCTAssertEqual(canvas.strokes.count, 1)
     }
 
@@ -396,7 +445,7 @@ final class VectorEraserCommitLogicTests: XCTestCase {
         let canvases = stack.canvases
         let drag = Self.gesture([CGPoint(x: 32, y: 20), CGPoint(x: 32, y: 44)])
         let landed = stack.manager.commitUniversalErase(runs: [drag], brush: Self.brush(size: 6), size: 6,
-                                                        opacity: 1, mode: .wholeStroke)
+                                                        opacity: 1, mode: .wholeStroke, seed: 0)
         XCTAssertEqual(landed.count, 2)
         XCTAssertEqual(canvases[stack.under]?.strokes.count, 0)
         XCTAssertEqual(canvases[stack.alsoUnder]?.strokes.count, 0)

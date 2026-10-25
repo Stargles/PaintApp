@@ -290,7 +290,7 @@ final class UndoRepairLogicTests: XCTestCase {
         let canvas = Self.drawnCanvas(48)
         let before = canvas.elements
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 19), brush: Self.brush(),
-                                   size: 14, opacity: 1, mode: .cutPoints))
+                                   size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         guard case .region(let cutRegion) = canvas.lastDamage else {
             return XCTFail("the fixture must cut and bound itself, or there is nothing to carry back")
         }
@@ -933,7 +933,7 @@ final class UndoRepairLogicTests: XCTestCase {
             let originalCount = canvas.elements.count
             let before = fingerprints(canvas.elements)
             XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 12), brush: Self.brush(),
-                                       size: 8, opacity: 1, mode: mode),
+                                       size: 8, opacity: 1, mode: mode, seed: 0),
                           "\(mode): the fixture must actually change the list")
             XCTAssertGreaterThan(canvas.elements.count, originalCount,
                                  "\(mode): the fixture must *add* elements — a cut that only deletes "
@@ -978,7 +978,7 @@ final class UndoRepairLogicTests: XCTestCase {
         let canvas = Self.drawnCanvas(48)
         let before = canvas.elements
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 19), brush: Self.brush(),
-                                   size: 14, opacity: 1, mode: .cutPoints))
+                                   size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         guard case .region(let cutRegion) = canvas.lastDamage else {
             return XCTFail("the fixture must cut and bound itself")
         }
@@ -1003,7 +1003,7 @@ final class UndoRepairLogicTests: XCTestCase {
         let canvas = Self.drawnCanvas(48)
         let before = canvas.elements
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 19), brush: Self.brush(),
-                                   size: 14, opacity: 1, mode: .cutPoints))
+                                   size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         guard case .region(let cutRegion) = canvas.lastDamage else {
             return XCTFail("the fixture must cut and bound itself")
         }
@@ -1038,7 +1038,7 @@ final class UndoRepairLogicTests: XCTestCase {
         let canvas = Self.drawnStripes()
         let before = canvas.elements
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 12), brush: Self.brush(),
-                                   size: 8, opacity: 1, mode: .cutPoints))
+                                   size: 8, opacity: 1, mode: .cutPoints, seed: 0))
         XCTAssertGreaterThan(canvas.elements.count, before.count,
                              "the fixture must split a stroke into pieces, not delete it — a deletion "
                              + "shortens the list and exercises the other arm entirely")
@@ -1086,7 +1086,7 @@ final class UndoRepairLogicTests: XCTestCase {
 
         // Cut one, through the stripe's middle: splits it, and deletes the short mark on that row.
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 12), brush: Self.brush(),
-                                   size: 14, opacity: 1, mode: .cutPoints))
+                                   size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         guard case .region(let firstCut) = canvas.lastDamage else {
             return XCTFail("the fixture's first cut must bound itself")
         }
@@ -1100,7 +1100,7 @@ final class UndoRepairLogicTests: XCTestCase {
         // Cut two, three rows down, over a mark shorter than the nib: deletes it outright. It leaves
         // no piece, so after this gesture nothing in the standing list is anywhere near where it was.
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 36), brush: Self.brush(),
-                                   size: 14, opacity: 1, mode: .cutPoints))
+                                   size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         guard case .region(let secondCut) = canvas.lastDamage else {
             return XCTFail("the fixture's second cut must bound itself")
         }
@@ -1153,7 +1153,7 @@ final class UndoRepairLogicTests: XCTestCase {
         let canvas = Self.drawnStripes()
         let before = canvas.elements
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 12), brush: Self.brush(),
-                                   size: 8, opacity: 1, mode: .cutPoints))
+                                   size: 8, opacity: 1, mode: .cutPoints, seed: 0))
         guard case .region(let cutRegion) = canvas.lastDamage else {
             return XCTFail("the fixture must cut and bound itself")
         }
@@ -1187,7 +1187,7 @@ final class UndoRepairLogicTests: XCTestCase {
         let canvas = Self.drawnStripes()
         let before = canvas.elements
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 12), brush: Self.brush(),
-                                   size: 8, opacity: 1, mode: .cutPoints))
+                                   size: 8, opacity: 1, mode: .cutPoints, seed: 0))
         guard case .region(let cutRegion) = canvas.lastDamage else {
             return XCTFail("the fixture must cut and bound itself")
         }
@@ -1250,7 +1250,7 @@ final class UndoRepairLogicTests: XCTestCase {
         let canvas = Self.drawnCanvas(48)
         let before = canvas.elements
         XCTAssertTrue(canvas.erase(alongPath: Self.flick(over: 19), brush: Self.brush(),
-                                   size: 14, opacity: 1, mode: .cutPoints))
+                                   size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         guard case .region(let cutRegion) = canvas.lastDamage else {
             return XCTFail("the fixture must cut and bound itself")
         }
@@ -1294,7 +1294,7 @@ final class UndoRepairLogicTests: XCTestCase {
         let redone = Self.drawnCanvas(48)
         let intact = redone.elements
         XCTAssertTrue(redone.erase(alongPath: Self.flick(over: 19), brush: Self.brush(),
-                                   size: 14, opacity: 1, mode: .cutPoints))
+                                   size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         _ = redone.render()
         let repairsAfterTheCut = redone.regionRepairs
         redone.restoreElements(intact, changedInk: CGRect(origin: .zero, size: Self.canvasSize))

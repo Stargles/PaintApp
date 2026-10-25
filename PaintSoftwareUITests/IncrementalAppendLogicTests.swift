@@ -241,13 +241,13 @@ final class IncrementalAppendLogicTests: XCTestCase {
         // Opacity below 1 forbids the clean cut (`VectorEraser.supportsCleanCut`), so this gesture
         // can only punch.
         XCTAssertTrue(soft.erase(alongPath: path, brush: Self.brush(), size: 12, opacity: 0.5,
-                                 mode: .erase))
+                                 mode: .erase, seed: 0))
         XCTAssertEqual(soft.lastDamage, .appended(count: 1),
                        "a punch is one `.erase` element on the end of the list")
 
         let cut = Self.canvas(4)
         XCTAssertTrue(cut.erase(alongPath: path, brush: Self.brush(), size: 40, opacity: 1,
-                                mode: .cutPoints))
+                                mode: .cutPoints, seed: 0))
         // **`.everything` here for a reason that is about this fixture**, not about Mode 2: since
         // TODO (41) a cut declares `.region`, but the rectangle is derived from what the strokes it
         // replaced last *painted*, and `cut` has never rendered so nothing has been measured. That
@@ -403,7 +403,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
         let path = StrokeSamples((0..<6).map { VectorSample(x: 12 + CGFloat($0) * 18, y: 44, pressure: 0.5) },
                                  channels: .pressureOnly)
         XCTAssertTrue(canvas.erase(alongPath: path, brush: Self.brush(), size: 12, opacity: 0.5,
-                                   mode: .erase))
+                                   mode: .erase, seed: 0))
         let incremental = (try XCTUnwrap(canvas.render()))
         XCTAssertLessThan(canvas.lastRenderDabCount, wholeLayerDabs / 2,
                           "an eraser gesture that only punches must not re-stamp the layer")

@@ -133,7 +133,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
 
         // …and the gesture really was over ink, or the assertions above are about nothing.
         XCTAssertTrue(canvas.erase(alongPath: gesture, brush: opaqueBrush(size: 12), size: 12,
-                                   mode: .cutPoints),
+                                   mode: .cutPoints, seed: 0),
                       "Setup: this drag must actually cut, or the test above proves nothing")
     }
 
@@ -152,10 +152,10 @@ final class VectorCutPreviewLogicTests: XCTestCase {
 
         let withPreview = build()
         _ = try previewed(withPreview, gesture: gesture, brush: brush, size: 12)
-        XCTAssertTrue(withPreview.erase(alongPath: gesture, brush: brush, size: 12, mode: .cutPoints))
+        XCTAssertTrue(withPreview.erase(alongPath: gesture, brush: brush, size: 12, mode: .cutPoints, seed: 0))
 
         let without = build()
-        XCTAssertTrue(without.erase(alongPath: gesture, brush: brush, size: 12, mode: .cutPoints))
+        XCTAssertTrue(without.erase(alongPath: gesture, brush: brush, size: 12, mode: .cutPoints, seed: 0))
 
         XCTAssertEqual(withPreview.strokes.count, without.strokes.count,
                        "The preview must not change how many pieces the cut produces")
@@ -188,7 +188,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
         let original = (try XCTUnwrap(build().render()))
 
         let cut = build()
-        XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 8, mode: .cutPoints),
+        XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 8, mode: .cutPoints, seed: 0),
                       "Setup: an 8pt eraser drawn across a 40pt line must still cut the geometry")
         XCTAssertEqual(cut.strokes.count, 2, "Setup: the line should end up in two pieces")
         let afterLift = (try XCTUnwrap(cut.render()))
@@ -229,7 +229,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
 
         let original = (try XCTUnwrap(build().render()))
         let cut = build()
-        XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 72, mode: .cutPoints))
+        XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 72, mode: .cutPoints, seed: 0))
         let afterLift = (try XCTUnwrap(cut.render()))
 
         let preview = try previewed(build(), gesture: gesture, brush: nib, size: 72).renderToUIImage().get()
@@ -265,7 +265,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
         let nib = opaqueBrush(size: 24)
 
         let cut = build()
-        XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 24, mode: .cutPoints))
+        XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 24, mode: .cutPoints, seed: 0))
         let afterLift = (try XCTUnwrap(cut.render()))
         let preview = try previewed(build(), gesture: gesture, brush: nib, size: 24).renderToUIImage().get()
 
@@ -299,7 +299,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
         let nib = opaqueBrush(size: 30)
 
         let cut = build()
-        XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 30, mode: .cutPoints))
+        XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 30, mode: .cutPoints, seed: 0))
         XCTAssertEqual(cut.strokes.count, 2, "Setup: the horizontal line's stub gone, its right piece and the vertical intact")
         let afterLift = (try XCTUnwrap(cut.render()))
         let preview = try previewed(build(), gesture: gesture, brush: nib, size: 30).renderToUIImage().get()
@@ -327,7 +327,7 @@ final class VectorCutPreviewLogicTests: XCTestCase {
         let nib = opaqueBrush(size: 12)
 
         let cut = build()
-        XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 12, mode: .cutPoints))
+        XCTAssertTrue(cut.erase(alongPath: gesture, brush: nib, size: 12, mode: .cutPoints, seed: 0))
         let afterLift = (try XCTUnwrap(cut.render()))
         let preview = try previewed(build(), gesture: gesture, brush: nib, size: 12).renderToUIImage().get()
 
