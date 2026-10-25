@@ -25,7 +25,7 @@ The A/B illustration was a proposal, not app output; owner does not need another
 
 **Independent unrelated gate:** actual422/422 passed, zero failures/skips/expected,18classes on owned
 M539E at b827cbfc. Root independently verified all728 byte/kind/mode records match subsequent clean
-records-only pins; do not retag the old binary. First29 fault targets are being prepared: brush14,
+records-only pins; do not retag the old binary. First29 fault targets comprise brush14,
 palette4, metadata4, curve7;14selectors/69 meaningful statements inherited from accepted107 map.
 Root must inspect exact recipes/source locations and explicitly grant one-Mac native execution.
 Stop on compiler/crash/setup failure or unexpected green; rebuild normal after mutations before UI.
@@ -36,31 +36,50 @@ post-state failures are preserved separately, not counted as additional primary 
 restored exact; post-fault normal422 at1195 passed422/422,0skip/expected, same39E/18classes. Evidence:
 `native/fault-remaining25-1195db75-run01/root-independent-qualification.json` and normal acceptance.
 
-**Assertion coverage is not finished:** the69 receipts describe53 unique statements;45 were actually
-hit by approved native failures. Root inventoried8 still-unproved statements (curve return ticks,
-endpoint/neighbor preservation, valid-palette bytes and archived damaged bytes). Prepare8 focused
-external controls; do not change product/tests or count unreached assertions. Inventory:
-`native/fault-remaining25-1195db75-run01/root-assertion-coverage-inventory.json`. Native lease RELEASED.
+**First29 assertion coverage complete at its named pins:** the69 receipts describe53 unique
+statements. Root independently verified all8 additional controls at79a reached their intended
+semantic failures: curve133/134/138/143/157/166, palette462 and damaged-Trash170. Earlier admissions
+remained valid; the later neighbor164 issue is retained without extra credit. Prior45 plus8 now covers
+all53 unique statements. All728 source entries restored exact, cleanHEAD, native lease RELEASED.
+Evidence: `native/gap8-79a272c4-run01/root-independent-qualification.json`. This does not qualify the
+remaining78 targets, new media assertions, or final fill. Old failed/interrupted attempts stay excluded.
 
 **Media final-owner fix integrated from a58498bd:** the final VT session is transferred to the decoder's
 existing serial queue; reset/rebuild/final release share one native wait/invalidate operation. Product
 +18/-4, test+150/0, exactly2files; all old8tests unchanged,3newmethods/16 meaningful assertions. Final
 cleanup captures session/operation, no decoder/client. New tests use deterministic queue fences rather
 than wait for the cleanup/completion being tested; inflight release uses two fences. No new queue,
-QoS/video/client/PBX change. Native compiler/11-method class and15 external recipe/16assertion controls
-remain UNRUN; source inspection/static lints are not qualification. Next normal18class slice should
-count425 (422+3), excluding FillMend. Root will reconcile actual static/native counts before faults.
-Reports/plans: `media-retirement-a58498bd-offline/`; sourceauthor branch preserved.
+QoS/video/client/PBX change. Actual normal425 at79a passed425/425, zero skips/failures/expected,
+18classes on owned39E, all old422 plus exactly3 new methods. Root independently read the actual
+xcresult/static census, fresh H264 compilation in both targets/new test source and all728 exact bytes.
+Five runtime QoS warnings remain (four native VT waits on decoder worker, one VideoFrameReader test);
+43 compile warnings retained. No suppression or QoS change. Receipt:
+`native/media-normal425-79a272c4-run01/root-independent-acceptance.json`.
+
+Next prepare and run the reviewed media15 production recipes as16 selector-cases/16 distinct assertion
+targets against unchanged source and the actual425 baseline. Root conversion/RAM review:
+`media-retirement-root-review-79a272c4/`. R10 retained invalid-but-CF-live native-session stress goes
+LAST on the owned simulator; crash/setup/deadlock is excluded, never assertion credit. No expected
+literal or test-source mutation. Root reviews preparation before granting one native lease. Rebuild
+normal after all mutation batches before UI/install; do not repeat normal425 merely between unchanged
+source fault tranches. Remaining78 prepared audit targets follow. Sourceauthor branch preserved.
 
 **Fill design remains unproved, no new product patch:** independent finite models reject tangent-only
 or nearest-face shortcuts (sharp corners, non-nearest unfilled contacts and gapped centerlines whose
 physical ink is closed). Global min/max chronological dab IDs can also withhold an entire retraced
 interior stem. Those variants are not approved for implementation. One source-keyed protected-footprint
-stencil with complete parameter-local support certificates is now being designed through existing
-brush rendering; unknown joins protect whole contributors. Real CPU/GPU source availability, full
-coverage, cache invalidation and bounded cost must be concrete before coding. No second renderer or
-new planar-graph subsystem is assumed. Reports: `vector-mend-independent-proof/` and current-vector
-seam feasibility reports. Current failed321 remains unshippable until replaced and qualified.
+stencil with complete parameter-local support certificates is being built through existing brush
+rendering in isolated PaintApp-s54-vector-mend-reference (scope record24562dc1); proof agent reviews
+independently. This is the actual canonical footprint/contact/span producer, not a product acceptance.
+Complete contributor closure covers all local support, including buried unknown/nonlocal branches;
+only unsafe target footprints are protected. True path derivative differs from held brush direction.
+GPU contacts must distinguish physical RGBA INK from synthetic gap-closing hairlines and require
+actual OPEN plus SOURCE at non-gate boundaries. Tagged contacts and known/protected stencil bits
+avoid a second source formula/readback. One source-keyed stencil reuses current scratch only after
+its prior owner finishes; exact aliasing, checked memory/work admission and cold/hot performance
+remain gates. No second renderer, global ID interval or new planar graph. Reports:
+`vector-mend-independent-proof/` and current-vector seam feasibility support-patch proposal. No fill
+native grant yet; failed321 remains unshippable until wholly replaced and qualified.
 
 
 **Device:** install is off immediate priority; owner authorizes future qualified installs. Review
