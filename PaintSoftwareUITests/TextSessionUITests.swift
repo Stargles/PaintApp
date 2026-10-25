@@ -103,6 +103,7 @@ final class TextSessionUITests: PaintUITestCase {
         rectangle.tap()
         let words = wordsWindow(in: host)
         let written = try inkReading(canvas, in: words)
+        XCTAssertGreaterThan(written.ink, 40, "PREMISE: visible text is present before reopening")
         attachScreenshot(XCUIScreen.main, "text-edit-1-before-reopening")
         dragInPoints(app, from: CGPoint(x: boxTopLeft.x - 0.03 * host.width, y: boxTopLeft.y - 0.015 * host.height),
                      to: CGPoint(x: boxTopLeft.x + 0.38 * host.width, y: boxTopLeft.y + 0.07 * host.height))
