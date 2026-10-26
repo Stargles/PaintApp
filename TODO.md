@@ -49,7 +49,8 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   signing renewal, or resolve automatic old-main downgrade risk. Remove completed items WHOLE.
 
 Current integration730source/PBX1325/runnable5412fast6008full. Video67bd normal11/control1 are closed;
-the exact3 Undo logic controls hold the sole native slot after normal70 passed70/70. Exact evidence/current
+the normal rebuilt public Undo4 workflow holds the sole native slot; normal70 and3 logic controls
+are closed at their actual pins. Exact evidence/current
 lease live in HANDOFF.md and `~/PaintWork/s54-final-qualification/root-next-gates.json`.
 Owner rulings remain point-only vector Liquify; vector batch mending includes attached strokes but
 protects uncertain joins/outside outline; saves keep newest clock-bucket versions. Deferred features
@@ -109,8 +110,8 @@ Actual whole CuttingModes4 atb60 is3pass/1intended thumbnail failure, with inspe
 landscape pictures. Undo restores A while current-view callback resolves B, leaving A's tile cut.
 Source1c99512c reuses existing cel ID, lookup and registerVectorElementsUndo; duplicate view
 closures are removed and the generic helper moves +Text→+Undo. No new state/service/renderer or
-respring attribution. Independent peer accepted source. Normal logic70 passed70/70;3 logic controls are running.
-Public4/public1 and final integration remain pending.
+respring attribution. Independent peer accepted source. Normal logic70 passed70/70 and3 controls qualify5 contracts. Public4 is running; public1 and final
+integration remain pending.
 
 The completed CuttingModes4 run atb60 reached the intended public failure at526 after CutA and
 scrubbingB. All earlier ink/tile/history premises passed; ReturnA/Redo/B outcomes were unreached.
@@ -363,8 +364,8 @@ Inventory-only files are not reviewed code. New source is not called complete be
       with0 tests, exposing candidate-interface warnings. The three-prefix successor07a was
       interrupted on new cache/factory warnings (operator cancellation, not completed compiler
       failure). Both annotation candidates stay UNHARVESTED: the coherent pixel/primitive boundary
-      is larger and no runtime defect is proved. Keep the source triage, separate two dead-local
-      deletions, and finish drawn-workflow gates before considering a wider isolation migration.
+      is larger and no runtime defect is proved. Keep the source triage; the two dead-local
+      deletions are harvested alone ate88a25ab. Finish drawn-workflow gates before considering a wider isolation migration.
       No automatic cascade, blanket namespace opt-out, new locks or actor hops.
 - [ ] Verify the new source-only Tap-selection candidate before a fix: VectorHitTest uses a circular
       pressure-one radius/outline for noncircular tips. A rotated100-point square dab has visible

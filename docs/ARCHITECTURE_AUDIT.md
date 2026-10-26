@@ -21,8 +21,12 @@ The per-cluster prepared/unqualified notes below are historical at their named i
 Current component/native/fault status is in HANDOFF.md and its immutable evidence references; do not
 reopen a qualified finding solely because an old entry says pending. Coverage remains bounded:
 FontLibrary384/TextSettings25 whole lines additionally reviewed at8dcb without a new concrete defect;
-remaining typography/archive/panel and graph/tool file gaps stay open. External root font receipt
-78ff10a8 and coverage-gap-reconciliation-5b8e5738 distinguish review from inventory.
+remaining typography/archive/panel and graph/tool file gaps stay bounded. External root font receipt
+78ff10a8 and coverage-gap-reconciliation-5b8e5738 distinguish review from inventory. A further source-only
+pass ate88a25ab covers selected graph editor close/context/menu/subscription and target/evaluation
+ownership ranges, without a new demonstrated defect (external graph-editor-lifecycle-e88a25ab.md).
+It does not certify every curve equation or UIKit teardown/interleaving. The concrete curve-flattening
+integer-conversion defect is recorded separately in TODO/BUGS before its minimal correction.
 
 ## Findings queue
 
@@ -234,8 +238,10 @@ Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/bru
 
 ## Current limits
 
-The subagents reported account usage limits; their work is committed as WIP and must not be merged
-or installed as qualified. Root owns the only native slot. No new device operation has occurred.
-Large residency/transport changes need coherent ownership designs; a lazy decode or latest-output slot
-alone does not bound visited dirty cels or queued input. Capacity arithmetic is not measured RSS.
-The old parallel test script is a prune candidate only after checking live operational references.
+Component logic and deliberately broken controls are qualified only at their recorded pins. Final
+assembled-source Debug/Release, affected cold UI and paired performance gates remain open; root owns
+one native slot. Large residency/transport changes retain their existing coherent owners and limits.
+Counted capacities are not process RSS or an explanation of the iPad respring. Compiler ownership
+annotations that expose a broader unreviewed pixel/primitive boundary remain unharvested; only two
+side-effect-free unused locals were pruned. No speculative actor migration or platform-memory claim
+is part of the current fixes. Real-link and physical erasing measurements still require the device.

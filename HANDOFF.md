@@ -91,10 +91,10 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   sweep through the existing finger synthesizer. Temporaryfb87 is clean/source-prepared and exactdiff
   peer675d2f20 accepted; its one-selector experiment remains UNRUN/ungranted.
   Keep four attempts, original .005/50% and all drawing assertions; no product hook/controller state.
-- Sole native slot is Vector's exact3 Undo logic controls at1c99512c on56C, grant9812ab9c.
-  Its normalwhole70 passed70/70, zero failure/skip/expected; root independently reconciled IDs,
-  source730 and device. Original grant helper/native hash field mismatch has an immutable extraction-
-  only addendum; actual native argv exactly matched the already-frozen proposal. Public4 is unrun.
+- Sole native slot is Vector's normal rebuild+whole public4 at1c99512c on56C, grant1e589d63.
+  Its normalwhole70 passed70/70; exact3 logic controls qualify5 application contracts, root
+  causal632b760f, all730 restored and children joined. Root independently reconciled IDs/device. Original grant helper/native hash field mismatch has an immutable extraction-
+  only addendum; actual native argv exactly matched the already-frozen proposal. Public4 is running; public1 remains unrun.
   4B33/39E remain shut; no physical/lifecycle/environment action is granted.
 - Permanent startup normal59 passed59/59 at60427 (57 whole logic +2 explicit old Gallery methods,
   whole class3), root5283dbb2. Four original controls are assertion-red/root partially accepted;
@@ -124,7 +124,8 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   across Undo/Redo with real cold B renders. Author c34's cached-B operands are superseded unrun.
   Harvest only4 source/test paths, exclude3 author precode docs; packet69fca5cc/addendum21e44119.
   Independent source peer b6a66de2 accepted the existing-owner patch and cold B render checks.
-  Logic70 passed70/70 and the3 logic controls are running; public4/public1 remain unrun. No fix is
+  Logic70 passed70/70,3 logic controls qualify5 contracts, and whole public4 is running; public1
+  remains unrun. No fix is
   yet harvested or qualified. Earlier4432 and all baseline pictures/results remain immutable.
 
 ### Newly recorded bounded numeric audit lead
@@ -145,8 +146,8 @@ warnings surfaced. Exact three-prefix successor07a was deliberately interrupted 
 factory warnings652–654 (operator SIGINT/exit75, not a completed compiler failure;0 tests). All730
 source restored/children joined; completionfaab3917. Further opt-outs reach a materially larger
 existing pixel/primitive owner boundary. No runtime defect was established, so do not harvest
-partial annotations or automatically cascade through protocols/renderer classes. Bake is separating
-only the two genuinely dead-local deletions. Future warning-only builds must finish collecting
+partial annotations or automatically cascade through protocols/renderer classes. Root harvested only the two genuinely dead-local deletions ate88a25ab; both initializers are
+side-effect-free, no actor annotations are included. Future warning-only builds must finish collecting
 full diagnostics, then stop source expansion for review; do not cancel on a warning alone.
 
 Tap audit found actual support outside the circular hit/outline (source-only rotated-square witness).
@@ -223,3 +224,11 @@ containers/artwork/products/results preserved. No global shutdown, erase or broa
 
 Deferred, written not researched: future interpolation overhaul, multi-cel22, linear-light10,
 audio28/video30, dropped brush importers37, real-link streaming27stage5 owner/laptop.
+
+### Checkout/resource housekeeping
+
+Eight superseded historical diagnostic checkouts were removed after proving clean status and zero
+ignored/untracked data. Their branches/Git objects and all external results/Products/artwork remain.
+External resume-20261026/finished-diagnostic-worktree-cleanup-receipt.json lists exact paths/pins and
+reconstruction. No active/future a140/fb87/Undo/numeric/benchmark tree was removed. Fetch/all110tmp
+branch logs were verified atbd8aa8ad; origin/main remainsafd2030c.
