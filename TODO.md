@@ -36,15 +36,17 @@ that the final combined audit build has passed.
    a temporary test-only stage discriminator (three64²images) preserving the original probe/tolerance/
    assertion: observe actual paint/CTMs, direct moved Frozen draw versus flatten, and one shared raw
    CGGradient under native CTM versus mapped identity. No product change or CG algorithm claim yet.
-   Measured public fixture corrections0c are running as two isolated UI checks.
+   Measured public fixture corrections0c passed both isolated UI checks; root inspected all5 whole
+   pictures. Temporary diagnostic274 is running; no gradient logic qualification or harvest yet.
 3. Resize: one operation phase separates immediate safety locking from visible loading progress,
-   using the existing worker and presentation task. Safe successor e3fd is source-only; model/fault
+   using the existing worker and presentation task. Current successor546 is source-only; model/fault
    and genuine public progress/no-flash observation remain. Do not restore blocking PNG work.
 4. Tap selection: canonical brush geometry correction is integrated at3219c8b4. Model37, public8,
    Release benchmark1 and24 deliberate-failure cases passed at their recorded component pins; root
    inspected the independent square selection/Clear pictures. Final combined checks remain.
 5. Export: correct stale destination results and immutable file ownership together. Current proposal
-   preserves artist filenames and bounds temporary storage; old regressions/implementation are pending.
+   preserves artist filenames; old regressions f270 are prepared. Verify consumer lifetime and storage
+   cleanup before implementing; a copy-only transfer declaration alone does not prove file lifetime.
 6. Saved group metadata: remove unsupported nested legacy defaults only after old rejection proof
    and a real nonempty previous-writer roundtrip. Legal omission of an empty registry stays. Old6fb
    witness28c is source-only; no source/artwork repair has run and no interpolation redesign is in scope.

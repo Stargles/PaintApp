@@ -28,8 +28,10 @@ Use the three existing agents; all source work stays in separate trees. No physi
 
 ### Current native and source work
 
-- **Native now:** gradient public fixture0c selected2 under grantaf3ff96b/supervisor86199. Root-only
-  Mac lease; no other compiler, staging, lifecycle or environment mutation until joined/source730 exact.
+- **Native now:** temporary gradient render-stage diagnostic274 selected1, grant in its42d2 packet,
+  supervisor44715. Root-only Mac lease; all other native/staging/lifecycle work waits for join.
+  Public fixture0c selected2 JOINED GREEN2; root reconciled actual730/IDs/device/argv and LOOKed all5
+  whole originals (3gradient landscape,2rectangle portrait). No Undo-picture LOOK claim; no logic pass.
 - **Tap closed/harvested:**756 logic37/public6+bench1/Release1 GREEN. Independent cold square d7fa
   normal8 GREEN and ROOTLOOK3 whole originals.17logic controls23statements accepted78117db7;
   public2/benchmark5 controls7 accepteda8206a35 for11statements,4extras0credit, missing-selection
@@ -41,13 +43,15 @@ Use the three existing agents; all source work stays in separate trees. No physi
   `affine-gradient-reference-normal1-50873701-run01/root-attachments/root-whole-look-and-pixels.json`.
   Bake traces renderer/affine/flatten. Original scalar mapper failure and corrected current API must
   get truthful causal proof; no matched-target attribution from earlier unequal-format assumptions.
-  UI0c source fixes only measured toolbar/dock obstruction (portrait leak refuted), same actual
-  gestures/probes/outcomes. Whole294/3logic1public controls remain pending; no gradient harvest.
+  UI0c fixes only measured toolbar/dock obstruction (portrait leak refuted), same gestures/probes/
+  outcomes, and its selected2 now pass. Temporary diagnostic274 retains original2images/2tolerance;
+  other729 exact; all3extraimages retire WHOLE. Whole294/3logic1public controls remain pending.
 - **Resize:** unchanged warm2 gave1pass/1fail: old raster same-turn/no-busy assumptions obsolete;
   announced500-yield wait warm-passed but is not reliable queue completion. Root recorded0bc then
   accepted source designc78. Converter source381→safe test-onlye3fd uses ONE published phase,
   derived existingisResizing, existing LatestWins atomic landing, whole-editor hit-test block,
-  captured-ID existingviewtask.47static methods, source730; normal/control/public appearance UNRUN.
+  captured-ID existingviewtask. Current546 adds the actual painted public resize/Undo workflow;
+  normal47/public2of14 and11finite controls prepared, source730; all native/recording remains UNRUN.
   Do not execute unsafe derived-safety mutant on381's stale second-resize fixture; e3fd attemptsFlip.
   Bake independent peer found no scoped blocker; no no-flash/visible-progress claim without video.
 - **Saving:** oldfd8 selected1 actual landing304 RED plus downstream unwrap306(0credit), root1e8bd7a8.
@@ -72,7 +76,10 @@ Use the three existing agents; all source work stays in separate trees. No physi
   owner asphasepayload, unique private parent/unchanged artistfilename, retained consumers/current
   product publication and owned Share handoff. Need verify Share framework lifetime contract and
   bounded cleanup; no implementation/oldnative yet, no extra service or unbounded completed-file pile.
-  Existing export run/offMain cancellation fences are healthy; do not re-fix them.
+  Existing export run/offMain cancellation fences are healthy; do not re-fix them. Old regressions
+  f270d7e7 are source-only (selected2/whole26), preserving24 old methods and all production bytes.
+  Apple copy-only transfer semantics do not yet prove source-owner lifetime through the system copy;
+  do not implement deinit cleanup on an assumed ShareLink guarantee.
 - **Group legacy cleanup:** root8a/c6 recorded unsupported nested MotionGroup defaults. Bake report
   2f0ecdec: all4fields existed/emitted since firstcbdae859, installed6fb file exactcurrent; parent
   omission for empty registry LEGAL and remains. All250 protected manifests omitgroups, none is a
@@ -108,9 +115,8 @@ O(N) input storage. Do not reopen implemented findings from stale lower queue pr
 
 ### Next gates, in order
 
-1. Tap d7fa qualification and exact harvest are closed. Preserve3219source and868 curve cap.
-   Public old-scalar/Clear and output-asserted benchmark control proposals need separate grants.
-   Preserve **868's curve cap in StrokeGeometry's tail** when harvesting Tap upper hunks.
+1. Tap d7fa qualification and exact harvest are closed, including actual7 public/benchmark controls.
+   Preserve3219source and **868's curve cap in StrokeGeometry's tail**.
 2. Resolve actual7e normal294 five RED outcomes without weakening checks; inspect whole captures; qualify
    3logic/public1 real-owner faults. No reuse of old0ab279 as an actual run. Then exact source harvest.
 3. Opacityfb87 held-thumb selected1 is UNRUN. Readiness893389b8 remains exact. Root ready ONLY4B33,
