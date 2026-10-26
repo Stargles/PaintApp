@@ -17,6 +17,16 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Reduced fill-window preview test produces no preview — 2026-10-26
+
+Actual fill-reuse116 three-class47 run:46pass/1fail. All19 WindowSurfaceView checks, including the
+new real layer owner, pass. Existing FillWindowLogicTests.testAFillPastTheBudgetLandsAtCanvasScaleThroughTheWindow
+fails its unwrap of fillLastRender after an exact120² budget/queue sync/fixed0.8s settle. The pure
+manager fixture does not instantiate the changed LayerFillView. This is an unresolved setup/product
+boundary, not proof of a user-visible failure or a surface-reuse regression. Trace admission and
+delivery before changing code; no increased delay, retry or reduced assertion. Original result:
+`s54-final-qualification/native/layer-fill-reuse-logic47-11633c53-run01`. The47 run is not GREEN.
+
 ## Package resource names can point outside their package — 2026-10-26
 
 Bounded source reviewb431481b/cba09da0: ProjectPackageLayout.resolve/existingURL accepts slash-separated

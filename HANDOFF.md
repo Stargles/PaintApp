@@ -28,7 +28,9 @@ Use the three existing agents; all source work stays in separate trees. No physi
 
 ### Current native and source work
 
-- **Native lease:** fill116 three-whole-class47, session15082/helper99096. Previous gradient public1
+- **Native lease:** fill116 three-whole-class47 joined1/native65:46pass/1fail. All19surface tests
+  pass; existing reduced-budget FillWindow preview unwrap fails. Trace separately before any change,
+  no retries/delay inflation or GREEN47 claim. Next native Export542 focusedShare1. Previous gradient public1
   joined0/source730restored but intended colour targetUNREACHED: extension witness failed first.
   Investigation source/results-only; no retry/product change/credit. Gradient logic3 accepts6targets;
   package OLD8f5 accepts11boundary assertions. Agents source-only; Export Share1 follows fill47.

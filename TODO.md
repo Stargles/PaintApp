@@ -58,7 +58,9 @@ that the final combined audit build has passed.
    effect measurements with correct-output checks and whole-memory limits.
 10. Finish the architecture review and integrate qualified changes, then merge/push and check the
     device with fresh readiness. The fill preview now reuses its existing surface owner; complete
-    its drawing and fault checks. The Test1 erasing respring still needs fresh physical evidence.
+    its drawing and fault checks. Investigate the existing reduced-budget fill preview check that
+    failed while all19surface checks passed; no retry or enlarged wait. The Test1 erasing respring
+    still needs fresh physical evidence.
     Remove finished items whole at merge. Resolve the October29 automatic build's old-main risk.
 
 Future interpolation overhaul, multi-cel selection, linear-light blending, audio/video editing and
