@@ -378,6 +378,28 @@ final class WarpAgreementCharacterizationTests: XCTestCase {
         print("MEASURED Swift-vs-MSL warp: worst single-channel disagreement \(worstChannel)/255, on '\(worstQuad)'.")
     }
 
+    /// The shared Metal transparent sampler must keep fractional exterior taps for a genuine warp.
+    /// One soft red texel makes every expected byte independent of either implementation.
+    func testBothWarpsKeepFractionalExteriorTaps() throws {
+        let engine = try XCTUnwrap(MetalWarpEngine.shared)
+        let source: [UInt8] = [128, 0, 0, 128]
+        let samples: [(x: CGFloat, y: CGFloat, red: UInt8)] = [
+            (-0.5, 0, 64), (0.5, 0, 64), (0, -0.5, 64), (0, 0.5, 64),
+            (-0.5, -0.5, 32), (-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0),
+        ]
+        for sample in samples {
+            let params = WarpParams(Homography(a: 1, b: 0, c: sample.x,
+                                                d: 0, e: 1, f: sample.y, g: 0, h: 0, i: 1))
+            let reference = try XCTUnwrap(ImageWarp.warp(source: source, sourceWidth: 1, sourceHeight: 1,
+                                                         destinationWidth: 1, destinationHeight: 1, params: params))
+            let kernel = try XCTUnwrap(engine.warp(source, sourceWidth: 1, sourceHeight: 1,
+                                                   destinationWidth: 1, destinationHeight: 1, params: params))
+            let expected: [UInt8] = [sample.red, 0, 0, sample.red]
+            XCTAssertEqual(reference, expected, "\(sample): the Swift warp preserves exactly the in-frame share")
+            XCTAssertEqual(kernel, expected, "\(sample): the shared Metal sampler preserves the same edge share")
+        }
+    }
+
     /// The `w ≤ 0` discard, isolated. A destination pixel on the far side of the vanishing line has
     /// no source at all, and **both** backends must write transparent there rather than sampling
     /// something plausible.
@@ -425,18 +447,16 @@ final class WarpAgreementCharacterizationTests: XCTestCase {
     ///
     /// `w > 0` lets through a destination pixel a hair *inside* the vanishing line, and there `u` and
     /// `v` come out at 1e17 and beyond. `Int(_:)` on a `Double` that will not fit **traps** in Swift;
-    /// it does not saturate and it does not wrap. The GPU has no such cliff — `int(base.x)` in MSL is
-    /// undefined-but-quiet and every branch it feeds is a bounds test that answers "outside" — so this
-    /// is a hazard the scalar reference has and the kernel does not, which is exactly the kind the
-    /// agreement tests above cannot see.
+    /// it does not saturate and it does not wrap. This independently guards the scalar reference's
+    /// integer conversion boundary.
     ///
     /// The fixture states the condition directly rather than hunting for a quad that produces it: a
     /// denormal weight, positive everywhere, so every pixel takes the branch at once. Refusing is not
     /// an approximation of sampling — a `u` outside `(-1, sourceWidth)` puts *both* bilinear taps out
     /// of bounds, and both come back transparent, so the blend would have written zero anyway.
     ///
-    /// Only the reference is asserted. The kernel's behaviour here is genuinely undefined by the MSL
-    /// spec, and a test that pinned it would be pinning a compiler's current mood.
+    /// Only the reference is asserted here. The shared Metal sampler also bounds floating coordinates
+    /// before conversion; its fractional exterior taps are asserted separately above.
     func testAWeightAHairAboveZeroDrawsNothingRatherThanTrapping() throws {
         let width = 24, height = 16
         var params = WarpParams(Homography(a: 0.5, b: 0, c: 0, d: 0, e: 0.5, f: 0, g: 0, h: 0, i: 1))

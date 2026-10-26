@@ -755,6 +755,30 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertEqual(restored.layerEffect(atFrame: 6), .blur(Effect.Blur(radius: 20)),
                        "And the curve still drives the grade after the round trip, which is what it is for")
         XCTAssertEqual(restored.layerEffect(atFrame: 0), .blur(Effect.Blur(radius: 4)))
+
+        let distant: [(effect: Effect, id: String, value: Double)] = [
+            (.chromaticAberration(Effect.ChromaticAberration(offsetX: 1e308, offsetY: -1e20)),
+             "chromaticAberration.offsetY", -1e308),
+            (.crtScreen(Effect.CRTScreen(aberration: -1e308)), "crtScreen.aberration", 1e308),
+        ]
+        for (index, entry) in distant.enumerated() {
+            let document = makeManager()
+            document.addValueLayer(effect: entry.effect, name: "Distant Grade")
+            let grade = try XCTUnwrap(document.layers.firstIndex { $0.name == "Distant Grade" })
+            let key = AnimationCurve(keys: [AnimationCurve.Key(frame: 0, value: entry.value)])
+            XCTAssertTrue(document.setEffectParameterTrack(layerIndex: grade, parameterID: entry.id, to: key))
+            let saved = projectURL(name: "Distant Grade \(index)")
+            saveAndWait(document, to: saved)
+            let loaded = try XCTUnwrap(ProjectStore.load(from: saved))
+            let layer = try XCTUnwrap(loaded.layers.first { $0.name == "Distant Grade" })
+            XCTAssertEqual(layer.layerEffect, entry.effect, "The actual package retains the unbounded stored Double")
+            XCTAssertEqual(layer.effectTracks[entry.id], key, "The actual package retains the unbounded keyed Double")
+            let effect = try XCTUnwrap(layer.layerEffect(atFrame: 0))
+            let parameter = try XCTUnwrap(effect.parameters.first { $0.id == entry.id })
+            XCTAssertEqual(parameter.read(effect), entry.value, "The loaded key still drives the raw model value")
+            XCTAssertEqual(effect.verticalKernelRadius(frameSize: (64, 64)), 64,
+                           "The loaded channel needs only the complete source frame")
+        }
     }
 
     /// §3.5's field-presence versioning, checked from both ends: a document nobody has animated writes

@@ -374,9 +374,8 @@ enum ImageWarp {
                         // **The one place this loop can crash rather than draw nothing.** A
                         // destination pixel a hair inside the vanishing line has `w` a hair above
                         // zero, so `u` and `v` come out at 1e17 and beyond — and `Int(_:)` on a
-                        // `Double` that will not fit **traps**, taking the process with it. The GPU
-                        // has no such cliff: `int(base.x)` in MSL is merely undefined-but-quiet, and
-                        // every branch it feeds is a bounds test that says "outside".
+                        // `Double` that will not fit **traps**, taking the process with it. The
+                        // shared Metal sampler likewise checks floating bounds before conversion.
                         //
                         // Refusing here is not an approximation of that: a `u` outside `(-1,
                         // sourceWidth)` puts *both* bilinear taps out of bounds, and `texel` returns

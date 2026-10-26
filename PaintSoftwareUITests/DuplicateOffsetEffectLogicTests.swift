@@ -142,6 +142,47 @@ final class DuplicateOffsetEffectLogicTests: XCTestCase {
         }
     }
 
+    /// Distant copies have no coverage; fractional taps just outside an edge still carry that edge.
+    /// Both backends consume the real two-pass effect, including finite Doubles that narrow to infinity.
+    func testTransparentExteriorKeepsDistantCopiesClearAndFractionalEdgeTaps() throws {
+        let engine = try XCTUnwrap(MetalEffectEngine.shared, "The actual Metal effect pipeline is required")
+        var bytes = [UInt8](repeating: 0, count: Self.side * Self.side * 4)
+        for alpha in stride(from: 3, to: bytes.count, by: 4) { bytes[alpha] = 128 }
+        var redInk = bytes
+        for channel in stride(from: 0, to: redInk.count, by: 4) { redInk[channel] = 128 }
+
+        let distant: [(x: Double, y: Double)] = [
+            (1e20, 0), (-1e20, 0), (0, 1e20), (0, -1e20),
+            (.greatestFiniteMagnitude, 0), (0, .greatestFiniteMagnitude),
+        ]
+        for offset in distant {
+            for region in Effect.DuplicateOffset.Region.allCases {
+                let effect = dup {
+                    $0.offsetX = offset.x; $0.offsetY = offset.y; $0.region = region; $0.color = red
+                }
+                let expected = region == .rim ? redInk : bytes
+                let reference = cpu(effect, bytes)
+                XCTAssertEqual(reference, expected, "\(offset)/\(region): the exterior copy is clear, alpha stays128")
+                let gpu = try XCTUnwrap(engine.apply(effect, to: bytes, width: Self.side, height: Self.side))
+                XCTAssertLessThanOrEqual(maxChannelDelta(gpu, expected), 1,
+                                         "\(offset)/\(region): Metal must also read clear exterior texels")
+            }
+        }
+
+        let edges: [(x: Double, y: Double, px: Int, py: Int)] = [
+            (0.5, 0, 0, 32), (-0.5, 0, 63, 32), (0, 0.5, 32, 0), (0, -0.5, 32, 63),
+        ]
+        for edge in edges {
+            let effect = dup { $0.offsetX = edge.x; $0.offsetY = edge.y; $0.color = red }
+            let reference = cpu(effect, bytes)
+            XCTAssertEqual(pixel(reference, edge.px, edge.py), [64, 0, 0, 128],
+                           "Half of the copy's128 coverage still reaches the boundary pixel")
+            XCTAssertEqual(pixel(reference, 32, 32), [0, 0, 0, 128], "The overlapping interior has no rim")
+            let gpu = try XCTUnwrap(engine.apply(effect, to: bytes, width: Self.side, height: Self.side))
+            XCTAssertLessThanOrEqual(maxChannelDelta(gpu, reference), 1, "Metal must preserve fractional exterior taps")
+        }
+    }
+
     // MARK: - Rim and intersection over a known shape
 
     /// **A disc of radius 20 against its own copy slid half a radius: the rim and the intersection
@@ -230,6 +271,21 @@ final class DuplicateOffsetEffectLogicTests: XCTestCase {
         else { return XCTFail("The GPU declined the turn") }
         XCTAssertTrue(isPaintedRed(pixel(gpu, below.0, below.1)), "The shader turns the same way")
         XCTAssertFalse(isPaintedRed(pixel(gpu, right.0, right.1)))
+
+        // Stored degrees stay unbounded; only their periodic render interpretation is reduced.
+        let asymmetric = spectrumBytes()
+        for degrees in [360 * 1e12 + 17, -360 * 1e12 - 17, 1e308, -1e308] {
+            let full = dup { $0.rotationDegrees = degrees; $0.color = red }
+            let reduced = dup { $0.rotationDegrees = degrees.truncatingRemainder(dividingBy: 360); $0.color = red }
+            XCTAssertEqual(full.params, reduced.params, "\(degrees): finite periodic payload before Float narrowing")
+            let reference = cpu(reduced, asymmetric)
+            XCTAssertNotEqual(reference, asymmetric, "The reduced-angle picture must contain a visible rim")
+            XCTAssertEqual(cpu(full, asymmetric), reference, "Whole turns must not change the CPU picture")
+            let fullGPU = try XCTUnwrap(engine.apply(full, to: asymmetric, width: Self.side, height: Self.side))
+            let reducedGPU = try XCTUnwrap(engine.apply(reduced, to: asymmetric, width: Self.side, height: Self.side))
+            XCTAssertEqual(fullGPU, reducedGPU, "Whole turns must not change the actual Metal picture")
+            XCTAssertLessThanOrEqual(maxChannelDelta(fullGPU, reference), 1, "Both backends consume the reduced turn")
+        }
     }
 
     /// A scale about the centre: a copy at half size of a disc of radius 20 is a disc of radius 10,

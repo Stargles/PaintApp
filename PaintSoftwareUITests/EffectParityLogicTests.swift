@@ -366,7 +366,7 @@ final class EffectParityLogicTests: XCTestCase {
     /// Chromatic aberration displaces the red and blue channels and leaves green where it is, so a
     /// vertical edge in a grey image comes apart into a coloured fringe — and the *shape* does not
     /// move, which is the contract that makes the effect composable.
-    func testChromaticAberrationFringesAnEdgeWithoutMovingIt() {
+    func testChromaticAberrationFringesAnEdgeWithoutMovingIt() throws {
         var bytes = [UInt8](repeating: 0, count: Self.side * Self.side * 4)
         for y in 0..<Self.side {
             for x in 0..<Self.side {
@@ -386,6 +386,33 @@ final class EffectParityLogicTests: XCTestCase {
         XCTAssertEqual(atEdge[1], 40, "Green does not move, so it is still the dark side. Got \(atEdge)")
         XCTAssertEqual(atEdge[2], 40, "Blue samples 3px left, deeper into the dark side. Got \(atEdge)")
         XCTAssertEqual(atEdge[3], 255, "And the coverage is untouched. Got \(atEdge)")
+
+        let engine = try XCTUnwrap(MetalEffectEngine.shared, "The actual Metal sampler is required")
+        for vertical in [false, true] {
+            var soft = [UInt8](repeating: 0, count: Self.side * Self.side * 4)
+            for y in 0..<Self.side { for x in 0..<Self.side {
+                let colour: [UInt8] = (vertical ? y : x) == 0 ? [64, 32, 16, 128] : [16, 48, 96, 128]
+                soft.replaceSubrange((x + y * Self.side) * 4..<(x + y * Self.side) * 4 + 4, with: colour)
+            } }
+            for offset in [0.5, -0.5, 1e20, -1e20, Double.greatestFiniteMagnitude, -Double.greatestFiniteMagnitude] {
+                let effect = Effect.chromaticAberration(Effect.ChromaticAberration(
+                    offsetX: vertical ? 0 : offset, offsetY: vertical ? offset : 0))
+                let reference = cpu(effect, soft)
+                let boundary = abs(offset) == 0.5
+                    ? (offset > 0 ? [40, 32, 16, 128] : [64, 32, 56, 128])
+                    : (offset > 0 ? [16, 32, 16, 128] : [64, 32, 96, 128])
+                let interior = abs(offset) == 0.5
+                    ? (offset > 0 ? [16, 48, 56, 128] : [40, 48, 96, 128])
+                    : (offset > 0 ? [16, 48, 16, 128] : [64, 48, 96, 128])
+                XCTAssertEqual(pixel(reference, 0, 0), boundary,
+                               "\(vertical)/\(offset): exterior taps clamp to the soft edge, never transparent")
+                XCTAssertEqual(pixel(reference, vertical ? 0 : 1, vertical ? 1 : 0), interior,
+                               "Fractional interior taps still interpolate premultiplied colour")
+                let gpu = try XCTUnwrap(engine.apply(effect, to: soft, width: Self.side, height: Self.side))
+                XCTAssertLessThanOrEqual(maxChannelDelta(gpu, reference), 1,
+                                         "Both actual samplers preserve clamped edge and fractional bytes")
+            }
+        }
     }
 
     // MARK: - (3) The wrapper: identity and alpha

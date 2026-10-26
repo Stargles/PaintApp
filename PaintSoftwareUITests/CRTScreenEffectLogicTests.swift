@@ -253,7 +253,7 @@ final class CRTScreenEffectLogicTests: XCTestCase {
     ///
     /// MEASURED by mutation: with `fringe` dropped from the red and blue taps, every pixel reads its
     /// own texel and both fringe assertions fail at once.
-    func testTheFringeAloneSplitsAnEdgeInColourAndNotInCoverage() {
+    func testTheFringeAloneSplitsAnEdgeInColourAndNotInCoverage() throws {
         // Black left of column 8, white from it, opaque throughout.
         var bytes = flatBytes(0, 0, 0)
         for y in 0..<Self.side {
@@ -280,6 +280,29 @@ final class CRTScreenEffectLogicTests: XCTestCase {
         // A flat colour has no edge to fringe, whatever the offset — the taps read the same value.
         XCTAssertEqual(cpu(screen { $0.aberration = 6 }, flatBytes(90, 150, 210)), flatBytes(90, 150, 210),
                        "A fringe needs an edge; flat colour is left alone")
+
+        let engine = try XCTUnwrap(MetalEffectEngine.shared, "The actual Computer Screen pipeline is required")
+        let side = 65
+        var soft = [UInt8](repeating: 0, count: side * side * 4)
+        for y in 0..<side { for x in 0..<side {
+            let colour: [UInt8] = [UInt8(16 + x), UInt8(24 + y), UInt8(8 + (x + 2 * y) % 65), 128]
+            soft.replaceSubrange((x + y * side) * 4..<(x + y * side) * 4 + 4, with: colour)
+        } }
+        for fringe in [1e20, -1e20, 1e308, -1e308] {
+            let effect = screen { $0.aberration = fringe }
+            let reference = cpu(effect, soft, width: side, height: side)
+            XCTAssertEqual(pixel(reference, 32, 32, width: side), [48, 56, 39, 128],
+                           "The exact zero-radius centre remains its own texel for any finite stored fringe")
+            XCTAssertEqual(pixel(reference, 16, 32, width: side),
+                           fringe > 0 ? [16, 56, 71, 128] : [80, 56, 72, 128],
+                           "A zero vertical component samples the SAME row at the two horizontal edges")
+            XCTAssertEqual(pixel(reference, 32, 16, width: side),
+                           fringe > 0 ? [48, 40, 38, 128] : [48, 40, 40, 128],
+                           "A zero horizontal component samples the SAME column at the two vertical edges")
+            let gpu = try XCTUnwrap(engine.apply(effect, to: soft, width: side, height: side))
+            XCTAssertLessThanOrEqual(maxChannelDelta(gpu, reference), 1,
+                                     "The actual Metal screen preserves centre axes, edge colour and coverage")
+        }
     }
 
     // MARK: - The two backends
@@ -502,6 +525,14 @@ final class CRTScreenEffectLogicTests: XCTestCase {
                                                        curvature: .nan, aberration: .nan)).params
         XCTAssertEqual(broken.scanlines, 0); XCTAssertEqual(broken.scanlinePeriod, 1)
         XCTAssertEqual(broken.curvature, 0); XCTAssertEqual(broken.aberration, 0)
+
+        for fringe in [1e308, -1e308] {
+            let raw = Effect.CRTScreen(aberration: fringe)
+            let resolved = Effect.crtScreen(raw).params.aberration
+            XCTAssertTrue(resolved.isFinite, "A finite saved Double must resolve to a finite Float payload")
+            XCTAssertEqual(resolved, fringe > 0 ? Float.greatestFiniteMagnitude : -Float.greatestFiniteMagnitude,
+                           "Only the Float representation is bounded, retaining the fringe's sign")
+        }
 
         // The screen is one pass, a gather with no weights, and the stub bindings every one-pass
         // effect carries.

@@ -744,11 +744,12 @@ enum EffectReference {
     /// zero, one straddling the edge reads the inside texels weighted and zero for the rest.
     private static func sampleTransparent(_ bytes: [UInt8], _ position: SIMD2<Float>,
                                           width: Int, height: Int) -> SIMD4<Float> {
+        // Reject in Float before floor/Int; positive bounds reject NaN too. Between -1 and 0 a
+        // fractional tap still reaches the first texel, as one below width reaches the last.
+        guard position.x > -1, position.x < Float(width),
+              position.y > -1, position.y < Float(height) else { return SIMD4<Float>(repeating: 0) }
         let base = SIMD2<Float>(position.x.rounded(.down), position.y.rounded(.down))
         let fraction = position - base
-        // A position far outside the buffer floors to an `Int` that need not be representable in
-        // 32 bits; the tap is transparent there whatever the integer would have been.
-        guard abs(base.x) < 1e9, abs(base.y) < 1e9 else { return SIMD4<Float>(repeating: 0) }
         let x0 = Int(base.x), y0 = Int(base.y)
         func texelOrClear(_ x: Int, _ y: Int) -> SIMD4<Float> {
             guard x >= 0, x < width, y >= 0, y < height else { return SIMD4<Float>(repeating: 0) }
@@ -765,8 +766,12 @@ enum EffectReference {
     /// interpolation is premultiplied and not unpremultiplied.
     private static func sample(_ bytes: [UInt8], _ position: SIMD2<Float>,
                                width: Int, height: Int) -> SIMD4<Float> {
-        let base = SIMD2<Float>(position.x.rounded(.down), position.y.rounded(.down))
-        let fraction = position - base
+        // Outside taps already read the same edge texel. Resolve that edge before integer
+        // conversion so distant saved displacements cannot exceed Int's domain.
+        let clamped = SIMD2<Float>(min(max(position.x, 0), Float(width - 1)),
+                                   min(max(position.y, 0), Float(height - 1)))
+        let base = SIMD2<Float>(clamped.x.rounded(.down), clamped.y.rounded(.down))
+        let fraction = clamped - base
         let x0 = Int(base.x), y0 = Int(base.y)
         let c00 = texel(bytes, x0, y0, width: width, height: height)
         let c10 = texel(bytes, x0 + 1, y0, width: width, height: height)

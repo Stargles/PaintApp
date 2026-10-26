@@ -515,7 +515,7 @@ final class StripedCompositeLogicTests: XCTestCase {
     /// neighbourhood whose reach is a fraction of the frame. The Duplicate Offset (TODO (61)) is the
     /// second on both lists: its box is about the frame's centre and its gather reaches as far as
     /// the box slides.
-    func testOnlyNoiseAScreenedPosterizeTheComputerScreenAndTheDuplicateOffsetReadTheirOwnCoordinate() {
+    func testOnlyNoiseAScreenedPosterizeTheComputerScreenAndTheDuplicateOffsetReadTheirOwnCoordinate() throws {
         let colour = CodableColor(red: 0, green: 0, blue: 0, alpha: 1)
         let positional: [Effect] = [
             .noise(Effect.Noise(amount: 0.3)),
@@ -576,15 +576,51 @@ final class StripedCompositeLogicTests: XCTestCase {
                        "(H/2) + 2·offset at the far corner, plus one")
         // and a quarter turn reads a row from a *column*, so the width is what bounds it: on a 64×64
         // frame the corner (0, 0) reads from row 64; on a 128×64 frame it reads from row 96.
+        let quarterTurn = Effect.duplicateOffset(Effect.DuplicateOffset(rotationDegrees: 90))
+        XCTAssertEqual(Effect.duplicateSource(of: .zero, params: quarterTurn.params, frame: SIMD2<Double>(64, 64)).y + 1,
+                       64 + 1, accuracy: 1e-5, "Geometric reach plus halo still spans65 rows")
+        XCTAssertEqual(Effect.duplicateSource(of: .zero, params: quarterTurn.params, frame: SIMD2<Double>(128, 64)).y + 1,
+                       96 + 1, accuracy: 1e-5, "The wide frame still has the larger geometric reach")
         XCTAssertEqual(Effect.duplicateOffset(Effect.DuplicateOffset(rotationDegrees: 90))
-                        .verticalKernelRadius(frameSize: (64, 64)), 64 + 1,
-                       "A quarter turn on a square frame reaches the whole height")
+                        .verticalKernelRadius(frameSize: (64, 64)), 64,
+                       "All64 frame rows supply every nontransparent source tap")
         XCTAssertEqual(Effect.duplicateOffset(Effect.DuplicateOffset(rotationDegrees: 90))
-                        .verticalKernelRadius(frameSize: (128, 64)), 96 + 1,
-                       "…and further on a wide one, which is why the apron takes the width")
+                        .verticalKernelRadius(frameSize: (128, 64)), 64,
+                       "A source beyond the whole frame is clear, not extra context")
+        let eighthTurn = Effect.duplicateOffset(Effect.DuplicateOffset(rotationDegrees: 45))
+        XCTAssertEqual(eighthTurn.verticalKernelRadius(frameSize: (64, 64)), 33,
+                       "Below the cap, a45-degree square reaches32 rows plus the halo")
+        XCTAssertEqual(eighthTurn.verticalKernelRadius(frameSize: (128, 64)), 56,
+                       "The wide frame requires ceil(64sin45 + 32(1-cos45)) + 1 rows")
         XCTAssertEqual(Effect.duplicateOffset(Effect.DuplicateOffset())
                         .verticalKernelRadius(frameSize: (4000, 4000)), 1,
                        "The identity reads its own row; the one row is the bilinear tap")
+
+        for displacement in [1e20, -1e20, 1e308, -1e308] {
+            let effects: [Effect] = [
+                .chromaticAberration(Effect.ChromaticAberration(offsetY: displacement)),
+                .crtScreen(Effect.CRTScreen(curvature: 1, aberration: displacement)),
+            ]
+            for effect in effects {
+                XCTAssertEqual(effect.verticalKernelRadius(frameSize: (64, 64)), 64,
+                               "\(effect.displayName)/\(displacement): bound source context before Int")
+                let manager = CanvasFixture.manager(layerCount: 1)
+                CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                              CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 64, height: 64)))
+                manager.addValueLayer(effect: effect)
+                let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: true))
+                let frame = CGRect(origin: .zero, size: recipe.canvasSize)
+                let fit = StripedCompositor.plan(for: recipe,
+                                                 budgetBytes: budgetBytes(forStripBufferRows: 64, recipe: recipe))
+                XCTAssertEqual(fit, [StripedCompositor.PlannedStrip(core: frame, buffer: frame)],
+                               "A fitting frame has every clamped source row already")
+                let strips = StripedCompositor.plan(for: recipe,
+                                                    budgetBytes: budgetBytes(forStripBufferRows: 16, recipe: recipe))
+                XCTAssertEqual(strips.count, 64, "The constrained plan retains the existing one-core-row floor")
+                XCTAssertTrue(strips.allSatisfy { $0.buffer == frame },
+                              "Every clamped edge source remains present; allocation may still refuse this plan")
+            }
+        }
     }
 
     // MARK: - 3 and 4. The two memos a strip can collide in
@@ -779,6 +815,35 @@ final class StripedCompositeLogicTests: XCTestCase {
         XCTAssertEqual(windowed.background?.rect,
                        recipe.background?.rect.offsetBy(dx: 0, dy: -16),
                        "The paper is translated into the band, not re-derived")
+    }
+
+    /// Kept separate from ordinary reach controls: restoring the old Int conversion here can trap
+    /// and must never be used as an assertion-red mutation. Planning needs at most the actual frame.
+    func testADistantCopyApronIsBoundedBeforePlanning() throws {
+        for offset in [1e20, -1e20, Double.greatestFiniteMagnitude] {
+            let manager = CanvasFixture.manager(layerCount: 1)
+            CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                                          CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 64, height: 64)))
+            let effect = Effect.duplicateOffset(Effect.DuplicateOffset(offsetY: offset))
+            manager.addValueLayer(effect: effect)
+            let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: true))
+            let frame = CGRect(origin: .zero, size: recipe.canvasSize)
+            XCTAssertEqual(effect.verticalKernelRadius(frameSize: (64, 64)), 64,
+                           "\(offset): bound actual source rows before converting an unbounded reach to Int")
+            let fit = StripedCompositor.plan(for: recipe,
+                                             budgetBytes: budgetBytes(forStripBufferRows: 64, recipe: recipe))
+            XCTAssertEqual(fit, [StripedCompositor.PlannedStrip(core: frame, buffer: frame)],
+                           "The tiny frame that fits needs no window or oversized context")
+
+            let budget = budgetBytes(forStripBufferRows: 16, recipe: recipe)
+            XCTAssertEqual(ChunkedCompositor.affordableRows(width: recipe.canvasSize.width, tree: recipe.tree,
+                                                             maskStacks: recipe.maskStacks, budgetBytes: budget), 16,
+                           "Premise: the constrained plan still uses the existing budget formula")
+            let constrained = StripedCompositor.plan(for: recipe, budgetBytes: budget)
+            XCTAssertEqual(constrained.count, 64, "The existing one-core-row floor is unchanged")
+            XCTAssertTrue(constrained.allSatisfy { $0.buffer == frame },
+                          "Even the constrained plan needs only whole-frame source context; admission may still refuse it")
+        }
     }
 
     // MARK: - The two cuts nested

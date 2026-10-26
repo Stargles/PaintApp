@@ -1767,7 +1767,11 @@ extension Effect {
             p.apertureMask = unit(screen.apertureMask)
             p.curvature = Float(Double(unit(screen.curvature)) * CRTScreen.maxCurvature)
             p.vignette = unit(screen.vignette)
-            p.aberration = screen.aberration.isFinite ? Float(screen.aberration) : 0
+            // Keep the payload finite when a valid saved Double exceeds Float's representation.
+            // The stored knob stays unchanged; a zero radial component must still have zero fringe.
+            let largestFringe = Double(Float.greatestFiniteMagnitude)
+            p.aberration = screen.aberration.isFinite
+                ? Float(min(max(screen.aberration, -largestFringe), largestFringe)) : 0
         case .duplicateOffset(let dup):
             // The box, resolved once for both backends — `DuplicateOffset`'s doc says which field
             // carries which. A non-finite scalar is its identity; a scale under `minimumScale` in
@@ -1782,7 +1786,7 @@ extension Effect {
             p.offsetY = Float(finite(dup.offsetY, 0))
             p.dupInverseScaleX = Float(1 / scale(dup.scaleX))
             p.dupInverseScaleY = Float(1 / scale(dup.scaleY))
-            let radians = finite(dup.rotationDegrees, 0) * .pi / 180
+            let radians = Self.periodicRadians(dup.rotationDegrees)
             p.dupCos = Float(cos(radians))
             p.dupSin = Float(sin(radians))
             p.dupRegion = dup.region.code
@@ -2137,13 +2141,17 @@ extension Effect {
     ///   at one of the frame's four corners — which is where it is read, exactly, rather than bounded
     ///   by a guess. A turned copy on a wide canvas pulls further vertically at the far corners than
     ///   at the near ones, which is what a height-only bound would miss. Plus one for the bilinear
-    ///   tap. A large offset or a small scale makes a large apron, and the planner pays it in shorter
-    ///   strips rather than in a seam.
+    ///   tap, capped at the frame's rows: holding the whole frame already supplies every nontransparent
+    ///   source row. A large offset or a small scale needs no context beyond that.
     /// - Every per-pixel grade is 0. `noise` and a screened `posterize` are 0 *here* and are not
     ///   therefore free under a strip — they read absolute position rather than a neighbourhood, so
     ///   no apron can carry them and `EffectParams.originX/originY` is what does.
+    /// The three source-coordinate gathers share one final bound: the whole frame already supplies
+    /// every source row, whether exterior taps clamp to an edge or read transparent. Bound in Double
+    /// before Int, since a finite saved displacement need not fit an integer.
     func verticalKernelRadius(frameSize: (width: Int, height: Int)) -> Int {
         let frameHeight = frameSize.height
+        let sourceRows: Double
         switch self {
         case .blur(let blur): return Self.tapCount(forRadius: blur.radius)
         case .bloom(let bloom): return Self.tapCount(forRadius: bloom.radius)
@@ -2153,11 +2161,11 @@ extension Effect {
             return Int(min(max(outline.width, 0), Self.maxOutlineRadius).rounded(.up))
         case .chromaticAberration(let aberration):
             guard aberration.offsetY.isFinite else { return 0 }
-            return Int(abs(aberration.offsetY).rounded(.up)) + 1
+            sourceRows = abs(aberration.offsetY).rounded(.up) + 1
         case .crtScreen:
             let p = params
             let pull = Double(p.curvature) * Double(max(frameHeight, 0)) / 2
-            return Int(pull.rounded(.up)) + Int(abs(Double(p.aberration)).rounded(.up)) + 1
+            sourceRows = pull.rounded(.up) + abs(Double(p.aberration)).rounded(.up) + 1
         case .duplicateOffset:
             let width = Double(max(frameSize.width, 0)), height = Double(max(frameHeight, 0))
             var reach = 0.0
@@ -2167,8 +2175,7 @@ extension Effect {
                                                   frame: SIMD2<Double>(width, height))
                 reach = max(reach, abs(source.y - corner.y))
             }
-            guard reach.isFinite else { return Int(height.rounded(.up)) + 1 }
-            return Int(reach.rounded(.up)) + 1
+            sourceRows = reach.rounded(.up) + 1
         case .glare(let glare):
             if glare.type == .fogGlow { return Effect.bloom(glare.asBloom).verticalKernelRadius(frameSize: frameSize) }
             // Every direction's own vertical reach, taken at its worst — `duplicateOffset`'s own
@@ -2195,6 +2202,9 @@ extension Effect {
              .recolor, .colorWheels, .guide:
             return 0
         }
+        let frameRows = max(frameHeight, 0)
+        guard sourceRows.isFinite, sourceRows < Double(frameRows) else { return frameRows }
+        return Int(sourceRows)
     }
 
     /// **Where a duplicate offset's copy reads from, for one frame position** — the box's inverse

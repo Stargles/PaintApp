@@ -850,8 +850,11 @@ static inline float4 texelClamped(texture2d<float, access::read> source, int x, 
 /// storage exists, since interpolating unpremultiplied colour across an alpha edge pulls in the colour
 /// of pixels that are not there.
 static inline float4 sampleBilinear(texture2d<float, access::read> source, float2 position) {
-    float2 base = floor(position);
-    float2 fraction = position - base;
+    // Match the existing edge-tap semantics while keeping distant coordinates out of int conversion.
+    float2 edge = float2(float(source.get_width() - 1u), float(source.get_height() - 1u));
+    float2 clamped = clamp(position, float2(0.0f), edge);
+    float2 base = floor(clamped);
+    float2 fraction = clamped - base;
     int x = int(base.x), y = int(base.y);
     float4 top = mix(texelClamped(source, x, y), texelClamped(source, x + 1, y), fraction.x);
     float4 bottom = mix(texelClamped(source, x, y + 1), texelClamped(source, x + 1, y + 1), fraction.x);
@@ -874,6 +877,10 @@ static inline float4 sampleBilinear(texture2d<float, access::read> source, float
 /// clamped tap would smear the edge column across the whole displaced region.
 static inline float4 sampleBilinearTransparent(texture2d<float, access::read> source, float2 position) {
     int width = int(source.get_width()), height = int(source.get_height());
+    // Test floating coordinates before floor/int. Positive bounds also reject NaN; fractional
+    // exterior taps in (-1, 0) and (size - 1, size) still carry the edge texel's share.
+    if (!(position.x > -1.0f && position.x < float(width)
+          && position.y > -1.0f && position.y < float(height))) { return float4(0.0f); }
     float2 base = floor(position);
     float2 fraction = position - base;
     int x = int(base.x), y = int(base.y);
