@@ -271,7 +271,14 @@ final class VideoImportLogicTests: XCTestCase {
                 let layers = manager.layers.map(\.id), active = manager.currentLayerIndex
                 let identity = CelContentIdentity(manager.layers[active].cels[0])
                 XCTAssertFalse(manager.insertVideo(at: picked, consumingSource: consuming))
-                XCTAssertEqual(try Data(contentsOf: picked), original, "Refusal preserves the only owned picked copy")
+                let pickedRead: Result<Data, Error> = Result { try Data(contentsOf: picked) }
+                let pickedAfter: Data?
+                switch pickedRead {
+                case .success(let data): pickedAfter = data
+                case .failure: pickedAfter = nil
+                }
+                XCTAssertEqual(pickedAfter, Optional(original),
+                               "Refusal preserves the only owned picked copy; read result: \(pickedRead)")
                 let stagedAssets = try FileManager.default.subpathsOfDirectory(atPath: directory.path)
                     .filter { $0.contains("_video.") }
                 XCTAssertTrue(stagedAssets.isEmpty, "A failed creation must not leave an unswept staged video")
@@ -316,7 +323,13 @@ final class VideoImportLogicTests: XCTestCase {
             manager.history.removeAll()
 
             XCTAssertFalse(manager.insertVideo(at: picked, consumingSource: consuming))
-            XCTAssertEqual(try Data(contentsOf: picked), pickedBytes)
+            let pickedRead: Result<Data, Error> = Result { try Data(contentsOf: picked) }
+            let pickedAfter: Data?
+            switch pickedRead {
+            case .success(let data): pickedAfter = data
+            case .failure: pickedAfter = nil
+            }
+            XCTAssertEqual(pickedAfter, Optional(pickedBytes), "Read result: \(pickedRead)")
             XCTAssertEqual(manager.layers.map(\.id), layers, "Only the provisional layer is rolled back")
             XCTAssertNil(manager.floatingPiece, "The successful earlier Move stays settled")
             let after = try XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(
