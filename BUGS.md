@@ -22,12 +22,15 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 At2d30185d, actual normal116 passes115 and fails the retained CRT fringe comparison at303 four
 times, with channel deltas64/32/64/32. No compiler/crash/skip substitution. All730 source entries
 are restored exactly; original result is preserved under s54-final-qualification/native/
-chromatic-crt-normal116-2d30185d-run01. The13 negative controls remain blocked.
+chromatic-crt-normal116-2d30185d-run01. The corrected ec50 source now passes116/116 and all13
+safe negative controls reach their intended assertions, qualifying17 canonical contracts. Final
+integrated Release/cold/performance gates remain open.
 
-Actual Metal build flags enable fast math. A finite reciprocal/FMA centre residual reproduces the
-four magnitudes at odd65 size with huge finite fringe; no NaN/overflow is required. This witness
-does not prove the exact native lowering. Review existing precise::divide at this CRT normalization
-only, retaining CPU operation order, ordinary equations, global flags and all existing tests.
+Actual Metal build flags enable fast math. A finite centre residual reproduces the four magnitudes
+at odd65 size with huge finite fringe; no NaN/overflow is required. Division precision alone still
+failed. The one-line correction cancels the centre before division, retaining ordinary equations,
+global flags and all existing tests. Returned native pixels establish the defect; the exact compiler
+lowering was not observed.
 Chroma's direct offset route has no such normalization. No speculative input/tolerance change.
 
 ## Mode2 Undo can leave the edited cel thumbnail stale after a frame change — 2026-10-26

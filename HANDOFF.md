@@ -57,7 +57,7 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   print/past-longpress comment; preserve every drawn colour/keyboard/selection/replacement outcome.
   The failed integral slider helper is NOT integrated. Observe actual native slider events before
   another gesture correction. Temporary observercad2 is source-reviewed/prepared through the existing
-  bounded flight recorder, already armed by normal editor launch. Native observation is pending.
+  bounded flight recorder, already armed by normal editor launch. The completed observation is below.
 - D1 effects source **5a067c9d** independently accepted; actual normal63 **63/63**, zero fail/skip,
   exact IDs/device/source730 and root receiptea7824b4. All13 safe controls closed assertion-red with
   all730 restored. Rootb84a2549 qualifies19 product/retained statements;3 picture/geometry premises
@@ -68,7 +68,9 @@ complete. Erasing respring cause, broad final regression/performance and remaini
 - Chroma/CRT corrected source **ec50c8a0** passed **116/116**, zero failure/skip/expected; all730
   exact, root5eeb1ea0. One existing CRT line now cancels its centre before division, preserving exact
   centre/axis colour at huge finite fringe. Original CPU/tests/tolerance/global flags remain exact;
-  no new state/pass/schema/helper. The13 safe controls are prepared09a61cbd, still UNRUN/ungranted.
+  no new state/pass/schema/helper. All13 safe controls closed assertion-red; root causal receipt
+  ddc5f3fd accepts17 canonical contracts. Six additional issue occurrences receive ZERO credit.
+  All730 source entries are restored and native children joined; normal rebuilding remains required.
   Earlier2d/702 each115/116 RED and print-only3d2 RED remain immutable. Actual returned pixels showed
   lost centre/axis red-blue values with green/coverage intact; no actual optimizer instruction was
   measured. Division precision alone was ineffective. Current source has no diagnostic prints.
@@ -76,22 +78,24 @@ complete. Erasing respring cause, broad final regression/performance and remaini
 - Video picked-file comparisons67bd passed11/11; one real source-cleanup fault reached both direct
   comparisons (four occurrences/two contracts), root causal30a0b97c; all730 restored. No throw/setup
   credit and no cel/version identity qualification. Normal rebuild follows any compiled mutant.
-- cad2 observation CLOSED1RED at original opacity setup56.55%; source730 exact, helper/native joined.
-  Public flight was NOT requested: Settings opened but clipped before recorder rows. Agent and root
-  whole-frame LOOK confirm it. Reuse existing FlightRecorderUITests bounded left-gutter scrolling in
-  a separate temporary diagnostic successor, preserving four attempts/.005/50% and original failure.
-  Old AFTER export independently stopped on changed AUT container address. Its before inventory was
-  empty, so no old recording is alleged lost. New read-only export must track bundle-owned current
-  address explicitly and verify prior kind/mode/byte/hash preservation instead of stable UUID.
-- Sole native slot is Bake's **d700b8be** opacity observation1 on owned4B33, grant98390668.
-  It reuses existing bounded Settings scrolling and preserves all original slider attempts/outcomes.
-  Before/after public-flight inventory follows the bundle-owned current container, retaining address
-  changes and prior recording kind/mode/bytes/hash. Root lifecycle4947f57d shut only56C/booted4B33;
-  39E stays shut. No physical action. Check external lease/completion before any next native job.
+- d700 observation CLOSED at the unchanged56.55% setup failure; source730 exact and native joined.
+  Existing bounded Settings scrolling saved the public flight successfully:866 events include all6
+  hardware/native drag sequences and335 native notes. Root independently verified the original bytes,
+  owner identities, native indices/times and model Float32 assignments; receipt053369a5. The native
+  value is already wrong before model delivery, and the final two small corrective touches change
+  no native value. No stale reset/cancel/wrong-owner is observed in this execution. Internal UIKit
+  mechanics remain unproved; later Blend outcomes are unreached. Root inspected three whole images.
+  Export explicitly records the bundle-owned container change; its empty prior inventory supplies no
+  nonempty-library preservation claim. A source-only peer is reviewing one continuous held-thumb
+  sweep through the existing finger synthesizer before a separately granted one-selector experiment.
+  Keep four attempts, original .005/50% and all drawing assertions; no product hook/controller state.
+- Sole native slot is Converter's corrected **60427b21** startup59 on56C, granta60b795b. Actual
+  operator67391/helper67393 started once. No concurrent compiler/lifecycle/environment operations.
+  4B33/39E remain shut; no physical action. Check actual completion before granting the next job.
 - Chroma public drawing testee983 is integrated with only two explicit self.onHost compile corrections
   at60427b21; no outcome/input/action changed. Firststartup59 at1a92 compiled ZERO tests, root61eb736e;
   preserve that failed run. New permanent startup59/control10 are frozen at60427:57 whole logic plus
-  two explicit old Gallery methods (whole class3); normal/control remain UNRUN. Chroma selected/whole11/
+  two explicit old Gallery methods (whole class3); normal59 is running, control10 remains UNRUN. Chroma selected/whole11/
   drawn effect-omission control also remain UNRUN. Do not count compilation as a drawing check.
 - Public capacity cold source **6ef391e4** extends an existing Sandwich workflow, one exact launch
   helper seam; no product hook/new test method. Real two-input Mix refusal/current row/history/drawing
