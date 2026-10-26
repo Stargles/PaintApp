@@ -435,7 +435,7 @@ final class EyedropperLogicTests: XCTestCase {
 
     /// **A layer that is not on screen is not under the point**: its own eye, or the eye of the folder
     /// it is in. Both take the green out of the answer and leave the red beneath it.
-    func testAHiddenLayerAndALayerInAHiddenFolderAreNotUnderThePoint() {
+    func testAHiddenLayerAndALayerInAHiddenFolderAreNotUnderThePoint() throws {
         let manager = redUnderGreenOnTheLeft()
         let onGreen = CGPoint(x: 10, y: 10)
         XCTAssertEqual(pick(manager, at: onGreen)?.g ?? -1, 1, accuracy: 1.0 / 255, "PREMISE: green is on top there")
@@ -445,7 +445,7 @@ final class EyedropperLogicTests: XCTestCase {
                        "a layer with its eye off is not an object")
         manager.layers[1].isVisible = true
 
-        let folder = manager.addFolder(name: "Group")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Group"))
         manager.layers[1].parentFolderID = folder
         XCTAssertEqual(pick(manager, at: onGreen)?.g ?? -1, 1, accuracy: 1.0 / 255,
                        "PREMISE: a layer in a visible folder is still on top")

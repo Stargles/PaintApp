@@ -54,7 +54,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         var moverID: UUID { manager.layers[mover].id }
     }
 
-    private func makeStack() -> Stack {
+    private func makeStack() throws -> Stack {
         let manager = CanvasManager()
         manager.canvasSize = size
         manager.addVectorLayer(name: "floor")
@@ -65,7 +65,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers.map(\.name), ["floor", "inner", "mover", "above", "outside"],
                        "The fixture's own premise: layers are created bottom to top")
         let ids = manager.layers.map(\.id)
-        let folder = manager.addFolder(name: "F")
+        let folder = try XCTUnwrap(manager.addFolder(name: "F"))
         for name in ["inner", "mover", "above"] {
             guard let at = manager.layers.firstIndex(where: { $0.name == name }) else { continue }
             manager.layers[at].parentFolderID = folder
@@ -117,11 +117,11 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// **A folder raises no container box** — TODO (71): a folder poses nothing, and its Move is the
     /// Move tool over its contents (`beginVectorFolderMove`, pinned in `FolderMoveLogicTests`). This
     /// is the model saying so where a caller could still ask through the general address.
-    func testAFolderRaisesNoContainerPoseBox() {
+    func testAFolderRaisesNoContainerPoseBox() throws {
         let manager = CanvasManager()
         manager.canvasSize = size
         manager.addVectorLayer(name: "ink")
-        let folder = manager.addFolder(name: "F")
+        let folder = try XCTUnwrap(manager.addFolder(name: "F"))
         XCTAssertNil(manager.containerPose(of: .folder(id: folder)), "A folder poses nothing")
         XCTAssertFalse(manager.beginContainerPoseMove(for: .folder(id: folder)))
         XCTAssertNil(manager.floatingPiece, "…and nothing came up")
@@ -209,7 +209,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
     /// A writer that put the pose on the wrong layer, or wrote a field the accessor does not read,
     /// goes red here and nowhere else.
     func testAMoveBoxOnATransformationLayerPosesItsContainerAndNothingOutsideIt() throws {
-        let stack = makeStack()
+        let stack = try makeStack()
         stack.manager.currentLayerIndex = stack.mover
         XCTAssertTrue(stack.manager.layerPoses(atFrame: 0).isEmpty,
                       "A transformation layer nobody has moved costs the document nothing")
@@ -581,7 +581,7 @@ final class TransformLayerEntryLogicTests: XCTestCase {
             try? FileManager.default.removeItem(at: root)
         }
 
-        let stack = makeStack()
+        let stack = try makeStack()
         stack.manager.currentLayerIndex = stack.mover
         let layerID = stack.moverID
         stack.manager.currentFrame = 0

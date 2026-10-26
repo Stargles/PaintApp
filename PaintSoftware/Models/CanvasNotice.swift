@@ -32,6 +32,8 @@ struct CanvasNotice: Identifiable, Equatable {
         /// The active layer holds no pixels: a value layer, in either of its two modes, or a
         /// transform layer.
         case noDrawingSurface
+        /// A structural edit would add an input beyond this node's current capacity.
+        case nodeInputLimit(Int)
         /// An undo just reverted `HistoryActionLabel`. Raised only when one actually fired —
         /// `CanvasManager.undo()` checks `UndoHistory.undo()`'s return before calling `raise`, so an
         /// undo against an empty stack stays silent rather than announcing nothing happened.
@@ -379,6 +381,8 @@ struct CanvasNotice: Identifiable, Equatable {
         case .noLayers:         return "No layers — add one to start drawing."
         case .hiddenLayer:      return "This layer is hidden."
         case .noDrawingSurface: return "This layer has no drawing surface."
+        case .nodeInputLimit(let maximum):
+            return "This node takes \(maximum) \(maximum == 1 ? "input" : "inputs"). Move an input out first."
         case .historyUndo(let label):  return "Undid \(label.phrase)."
         case .historyRedo(let label):  return "Redid \(label.phrase)."
         case .nothingToPick:    return "Nothing to pick up there."
@@ -541,7 +545,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .fillNeedsMoreMemory: return nil
         case .fillsMended, .noFillGapsToMend, .fillMendingExceedsBudget: return nil
         case .outOfMemoryToDraw: return nil
-        case .drawingSourceUnavailable: return nil
+        case .drawingSourceUnavailable, .nodeInputLimit: return nil
         // Nor this one. An unreadable file has no fix this app can offer, and a crop with nothing
         // decodable in it is undone from the block's own edge handles or Adjust Speed row, neither
         // of which is a button this banner could press on the artist's behalf.
@@ -612,6 +616,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .fillMendingExceedsBudget: return "fillMendingExceedsBudget"
         case .outOfMemoryToDraw: return "outOfMemoryToDraw"
         case .drawingSourceUnavailable: return "drawingSourceUnavailable"
+        case .nodeInputLimit: return "nodeInputLimit"
         case .videoBakeRefused: return "videoBakeRefused"
         case .streamBakeRefused: return "streamBakeRefused"
         case .poseBakeRefused: return "poseBakeRefused"

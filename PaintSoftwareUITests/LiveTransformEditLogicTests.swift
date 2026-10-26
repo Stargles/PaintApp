@@ -67,7 +67,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
 
     private func scene(_ moverPose: LayerPose = LayerPose(pose: PoseQuad(restingIn: CGRect(origin: .zero,
                                                                                             size: CanvasFixture.canvasSize))))
-    -> Scene {
+    throws -> Scene {
         let manager = CanvasManager()
         manager.canvasSize = size
         let floor = addInk(manager, "floor", y: 8)
@@ -76,7 +76,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
         manager.addTransformLayer(name: "mover")
         let mover = manager.layers[manager.currentLayerIndex].id
         let above = addInk(manager, "above", y: 50)
-        let folder = manager.addFolder(name: "F")
+        let folder = try XCTUnwrap(manager.addFolder(name: "F"))
         manager.layers[index(inner, manager)].parentFolderID = folder
         manager.layers[index(innerToo, manager)].parentFolderID = folder
         manager.layers[index(mover, manager)].transform = moverPose
@@ -99,8 +99,8 @@ final class LiveTransformEditLogicTests: XCTestCase {
 
     /// A transformation layer moves everything beneath it in its own container — a folder's whole
     /// subtree with it — as one run, in the frame's leaf order; never what is above it.
-    func testATransformLayerMovesEverythingBeneathItAsOneRun() {
-        let s = scene()
+    func testATransformLayerMovesEverythingBeneathItAsOneRun() throws {
+        let s = try scene()
         let runs = s.manager.liveTransformRuns(.container(layerID: s.mover), atFrame: 0)
         XCTAssertEqual(ids(runs, s.manager), [[s.floor, s.inner, s.innerToo]])
         XCTAssertEqual(Array(runs.joined()), s.manager.renderTree(atFrame: 0).leafLayerIndices
@@ -109,8 +109,8 @@ final class LiveTransformEditLogicTests: XCTestCase {
 
     /// **Parallax shares its pose out per item**, so each item is a run of its own — and the folder,
     /// one item, is one run however many leaves it holds.
-    func testAParallaxLayerMovesEachItemAsItsOwnRun() {
-        let s = scene()
+    func testAParallaxLayerMovesEachItemAsItsOwnRun() throws {
+        let s = try scene()
         s.manager.layers[index(s.mover, s.manager)].transform?.mode = .parallax
         let runs = s.manager.liveTransformRuns(.container(layerID: s.mover), atFrame: 0)
         XCTAssertEqual(ids(runs, s.manager), [[s.floor], [s.inner, s.innerToo]])
@@ -133,24 +133,24 @@ final class LiveTransformEditLogicTests: XCTestCase {
 
     /// Where the layer poses nothing — its eye shut, a frame its bar does not cover, a Repeat —
     /// nothing moves, the same gates `renderNodes` applies.
-    func testNothingMovesWhereTheLayerPosesNothing() {
-        var s = scene()
+    func testNothingMovesWhereTheLayerPosesNothing() throws {
+        var s = try scene()
         s.manager.layers[index(s.mover, s.manager)].isVisible = false
         XCTAssertEqual(s.manager.liveTransformRuns(.container(layerID: s.mover), atFrame: 0), [], "eye shut")
 
-        s = scene()
+        s = try scene()
         let block = s.manager.layers[index(s.mover, s.manager)].cels[0]
         XCTAssertEqual(s.manager.liveTransformRuns(.container(layerID: s.mover),
                                                    atFrame: block.startFrame + block.frameCount + 3), [],
                        "past its bar")
 
-        s = scene()
+        s = try scene()
         s.manager.layers[index(s.mover, s.manager)].transform?.mode = .repeat
         XCTAssertEqual(s.manager.liveTransformRuns(.container(layerID: s.mover), atFrame: 0), [], "a Repeat")
     }
 
-    func testACelChannelMovesItsOwnLayerAndAFloatingPieceNothing() {
-        let s = scene()
+    func testACelChannelMovesItsOwnLayerAndAFloatingPieceNothing() throws {
+        let s = try scene()
         XCTAssertEqual(ids(s.manager.liveTransformRuns(.cel(layerID: s.inner), atFrame: 0), s.manager),
                        [[s.inner]])
         XCTAssertEqual(s.manager.liveTransformRuns(.cel(layerID: s.mover), atFrame: 0), [],
@@ -165,7 +165,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
     /// map at the mint and a map now whose difference is (8, 4) — read off a leaf inside the folder,
     /// so the inner-first composition is exercised.
     func testTheMapsDifferByExactlyTheEdit() throws {
-        let s = scene()
+        let s = try scene()
         let runs = s.manager.liveTransformRuns(.container(layerID: s.mover), atFrame: 0)
         let minted = s.manager.liveTransformMaps(.container(layerID: s.mover), runs: runs, atFrame: 0)
         s.manager.layers[index(s.mover, s.manager)].transform = pose(CGAffineTransform(translationX: 8, y: 4))
@@ -179,7 +179,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
 
     /// A cel's whole-drawing channel reads through `inkPose`, so it sees the cel's own key.
     func testACelChannelsMapIsTheCelsOwnPose() throws {
-        let s = scene()
+        let s = try scene()
         let inner = index(s.inner, s.manager)
         let runs = s.manager.liveTransformRuns(.cel(layerID: s.inner), atFrame: 0)
         let minted = s.manager.liveTransformMaps(.cel(layerID: s.inner), runs: runs, atFrame: 0)
@@ -195,7 +195,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
     /// **The cut**: two runs give five bands, static and moving in turn, and a run that is not one
     /// span of the leaf order — or runs out of order — is refused rather than cut wrong.
     func testTheCutIsStaticAndMovingBandsInTurn() throws {
-        let s = scene()
+        let s = try scene()
         let tree = s.manager.renderTree(atFrame: 0)
         let order = tree.leafLayerIndices
         let bands = try XCTUnwrap(tree.cut(around: [[order[1]], [order[3]]]))
@@ -210,7 +210,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
     /// and laid over each other, are the frame — byte for byte. Anything less and the drag would
     /// start with a jump.
     func testTheBandsRecomposeToTheFrame() throws {
-        let s = scene()
+        let s = try scene()
         let runs = s.manager.liveTransformRuns(.container(layerID: s.mover), atFrame: 0)
         let recipe = try XCTUnwrap(s.manager.makeSandwichRecipe(atFrame: 0, runs: runs))
         let exact = try XCTUnwrap(Compositor.composite(recipe.resolve().full))
@@ -229,7 +229,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
         for (name, edit, exactBytes) in [("a slide", CGAffineTransform(translationX: 8, y: 4), true),
                                          ("a turn", CGAffineTransform(translationX: 32, y: 32)
                                             .rotated(by: .pi / 10).translatedBy(x: -32, y: -32), false)] {
-            let s = scene()
+            let s = try scene()
             let mover = index(s.mover, s.manager)
             let runs = s.manager.liveTransformRuns(.container(layerID: s.mover), atFrame: 0)
             let recipe = try XCTUnwrap(s.manager.makeSandwichRecipe(atFrame: 0, runs: runs))
@@ -288,8 +288,8 @@ final class LiveTransformEditLogicTests: XCTestCase {
 
     /// The owner's *"pause the background renderer until the user raises their pen off the move
     /// tool"*: the sweep still marks what is dirty, and nothing is composited until the edit ends.
-    func testTheBakerHoldsWhileAnEditIsLiveAndResumesWhenItEnds() {
-        let s = scene()
+    func testTheBakerHoldsWhileAnEditIsLiveAndResumesWhenItEnds() throws {
+        let s = try scene()
         s.manager.syncFrameBake(suspended: false)
         XCTAssertFalse(s.manager.frameBaker.isSuspended, "PREMISE: a document at rest bakes")
         s.manager.beginLiveTransformEdit(.container(layerID: s.mover))
@@ -309,8 +309,8 @@ final class LiveTransformEditLogicTests: XCTestCase {
     }
 
     /// The scene with `mover` keyed on X, at rest, at frame 0 — a node a graph drag can carry.
-    private func keyedScene() -> Scene {
-        let s = scene()
+    private func keyedScene() throws -> Scene {
+        let s = try scene()
         s.manager.layers[index(s.mover, s.manager)].transform?.track =
             TransformTrack(box: canvasBox, curves: [.x: xCurve(canvasBox.midX)])
         return s
@@ -325,7 +325,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
     /// the whole editor. Held, the canvas is told directly, the document does not move, and the walk
     /// under the held pose is the drag's own distance from the mint.
     func testAHeldPoseMovesTheBandsAndPublishesNothing() throws {
-        let s = keyedScene()
+        let s = try keyedScene()
         let edit = LiveTransformEdit.container(layerID: s.mover)
         let runs = s.manager.liveTransformRuns(edit, atFrame: 0)
         let minted = s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0)
@@ -355,7 +355,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
     /// **The lift writes the held pose, as one press of Undo** — and what the document then shows is
     /// what the finger was showing.
     func testTheLiftWritesTheHeldPoseAsOneUndoStep() throws {
-        let s = keyedScene()
+        let s = try keyedScene()
         let edit = LiveTransformEdit.container(layerID: s.mover)
         let runs = s.manager.liveTransformRuns(edit, atFrame: 0)
         let minted = s.manager.liveTransformMaps(edit, runs: runs, atFrame: 0)
@@ -385,8 +385,8 @@ final class LiveTransformEditLogicTests: XCTestCase {
 
     /// **A cancelled drag, or one that came back to where it began, writes nothing** — no edit and no
     /// step — and the held pose goes with the edit whichever way it ended.
-    func testAnEndedEditDropsTheHeldPoseAndWritesNothing() {
-        let s = keyedScene()
+    func testAnEndedEditDropsTheHeldPoseAndWritesNothing() throws {
+        let s = try keyedScene()
         let mover = index(s.mover, s.manager)
         let stored = s.manager.layers[mover].transform
         let steps = s.manager.history.undoStack.count
@@ -408,8 +408,8 @@ final class LiveTransformEditLogicTests: XCTestCase {
     }
 
     /// A pose is held only inside an edit the canvas draws as bands — what shows it, and what drops it.
-    func testAPoseIsHeldOnlyInsideAnEditThatMovesBands() {
-        let s = keyedScene()
+    func testAPoseIsHeldOnlyInsideAnEditThatMovesBands() throws {
+        let s = try keyedScene()
         let curves = [containerX: xCurve(canvasBox.midX + 8)]
         s.manager.holdLivePose(curves, of: .layer(id: s.mover))
         XCTAssertNil(s.manager.livePose, "no edit, nothing to show it")
@@ -421,7 +421,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
     /// **A cel channel's held pose reaches the bands through `inkPose`**, the cel's own tracks read
     /// from the hold in place of the document's.
     func testAHeldCelPoseIsReadThroughInkPose() throws {
-        let s = scene()
+        let s = try scene()
         let inner = index(s.inner, s.manager)
         s.manager.layers[inner].cels[0].transformTracks = [
             TransformChannelID.cel.id: TransformTrack(box: canvasBox, curves: [.x: xCurve(canvasBox.midX)])]
@@ -457,7 +457,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
     /// ticks, the document and the piece mid-drag, the walk under the held pose against the mint, and
     /// the document after the lift against what the finger showed.
     func testABoxDragHoldsItsPoseOffTheDocumentAndLandsItAsOneStep() throws {
-        let s = scene()
+        let s = try scene()
         let m = s.manager
         let mover = index(s.mover, m)
         m.currentLayerIndex = mover
@@ -506,7 +506,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
     /// (`containerPoseMove`), so the operands are the whole `LayerPose` the finger held just before the
     /// lift and the whole `LayerPose` the document holds just after it: base, baseline, track and mode.
     func testTheHeldPoseIsTheLandedPoseOnEveryRoute() throws {
-        let s = scene()
+        let s = try scene()
         let m = s.manager
         let mover = index(s.mover, m)
         let target = KeyframeTarget.layer(id: s.mover)
@@ -539,7 +539,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
     /// so the press acts on the steps and the canvas shows the document it leaves; the box stays under
     /// the finger and the lift lands only what it moved since.
     func testUndoMidDragLetsTheHeldPoseGo() throws {
-        let s = scene()
+        let s = try scene()
         let m = s.manager
         let mover = index(s.mover, m)
         m.currentLayerIndex = mover
@@ -627,7 +627,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
     // MARK: - The entry points' answers
 
     func testTheMoveBoxEditsWhatItHolds() throws {
-        let s = scene()
+        let s = try scene()
         s.manager.currentLayerIndex = index(s.mover, s.manager)
         XCTAssertNil(s.manager.moveBoxEdit, "no box, no edit")
         XCTAssertTrue(s.manager.beginContainerPoseMove())
@@ -663,7 +663,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
     /// a box over lifted ink too, whose hosts are the live pair's middle (`liveHostRun`). And a live
     /// edit engages a document that otherwise would not be; a float's own edit does not.
     func testEveryBoxKeepsTheCompositor() throws {
-        let s = scene(pose(CGAffineTransform(translationX: 4, y: 0)))
+        let s = try scene(pose(CGAffineTransform(translationX: 4, y: 0)))
         s.manager.currentLayerIndex = index(s.mover, s.manager)
         XCTAssertTrue(s.manager.beginContainerPoseMove())
         XCTAssertTrue(s.manager.sandwichEngagesOnCanvas(tree: s.manager.renderTree(atFrame: 0)))
@@ -672,7 +672,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
         XCTAssertTrue(s.manager.beginVectorFolderMove(try XCTUnwrap(s.manager.folders.first?.id)))
         XCTAssertTrue(s.manager.sandwichEngagesOnCanvas(tree: s.manager.renderTree(atFrame: 0)))
 
-        let plain = scene()
+        let plain = try scene()
         let tree = plain.manager.renderTree(atFrame: 0)
         XCTAssertFalse(plain.manager.sandwichEngagesOnCanvas(tree: tree), "PREMISE: nothing poses yet")
         plain.manager.beginLiveTransformEdit(.container(layerID: plain.mover))

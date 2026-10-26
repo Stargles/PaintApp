@@ -93,7 +93,7 @@ final class SandwichLogicTests: XCTestCase {
     /// generated because the point is coverage of *shapes* a recursive prune could get wrong: the
     /// leaf being first, last, alone, in the middle of a group, two levels down, or sharing a tree
     /// with a folder that contributes no leaves at all.
-    private func battery() -> [Battery] {
+    private func battery() throws -> [Battery] {
         var cases: [Battery] = []
 
         cases.append(Battery(name: "a flat stack, active in the middle", manager: stack(3), active: 1))
@@ -103,15 +103,15 @@ final class SandwichLogicTests: XCTestCase {
 
         do {
             let manager = stack(5)
-            let folder = manager.addFolder(name: "Middle")
+            let folder = try XCTUnwrap(manager.addFolder(name: "Middle"))
             for index in 1...3 { manager.layers[index].parentFolderID = folder }
             cases.append(Battery(name: "active inside a group with siblings above and below it",
                                  manager: manager, active: 2))
         }
         do {
             let manager = stack(4)
-            let outer = manager.addFolder(name: "Outer")
-            let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+            let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+            let inner = try XCTUnwrap(manager.addFolder(name: "Inner", parentFolderID: outer))
             manager.layers[0].parentFolderID = outer
             manager.layers[1].parentFolderID = inner
             manager.layers[2].parentFolderID = inner
@@ -126,7 +126,7 @@ final class SandwichLogicTests: XCTestCase {
         }
         do {
             let manager = stack(4)
-            let folder = manager.addFolder(name: "Above")
+            let folder = try XCTUnwrap(manager.addFolder(name: "Above"))
             manager.layers[2].parentFolderID = folder
             manager.layers[3].parentFolderID = folder
             cases.append(Battery(name: "a folder whose contents are wholly above the active layer",
@@ -134,7 +134,7 @@ final class SandwichLogicTests: XCTestCase {
         }
         do {
             let manager = stack(4)
-            let folder = manager.addFolder(name: "Below")
+            let folder = try XCTUnwrap(manager.addFolder(name: "Below"))
             manager.layers[0].parentFolderID = folder
             manager.layers[1].parentFolderID = folder
             cases.append(Battery(name: "a folder whose contents are wholly below the active layer",
@@ -211,8 +211,8 @@ final class SandwichLogicTests: XCTestCase {
     /// together, in order.** A prune that dropped a node, duplicated one, or reordered slots would
     /// render a canvas missing a layer or showing one twice, and this is the cheapest place to catch
     /// it — `assertRenderTreeMatchesFlatOrder` is the same claim about the whole tree.
-    func testEveryTreeSplitsIntoTwoHalvesThatPutTheStackBackTogether() {
-        for testCase in battery() {
+    func testEveryTreeSplitsIntoTwoHalvesThatPutTheStackBackTogether() throws {
+        for testCase in try battery() {
             let tree = testCase.manager.renderTree(atFrame: 0)
             guard let halves = tree.split(atLeaf: testCase.active) else {
                 XCTFail("\(testCase.name): the active layer is a leaf of its own tree, so the split must succeed")
@@ -230,13 +230,13 @@ final class SandwichLogicTests: XCTestCase {
 
     /// The sweep above is only worth its runtime if it is sweeping different *shapes* — nine runs of
     /// a flat stack would pass every assertion in this file while testing one code path.
-    func testTheBatteryExercisesGenuinelyDifferentTreeShapes() {
-        let shapes = battery().map { shape($0.manager.renderTree(atFrame: 0)) }
+    func testTheBatteryExercisesGenuinelyDifferentTreeShapes() throws {
+        let shapes = try battery().map { shape($0.manager.renderTree(atFrame: 0)) }
         XCTAssertGreaterThanOrEqual(Set(shapes).count, 6,
                                     "Only \(Set(shapes).count) distinct shapes in \(shapes.count) cases: \(shapes)")
         XCTAssertGreaterThanOrEqual(shapes.filter { $0.contains("(") }.count, 5,
                                     "Most of the battery must involve folders — the flat cases cannot exercise a half-group at all. Shapes: \(shapes)")
-        XCTAssertGreaterThanOrEqual(battery().map { depth($0.manager.renderTree(atFrame: 0)) }.max() ?? 0, 3,
+        XCTAssertGreaterThanOrEqual(try battery().map { depth($0.manager.renderTree(atFrame: 0)) }.max() ?? 0, 3,
                                     "One case must nest two folders deep, which is where a half-group has to contain another half-group. Shapes: \(shapes)")
     }
 
@@ -252,9 +252,9 @@ final class SandwichLogicTests: XCTestCase {
     /// layer's own host already has the group's opacity folded into it by `effectiveOpacity`. A half
     /// that forgot the group's properties would disagree with the view sitting between the halves,
     /// which is a worse answer than the approximation carrying them is.
-    func testAHalfGroupKeepsTheGroupsIdentityAndEveryPropertyOfIt() {
+    func testAHalfGroupKeepsTheGroupsIdentityAndEveryPropertyOfIt() throws {
         let manager = stack(4)
-        let folder = manager.addFolder(name: "Group")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Group"))
         for index in 0..<3 { manager.layers[index].parentFolderID = folder }
         manager.setFolderOpacity(folder, to: 0.4)
         manager.setFolderBlendMode(folder, to: .multiply)
@@ -276,9 +276,9 @@ final class SandwichLogicTests: XCTestCase {
 
     /// A half pruned to nothing is dropped rather than emitted as a node with an empty slot: it would
     /// buy a canvas-sized buffer (its opacity is not 1) to composite nothing into.
-    func testAHalfGroupPrunedToNothingIsDroppedRatherThanEmitted() {
+    func testAHalfGroupPrunedToNothingIsDroppedRatherThanEmitted() throws {
         let manager = stack(2)
-        let folder = manager.addFolder(name: "Group")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Group"))
         manager.layers[0].parentFolderID = folder
         manager.layers[1].parentFolderID = folder
         manager.setFolderOpacity(folder, to: 0.5)
@@ -322,9 +322,9 @@ final class SandwichLogicTests: XCTestCase {
     /// every pixel alpha 0 or 255, where source-over through an intermediate is lossless.
     /// `testTheSandwichCostsAtMostAChannelStepWhereAlphaIsFractional` is what happens when that stops
     /// being true, measured rather than assumed.
-    func testTheSandwichReassemblesToTheExactCompositeWhereverNothingAboveBlends() {
+    func testTheSandwichReassemblesToTheExactCompositeWhereverNothingAboveBlends() throws {
         var worst = 0
-        for testCase in battery() {
+        for testCase in try battery() {
             guard let requests = testCase.manager.makeSandwichRecipe(atFrame: 0,
                                                                       activeLayerIndex: testCase.active)?.resolve(),
                   let exact = Compositor.composite(requests.full),
@@ -531,12 +531,12 @@ final class SandwichLogicTests: XCTestCase {
     /// the group, and the finished thing fades once. The sandwich shows (64, 128, 0, 192): the red is
     /// no longer covered, because it is drawn by its own view before the upper half lands on it, and
     /// two half-alpha draws accumulate past one. **Measured max channel delta 64.**
-    func testTheSandwichIsNotExactWhenTheActiveLayerIsInsideAFadedGroup() {
+    func testTheSandwichIsNotExactWhenTheActiveLayerIsInsideAFadedGroup() throws {
         let manager = CanvasFixture.manager(layerCount: 2)
         let square = CGRect(x: 0, y: 0, width: 40, height: 40)
         CanvasFixture.setBakedContent(manager, layerIndex: 0, CanvasFixture.solidImage(red, rect: square))
         CanvasFixture.setBakedContent(manager, layerIndex: 1, CanvasFixture.solidImage(green, rect: square))
-        let folder = manager.addFolder(name: "Faded")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Faded"))
         manager.layers[0].parentFolderID = folder
         manager.layers[1].parentFolderID = folder
         manager.setFolderOpacity(folder, to: 0.5)
@@ -569,12 +569,12 @@ final class SandwichLogicTests: XCTestCase {
     /// The documents that existed before phase 5a stay on today's code path, exactly. That is the
     /// whole of the phase's risk containment: if this ever answers true for an all-normal document,
     /// every project ever made starts rendering through a path it has never rendered through.
-    func testAnAllNormalDocumentDoesNotNeedTheCompositorOnCanvas() {
+    func testAnAllNormalDocumentDoesNotNeedTheCompositorOnCanvas() throws {
         XCTAssertFalse(stack(3).renderTree(atFrame: 0).needsCompositorOnCanvas, "A flat all-normal stack is Core Animation's own case")
 
         let nested = stack(4)
-        let outer = nested.addFolder(name: "Outer")
-        let inner = nested.addFolder(name: "Inner", parentFolderID: outer)
+        let outer = try XCTUnwrap(nested.addFolder(name: "Outer"))
+        let inner = try XCTUnwrap(nested.addFolder(name: "Inner", parentFolderID: outer))
         nested.layers[0].parentFolderID = outer
         nested.layers[1].parentFolderID = inner
         nested.layers[2].parentFolderID = inner
@@ -596,10 +596,10 @@ final class SandwichLogicTests: XCTestCase {
 
     /// And it has to find one at any depth: the recursion is what a "does anything in this document
     /// blend" question actually is.
-    func testABlendingLeafBuriedInsideFoldersIsStillFound() {
+    func testABlendingLeafBuriedInsideFoldersIsStillFound() throws {
         let manager = stack(3)
-        let outer = manager.addFolder(name: "Outer")
-        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let inner = try XCTUnwrap(manager.addFolder(name: "Inner", parentFolderID: outer))
         manager.layers[0].parentFolderID = outer
         manager.layers[1].parentFolderID = inner
         manager.layers[2].parentFolderID = inner
@@ -608,9 +608,9 @@ final class SandwichLogicTests: XCTestCase {
         XCTAssertTrue(manager.renderTree(atFrame: 0).needsCompositorOnCanvas, "Two levels down is still in the document")
     }
 
-    func testABlendingGroupNeedsTheCompositor() {
+    func testABlendingGroupNeedsTheCompositor() throws {
         let manager = stack(2)
-        let folder = manager.addFolder(name: "Group")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Group"))
         manager.layers[1].parentFolderID = folder
         manager.setFolderBlendMode(folder, to: .overlay)
 
@@ -622,9 +622,9 @@ final class SandwichLogicTests: XCTestCase {
     /// `effectiveOpacity(ofLayer:)` folds the fade into each child, which differs from fading the
     /// group's composite wherever children overlap. It reaches the compositor now through
     /// `needsOwnBuffer`'s first clause, without the predicate needing to know about opacity at all.
-    func testAGroupAtAnyOpacityOtherThanOneNeedsTheCompositor() {
+    func testAGroupAtAnyOpacityOtherThanOneNeedsTheCompositor() throws {
         let manager = stack(2)
-        let folder = manager.addFolder(name: "Group")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Group"))
         manager.layers[0].parentFolderID = folder
         manager.layers[1].parentFolderID = folder
 
@@ -638,9 +638,9 @@ final class SandwichLogicTests: XCTestCase {
     /// its own — and that is the point rather than a weakness in the fixture: an isolated group over a
     /// blend is a document Core Animation cannot draw for two independent reasons, and the predicate
     /// only has to notice one of them.
-    func testAnIsolatedGroupOverABlendingDescendantNeedsTheCompositor() {
+    func testAnIsolatedGroupOverABlendingDescendantNeedsTheCompositor() throws {
         let manager = stack(2)
-        let folder = manager.addFolder(name: "Isolated")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Isolated"))
         manager.layers[1].parentFolderID = folder
         manager.setFolderIsolated(folder, isIsolated: true)
         manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
@@ -864,9 +864,9 @@ final class SandwichLogicTests: XCTestCase {
     /// The other side of that, and the containment the whole phase rests on: **`.stack` is untouched.**
     /// A folder is still `.node(op: .stack, …)` and still a transparent parenthesis at its defaults —
     /// no buffer, no canvas path, not one byte different from before nodes existed.
-    func testAStackNodeIsUnaffectedByTheOpsSecondCase() {
+    func testAStackNodeIsUnaffectedByTheOpsSecondCase() throws {
         let manager = stack(2)
-        let folder = manager.addFolder(name: "Folder")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Folder"))
         manager.layers[1].parentFolderID = folder
 
         guard case .node(let op, _)? = manager.renderTree(atFrame: 0).first(where: { $0.id == folder })?.content else {

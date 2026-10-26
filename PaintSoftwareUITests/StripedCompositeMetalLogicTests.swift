@@ -160,7 +160,7 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
     /// document the CoreGraphics suite holds the strip cut to, at a height that genuinely cuts it.
     func testMetalStrippedCompositingIsByteIdenticalToTheMetalWholeFrameWalk() throws {
         try skipUnlessGPUAvailable()
-        let manager = CanvasFixture.stripingZoo()
+        let manager = try CanvasFixture.stripingZoo()
         assertFolderSpansAreContiguous(manager, "Fixture invariant")
         assertRenderTreeMatchesFlatOrder(manager, "Fixture invariant")
         XCTAssertEqual(manager.layers.count, 12,
@@ -197,7 +197,7 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
     /// not cleared would show through.
     func testMetalStrippedCompositingAgreesWithNoPaperEither() throws {
         try skipUnlessGPUAvailable()
-        let strips = assertStrippedMatchesWholeOnGPU(CanvasFixture.stripingZoo(), stripBufferRows: 40,
+        let strips = assertStrippedMatchesWholeOnGPU(try CanvasFixture.stripingZoo(), stripBufferRows: 40,
                                                       includeBackground: false,
                                                       "With no paper every seam is translucent, and a "
                                                       + "pooled texture at a strip's size is one the "
@@ -304,7 +304,7 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
         CanvasFixture.setBakedContent(manager, layerIndex: 2,
                                       CanvasFixture.solidImage(blue.withAlphaComponent(0.5),
                                                                rect: CGRect(x: 8, y: 0, width: 40, height: 64)))
-        let folder = manager.addFolder(name: "Grained group")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Grained group"))
         manager.layers[1].parentFolderID = folder
         manager.layers[2].parentFolderID = folder
         manager.setNodeEffect(folder, to: .noise(Effect.Noise(amount: 0.5, isMonochrome: true, seed: 7)))
@@ -329,7 +329,7 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
     /// and rule 3's substitution, all inside a windowed buffer.
     func testAMetalStripIsChunkedWhenOneStripStillDoesNotFit() throws {
         try skipUnlessGPUAvailable()
-        let manager = CanvasFixture.stripingZoo()
+        let manager = try CanvasFixture.stripingZoo()
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true) else {
             return XCTFail("Fixture must mint")
         }
@@ -477,7 +477,7 @@ final class StripedCompositeMetalLogicTests: XCTestCase {
     /// file measured nothing.
     func testTheGPUGenuinelyRenderedTheseFixturesRatherThanFallingBackToTheCPU() throws {
         try skipUnlessGPUAvailable()
-        guard let recipe = CanvasFixture.stripingZoo().makeFrameRecipe(atFrame: 0, includeBackground: true) else {
+        guard let recipe = try CanvasFixture.stripingZoo().makeFrameRecipe(atFrame: 0, includeBackground: true) else {
             return XCTFail("Fixture must mint")
         }
         switch MetalCompositor.attempt(recipe.resolve()) {

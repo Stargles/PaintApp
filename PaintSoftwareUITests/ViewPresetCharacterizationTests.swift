@@ -48,9 +48,9 @@ final class ViewPresetCharacterizationTests: XCTestCase {
     /// recorded them hidden too and a preset saved under the old rule still restores the same
     /// picture. It no longer writes through — the folder's flag gates its subtree at composite time
     /// — so the child records the flag the artist actually set, which is `true`.
-    func testAddingAViewAlsoCapturesFolderVisibility() {
+    func testAddingAViewAlsoCapturesFolderVisibility() throws {
         let manager = CanvasFixture.manager(layerCount: 2)
-        let folder = manager.addFolder(name: "Folder")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Folder"))
         manager.layers[1].parentFolderID = folder
         manager.toggleFolderVisibility(folder)
         XCTAssertFalse(manager.folders[0].isVisible)
@@ -329,9 +329,9 @@ final class ViewPresetCharacterizationTests: XCTestCase {
 
     /// `deleteFolder`, by contrast, *does* prune its own key from every preset. The asymmetry with
     /// layers above is current behavior, pinned so a dedup of the two paths is a deliberate choice.
-    func testDeletingAFolderPrunesItsEntryFromEveryPreset() {
+    func testDeletingAFolderPrunesItsEntryFromEveryPreset() throws {
         let manager = CanvasFixture.manager(layerCount: 2)
-        let folder = manager.addFolder(name: "Folder")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Folder"))
         manager.layers[1].parentFolderID = folder
         manager.addViewPreset()
         XCTAssertNotNil(manager.viewPresets[0].folderVisibility[folder])

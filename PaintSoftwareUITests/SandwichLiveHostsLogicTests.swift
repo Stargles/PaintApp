@@ -76,9 +76,9 @@ final class SandwichLiveHostsLogicTests: XCTestCase {
 
     /// **A folder's float names every host it rides in**, wherever the active layer is — the run spans
     /// them all, so a part is never blanked under a half that still holds its un-lifted ink.
-    func testAFolderFloatsPartsAreAllDrawnByTheirHosts() {
+    func testAFolderFloatsPartsAreAllDrawnByTheirHosts() throws {
         let s = guideStack()
-        let folder = s.manager.addFolder(name: "Guides")
+        let folder = try XCTUnwrap(s.manager.addFolder(name: "Guides"))
         s.manager.layers[s.below].parentFolderID = folder
         s.manager.layers[s.drawing].parentFolderID = folder
         s.manager.currentLayerIndex = s.above
@@ -178,9 +178,9 @@ final class SandwichLiveHostsLogicTests: XCTestCase {
 
     /// **A faded folder around the hosts** fades once per half when cut (`cut(around:)`'s part-group),
     /// so its upper part over transparency is not the picture either.
-    func testHostsInsideAFadedFolderWithLayersAboveThemGoOver() {
+    func testHostsInsideAFadedFolderWithLayersAboveThemGoOver() throws {
         let s = guideStack()
-        let folder = s.manager.addFolder(name: "Faded")
+        let folder = try XCTUnwrap(s.manager.addFolder(name: "Faded"))
         s.manager.layers[s.drawing].parentFolderID = folder
         s.manager.layers[s.above].parentFolderID = folder
         s.manager.setFolderOpacity(folder, to: 0.5)
@@ -203,7 +203,7 @@ final class SandwichLiveHostsLogicTests: XCTestCase {
                                       CanvasFixture.solidImage(.black, rect: CGRect(x: 8, y: 40, width: 40, height: 8)))
         CanvasFixture.setBakedContent(manager, layerIndex: 2,
                                       CanvasFixture.solidImage(.red, rect: CGRect(x: 8, y: 8, width: 40, height: 12)))
-        let folder = manager.addFolder(name: "Faded")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Faded"))
         for index in 0..<3 { manager.layers[index].parentFolderID = folder }
         manager.setFolderOpacity(folder, to: 0.5)
         manager.currentLayerIndex = 2

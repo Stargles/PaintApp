@@ -695,19 +695,31 @@ final class CanvasManager: ObservableObject {
               info.displaySize.width > 0, info.displaySize.height > 0,
               info.duration.seconds > 0 else { return false }
 
+        // Earlier edits own their pixels and history before a failed stage can roll back the new layer.
+        guard commitAllInteractiveState() else { return false }
+
         let id = UUID()
         let suffix = pickedURL.pathExtension.isEmpty ? "mov" : pickedURL.pathExtension
         let assetFileName = "\(id.uuidString)_video.\(suffix)"
-        guard let assetURL = VideoImportStore.stage(pickedURL, as: assetFileName,
-                                                    consumingSource: consumingSource)
-        else { return false }
-
-        // §2.1. This is its own undo step and has to be, because the element below is registered
-        // against the layer it lands on.
-        addVectorLayer()
-        guard layers.indices.contains(currentLayerIndex),
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: 0),
-              let vector = layers[currentLayerIndex].cels[celIndex].vector else { return false }
+        // Layer/context settlement and actual destination admission precede the move of an owned
+        // picked copy. A stage refusal rolls back only this provisional structure, through its
+        // existing owner; successful layer creation remains separate from the video-element undo.
+        var imported: (assetURL: URL, layerIndex: Int, celIndex: Int, vector: VectorCanvas)?
+        guard withStructureTransaction(label: .addVectorLayer, {
+            let previousID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
+            guard addVectorLayer(), layers.indices.contains(currentLayerIndex),
+                  layers[currentLayerIndex].id != previousID,
+                  let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: 0),
+                  let vector = layers[currentLayerIndex].cels[celIndex].vector else { return false }
+            guard let assetURL = VideoImportStore.stage(pickedURL, as: assetFileName,
+                                                        consumingSource: consumingSource) else { return false }
+            imported = (assetURL, currentLayerIndex, celIndex, vector)
+            return true
+        }) else { return false }
+        guard let imported else { preconditionFailure("A successful video import has its staged destination") }
+        let assetURL = imported.assetURL
+        let celIndex = imported.celIndex
+        let vector = imported.vector
 
         // §2.4. The whole clip's length in document frames, clipped to the scene the artist already
         // has — and `sourceEnd` written to the clipped length, so the crop and the block agree from
@@ -739,7 +751,7 @@ final class CanvasManager: ObservableObject {
             // faster instead of always at real wall-clock speed — see the field's own doc comment.
             mappedFrameRate: fps)
 
-        let layerIndex = currentLayerIndex
+        let layerIndex = imported.layerIndex
         // Made in canvas points, so under a pose it is carried into the layer's own space and shown
         // where it was put (`placedInLayerSpace`).
         let element = placedInLayerSpace(.video(drawn), onLayerAt: layerIndex).video ?? drawn
@@ -799,7 +811,7 @@ final class CanvasManager: ObservableObject {
 
         // §2.2. Its own undo step, for `insertVideo`'s reason: the element below is registered
         // against the layer it lands on.
-        addVectorLayer()
+        guard addVectorLayer() else { return nil }
         guard layers.indices.contains(currentLayerIndex),
               layers[currentLayerIndex].cels.count == 1,
               let vector = layers[currentLayerIndex].cels[0].vector else { return nil }
@@ -2407,37 +2419,46 @@ final class CanvasManager: ObservableObject {
 
     /// Inserts a freshly built layer at `newLayerPlacement` and makes it active. The one place the
     /// placement is spent, so the four `add*Layer` methods cannot drift on where "+" puts things.
-    private func insertNewLayer(_ build: (UUID?) -> Layer) {
-        let placement = newLayerPlacement
-        layers.insert(build(placement.parentFolderID), at: placement.index)
-        currentLayerIndex = placement.index
+    @discardableResult
+    private func insertNewLayer(label: HistoryActionLabel, _ build: (UUID?) -> Layer) -> Bool {
+        guard admitChildChange(inContainer: newLayerPlacement.parentFolderID) else { return false }
+        return withStructureTransaction(label: label) {
+            let placement = newLayerPlacement
+            guard admitChildChange(inContainer: placement.parentFolderID) else { return false }
+            let layer = build(placement.parentFolderID)
+            layers.insert(layer, at: placement.index)
+            currentLayerIndex = placement.index
+            return layers.indices.contains(currentLayerIndex) && layers[currentLayerIndex].id == layer.id
+        }
     }
 
-    func addLayer(name: String? = nil) {
-        withStructureUndo(label: .addLayer) {
-            let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength, raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
-            insertNewLayer { parent in
-                Layer(id: UUID(), name: name ?? defaultLayerName(for: .raster), opacity: 1.0,
-                      isVisible: true, parentFolderID: parent, cels: [cel])
-            }
-        }
+    @discardableResult
+    func addLayer(name: String? = nil) -> Bool {
+        guard insertNewLayer(label: .addLayer, { parent in
+            let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength,
+                          raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
+            return Layer(id: UUID(), name: name ?? defaultLayerName(for: .raster), opacity: 1.0,
+                         isVisible: true, parentFolderID: parent, cels: [cel])
+        }) else { return false }
         recordLayerStackChange("added raster layer")
+        return true
     }
 
     /// Adds a `.vector` layer: brush strokes are stored as geometry (see `VectorCanvas`) so they can
     /// be moved/rotated/scaled without resolution loss, and it can also host imported images/shapes.
     /// Its cel still keeps an (empty) `raster` so every cel-lifecycle path assuming a non-optional
     /// raster keeps working — live strokes just live in `vector` instead.
-    func addVectorLayer(name: String? = nil) {
-        withStructureUndo(label: .addVectorLayer) {
+    @discardableResult
+    func addVectorLayer(name: String? = nil) -> Bool {
+        guard insertNewLayer(label: .addVectorLayer, { parent in
             let size = canvasSize ?? CGSize(width: 1, height: 1)
-            let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength, raster: .empty(size: size), vector: .empty(size: size))
-            insertNewLayer { parent in
-                Layer(id: UUID(), name: name ?? defaultLayerName(for: .vector), opacity: 1.0,
-                      isVisible: true, kind: .vector, parentFolderID: parent, cels: [cel])
-            }
-        }
+            let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength,
+                          raster: .empty(size: size), vector: .empty(size: size))
+            return Layer(id: UUID(), name: name ?? defaultLayerName(for: .vector), opacity: 1.0,
+                         isVisible: true, kind: .vector, parentFolderID: parent, cels: [cel])
+        }) else { return false }
         recordLayerStackChange("added vector layer")
+        return true
     }
 
     /// Adds a `.value` layer — the kind that draws nothing of its own (§4.5) — in whichever of its two
@@ -2465,24 +2486,19 @@ final class CanvasManager: ObservableObject {
     /// flat-colour mode the fill is resolved into the snapshot's source at `leafSnapshots`, and in
     /// effect mode the snapshot elides the layer's pixels entirely and the compositor reaches the leaf
     /// by its grade before it would look for a source.
+    @discardableResult
     func addValueLayer(color: PaletteColor = ValueFill.defaultColor,
-                       effect: Effect? = nil, name: String? = nil) {
-        withStructureUndo(label: effect == nil ? .addValueLayer : .addEffectLayer) {
+                       effect: Effect? = nil, name: String? = nil) -> Bool {
+        guard insertNewLayer(label: effect == nil ? .addValueLayer : .addEffectLayer, { parent in
             let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength,
                           raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
-            insertNewLayer { parent in
-                Layer(id: UUID(),
-                      name: name ?? defaultValueLayerName(effect: effect),
-                      // A caller that supplied a name chose it, so the mode picker must not take it
-                      // back — see `Layer.hasCustomName`. Every in-app route leaves this nil.
-                      hasCustomName: name != nil,
-                      opacity: 1.0, isVisible: true, kind: .value, effect: effect,
-                      fill: ValueFill(color: color), parentFolderID: parent, cels: [cel])
-            }
-        }
-        // One constructor, two modes (see the doc above), so one recorder line that names which —
-        // the recorder's two separate `addEffectLayer`/`addValueLayer` lines collapsed with them.
+            return Layer(id: UUID(), name: name ?? defaultValueLayerName(effect: effect),
+                         hasCustomName: name != nil, opacity: 1.0, isVisible: true,
+                         kind: .value, effect: effect, fill: ValueFill(color: color),
+                         parentFolderID: parent, cels: [cel])
+        }) else { return false }
         recordLayerStackChange(effect == nil ? "added value layer" : "added effect layer")
+        return true
     }
 
     /// **The one generator for a value layer's automatic name**, so the name it is born with and the
@@ -2523,18 +2539,17 @@ final class CanvasManager: ObservableObject {
     /// `leafSnapshots` elides the leaf outright.
     ///
     /// No fill: `Layer.fill` is a value layer's payload and `valueFill` never reads it on this kind.
-    func addTransformLayer(name: String? = nil) {
-        withStructureUndo(label: .addTransformLayer) {
+    @discardableResult
+    func addTransformLayer(name: String? = nil) -> Bool {
+        guard insertNewLayer(label: .addTransformLayer, { parent in
             let cel = Cel(id: UUID(), startFrame: 0, frameCount: newLayerBlockLength,
                           raster: .empty(size: canvasSize ?? CGSize(width: 1, height: 1)))
-            insertNewLayer { parent in
-                Layer(id: UUID(), name: name ?? defaultLayerName(for: .transform),
-                      hasCustomName: name != nil,
-                      opacity: 1.0, isVisible: true, kind: .transform,
-                      transform: restingContainerPose, parentFolderID: parent, cels: [cel])
-            }
-        }
+            return Layer(id: UUID(), name: name ?? defaultLayerName(for: .transform),
+                         hasCustomName: name != nil, opacity: 1.0, isVisible: true, kind: .transform,
+                         transform: restingContainerPose, parentFolderID: parent, cels: [cel])
+        }) else { return false }
         recordLayerStackChange("added transform layer")
+        return true
     }
 
     /// Sets or clears the grade on a `.value` layer — **the mode picker's whole model half.** Passing
@@ -4088,7 +4103,10 @@ final class CanvasManager: ObservableObject {
     func setMixBlendMode(_ folderID: UUID, to mode: BlendMode) {
         guard let idx = folders.firstIndex(where: { $0.id == folderID }), folders[idx].isCompositorNode,
               folders[idx].compositorOp != .mix(mode) || folders[idx].effect != nil else { return }
-        withStructureUndo(label: .mixMode) {
+        guard admitMixTransition(folders[idx]) else { return }
+        withStructureTransaction(label: .mixMode) {
+            guard let idx = folders.firstIndex(where: { $0.id == folderID }),
+                  folders[idx].isCompositorNode, admitMixTransition(folders[idx]) else { return false }
             folders[idx].compositorRole = .node(op: .mix(mode))
             folders[idx].effect = nil
             // …and the grade's channels with it, the folder half of `setLayerBlendMode`'s line.
@@ -4099,7 +4117,20 @@ final class CanvasManager: ObservableObject {
             // rule `setLayerEffect` applies to a value layer, in the same undo step. See
             // `renameFolderToFollowItsRole`.
             renameFolderToFollowItsRole(idx)
+            return true
         }
+    }
+
+    /// Shape changes admit the new maximum; editing the blend of an existing Mix adds no input.
+    private func admitMixTransition(_ folder: LayerFolder) -> Bool {
+        if case .mix(_)? = folder.compositorOp, folder.effect == nil { return true }
+        var requested = folder
+        requested.compositorRole = .node(op: .mix(.normal))
+        requested.effect = nil
+        guard let maximum = requested.maxInputCount,
+              directChildCount(inContainer: folder.id) > maximum else { return true }
+        raise(.nodeInputLimit(maximum))
+        return false
     }
 
     /// Sets or clears the grade a folder applies to its own finished composite (§4.4's 1-input node
@@ -4377,15 +4408,18 @@ final class CanvasManager: ObservableObject {
     /// `parentFolderID` nil is the root, explicitly — pass `activeContainerID` to put the folder
     /// beside whatever the artist is working on, which is what the panel's "+" does.
     @discardableResult
-    func addFolder(name: String? = nil, parentFolderID: UUID? = nil) -> UUID {
+    func addFolder(name: String? = nil, parentFolderID: UUID? = nil) -> UUID? {
+        guard admitChildChange(inContainer: parentFolderID) else { return nil }
         let folder = LayerFolder(id: UUID(),
                                  name: name ?? defaultFolderName(effect: nil, op: nil),
                                  // `addValueLayer`'s rule: a supplied name is a chosen name.
                                  hasCustomName: name != nil,
                                  parentFolderID: parentFolderID)
-        withStructureUndo(label: .addFolder) {
+        guard withStructureTransaction(label: .addFolder, {
+            guard admitChildChange(inContainer: parentFolderID) else { return false }
             folders.append(folder)
-        }
+            return true
+        }) else { return nil }
         return folder.id
     }
 
@@ -4405,13 +4439,16 @@ final class CanvasManager: ObservableObject {
     /// grade, and each clears the other — so this is the starting op rather than the only one it can
     /// ever have.
     @discardableResult
-    func addCompositorNode(op: CompositorOp, name: String? = nil, parentFolderID: UUID? = nil) -> UUID {
+    func addCompositorNode(op: CompositorOp, name: String? = nil, parentFolderID: UUID? = nil) -> UUID? {
+        guard admitChildChange(inContainer: parentFolderID) else { return nil }
         let node = LayerFolder(id: UUID(), name: name ?? defaultNodeName(for: op),
                                hasCustomName: name != nil,
                                parentFolderID: parentFolderID, compositorRole: .node(op: op))
-        withStructureUndo(label: .addNode) {
+        guard withStructureTransaction(label: .addNode, {
+            guard admitChildChange(inContainer: parentFolderID) else { return false }
             folders.append(node)
-        }
+            return true
+        }) else { return nil }
         return node.id
     }
 
@@ -4475,10 +4512,12 @@ final class CanvasManager: ObservableObject {
     /// one reason only — a promoted *slot* folder would be stranded, tagged as input to a node that
     /// no longer exists, with nothing on it to say which node it lost. No slots, no stranding, no
     /// second behaviour: a node's children are ordinary layers and folders and belong in the stack.
-    func deleteFolder(_ folderID: UUID) {
-        guard folders.contains(where: { $0.id == folderID }) else { return }
-        withStructureUndo(label: .deleteFolder) {
-            guard let idx = folders.firstIndex(where: { $0.id == folderID }) else { return }
+    @discardableResult
+    func deleteFolder(_ folderID: UUID) -> Bool {
+        guard admitChildPromotion(of: folderID) else { return false }
+        return withStructureTransaction(label: .deleteFolder) {
+            guard admitChildPromotion(of: folderID),
+                  let idx = folders.firstIndex(where: { $0.id == folderID }) else { return false }
             // Children move up into whatever contained this folder, not to the root, so deleting a
             // nested folder doesn't yank its contents out of the enclosing one.
             let grandparent = folders[idx].parentFolderID
@@ -4493,6 +4532,7 @@ final class CanvasManager: ObservableObject {
                 viewPresets[vi].folderVisibility.removeValue(forKey: folderID)
             }
             dropMaskSource(.folder(folderID))
+            return true
         }
     }
 

@@ -142,7 +142,7 @@ final class TransformLayerLogicTests: XCTestCase {
         let floor: Int, inner: Int, mover: Int, above: Int, outside: Int
     }
 
-    private func makeStack(mover moverPose: LayerPose?) -> Stack {
+    private func makeStack(mover moverPose: LayerPose?) throws -> Stack {
         let manager = CanvasManager()
         manager.canvasSize = size
         // Created bottom to top: `insertNewLayer` puts each new layer above the active one and makes
@@ -160,7 +160,7 @@ final class TransformLayerLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers.map(\.name), ["floor", "inner", "mover", "above", "outside"],
                        "The fixture's own premise: layers are created bottom to top")
 
-        let folder = manager.addFolder(name: "F")
+        let folder = try XCTUnwrap(manager.addFolder(name: "F"))
         for name in ["inner", "mover", "above"] {
             guard let at = manager.layers.firstIndex(where: { $0.name == name }) else { continue }
             manager.layers[at].parentFolderID = folder
@@ -219,8 +219,8 @@ final class TransformLayerLogicTests: XCTestCase {
     /// The four layers that must *not* move are each a different mistake: `above` is "everything in
     /// the folder", `floor` is "everything beneath it anywhere", `outside` is "everything in the
     /// document", and `mover` itself is a leaf that holds no pixels and has nothing to pose.
-    func testATransformLayerPosesWhatIsBeneathItInItsOwnContainerAndNothingElse() {
-        let stack = makeStack(mover: pose(CGAffineTransform(translationX: 12, y: 0)))
+    func testATransformLayerPosesWhatIsBeneathItInItsOwnContainerAndNothingElse() throws {
+        let stack = try makeStack(mover: pose(CGAffineTransform(translationX: 12, y: 0)))
         let poses = stack.manager.layerPoses(atFrame: 0)
 
         XCTAssertEqual(Set(poses.keys), [stack.inner],
@@ -234,8 +234,8 @@ final class TransformLayerLogicTests: XCTestCase {
     /// because it is the failure with no symptom: a pose that leaked out would move artwork the
     /// artist never put in the group, and nothing in the tree, the composite or any cache key would
     /// look wrong.
-    func testAPoseDoesNotEscapeItsFolder() {
-        let stack = makeStack(mover: pose(CGAffineTransform(translationX: 12, y: 0)))
+    func testAPoseDoesNotEscapeItsFolder() throws {
+        let stack = try makeStack(mover: pose(CGAffineTransform(translationX: 12, y: 0)))
         let poses = stack.manager.layerPoses(atFrame: 0)
         XCTAssertNil(poses[stack.floor], "A pose must not reach out of the container it was set in")
         XCTAssertNil(poses[stack.outside])
@@ -273,9 +273,9 @@ final class TransformLayerLogicTests: XCTestCase {
     /// field without the kind would have been measuring the field rather than the feature. Both
     /// other-kind cases, because `.value` is the one a pre-2026-09-11 document's inert grade-over-pose
     /// storage would have carried, and it must stay inert.
-    func testAPoseOnALayerThatIsNotATransformLayerReachesNothing() {
+    func testAPoseOnALayerThatIsNotATransformLayerReachesNothing() throws {
         for kind in [LayerKind.raster, .value] {
-            let stack = makeStack(mover: pose(CGAffineTransform(translationX: 12, y: 0)))
+            let stack = try makeStack(mover: pose(CGAffineTransform(translationX: 12, y: 0)))
             stack.manager.layers[stack.mover].kind = kind
             XCTAssertTrue(stack.manager.layerPoses(atFrame: 0).isEmpty, "a pose on a \(kind) layer")
             XCTAssertNil(stack.manager.layers[stack.mover].layerTransform, "…through the accessor too")
@@ -286,8 +286,8 @@ final class TransformLayerLogicTests: XCTestCase {
     /// discriminant on both sides. Under the old three-payload precedence a grade beside a pose won
     /// and parked the pose; now only a hand-written manifest can carry both, and what matters is that
     /// the renderer and the panel read the same answer: this layer poses, and it grades nothing.
-    func testAGradeOnATransformLayerIsInertAndThePoseStillReaches() {
-        let stack = makeStack(mover: pose(CGAffineTransform(translationX: 12, y: 0)))
+    func testAGradeOnATransformLayerIsInertAndThePoseStillReaches() throws {
+        let stack = try makeStack(mover: pose(CGAffineTransform(translationX: 12, y: 0)))
         stack.manager.layers[stack.mover].effect = .posterize(Effect.Posterize())
         XCTAssertEqual(Set(stack.manager.layerPoses(atFrame: 0).keys), [stack.inner])
         XCTAssertNil(stack.manager.layers[stack.mover].layerEffect)
@@ -303,12 +303,14 @@ final class TransformLayerLogicTests: XCTestCase {
     /// **The complement is asserted in the same test**, because suppressing too much is the other way
     /// to get this wrong: a pose from *outside* the node still reaches everything the node is built
     /// from, since whatever poses the node poses its operands too.
-    func testATransformLayerInsideACompositorNodePosesNoOtherOperand() {
+    func testATransformLayerInsideACompositorNodePosesNoOtherOperand() throws {
         let manager = CanvasManager()
         manager.canvasSize = size
         manager.addVectorLayer(name: "operand")
         manager.addTransformLayer(name: "mover")
-        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix")
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.normal), name: "Mix"))
+        // Construct the root neighbour before assigning the two existing node inputs.
+        manager.addTransformLayer(name: "outer")
         for name in ["operand", "mover"] {
             guard let at = manager.layers.firstIndex(where: { $0.name == name }) else { continue }
             manager.layers[at].parentFolderID = node
@@ -319,10 +321,7 @@ final class TransformLayerLogicTests: XCTestCase {
                       "An operand's pose is not the node's answer to how its inputs combine")
 
         // …and a transform layer *outside* the node, above it at the root, still carries both of its
-        // operands. `addTransformLayer` lands beside the current layer, which is inside the node, so
-        // the new layer is lifted out to the root by hand; it is the topmost index, so it sits above
-        // the node in the root's stack.
-        manager.addTransformLayer(name: "outer")
+        // operands. It is the topmost index at the root, above the node's stack.
         let outer = manager.layers.firstIndex { $0.name == "outer" }!
         manager.layers[outer].parentFolderID = nil
         manager.layers[outer].transform = pose(slide)
@@ -332,16 +331,16 @@ final class TransformLayerLogicTests: XCTestCase {
     /// **The safety property the whole feature is shaped around.** A document with no transformation
     /// layer mints no pose entries at all, so nothing downstream — not a derivation, not a cache key,
     /// not a canvas-sized render — is paid for by a document that has never used this.
-    func testADocumentWithNoTransformLayerMintsNoPoses() {
-        let stack = makeStack(mover: nil)
+    func testADocumentWithNoTransformLayerMintsNoPoses() throws {
+        let stack = try makeStack(mover: nil)
         XCTAssertTrue(stack.manager.layerPoses(atFrame: 0).isEmpty)
     }
 
     /// A transformation layer the artist has added and not yet moved is resting, and resting is
     /// **absent** rather than present-and-identity — `LayerPose.mapping(atFrame:)`'s rule, asked from
     /// the tree side, because an entry in this dictionary is what gives a leaf a derivation.
-    func testARestingTransformLayerMintsNoPoses() {
-        let stack = makeStack(mover: LayerPose(restingIn: canvasBox))
+    func testARestingTransformLayerMintsNoPoses() throws {
+        let stack = try makeStack(mover: LayerPose(restingIn: canvasBox))
         XCTAssertTrue(stack.manager.layerPoses(atFrame: 0).isEmpty)
     }
 
@@ -370,8 +369,8 @@ final class TransformLayerLogicTests: XCTestCase {
     /// A transform layer is neither a flat colour nor a grade, so nothing paints a canvas-sized sheet
     /// of colour under the move — and it is its own kind, with no fill stamped on it at all, where
     /// the old transform *mode* of a value layer carried the fill as inert storage.
-    func testATransformLayerIsItsOwnKindAndNeitherAFlatColourNorAGrade() {
-        let stack = makeStack(mover: pose(CGAffineTransform(translationX: 12, y: 0)))
+    func testATransformLayerIsItsOwnKindAndNeitherAFlatColourNorAGrade() throws {
+        let stack = try makeStack(mover: pose(CGAffineTransform(translationX: 12, y: 0)))
         let mover = stack.manager.layers[stack.mover]
         XCTAssertEqual(mover.kind, .transform)
         XCTAssertNil(mover.fill, "`addTransformLayer` stamps no fill — there is no mode to flip back to")
@@ -387,7 +386,7 @@ final class TransformLayerLogicTests: XCTestCase {
     /// the snapshot is where "this leaf holds no pixels" is decided — and a leaf carrying a version
     /// and no content is the state §4.4's grading layer already put there.
     func testATransformLayerContributesAVersionAndNoPixels() throws {
-        let stack = makeStack(mover: pose(CGAffineTransform(translationX: 12, y: 0)))
+        let stack = try makeStack(mover: pose(CGAffineTransform(translationX: 12, y: 0)))
         let recipe = try XCTUnwrap(stack.manager.makeFrameRecipe(atFrame: 0, includeBackground: false))
         let leaf = try XCTUnwrap(recipe.leaves[stack.mover])
         XCTAssertNil(leaf.content, "A transformation layer holds no pixels — rasterizing its blank "
@@ -659,7 +658,7 @@ final class TransformLayerLogicTests: XCTestCase {
             try? FileManager.default.removeItem(at: root)
         }
 
-        let stack = makeStack(mover: animatedPose(CGAffineTransform(translationX: 24, y: 0)))
+        let stack = try makeStack(mover: animatedPose(CGAffineTransform(translationX: 24, y: 0)))
         let moverID = stack.manager.layers[stack.mover].id
 
         let url = root.appendingPathComponent("round-trip.paintproj", isDirectory: true)

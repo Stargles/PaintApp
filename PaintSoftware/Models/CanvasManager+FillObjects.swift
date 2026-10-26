@@ -306,7 +306,7 @@ extension CanvasManager {
         guard beginCanvasEdit() else { return nil }
         guard canvasSize != nil else { return nil }
         let usable = vectorOnly ? activeLayerKind == .vector : (activeLayerKind?.holdsPixels ?? false)
-        if !usable { addVectorLayer() }
+        if !usable, !addVectorLayer() { return nil }
         guard layers.indices.contains(currentLayerIndex),
               let celIndex = ensureCelAtCurrentFrame(layerIndex: currentLayerIndex) else { return nil }
         return (currentLayerIndex, celIndex)

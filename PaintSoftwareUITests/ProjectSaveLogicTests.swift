@@ -521,9 +521,9 @@ final class ProjectSaveLogicTests: XCTestCase {
         manager.folders.first { $0.name == name }
     }
 
-    func testGroupPropertiesSurviveARoundTrip() {
+    func testGroupPropertiesSurviveARoundTrip() throws {
         let manager = makeManager()
-        let group = manager.addFolder(name: "Inked")
+        let group = try XCTUnwrap(manager.addFolder(name: "Inked"))
         manager.layers[0].parentFolderID = group
         manager.setFolderOpacity(group, to: 0.4)
         manager.setFolderIsolated(group, isIsolated: false)
@@ -540,9 +540,9 @@ final class ProjectSaveLogicTests: XCTestCase {
 
     /// The claim §4.1 makes in one line — "all defaulted, so existing projects decode unchanged" —
     /// checked against a manifest that genuinely has no such keys.
-    func testAProjectSavedBeforeGroupPropertiesDecodesToTheIdentities() {
+    func testAProjectSavedBeforeGroupPropertiesDecodesToTheIdentities() throws {
         let manager = makeManager()
-        let group = manager.addFolder(name: "Inked")
+        let group = try XCTUnwrap(manager.addFolder(name: "Inked"))
         manager.layers[0].parentFolderID = group
 
         let url = projectURL()
@@ -565,10 +565,10 @@ final class ProjectSaveLogicTests: XCTestCase {
     /// write-through. Loaded without the migration that document renders correctly and then comes back
     /// empty the first time the artist un-hides the group, because each child is still hidden in its
     /// own right.
-    func testAnOldHiddenGroupComesBackWholeWhenItIsUnhidden() {
+    func testAnOldHiddenGroupComesBackWholeWhenItIsUnhidden() throws {
         let manager = makeManager()
-        let outer = manager.addFolder(name: "Outer")
-        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let inner = try XCTUnwrap(manager.addFolder(name: "Inner", parentFolderID: outer))
         manager.layers[0].parentFolderID = outer
         manager.layers[1].parentFolderID = inner
 
@@ -597,9 +597,9 @@ final class ProjectSaveLogicTests: XCTestCase {
     /// The other half, and the reason the signal is the absence of a key rather than a version number:
     /// a document this build saved must never be migrated, or a deliberately hidden layer inside a
     /// hidden group would silently come back every time the project was opened.
-    func testAGroupHiddenUnderTheNewRuleIsNotMigrated() {
+    func testAGroupHiddenUnderTheNewRuleIsNotMigrated() throws {
         let manager = makeManager()
-        let group = manager.addFolder(name: "Outer")
+        let group = try XCTUnwrap(manager.addFolder(name: "Outer"))
         manager.layers[0].parentFolderID = group
         manager.layers[1].parentFolderID = group
 
@@ -620,9 +620,9 @@ final class ProjectSaveLogicTests: XCTestCase {
     /// under the write-through records every child of a hidden group as hidden, so applying one
     /// re-creates the state the migration just cleared. Fixing the document alone would mean the group
     /// comes back once and empties again the next time the artist flips views.
-    func testAnOldPresetDoesNotReintroduceTheClobberedVisibility() {
+    func testAnOldPresetDoesNotReintroduceTheClobberedVisibility() throws {
         let manager = makeManager()
-        let group = manager.addFolder(name: "Outer")
+        let group = try XCTUnwrap(manager.addFolder(name: "Outer"))
         manager.layers[0].parentFolderID = group
         manager.layers[1].parentFolderID = group
 
@@ -648,9 +648,9 @@ final class ProjectSaveLogicTests: XCTestCase {
 
     /// A pre-phase-4 folder that was *visible* has children carrying their own honest flags, so the
     /// migration must leave them exactly alone.
-    func testAnOldVisibleGroupKeepsItsChildrensOwnVisibility() {
+    func testAnOldVisibleGroupKeepsItsChildrensOwnVisibility() throws {
         let manager = makeManager()
-        let group = manager.addFolder(name: "Outer")
+        let group = try XCTUnwrap(manager.addFolder(name: "Outer"))
         manager.layers[0].parentFolderID = group
         manager.layers[1].parentFolderID = group
         manager.toggleLayerVisibility(layerIndex: 1)
@@ -793,7 +793,7 @@ final class ProjectSaveLogicTests: XCTestCase {
     /// rather than the dictionary.
     func testAFolderEffectParameterTrackSurvivesASaveAndLoadAndStillResolves() throws {
         let manager = makeManager()
-        let group = manager.addFolder(name: "Graded group")
+        let group = try XCTUnwrap(manager.addFolder(name: "Graded group"))
         manager.restackLayer(manager.layers[0].id, above: .folder(group), parentFolderID: group)
         manager.setNodeEffect(group, to: .blur(Effect.Blur(radius: 4)))
         let curve = AnimationCurve(keys: [
@@ -827,7 +827,7 @@ final class ProjectSaveLogicTests: XCTestCase {
     /// of them pass for the other's reason.
     func testAFolderWithNoTrackWritesNoEffectTracksKey() throws {
         let manager = makeManager()
-        let group = manager.addFolder(name: "Graded group")
+        let group = try XCTUnwrap(manager.addFolder(name: "Graded group"))
         manager.restackLayer(manager.layers[0].id, above: .folder(group), parentFolderID: group)
         manager.setNodeEffect(group, to: .blur(Effect.Blur(radius: 4)))
 
@@ -863,7 +863,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         let manager = makeManager()
         manager.addValueLayer(effect: .blur(Effect.Blur(radius: 4)), name: "Grade")
         let gradeID = try XCTUnwrap(manager.layers.first { $0.name == "Grade" }?.id)
-        let group = manager.addFolder(name: "Graded group")
+        let group = try XCTUnwrap(manager.addFolder(name: "Graded group"))
         manager.restackLayer(manager.layers[0].id, above: .folder(group), parentFolderID: group)
         manager.setNodeEffect(group, to: .blur(Effect.Blur(radius: 4)))
 
@@ -893,7 +893,7 @@ final class ProjectSaveLogicTests: XCTestCase {
     func testADocumentWithNoKeyframesWritesNeitherKey() throws {
         let manager = makeManager()
         manager.addValueLayer(effect: .blur(Effect.Blur(radius: 4)), name: "Grade")
-        let group = manager.addFolder(name: "Graded group")
+        let group = try XCTUnwrap(manager.addFolder(name: "Graded group"))
         manager.restackLayer(manager.layers[0].id, above: .folder(group), parentFolderID: group)
         manager.setNodeEffect(group, to: .blur(Effect.Blur(radius: 4)))
 
@@ -922,9 +922,9 @@ final class ProjectSaveLogicTests: XCTestCase {
     /// operands in the order they were in. A node's inputs are its ordinary children now (§4.3), so
     /// **the whole of the operand order is the containment and ranking the round trip already
     /// preserves** — which is the storage decision holding, not a gap in this test.
-    func testAMixNodeRoundTripsThroughSaveAndLoadWithItsOperandsInOrder() {
+    func testAMixNodeRoundTripsThroughSaveAndLoadWithItsOperandsInOrder() throws {
         let manager = makeManager()
-        let node = manager.addCompositorNode(op: .mix(.multiply), name: "Mix")
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.multiply), name: "Mix"))
         let backdropID = manager.layers[0].id
         let overID = manager.layers[1].id
         // Backdrop first, then the layer that composites over it — dropped in that order, so a load
@@ -958,11 +958,11 @@ final class ProjectSaveLogicTests: XCTestCase {
     ///
     /// **Asserts the order, not the count.** Two children in the wrong order is exactly what a
     /// migration that dropped the ranking would produce, and it passes any count-shaped assertion.
-    func testANodeSavedWithInputSlotFoldersOpensWithItsOperandsInSlotOrder() {
+    func testANodeSavedWithInputSlotFoldersOpensWithItsOperandsInSlotOrder() throws {
         let manager = makeManager()
-        let node = manager.addCompositorNode(op: .mix(.multiply), name: "Mix")
-        let inputA = manager.addFolder(name: "Input A", parentFolderID: node)
-        let inputB = manager.addFolder(name: "Input B", parentFolderID: node)
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.multiply), name: "Mix"))
+        let inputA = try XCTUnwrap(manager.addFolder(name: "Input A", parentFolderID: node))
+        let inputB = try XCTUnwrap(manager.addFolder(name: "Input B", parentFolderID: node))
         let backdropID = manager.layers[0].id
         let overID = manager.layers[1].id
         manager.restackLayer(backdropID, above: .folder(inputA), parentFolderID: inputA)

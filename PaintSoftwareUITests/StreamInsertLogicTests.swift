@@ -373,12 +373,12 @@ final class StreamInsertLogicTests: XCTestCase {
 
     /// A layer made invisible one of the two ways the artist can: its own switch, or a hidden folder
     /// above it.
-    private func hide(_ index: Int, in manager: CanvasManager, viaFolder: Bool) {
+    private func hide(_ index: Int, in manager: CanvasManager, viaFolder: Bool) throws {
         guard viaFolder else {
             manager.layers[index].isVisible = false
             return
         }
-        let folderID = manager.addFolder()
+        let folderID = try XCTUnwrap(manager.addFolder())
         manager.layers[index].parentFolderID = folderID
         if let folder = manager.folders.firstIndex(where: { $0.id == folderID }) {
             manager.folders[folder].isVisible = false
@@ -433,7 +433,7 @@ final class StreamInsertLogicTests: XCTestCase {
             fixture.manager.streamCoordinator.tick()
             XCTAssertTrue(try centreIs(.green, fixture.vector), "Setup: green on screen")
             let index = try XCTUnwrap(fixture.manager.layers.indices.last)
-            hide(index, in: fixture.manager, viaFolder: viaFolder)
+            try hide(index, in: fixture.manager, viaFolder: viaFolder)
             fixture.slot(2, solidImage(.red))
             let version = fixture.vector.version
 
@@ -459,7 +459,7 @@ final class StreamInsertLogicTests: XCTestCase {
             let manager = fixture.manager
             let baker = makeBaker(manager)
             let index = try XCTUnwrap(manager.layers.indices.last)
-            if hidden { hide(index, in: manager, viaFolder: false) }
+            if hidden { try hide(index, in: manager, viaFolder: false) }
             bakeEverything(baker)
             XCTAssertEqual(pending(baker, manager), [], "Setup: every frame baked (hidden: \(hidden))")
             let documentVersion = fixture.vector.documentVersion
@@ -503,7 +503,7 @@ final class StreamInsertLogicTests: XCTestCase {
             let coordinator = fixture.manager.streamCoordinator
             coordinator.tick()
             let index = try XCTUnwrap(fixture.manager.layers.indices.last)
-            hide(index, in: fixture.manager, viaFolder: viaFolder)
+            try hide(index, in: fixture.manager, viaFolder: viaFolder)
             coordinator.sync()
             fixture.slot(2, solidImage(.red))
             coordinator.tick()

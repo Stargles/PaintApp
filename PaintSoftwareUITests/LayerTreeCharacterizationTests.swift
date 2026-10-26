@@ -47,10 +47,10 @@ final class LayerTreeCharacterizationTests: XCTestCase {
 
     // MARK: - Reordering into and out of a nested folder
 
-    func testMovingALayerIntoAnEmptyNestedFolderLandsItAtThatFoldersDepth() {
+    func testMovingALayerIntoAnEmptyNestedFolderLandsItAtThatFoldersDepth() throws {
         let manager = namedManager(["A", "B", "C"])
-        let outer = manager.addFolder(name: "Outer")
-        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let inner = try XCTUnwrap(manager.addFolder(name: "Inner", parentFolderID: outer))
         let b = manager.layers[1].id
         let c = manager.layers[2].id
 
@@ -67,10 +67,10 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         assertFolderSpansAreContiguous(manager)
     }
 
-    func testMovingALayerOutOfANestedFolderToTheBottomOfTheStackClearsItsParent() {
+    func testMovingALayerOutOfANestedFolderToTheBottomOfTheStackClearsItsParent() throws {
         let manager = namedManager(["A", "B", "C"])
-        let outer = manager.addFolder(name: "Outer")
-        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let inner = try XCTUnwrap(manager.addFolder(name: "Inner", parentFolderID: outer))
         let b = manager.layers[1].id
         let c = manager.layers[2].id
         manager.restackLayer(c, above: .folder(outer), parentFolderID: outer)
@@ -86,10 +86,10 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         assertFolderSpansAreContiguous(manager)
     }
 
-    func testReorderingWithinANestedFolderKeepsBothEnclosingSpansContiguous() {
+    func testReorderingWithinANestedFolderKeepsBothEnclosingSpansContiguous() throws {
         let manager = namedManager(["X", "A", "B"])
-        let outer = manager.addFolder(name: "Outer")
-        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let inner = try XCTUnwrap(manager.addFolder(name: "Inner", parentFolderID: outer))
         // Placed directly: this test is about reordering inside an already-populated nesting, not
         // about how the layers got there.
         manager.layers[0].parentFolderID = outer
@@ -139,9 +139,9 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         assertFolderSpansAreContiguous(manager)
     }
 
-    func testNestingAFolderInsideAnotherMovesItsLayersIntoThatFoldersSpan() {
+    func testNestingAFolderInsideAnotherMovesItsLayersIntoThatFoldersSpan() throws {
         let manager = namedManager(["A", "B", "C"])
-        let outer = manager.addFolder(name: "Outer")
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
         manager.layers[0].parentFolderID = outer
         let b = manager.layers[1].id
         let c = manager.layers[2].id
@@ -159,10 +159,10 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         assertFolderSpansAreContiguous(manager)
     }
 
-    func testAFolderCannotBeDroppedIntoItselfOrItsOwnSubtree() {
+    func testAFolderCannotBeDroppedIntoItselfOrItsOwnSubtree() throws {
         let manager = namedManager(["A", "B"])
-        let outer = manager.addFolder(name: "Outer")
-        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let inner = try XCTUnwrap(manager.addFolder(name: "Inner", parentFolderID: outer))
         manager.layers[0].parentFolderID = outer
         manager.layers[1].parentFolderID = inner
         let before = stackOrder(manager)
@@ -184,10 +184,10 @@ final class LayerTreeCharacterizationTests: XCTestCase {
     // `folders` — the top — unless it rested directly on another empty folder, so a move to the bottom
     // of the stack, or onto a layer, left it exactly where it was.
 
-    func testAnEmptyFolderCanBeRestackedBelowAnotherEmptyFolderAndBackAbove() {
+    func testAnEmptyFolderCanBeRestackedBelowAnotherEmptyFolderAndBackAbove() throws {
         let manager = namedManager([])
-        let first = manager.addFolder(name: "First")
-        let second = manager.addFolder(name: "Second")
+        let first = try XCTUnwrap(manager.addFolder(name: "First"))
+        let second = try XCTUnwrap(manager.addFolder(name: "Second"))
         XCTAssertEqual(presentedRows(manager), ["0:Second", "0:First"], "Setup: the folder added last renders on top")
 
         manager.restackFolder(second, above: .bottom, parentFolderID: nil)
@@ -198,11 +198,11 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         XCTAssertEqual(presentedRows(manager), ["0:Second", "0:First"], "and back above it")
     }
 
-    func testAnEmptyFolderRestingOnALayerGoesBelowEveryEmptyFolderAboveIt() {
+    func testAnEmptyFolderRestingOnALayerGoesBelowEveryEmptyFolderAboveIt() throws {
         let manager = namedManager(["L"])
         manager.addFolder(name: "A")
         manager.addFolder(name: "B")
-        let c = manager.addFolder(name: "C")
+        let c = try XCTUnwrap(manager.addFolder(name: "C"))
         XCTAssertEqual(presentedRows(manager), ["0:C", "0:B", "0:A", "0:L"], "Setup")
 
         manager.restackFolder(c, above: .layer(manager.layers[0].id), parentFolderID: nil)
@@ -211,12 +211,12 @@ final class LayerTreeCharacterizationTests: XCTestCase {
                        "an empty folder cannot sit under a layer, so the lowest place it has is below its empty siblings")
     }
 
-    func testAnEmptyFolderRestackedInsideAFolderOrdersAmongThatFoldersEmptyChildren() {
+    func testAnEmptyFolderRestackedInsideAFolderOrdersAmongThatFoldersEmptyChildren() throws {
         let manager = namedManager([])
-        let outer = manager.addFolder(name: "Outer")
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
         manager.addFolder(name: "Outside")
         manager.addFolder(name: "X", parentFolderID: outer)
-        let y = manager.addFolder(name: "Y", parentFolderID: outer)
+        let y = try XCTUnwrap(manager.addFolder(name: "Y", parentFolderID: outer))
         XCTAssertEqual(presentedRows(manager), ["0:Outside", "0:Outer", "1:Y", "1:X"], "Setup")
 
         manager.restackFolder(y, above: .bottom, parentFolderID: outer)
@@ -227,9 +227,9 @@ final class LayerTreeCharacterizationTests: XCTestCase {
 
     // MARK: - A new folder's name steps past the ones standing (TODO (134))
 
-    func testANewFolderIsNamedOnePastTheHighestFolderNumberStanding() {
+    func testANewFolderIsNamedOnePastTheHighestFolderNumberStanding() throws {
         let manager = namedManager([])
-        let one = manager.addFolder()
+        let one = try XCTUnwrap(manager.addFolder())
         manager.addFolder()
         XCTAssertEqual(manager.folders.map(\.name), ["Folder 1", "Folder 2"], "Setup")
 
@@ -240,9 +240,9 @@ final class LayerTreeCharacterizationTests: XCTestCase {
                        "a count of the folders would have named the new one Folder 2 over the one standing")
     }
 
-    func testGroupingNamesItsFolderByTheSameRule() {
+    func testGroupingNamesItsFolderByTheSameRule() throws {
         let manager = namedManager(["A", "B"])
-        let first = manager.addFolder()
+        let first = try XCTUnwrap(manager.addFolder())
         manager.addFolder()
         manager.deleteFolder(first)
         XCTAssertEqual(manager.folders.map(\.name), ["Folder 2"], "Setup")
@@ -254,10 +254,10 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         XCTAssertEqual(manager.folders.first { $0.id == grouped }?.name, "Folder 3")
     }
 
-    func testNodesAreNumberedPerOperationAndARenamedNodeNeverTakesANumberStanding() {
+    func testNodesAreNumberedPerOperationAndARenamedNodeNeverTakesANumberStanding() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
-        let first = manager.addCompositorNode(op: .mix(.multiply))
-        let second = manager.addCompositorNode(op: .mix(.multiply))
+        let first = try XCTUnwrap(manager.addCompositorNode(op: .mix(.multiply)))
+        let second = try XCTUnwrap(manager.addCompositorNode(op: .mix(.multiply)))
         XCTAssertEqual(manager.folders.map(\.name), ["Mix 1", "Mix 2"], "Setup")
 
         manager.setNodeEffect(first, to: .blur(Effect.Blur(radius: 4)))
@@ -272,9 +272,9 @@ final class LayerTreeCharacterizationTests: XCTestCase {
 
     // MARK: - Grouping across a folder boundary
 
-    func testGroupingALayerInsideAFolderOntoOneOutsideCreatesATopLevelFolder() {
+    func testGroupingALayerInsideAFolderOntoOneOutsideCreatesATopLevelFolder() throws {
         let manager = namedManager(["A", "B"])
-        let existing = manager.addFolder(name: "Existing")
+        let existing = try XCTUnwrap(manager.addFolder(name: "Existing"))
         manager.layers[1].parentFolderID = existing   // B lives in Existing; A is top-level
         let a = manager.layers[0].id
         let b = manager.layers[1].id
@@ -294,9 +294,9 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         assertFolderSpansAreContiguous(manager)
     }
 
-    func testGroupingALayerOntoOneInsideAFolderNestsTheNewFolderInThere() {
+    func testGroupingALayerOntoOneInsideAFolderNestsTheNewFolderInThere() throws {
         let manager = namedManager(["A", "B"])
-        let existing = manager.addFolder(name: "Existing")
+        let existing = try XCTUnwrap(manager.addFolder(name: "Existing"))
         manager.layers[1].parentFolderID = existing   // B lives in Existing; A is top-level
         let a = manager.layers[0].id
         let b = manager.layers[1].id
@@ -325,9 +325,9 @@ final class LayerTreeCharacterizationTests: XCTestCase {
 
     // MARK: - Merging across a folder boundary
 
-    func testMergingIntoASurvivorThatLivesInAFolderKeepsTheSurvivorInThatFolder() {
+    func testMergingIntoASurvivorThatLivesInAFolderKeepsTheSurvivorInThatFolder() throws {
         let manager = namedManager(["Bottom", "Top"])
-        let folder = manager.addFolder(name: "Folder")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Folder"))
         manager.layers[0].parentFolderID = folder   // the *lower* layer is the one inside
         let bottom = manager.layers[0].id
         let top = manager.layers[1].id
@@ -342,9 +342,9 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         assertFolderSpansAreContiguous(manager)
     }
 
-    func testMergingIntoATopLevelSurvivorPullsTheContentOutOfTheFolder() {
+    func testMergingIntoATopLevelSurvivorPullsTheContentOutOfTheFolder() throws {
         let manager = namedManager(["Bottom", "Top"])
-        let folder = manager.addFolder(name: "Folder")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Folder"))
         manager.layers[1].parentFolderID = folder   // the *upper* layer is the one inside
         let bottom = manager.layers[0].id
         let top = manager.layers[1].id
@@ -358,12 +358,12 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         assertFolderSpansAreContiguous(manager)
     }
 
-    func testMergingAVectorLayerInsideAFolderLeavesARasterSurvivorStillInTheFolder() {
+    func testMergingAVectorLayerInsideAFolderLeavesARasterSurvivorStillInTheFolder() throws {
         let manager = CanvasFixture.manager()
         manager.layers.removeAll()
         manager.addVectorLayer(name: "VectorBottom")
         manager.addLayer(name: "RasterTop")
-        let folder = manager.addFolder(name: "Folder")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Folder"))
         manager.layers[0].parentFolderID = folder
         let bottom = manager.layers[0].id
         let top = manager.layers[1].id
@@ -380,9 +380,9 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         assertFolderSpansAreContiguous(manager)
     }
 
-    func testMergingIsOneUndoStepThatRestoresBothLayersAndTheirFolders() {
+    func testMergingIsOneUndoStepThatRestoresBothLayersAndTheirFolders() throws {
         let manager = namedManager(["Bottom", "Top"])
-        let folder = manager.addFolder(name: "Folder")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Folder"))
         manager.layers[0].parentFolderID = folder
         let bottom = manager.layers[0].id
         let top = manager.layers[1].id
@@ -417,11 +417,11 @@ final class LayerTreeCharacterizationTests: XCTestCase {
     /// A sequence of every tree operation in turn, asserting the contiguity invariant after each
     /// one. A decomposition that splits these across extension files can easily preserve each
     /// operation in isolation while breaking one of them in combination.
-    func testASequenceOfTreeOperationsNeverBreaksFolderContiguity() {
+    func testASequenceOfTreeOperationsNeverBreaksFolderContiguity() throws {
         let manager = namedManager(["A", "B", "C", "D"])
         let ids = manager.layers.map(\.id)
 
-        let outer = manager.addFolder(name: "Outer")
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
         manager.restackLayer(ids[3], above: .folder(outer), parentFolderID: outer)
         assertFolderSpansAreContiguous(manager, "after moving D into Outer")
 
@@ -455,10 +455,10 @@ final class LayerTreeCharacterizationTests: XCTestCase {
     // dragging one child past the other swaps the operands, because input index *is* position.
 
     /// A node at the top level holding two layers: the lower one is input 0, the backdrop.
-    private func mixFixture(_ names: [String]) -> (manager: CanvasManager, node: UUID, inputs: [UUID]) {
+    private func mixFixture(_ names: [String]) throws -> (manager: CanvasManager, node: UUID, inputs: [UUID]) {
         let manager = namedManager(names)
         let ids = manager.layers.map(\.id)
-        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix")
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.normal), name: "Mix"))
         manager.restackLayer(ids[0], above: .folder(node), parentFolderID: node)
         manager.restackLayer(ids[1], above: .folder(node), parentFolderID: node)
         return (manager, node, [ids[0], ids[1]])
@@ -474,8 +474,8 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         }
     }
 
-    func testANodesOperandsAreItsChildrenBottomToTop() {
-        let (manager, node, _) = mixFixture(["A", "B"])
+    func testANodesOperandsAreItsChildrenBottomToTop() throws {
+        let (manager, node, _) = try mixFixture(["A", "B"])
 
         XCTAssertEqual(inputNames(manager, ofNode: node), ["A", "B"],
                        "Input 0 is the lowest row — the backdrop, the direction a plain stack already reads")
@@ -490,8 +490,8 @@ final class LayerTreeCharacterizationTests: XCTestCase {
     /// places or enforced nowhere**: `canDrop` is what the panel reads to decline the drag, and
     /// `restackLayer` refuses independently, because a stale row still on screen from before a
     /// structural edit goes through the same call.
-    func testAThirdDropIntoAMixIsRefusedThroughBothTheGuardAndTheRestack() {
-        let (manager, node, _) = mixFixture(["A", "B", "C"])
+    func testAThirdDropIntoAMixIsRefusedThroughBothTheGuardAndTheRestack() throws {
+        let (manager, node, _) = try mixFixture(["A", "B", "C"])
         guard let loose = manager.layers.first(where: { $0.name == "C" })?.id else {
             return XCTFail("Setup: C should still be a loose top-level layer")
         }
@@ -510,9 +510,9 @@ final class LayerTreeCharacterizationTests: XCTestCase {
 
     /// The same cap, reached with a folder rather than a layer — `restackFolder` is a different call
     /// and asks the same question.
-    func testAThirdDropIntoAMixIsRefusedForAFolderToo() {
-        let (manager, node, _) = mixFixture(["A", "B"])
-        let group = manager.addFolder(name: "Group")
+    func testAThirdDropIntoAMixIsRefusedForAFolderToo() throws {
+        let (manager, node, _) = try mixFixture(["A", "B"])
+        let group = try XCTUnwrap(manager.addFolder(name: "Group"))
 
         XCTAssertFalse(manager.canDrop(inContainer: node, moving: group))
         manager.restackFolder(group, above: .folder(node), parentFolderID: node)
@@ -523,10 +523,10 @@ final class LayerTreeCharacterizationTests: XCTestCase {
 
     /// A node below its arity takes drops like any folder — the cap is a maximum, not a fixed shape,
     /// and a one-operand Mix is a legal document that folds to that operand.
-    func testANodeBelowItsArityAcceptsADropLikeAnyFolder() {
+    func testANodeBelowItsArityAcceptsADropLikeAnyFolder() throws {
         let manager = namedManager(["A", "B"])
         let ids = manager.layers.map(\.id)
-        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix")
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.normal), name: "Mix"))
 
         XCTAssertTrue(manager.canDrop(inContainer: node), "Empty: room for two")
         manager.restackLayer(ids[0], above: .folder(node), parentFolderID: node)
@@ -539,10 +539,10 @@ final class LayerTreeCharacterizationTests: XCTestCase {
 
     /// An ordinary folder declares no maximum, and neither does a variadic op — the arity guard must
     /// not leak out of `.fixed` and start capping the containers every other test in this file uses.
-    func testAnOrdinaryFolderHasNoArityCap() {
+    func testAnOrdinaryFolderHasNoArityCap() throws {
         let manager = namedManager(["A", "B", "C"])
         let ids = manager.layers.map(\.id)
-        let group = manager.addFolder(name: "Group")
+        let group = try XCTUnwrap(manager.addFolder(name: "Group"))
         for id in ids { manager.restackLayer(id, above: .folder(group), parentFolderID: group) }
 
         XCTAssertTrue(manager.canDrop(inContainer: group))
@@ -558,8 +558,8 @@ final class LayerTreeCharacterizationTests: XCTestCase {
     ///
     /// The reorder happens inside a node that is already at its arity, which is the case a naive
     /// `canDrop` refuses — the count does not grow when the thing being moved is already a child.
-    func testDraggingTheUpperOperandBelowTheOtherSwapsTheBackdrop() {
-        let (manager, node, inputs) = mixFixture(["A", "B"])
+    func testDraggingTheUpperOperandBelowTheOtherSwapsTheBackdrop() throws {
+        let (manager, node, inputs) = try mixFixture(["A", "B"])
         XCTAssertEqual(inputNames(manager, ofNode: node), ["A", "B"], "Setup: A is the backdrop")
 
         manager.restackLayer(inputs[1], above: .bottom, parentFolderID: node)
@@ -576,8 +576,8 @@ final class LayerTreeCharacterizationTests: XCTestCase {
     /// for one reason — a promoted *slot* folder would be stranded, tagged as input to a node that no
     /// longer exists. No slots, no stranding: a node's children are ordinary layers and folders and
     /// belong in the stack, exactly like any other folder's.
-    func testDeletingANodePromotesItsChildrenAndUndoesAsOneStep() {
-        let (manager, node, _) = mixFixture(["A", "B", "C"])
+    func testDeletingANodePromotesItsChildrenAndUndoesAsOneStep() throws {
+        let (manager, node, _) = try mixFixture(["A", "B", "C"])
         XCTAssertEqual(manager.folders.count, 1, "Setup: the node arrives alone, with no slot folders")
 
         manager.deleteFolder(node)
@@ -599,11 +599,11 @@ final class LayerTreeCharacterizationTests: XCTestCase {
 
     /// A nested node promotes into whatever held it, not to the root — the enclosing-folder rule
     /// `deleteFolder` already applies to every group.
-    func testDeletingANestedNodePromotesItsChildrenIntoTheEnclosingFolder() {
+    func testDeletingANestedNodePromotesItsChildrenIntoTheEnclosingFolder() throws {
         let manager = namedManager(["A", "B"])
         let ids = manager.layers.map(\.id)
-        let outer = manager.addFolder(name: "Outer")
-        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix", parentFolderID: outer)
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.normal), name: "Mix", parentFolderID: outer))
         manager.restackLayer(ids[0], above: .folder(node), parentFolderID: node)
         manager.restackLayer(ids[1], above: .folder(node), parentFolderID: node)
 
@@ -620,11 +620,11 @@ final class LayerTreeCharacterizationTests: XCTestCase {
     /// §4.3's "a node's span is the union of its inputs' spans", as the drop that would break it. The
     /// layer is dropped into the folder that *holds* the node — a legal container — with an anchor
     /// that puts it squarely between the node's two operands.
-    func testADropBetweenTwoOperandsIsPushedOutOfTheNode() {
+    func testADropBetweenTwoOperandsIsPushedOutOfTheNode() throws {
         let manager = namedManager(["L", "A", "B"])
         let ids = manager.layers.map(\.id)
-        let outer = manager.addFolder(name: "Outer")
-        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix", parentFolderID: outer)
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.normal), name: "Mix", parentFolderID: outer))
         manager.restackLayer(ids[1], above: .folder(node), parentFolderID: node)
         manager.restackLayer(ids[2], above: .folder(node), parentFolderID: node)
         manager.restackLayer(ids[0], above: .folder(outer), parentFolderID: outer)
@@ -663,9 +663,9 @@ final class LayerTreeCharacterizationTests: XCTestCase {
         }
     }
 
-    func testTheRowListNamesANodeApartFromAnOrdinaryFolder() {
-        let (manager, _, _) = mixFixture(["A", "B", "C"])
-        let group = manager.addFolder(name: "Group")
+    func testTheRowListNamesANodeApartFromAnOrdinaryFolder() throws {
+        let (manager, _, _) = try mixFixture(["A", "B", "C"])
+        let group = try XCTUnwrap(manager.addFolder(name: "Group"))
         guard let loose = manager.layers.first(where: { $0.name == "C" })?.id else {
             return XCTFail("Setup: C should still be a loose top-level layer")
         }
@@ -679,11 +679,11 @@ final class LayerTreeCharacterizationTests: XCTestCase {
     /// A folder as an operand is the shape the node earns its keep in: `Mix(A, B)` where A and B are
     /// single layers is the same picture as stacking B over A with that mode, so a real node holds a
     /// *folder* on at least one side. Nothing in the tree treats it differently, which is the claim.
-    func testAFolderIsAsLegalAnOperandAsALayer() {
+    func testAFolderIsAsLegalAnOperandAsALayer() throws {
         let manager = namedManager(["A", "B", "C"])
         let ids = manager.layers.map(\.id)
-        let node = manager.addCompositorNode(op: .mix(.multiply), name: "Mix")
-        let group = manager.addFolder(name: "Group")
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.multiply), name: "Mix"))
+        let group = try XCTUnwrap(manager.addFolder(name: "Group"))
         manager.restackLayer(ids[0], above: .folder(node), parentFolderID: node)
         manager.restackFolder(group, above: .folder(node), parentFolderID: node)
         manager.restackLayer(ids[1], above: .folder(group), parentFolderID: group)
@@ -703,8 +703,8 @@ final class LayerTreeCharacterizationTests: XCTestCase {
     /// `blendMode` is a stored field the derivation no longer reads (§4.3's second owner decision),
     /// but `setMixBlendMode` must still leave it alone — writing through `compositorRole` must not
     /// reach the rest of the folder.
-    func testSettingTheMixModeLeavesTheRestOfTheFolderAloneAndUndoesAsOneStep() {
-        let (manager, node, _) = mixFixture(["A", "B"])
+    func testSettingTheMixModeLeavesTheRestOfTheFolderAloneAndUndoesAsOneStep() throws {
+        let (manager, node, _) = try mixFixture(["A", "B"])
         manager.setFolderOpacity(node, to: 0.5)
 
         manager.setMixBlendMode(node, to: .multiply)
@@ -721,15 +721,184 @@ final class LayerTreeCharacterizationTests: XCTestCase {
                        "…and the operands hanging off the node's id are undisturbed")
     }
 
-    func testSettingAMixModeOnSomethingThatIsNotAMixNodeDoesNothing() {
-        let (manager, node, _) = mixFixture(["A", "B"])
-        let group = manager.addFolder(name: "Group")
+    func testSettingAMixModeOnSomethingThatIsNotAMixNodeDoesNothing() throws {
+        let (manager, node, _) = try mixFixture(["A", "B"])
+        let group = try XCTUnwrap(manager.addFolder(name: "Group"))
 
         manager.setMixBlendMode(group, to: .multiply)
 
         XCTAssertNil(manager.folders.first { $0.id == group }?.compositorRole,
                      "An ordinary folder must not acquire an op — a folder the artist made is not a node")
         XCTAssertEqual(manager.folders.first { $0.id == node }?.compositorOp, .mix(.normal))
+    }
+
+
+    @MainActor
+    func testEveryConstructorAndFullDuplicateRefusesNewInputsWithoutChangingThePictureOrUndo() throws {
+        for maximum in [1, 2] {
+            let manager = namedManager((0..<maximum).map { "Input \($0)" })
+            let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.normal)))
+            for index in manager.layers.indices { manager.layers[index].parentFolderID = node }
+            if maximum == 1 { manager.setNodeEffect(node, to: .blur(.init(radius: 1))) }
+            CanvasFixture.setBakedContent(manager, layerIndex: 0,
+                CanvasFixture.solidImage(.red, rect: CGRect(x: 12, y: 12, width: 24, height: 24)))
+            manager.history.removeAll()
+            manager.setFolderOpacity(node, to: 0.5)
+            let layers = manager.layers.map(\.id), folders = manager.folders.map(\.id)
+            let active = manager.layers[manager.currentLayerIndex].id
+            let before = try XCTUnwrap(Compositor.composite(
+                XCTUnwrap(manager.makeRenderRequest(atFrame: 0, includeBackground: false)), resolving: .coreGraphics))
+            let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(before))
+            XCTAssertTrue(stride(from: 3, to: pixels.count, by: 4).contains { pixels[$0] > 0 },
+                          "PREMISE: refusal must preserve a real nonblank node picture")
+
+            XCTAssertEqual([manager.addLayer(), manager.addVectorLayer(), manager.addValueLayer(),
+                            manager.addTransformLayer(), manager.duplicateLayer(at: manager.currentLayerIndex)],
+                           [false, false, false, false, false])
+            XCTAssertNil(manager.addFolder(parentFolderID: node))
+            XCTAssertNil(manager.addCompositorNode(op: .stack, parentFolderID: node))
+            XCTAssertEqual(manager.layers.map(\.id), layers)
+            XCTAssertEqual(manager.folders.map(\.id), folders)
+            XCTAssertEqual(manager.layers[manager.currentLayerIndex].id, active)
+            XCTAssertEqual(manager.notice?.kind, .nodeInputLimit(maximum))
+            let after = try XCTUnwrap(Compositor.composite(
+                XCTUnwrap(manager.makeRenderRequest(atFrame: 0, includeBackground: false)), resolving: .coreGraphics))
+            XCTAssertEqual(CanvasFixture.rgbaBytes(after), pixels)
+            XCTAssertEqual(manager.history.undoStack.count, 1, "A refused input adds no history entry")
+            manager.undo()
+            XCTAssertEqual(manager.folders.first { $0.id == node }?.opacity, 1,
+                           "Undo still reaches the previous successful edit")
+            manager.redo()
+            XCTAssertEqual(manager.folders.first { $0.id == node }?.opacity, 0.5)
+        }
+        let ordinary = namedManager(["Root"])
+        let group = try XCTUnwrap(ordinary.addFolder())
+        ordinary.layers[0].parentFolderID = group
+        XCTAssertTrue(ordinary.addLayer(), "Ordinary folders do not acquire a node limit")
+    }
+
+    func testGroupingAndFolderPromotionUseTheResolvedFinalCountIncludingRecoveredParents() throws {
+        for outside in [false, true] {
+            let manager = namedManager(["A", "B", "C"])
+            let ids = manager.layers.map(\.id)
+            let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.normal)))
+            manager.layers[0].parentFolderID = node
+            manager.layers[1].parentFolderID = node
+            manager.history.removeAll()
+            let dragged = outside ? ids[2] : ids[1]
+            let group = try XCTUnwrap(manager.groupLayers(dragged, with: ids[0]))
+            XCTAssertEqual(manager.folders.first { $0.id == group }?.parentFolderID, node)
+            XCTAssertEqual(manager.directChildCount(inContainer: node), outside ? 2 : 1)
+            XCTAssertEqual(Set(manager.descendantLayerIndices(ofFolder: group).map { manager.layers[$0].id }),
+                           Set([dragged, ids[0]]))
+            XCTAssertEqual(manager.renderLeafOrder(atFrame: 0).sorted(), Array(manager.layers.indices))
+            manager.undo()
+            XCTAssertEqual(manager.layers.map(\.id), ids)
+            XCTAssertEqual(manager.layers.map(\.parentFolderID), [node, node, nil])
+            manager.redo()
+            XCTAssertEqual(manager.folders.first { $0.id == group }?.parentFolderID, node)
+        }
+
+        for recovered in [false, true] {
+            let manager = namedManager(["Promoted A", "Promoted B", "Other", "Other B"])
+            let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.normal)))
+            let child = try XCTUnwrap(manager.addFolder(parentFolderID: node))
+            let nodeIndex = try XCTUnwrap(manager.folders.firstIndex { $0.id == node })
+            if recovered { manager.folders[nodeIndex].parentFolderID = child } // loaded two-cycle
+            manager.layers[0].parentFolderID = child
+            manager.layers[1].parentFolderID = recovered ? node : child
+            manager.layers[2].parentFolderID = node
+            manager.addViewPreset()
+            let parents = manager.layers.map(\.parentFolderID)
+            let folders = manager.folders.map(\.id)
+            let views = manager.viewPresets.map(\.folderVisibility)
+            manager.history.removeAll()
+            XCTAssertFalse(manager.deleteFolder(child), "Promotion must count the surviving raw parent, even in a cycle")
+            XCTAssertEqual(manager.layers.map(\.parentFolderID), parents)
+            XCTAssertEqual(manager.folders.map(\.id), folders)
+            XCTAssertEqual(manager.viewPresets.map(\.folderVisibility), views)
+            XCTAssertTrue(manager.history.undoStack.isEmpty)
+            manager.layers[1].parentFolderID = nil // now exactly two final inputs fit
+            XCTAssertTrue(manager.deleteFolder(child))
+            XCTAssertEqual(manager.directChildCount(inContainer: node), 2)
+            XCTAssertEqual(manager.layers[0].parentFolderID, node)
+            manager.undo()
+            XCTAssertTrue(manager.folders.contains { $0.id == child })
+            manager.redo()
+            XCTAssertFalse(manager.folders.contains { $0.id == child })
+        }
+        // Loaded cycles are recovered by the same projection used by rendering. The raw cycle
+        // predecessor is not a promoted direct input; a zero-growth delete remains legal at cap.
+        for length in [2, 3] {
+            for promotesInk in [false, true] {
+                let manager = namedManager(["Existing A", "Existing B", "Promoted"])
+                let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.normal)))
+                let child = try XCTUnwrap(manager.addFolder(parentFolderID: node))
+                let predecessor: UUID
+                if length == 2 { predecessor = node }
+                else { predecessor = try XCTUnwrap(manager.addFolder(parentFolderID: child)) }
+                let nodeAt = try XCTUnwrap(manager.folders.firstIndex { $0.id == node })
+                manager.folders[nodeAt].parentFolderID = length == 2 ? child : predecessor
+                manager.layers[0].parentFolderID = node
+                manager.layers[1].parentFolderID = node
+                manager.layers[2].parentFolderID = promotesInk ? child : nil
+                let parents = manager.layers.map(\.parentFolderID), folders = manager.folders.map(\.id)
+                XCTAssertEqual(manager.deleteFolder(child), !promotesInk,
+                               "Cycle deletion refuses only actual new projected growth")
+                XCTAssertEqual(manager.directChildCount(inContainer: node), 2)
+                XCTAssertEqual(manager.renderLeafOrder(atFrame: 0).sorted(), Array(manager.layers.indices))
+                if promotesInk {
+                    XCTAssertEqual(manager.layers.map(\.parentFolderID), parents)
+                    XCTAssertEqual(manager.folders.map(\.id), folders)
+                } else {
+                    XCTAssertFalse(manager.folders.contains { $0.id == child })
+                }
+            }
+        }
+        for rawParent in 0..<2 {
+            let manager = namedManager(["Ink"])
+            let child = try XCTUnwrap(manager.addFolder())
+            let at = try XCTUnwrap(manager.folders.firstIndex { $0.id == child })
+            manager.folders[at].parentFolderID = rawParent == 0 ? child : UUID() // loaded self/dangling
+            manager.layers[0].parentFolderID = child
+            XCTAssertTrue(manager.deleteFolder(child), "Deletion recovers these children at unlimited root")
+            XCTAssertEqual(manager.renderLeafOrder(atFrame: 0), [0])
+        }
+    }
+
+    func testOnlyTransitionIntoMixChecksItsMaximumAndExistingEffectInputsRemainEditable() throws {
+        for graded in [false, true] {
+            let manager = namedManager(["A", "B", "C"])
+            let node = try XCTUnwrap(manager.addCompositorNode(op: .stack))
+            let at = try XCTUnwrap(manager.folders.firstIndex { $0.id == node })
+            for index in manager.layers.indices { manager.layers[index].parentFolderID = node }
+            if graded { manager.setNodeEffect(node, to: .blur(.init(radius: 2))) }
+            let before = manager.folders[at]
+            manager.history.removeAll()
+            manager.setMixBlendMode(node, to: .multiply)
+            XCTAssertEqual(manager.folders[at].compositorOp, before.compositorOp)
+            XCTAssertEqual(manager.folders[at].effect, before.effect)
+            XCTAssertEqual(manager.folders[at].name, before.name)
+            XCTAssertTrue(manager.history.undoStack.isEmpty)
+            manager.restackLayer(manager.layers[2].id, above: .bottom, parentFolderID: nil)
+            manager.setMixBlendMode(node, to: .multiply)
+            XCTAssertEqual(manager.folders[at].compositorOp, .mix(.multiply))
+            XCTAssertNil(manager.folders[at].effect)
+            manager.setNodeEffect(node, to: .blur(.init(radius: 2)))
+            XCTAssertEqual(manager.directChildCount(inContainer: node), 2, "Picking a grade retains the existing pair")
+            XCTAssertTrue(manager.canDrop(inContainer: node, moving: manager.layers.first { $0.parentFolderID == node }!.id))
+            XCTAssertFalse(manager.canDrop(inContainer: node))
+
+            // A loaded over-count Mix stays intact and its blend remains editable; it cannot grow.
+            manager.folders[at].compositorRole = .node(op: .mix(.normal))
+            manager.folders[at].effect = nil
+            for index in manager.layers.indices { manager.layers[index].parentFolderID = node }
+            manager.setMixBlendMode(node, to: .screen)
+            XCTAssertEqual(manager.folders[at].compositorOp, .mix(.screen))
+            XCTAssertEqual(manager.directChildCount(inContainer: node), 3)
+            XCTAssertFalse(manager.canDrop(inContainer: node))
+
+        }
     }
 
     // MARK: - Horizontal drag exit (the owner's "moving it left" bug)
@@ -739,35 +908,35 @@ final class LayerTreeCharacterizationTests: XCTestCase {
     // `CanvasManager` directly, rather than through the view's gesture handling (see that function's
     // own doc for why it lives on this side of the UIKit/logic boundary).
 
-    func testContainerAfterExitingOneLevelReturnsTheImmediateParent() {
+    func testContainerAfterExitingOneLevelReturnsTheImmediateParent() throws {
         let manager = namedManager(["A"])
-        let outer = manager.addFolder(name: "Outer")
-        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let inner = try XCTUnwrap(manager.addFolder(name: "Inner", parentFolderID: outer))
 
         XCTAssertEqual(manager.containerAfterExiting(inner, levels: 1), outer,
                        "One exited level backs out to Inner's own parent")
     }
 
-    func testContainerAfterExitingTwoLevelsReachesTheGrandparent() {
+    func testContainerAfterExitingTwoLevelsReachesTheGrandparent() throws {
         let manager = namedManager(["A"])
-        let outer = manager.addFolder(name: "Outer")
-        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let inner = try XCTUnwrap(manager.addFolder(name: "Inner", parentFolderID: outer))
 
         XCTAssertNil(manager.containerAfterExiting(inner, levels: 2),
                      "Two exited levels clears Outer too — Inner has no grandparent, so this is the top level")
     }
 
-    func testContainerAfterExitingZeroLevelsLeavesTheContainerUnchanged() {
+    func testContainerAfterExitingZeroLevelsLeavesTheContainerUnchanged() throws {
         let manager = namedManager(["A"])
-        let outer = manager.addFolder(name: "Outer")
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
 
         XCTAssertEqual(manager.containerAfterExiting(outer, levels: 0), outer,
                        "No horizontal drag at all must not change the vertical answer")
     }
 
-    func testContainerAfterExitingPastTheRootStaysAtTheRootRatherThanCrashing() {
+    func testContainerAfterExitingPastTheRootStaysAtTheRootRatherThanCrashing() throws {
         let manager = namedManager(["A"])
-        let outer = manager.addFolder(name: "Outer")
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
 
         XCTAssertNil(manager.containerAfterExiting(outer, levels: 5),
                      "Dragging further left than the tree is deep just means 'top level', not an error")
@@ -983,11 +1152,11 @@ final class LayerTreeCharacterizationTests: XCTestCase {
 
     /// A raster layer under three vector layers, the lower two inside a folder: `[A raster, B, C, D]`
     /// bottom to top, with B and C in `folder` and D loose above it.
-    private func visibleStack() -> (manager: CanvasManager, folder: UUID, ids: [String: UUID]) {
+    private func visibleStack() throws -> (manager: CanvasManager, folder: UUID, ids: [String: UUID]) {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.layers[0].name = "A"
         for name in ["B", "C", "D"] { manager.addVectorLayer(name: name) }
-        let folder = manager.addFolder(name: "F")
+        let folder = try XCTUnwrap(manager.addFolder(name: "F"))
         manager.layers[1].parentFolderID = folder
         manager.layers[2].parentFolderID = folder
         return (manager, folder, Dictionary(uniqueKeysWithValues: manager.layers.map { ($0.name, $0.id) }))
@@ -1000,16 +1169,16 @@ final class LayerTreeCharacterizationTests: XCTestCase {
 
     /// **Topmost first, in the compositor's order and folders included** — and a raster layer holds no
     /// stored vector geometry, so it is not here.
-    func testTheVisibleStoredVectorCelsRunTopmostFirstThroughFolders() {
-        let (manager, _, _) = visibleStack()
+    func testTheVisibleStoredVectorCelsRunTopmostFirstThroughFolders() throws {
+        let (manager, _, _) = try visibleStack()
         XCTAssertEqual(manager.layers.map(\.name), ["A", "B", "C", "D"], "PREMISE: B and C sit in the folder, D above it")
         XCTAssertEqual(visibleNames(manager), ["D", "C", "B"])
     }
 
     /// **A layer's own eye gates it, and a folder's eye gates everything inside it** — whatever the
     /// layers inside say for themselves.
-    func testALayersEyeAndEveryFoldersAboveItGateTheVisibleStoredVectorCels() {
-        let (manager, folder, ids) = visibleStack()
+    func testALayersEyeAndEveryFoldersAboveItGateTheVisibleStoredVectorCels() throws {
+        let (manager, folder, ids) = try visibleStack()
 
         manager.layers[manager.layers.firstIndex { $0.id == ids["C"] }!].isVisible = false
         XCTAssertEqual(visibleNames(manager), ["D", "B"], "a hidden layer is not here")
@@ -1020,8 +1189,8 @@ final class LayerTreeCharacterizationTests: XCTestCase {
     }
 
     /// **An in-between has no stored geometry**, so it is not a cel to cut or to hit.
-    func testAnInBetweenIsNotAStoredVectorCel() {
-        let (manager, _, ids) = visibleStack()
+    func testAnInBetweenIsNotAStoredVectorCel() throws {
+        let (manager, _, ids) = try visibleStack()
         let c = manager.layers.firstIndex { $0.id == ids["C"] }!
         manager.layers[c].cels[0].interpolation = InterpolationRecipe(references: [], t: 0.5)
         XCTAssertEqual(visibleNames(manager), ["D", "B"])
@@ -1030,7 +1199,7 @@ final class LayerTreeCharacterizationTests: XCTestCase {
     /// **The frame each layer is read at is the caller's to say**: the playhead by default, and the
     /// walk's Repeat source frame where one is given — the cel and the frame reported are that frame's.
     func testTheVisibleStoredVectorCelsAreReadAtTheFrameTheCallerNames() throws {
-        let (manager, _, ids) = visibleStack()
+        let (manager, _, ids) = try visibleStack()
         let size = try XCTUnwrap(manager.canvasSize)
         let d = manager.layers.firstIndex { $0.id == ids["D"] }!
         manager.layers[d].cels = (0..<2).map {

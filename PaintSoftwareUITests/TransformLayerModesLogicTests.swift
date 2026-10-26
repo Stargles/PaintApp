@@ -225,9 +225,9 @@ final class TransformLayerModesLogicTests: XCTestCase {
     /// drawings and a folder of two make three items — 100/67/33 — and both drawings inside the
     /// folder take the folder's share. A walk that counted the folder's contents as items would give
     /// four shares, and one that skipped folders would give two.
-    func testAFolderIsOneItemAndEverythingInsideItTakesTheFoldersShare() {
+    func testAFolderIsOneItemAndEverythingInsideItTakesTheFoldersShare() throws {
         let fx = fourDrawings(mover: pose(CGAffineTransform(translationX: 90, y: 0), mode: .parallax))
-        let folder = fx.manager.addFolder(name: "F")
+        let folder = try XCTUnwrap(fx.manager.addFolder(name: "F"))
         for name in ["b", "c"] {
             fx.manager.layers[layerIndex(named: name, in: fx.manager)].parentFolderID = folder
         }
@@ -949,7 +949,7 @@ final class TransformLayerModesLogicTests: XCTestCase {
 
         // A folder beneath the looper holding the drawing: walked at the source frame. `addFolder`
         // puts the folder at the top, so it is restacked under the looper.
-        let folder = fx.manager.addFolder(name: "G")
+        let folder = try XCTUnwrap(fx.manager.addFolder(name: "G"))
         fx.manager.layers[layerIndex(named: "ink", in: fx.manager)].parentFolderID = folder
         fx.manager.restackFolder(folder, above: .bottom, parentFolderID: nil)
         let inFolder = layerIndex(named: "ink", in: fx.manager)
@@ -1046,7 +1046,7 @@ final class TransformLayerModesLogicTests: XCTestCase {
         XCTAssertEqual(empty.suggestedRepeatPeriod(forLayer: 0), empty.layers[0].cels[0].frameCount)
 
         // A folder has no mode at all: it poses nothing (TODO (71)), so the switch refuses it.
-        let folder = fx.manager.addFolder(name: "G")
+        let folder = try XCTUnwrap(fx.manager.addFolder(name: "G"))
         fx.manager.setTransformLayerMode(.folder(id: folder), to: .repeat)
         XCTAssertNil(fx.manager.transformLayerMode(of: .folder(id: folder)), "a folder takes no mode")
     }
@@ -1114,7 +1114,7 @@ final class TransformLayerModesLogicTests: XCTestCase {
         // source cel is the cel the render walk reads.
         CanvasFixture.setCelLayout(fx.manager, layerIndex: fx.drawn, [(start: 0, length: 1), (start: 1, length: 1), (start: 2, length: 1)])
         fx.manager.layers[fx.looper].transform?.repeatPeriod = 5
-        let folder = fx.manager.addFolder(name: "G")
+        let folder = try XCTUnwrap(fx.manager.addFolder(name: "G"))
         fx.manager.layers[layerIndex(named: "ink", in: fx.manager)].parentFolderID = folder
         fx.manager.addTransformLayer(name: "inner")
         fx.manager.layers[layerIndex(named: "inner", in: fx.manager)].parentFolderID = folder
@@ -1211,7 +1211,7 @@ final class TransformLayerModesLogicTests: XCTestCase {
         }
         let fx = shakenRasterLayer(seed: 0xBEEF, period: 2, x: 9, y: 3, rotation: 2)
         fx.manager.layers[fx.mover].channelTracks[TargetChannel.shakeX.id] = curve([(0, 9), (8, 0)])
-        let folder = fx.manager.addFolder(name: "G")
+        let folder = try XCTUnwrap(fx.manager.addFolder(name: "G"))
         fx.manager.layers[fx.drawn].parentFolderID = folder
         let moverID = fx.manager.layers[fx.mover].id, drawnID = fx.manager.layers[fx.drawn].id
 
@@ -1283,7 +1283,7 @@ final class TransformLayerModesLogicTests: XCTestCase {
 
         let fx = fourDrawings(mover: pose(CGAffineTransform(translationX: 40, y: 0), mode: .parallax))
         fx.manager.layers[fx.c].parallaxShare = 0.9
-        let folder = fx.manager.addFolder(name: "G")
+        let folder = try XCTUnwrap(fx.manager.addFolder(name: "G"))
         fx.manager.layers[layerIndex(named: "d", in: fx.manager)].parentFolderID = folder
         let folderAt = try XCTUnwrap(fx.manager.folders.firstIndex { $0.id == folder })
         fx.manager.folders[folderAt].channelTracks[TargetChannel.parallaxShare.id] = curve([(0, 0.2), (8, 0.5)])

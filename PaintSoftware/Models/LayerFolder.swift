@@ -208,8 +208,8 @@ extension LayerFolder {
     }
 
     /// How many direct children this folder will accept, or nil for "as many as the artist likes" —
-    /// every ordinary folder, and every variadic node. The one number the drop guards enforce, in
-    /// `canDrop(inContainer:moving:)` and again in the restacks it fronts for.
+    /// every ordinary folder, and every variadic node. Shared child admission reads this number for
+    /// creation, transfer, promotion and the restacks fronted by `canDrop(inContainer:moving:)`.
     ///
     /// **An effect node is the arity-1 case, and it is stated here rather than in `CompositorOp`.**
     /// The op it stores is `.stack`, which is variadic because stacking N composites bottom-to-top
@@ -222,13 +222,12 @@ extension LayerFolder {
     /// both backends' `fold` and both `Codable` halves of `CompositorRole`, and left two places a
     /// grade could live that have to agree.
     ///
-    /// So one clause, in the one property the drop guards read. `canDrop` and both restacks pick it
-    /// up unchanged.
+    /// One clause supplies the maximum to every child producer.
     ///
     /// A node that already holds two children when the artist picks an effect keeps them, and this
     /// then reads 1 against a real child count of 2 — see `CanvasManager.setNodeEffect`, which is
-    /// where that choice is argued. The `<` in `canDrop` handles the over-count exactly right: no
-    /// third child may land, and reordering the two that are there stays legal.
+    /// where that choice is argued. Shared admission prevents new growth while allowing a reorder
+    /// or reduction of the retained inputs.
     var maxInputCount: Int? {
         if isCompositorNode, effect != nil { return 1 }
         guard case .fixed(let count)? = compositorOp?.arity else { return nil }

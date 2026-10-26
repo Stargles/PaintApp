@@ -267,10 +267,10 @@ final class CompositorParityLogicTests: XCTestCase {
         assertWalksAgree(manager, "Grouping two layers must not alter one byte of the composite")
     }
 
-    func testNestedFoldersDoNotChangeThePixels() {
+    func testNestedFoldersDoNotChangeThePixels() throws {
         let manager = overlappingManager()
-        let outer = manager.addFolder(name: "Outer")
-        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let inner = try XCTUnwrap(manager.addFolder(name: "Inner", parentFolderID: outer))
         manager.layers[0].parentFolderID = outer
         manager.layers[1].parentFolderID = inner
         manager.layers[2].parentFolderID = inner
@@ -279,9 +279,9 @@ final class CompositorParityLogicTests: XCTestCase {
         assertWalksAgree(manager, "Two levels of nesting, still the same pixels")
     }
 
-    func testACollapsedFolderStillCompositesItsContents() {
+    func testACollapsedFolderStillCompositesItsContents() throws {
         let manager = overlappingManager()
-        let folder = manager.addFolder(name: "Folder")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Folder"))
         manager.layers[1].parentFolderID = folder
         manager.toggleFolderExpanded(folder)
 
@@ -301,9 +301,9 @@ final class CompositorParityLogicTests: XCTestCase {
     /// layer. Relaxing the oracle to make this pass would erase the record of what shipped. The
     /// expectation is stated independently instead: the same document with that layer plainly
     /// hidden, which is what the gate is supposed to look like.
-    func testAChildReShownInsideAHiddenFolderIsGatedByTheGroup() {
+    func testAChildReShownInsideAHiddenFolderIsGatedByTheGroup() throws {
         let manager = overlappingManager()
-        let folder = manager.addFolder(name: "Folder")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Folder"))
         manager.layers[1].parentFolderID = folder
         manager.layers[1].isVisible = false     // hidden by hand…
         manager.toggleFolderVisibility(folder)  // …then the group is hidden around it…
@@ -318,9 +318,9 @@ final class CompositorParityLogicTests: XCTestCase {
                            "A group's flag gates its subtree: the child's own switch decides nothing while the group is off")
     }
 
-    func testHidingAFolderHidesItsContents() {
+    func testHidingAFolderHidesItsContents() throws {
         let manager = overlappingManager()
-        let folder = manager.addFolder(name: "Folder")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Folder"))
         manager.layers[1].parentFolderID = folder
         manager.layers[2].parentFolderID = folder
         manager.toggleFolderVisibility(folder)
@@ -336,10 +336,10 @@ final class CompositorParityLogicTests: XCTestCase {
     /// The gate is a subtree that is not walked, so depth is not something it has to be told about.
     /// Worth its own case because the obvious wrong implementation — checking the folder flag when
     /// deciding whether to draw a *leaf* — passes the one-level test and fails this one.
-    func testAHiddenGroupGatesEveryDepthBeneathIt() {
+    func testAHiddenGroupGatesEveryDepthBeneathIt() throws {
         let manager = overlappingManager()
-        let outer = manager.addFolder(name: "Outer")
-        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let inner = try XCTUnwrap(manager.addFolder(name: "Inner", parentFolderID: outer))
         manager.layers[1].parentFolderID = outer
         manager.layers[2].parentFolderID = inner
         manager.toggleFolderVisibility(outer)
@@ -353,9 +353,9 @@ final class CompositorParityLogicTests: XCTestCase {
 
     /// A hidden group costs nothing: the walk drops the subtree before it asks whether the group
     /// wants a buffer, so hiding a *faded* group is not a canvas-sized buffer full of nothing.
-    func testAHiddenGroupIsGatedBeforeItsBufferIsConsidered() {
+    func testAHiddenGroupIsGatedBeforeItsBufferIsConsidered() throws {
         let manager = overlappingManager()
-        let folder = manager.addFolder(name: "Faded and hidden")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Faded and hidden"))
         manager.layers[1].parentFolderID = folder
         manager.setFolderOpacity(folder, to: 0.5)
         manager.toggleFolderVisibility(folder)
@@ -375,7 +375,7 @@ final class CompositorParityLogicTests: XCTestCase {
     /// half-transparent upper one. Every other fixture in this file uses opaque non-overlapping or
     /// full-alpha content, where the two are indistinguishable — which is exactly why this one
     /// overlaps.
-    func testGroupOpacityFadesTheGroupsCompositeRatherThanEachChild() {
+    func testGroupOpacityFadesTheGroupsCompositeRatherThanEachChild() throws {
         func stackedSquares() -> CanvasManager {
             let manager = CanvasFixture.manager(layerCount: 2)
             let square = CGRect(x: 0, y: 0, width: 40, height: 40)
@@ -385,7 +385,7 @@ final class CompositorParityLogicTests: XCTestCase {
         }
 
         let grouped = stackedSquares()
-        let folder = grouped.addFolder(name: "Group")
+        let folder = try XCTUnwrap(grouped.addFolder(name: "Group"))
         grouped.layers[0].parentFolderID = folder
         grouped.layers[1].parentFolderID = folder
         grouped.setFolderOpacity(folder, to: 0.5)
@@ -415,12 +415,12 @@ final class CompositorParityLogicTests: XCTestCase {
     /// the alpha is quantized to 8 bits twice. The flat cases in this file assert exact equality
     /// precisely because they involve no intermediate — that difference is the same one
     /// `CoreGraphicsCompositor.draw`'s comment is about, seen from the other side.
-    func testNestedGroupOpacityCompounds() {
+    func testNestedGroupOpacityCompounds() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 40, height: 40)))
-        let outer = manager.addFolder(name: "Outer")
-        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let inner = try XCTUnwrap(manager.addFolder(name: "Inner", parentFolderID: outer))
         manager.layers[0].parentFolderID = inner
         manager.setFolderOpacity(outer, to: 0.5)
         manager.setFolderOpacity(inner, to: 0.5)
@@ -460,9 +460,9 @@ final class CompositorParityLogicTests: XCTestCase {
     /// A group left at opacity 1 stays on the direct path — the boundary is the identity, and it is
     /// worth pinning in pixels as well as in `RenderNode.needsOwnBuffer`, because this is the case
     /// every document that has ever existed is made of.
-    func testAGroupAtFullOpacityStillCompositesLikeTheFlatWalk() {
+    func testAGroupAtFullOpacityStillCompositesLikeTheFlatWalk() throws {
         let manager = overlappingManager()
-        let folder = manager.addFolder(name: "Group")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Group"))
         manager.layers[1].parentFolderID = folder
         manager.layers[2].parentFolderID = folder
         manager.setFolderOpacity(folder, to: 1)
@@ -579,8 +579,8 @@ final class CompositorParityLogicTests: XCTestCase {
     /// One multiply child in a group, over an opaque floor. Isolated, the child starts from
     /// transparency, so it multiplies against nothing (reading as normal) and the finished group
     /// draws source-over: pure red. Pass-through, it multiplies the floor directly: (128, 0, 0).
-    func testIsolationAndPassThroughDivergeOnceAChildBlends() {
-        func floorAndBlendingChild() -> (CanvasManager, UUID) {
+    func testIsolationAndPassThroughDivergeOnceAChildBlends() throws {
+        func floorAndBlendingChild() throws -> (CanvasManager, UUID) {
             let manager = CanvasFixture.manager(layerCount: 2)
             CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                           CanvasFixture.solidImage(UIColor(white: 128.0 / 255, alpha: 1),
@@ -588,14 +588,14 @@ final class CompositorParityLogicTests: XCTestCase {
             CanvasFixture.setBakedContent(manager, layerIndex: 1,
                                           CanvasFixture.solidImage(self.red, rect: CGRect(x: 0, y: 0, width: 32, height: 32)))
             manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
-            let folder = manager.addFolder(name: "Group")
+            let folder = try XCTUnwrap(manager.addFolder(name: "Group"))
             manager.layers[1].parentFolderID = folder
             return (manager, folder)
         }
 
-        let (isolated, isolatedFolder) = floorAndBlendingChild()
+        let (isolated, isolatedFolder) = try floorAndBlendingChild()
         isolated.setFolderIsolated(isolatedFolder, isIsolated: true)
-        let (passThrough, passThroughFolder) = floorAndBlendingChild()
+        let (passThrough, passThroughFolder) = try floorAndBlendingChild()
         passThrough.setFolderIsolated(passThroughFolder, isIsolated: false)
 
         guard let isolatedImage = composite(isolated), let passThroughImage = composite(passThrough) else {
@@ -612,9 +612,9 @@ final class CompositorParityLogicTests: XCTestCase {
     /// backdrop without being *drawn* (it is arithmetic on what is already there), and because the
     /// hidden group here also carries a mode of its own, so both the group's blend and the child's
     /// have to come to nothing.
-    func testABlendInsideAHiddenGroupContributesNothing() {
+    func testABlendInsideAHiddenGroupContributesNothing() throws {
         let manager = overlappingManager()
-        let folder = manager.addFolder(name: "Hidden and blending")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Hidden and blending"))
         manager.layers[1].parentFolderID = folder
         manager.setLayerBlendMode(layerIndex: 1, to: .difference)
         manager.setFolderBlendMode(folder, to: .colorDodge)
@@ -774,7 +774,7 @@ final class CompositorParityLogicTests: XCTestCase {
                                                       UIImage(cgImage: image, scale: 1, orientation: .up))
                     }
                     if grouped {
-                        let folder = manager.addFolder(name: "Faded source")
+                        let folder = try XCTUnwrap(manager.addFolder(name: "Faded source"))
                         manager.layers[1].parentFolderID = folder
                         manager.setFolderBlendMode(folder, to: entry.mode)
                         manager.setFolderOpacity(folder, to: opacity)
@@ -997,7 +997,7 @@ final class CompositorParityLogicTests: XCTestCase {
     func testTheGPUMatchesTheCPUReferenceThroughFoldersAndOpacity() throws {
         try skipUnlessGPUAvailable()
         let manager = overlappingManager()
-        let outer = manager.addFolder(name: "Outer")
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
         manager.layers[0].parentFolderID = outer
         manager.layers[1].parentFolderID = outer
         manager.layers[1].opacity = 0.4
@@ -1146,7 +1146,7 @@ final class CompositorParityLogicTests: XCTestCase {
         var deltas: [(BlendMode, Int)] = []
         for mode in BlendMode.allCases {
             let manager = spectrumManager(.normal)
-            let folder = manager.addFolder(name: "Group")
+            let folder = try XCTUnwrap(manager.addFolder(name: "Group"))
             manager.layers[1].parentFolderID = folder
             manager.setFolderBlendMode(folder, to: mode)
             guard let (gpu, cpu) = gpuAndCPU(manager) else { return }
@@ -1334,7 +1334,7 @@ final class CompositorParityLogicTests: XCTestCase {
         for (label, apply) in [("a faded group", { (m: CanvasManager, f: UUID) in m.setFolderOpacity(f, to: 0.5) }),
                                ("a blending group", { (m: CanvasManager, f: UUID) in m.setFolderBlendMode(f, to: .multiply) })] {
             let manager = overlappingManager()
-            let folder = manager.addFolder(name: label)
+            let folder = try XCTUnwrap(manager.addFolder(name: label))
             manager.layers[1].parentFolderID = folder
             apply(manager, folder)
 
@@ -1351,8 +1351,8 @@ final class CompositorParityLogicTests: XCTestCase {
     func testTheGPUHandlesABufferedGroupInsideAnotherOne() throws {
         try skipUnlessGPUAvailable()
         let manager = overlappingManager()
-        let outer = manager.addFolder(name: "Outer")
-        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let inner = try XCTUnwrap(manager.addFolder(name: "Inner", parentFolderID: outer))
         manager.layers[0].parentFolderID = outer
         manager.layers[1].parentFolderID = inner
         manager.layers[2].parentFolderID = inner
@@ -1370,8 +1370,8 @@ final class CompositorParityLogicTests: XCTestCase {
     func testSequentialBufferedGroupsDoNotContaminateEachOther() throws {
         try skipUnlessGPUAvailable()
         let manager = overlappingManager()
-        let lower = manager.addFolder(name: "Lower")
-        let upper = manager.addFolder(name: "Upper")
+        let lower = try XCTUnwrap(manager.addFolder(name: "Lower"))
+        let upper = try XCTUnwrap(manager.addFolder(name: "Upper"))
         manager.layers[0].parentFolderID = lower
         manager.layers[1].parentFolderID = lower
         manager.layers[2].parentFolderID = upper
@@ -1388,7 +1388,7 @@ final class CompositorParityLogicTests: XCTestCase {
     func testTheGPUGatesAHiddenGroupExactlyAsTheCPUDoes() throws {
         try skipUnlessGPUAvailable()
         let manager = overlappingManager()
-        let folder = manager.addFolder(name: "Folder")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Folder"))
         manager.layers[1].parentFolderID = folder
         manager.layers[2].parentFolderID = folder
         manager.toggleFolderVisibility(folder)
@@ -1490,7 +1490,7 @@ final class CompositorParityLogicTests: XCTestCase {
     /// A node holding two operands over a grey floor, plus a hidden shape to mask with. `operands`
     /// are the two child folders, input 0 first; `shape` is a left-half rectangle on a hidden layer.
     private func nodeFixture(mode: BlendMode = .normal)
-        -> (manager: CanvasManager, node: UUID, operands: [UUID], shape: MaskSource) {
+        throws -> (manager: CanvasManager, node: UUID, operands: [UUID], shape: MaskSource) {
         let manager = CanvasFixture.manager(layerCount: 4)
         let whole = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
         // 0: the mask shape, hidden — a source, not content (§6.6 forces its visibility on).
@@ -1504,9 +1504,9 @@ final class CompositorParityLogicTests: XCTestCase {
         CanvasFixture.setBakedContent(manager, layerIndex: 3,
                                       CanvasFixture.solidImage(green, rect: CGRect(x: 16, y: 16, width: 48, height: 48)))
         let ids = manager.layers.map(\.id)
-        let node = manager.addCompositorNode(op: .mix(mode), name: "Mix")
-        let inputA = manager.addFolder(name: "A", parentFolderID: node)
-        let inputB = manager.addFolder(name: "B", parentFolderID: node)
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(mode), name: "Mix"))
+        let inputA = try XCTUnwrap(manager.addFolder(name: "A", parentFolderID: node))
+        let inputB = try XCTUnwrap(manager.addFolder(name: "B", parentFolderID: node))
         manager.restackLayer(ids[2], above: .folder(inputA), parentFolderID: inputA)
         manager.restackLayer(ids[3], above: .folder(inputB), parentFolderID: inputB)
         return (manager, node, [inputA, inputB], .layer(ids[0]))
@@ -1522,8 +1522,8 @@ final class CompositorParityLogicTests: XCTestCase {
     /// wholesale**: its children's opacity and masks still reach the picture, on both backends. The
     /// slot-era version of this test measured the same shape one level down
     /// (`testAnInputsOwnBlendModeIsInertButItsOpacityStillFades`, below, is what that became).
-    func testANodesOwnBlendModeIsInertButItsChildrensOpacityAndMasksAreNot() {
-        let (manager, node, operands, shape) = nodeFixture()
+    func testANodesOwnBlendModeIsInertButItsChildrensOpacityAndMasksAreNot() throws {
+        let (manager, node, operands, shape) = try nodeFixture()
 
         var backends: [CompositorBackend] = [.coreGraphics]
         if CompositorMetalEngine.shared != nil { backends.append(.metal) }
@@ -1583,8 +1583,8 @@ final class CompositorParityLogicTests: XCTestCase {
     /// **A bare layer as an operand is swept beside the folder, and that is the case §4.3's redesign
     /// added.** The old rule keyed on the child being a slot-tagged folder; a layer dropped straight
     /// into a node was not one, and its mode would have reached the fold.
-    func testAnInputsOwnBlendModeIsInertButItsOpacityStillFades() {
-        let (manager, node, operands, _) = nodeFixture()
+    func testAnInputsOwnBlendModeIsInertButItsOpacityStillFades() throws {
+        let (manager, node, operands, _) = try nodeFixture()
         // Input 1 becomes a bare layer rather than a folder, so the sweep covers both kinds of child.
         // Deleting the wrapper promotes the layer into the node in place, which is §4.3's first owner
         // decision doing the setup work — and keeps the child count at the arity throughout.
@@ -1641,7 +1641,7 @@ final class CompositorParityLogicTests: XCTestCase {
     ///
     /// The fixture makes the wrong answer visible: input 0 covers only the left half, so a clipped
     /// input 1 would vanish on the right and let the floor beneath the node show through.
-    func testAClipToBelowInputDoesNotClipToTheOtherInput() {
+    func testAClipToBelowInputDoesNotClipToTheOtherInput() throws {
         let manager = CanvasFixture.manager(layerCount: 3)
         let whole = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
         CanvasFixture.setBakedContent(manager, layerIndex: 0, CanvasFixture.solidImage(blue, rect: whole))
@@ -1649,7 +1649,7 @@ final class CompositorParityLogicTests: XCTestCase {
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
         CanvasFixture.setBakedContent(manager, layerIndex: 2, CanvasFixture.solidImage(green, rect: whole))
         let ids = manager.layers.map(\.id)
-        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix")
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.normal), name: "Mix"))
         manager.restackLayer(ids[1], above: .folder(node), parentFolderID: node)
         manager.restackLayer(ids[2], above: .folder(node), parentFolderID: node)
         guard let upper = manager.layers.firstIndex(where: { $0.id == ids[2] }) else {

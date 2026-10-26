@@ -43,11 +43,11 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
     /// `withStructureUndo` edits; several tests below assert that some *later* action recorded exactly
     /// one step, which is unassertable while the fixture's own steps are still on the stack
     /// (`KeyframeControlLogicTests.gradedManager` carries the same note for the same reason).
-    private func folderManager(frames: Int = 24) -> (manager: CanvasManager, folder: UUID,
+    private func folderManager(frames: Int = 24) throws -> (manager: CanvasManager, folder: UUID,
                                                      target: KeyframeTarget) {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: frames)])
-        let group = manager.addFolder(name: "Group")
+        let group = try XCTUnwrap(manager.addFolder(name: "Group"))
         manager.restackLayer(manager.layers[0].id, above: .folder(group), parentFolderID: group)
         manager.currentLayerIndex = 0
         manager.history.removeAll()
@@ -129,8 +129,8 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
     /// scene. The sweep is what makes the "nowhere else" half real — a build that answered true for
     /// every frame would satisfy a single-frame assertion and would light the Remove row on every
     /// frame of the timeline.
-    func testAFreshGroupHasNoKeyframesAndOnePressPlacesExactlyOne() {
-        let (manager, folder, target) = folderManager()
+    func testAFreshGroupHasNoKeyframesAndOnePressPlacesExactlyOne() throws {
+        let (manager, folder, target) = try folderManager()
 
         XCTAssertEqual(manager.keyframeFrames(of: target), [],
                        "A group nobody has keyed has no keyframes")
@@ -157,8 +157,8 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
     /// Operands: `canUndo` and the union, either side of `undo()`. A mark that cost two steps would
     /// leave the artist pressing Undo twice to take back one press, which is the shape
     /// `HistoryActionLabel`'s own notes are written against.
-    func testPlacingAGroupKeyframeIsOneUndoStep() {
-        let (manager, folder, target) = folderManager()
+    func testPlacingAGroupKeyframeIsOneUndoStep() throws {
+        let (manager, folder, target) = try folderManager()
         manager.addKeys(target, atFrame: 3)
 
         XCTAssertTrue(manager.canUndo, "The press must be undoable")
@@ -183,8 +183,8 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
     /// This is the assertion that would have gone red on the commit before this one had the panel row
     /// existed and written to the wrong target: `.layer(id:)` in place of `.folder(id:)` leaves the
     /// folder's own answer at `.storedValue`.
-    func testTheMarkIsWhatMakesTheGroupsOpacitySliderHoldItsPreviousValue() {
-        let (manager, _, target) = folderManager()
+    func testTheMarkIsWhatMakesTheGroupsOpacitySliderHoldItsPreviousValue() throws {
+        let (manager, _, target) = try folderManager()
 
         XCTAssertEqual(manager.keyframeWrite(target, channel: .opacity, atFrame: 4), .storedValue,
                        "With no keyframe on the group, dragging its opacity is an ordinary setting "
@@ -206,8 +206,8 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
     /// the render tree** at frames 0, 5 and 10, against the two values the artist set. Frame 5 is the
     /// load-bearing one: it is neither value, so it can only be right if a curve exists *and* the
     /// tree resolves through it. Nothing here reads `channelTracks`.
-    func testTheFourStepWorkflowOnAGroupProducesAnAnimationTheTreeDraws() {
-        let (manager, folder, target) = folderManager()
+    func testTheFourStepWorkflowOnAGroupProducesAnAnimationTheTreeDraws() throws {
+        let (manager, folder, target) = try folderManager()
 
         // 1. A bare mark at A. "Keyframe A is added, nothing is saved."
         manager.addKeys(target, atFrame: 0)
@@ -242,8 +242,8 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
     /// empty while the union still names both frames. A build that kept the marks would draw a
     /// keyframe indicator that outlives the node under it, which is the report §2.28 was written from
     /// three times.
-    func testOnceTheChannelKeysThemTheGroupsMarksAreDroppedAndOnlyTheUnionRemains() {
-        let (manager, folder, target) = folderManager()
+    func testOnceTheChannelKeysThemTheGroupsMarksAreDroppedAndOnlyTheUnionRemains() throws {
+        let (manager, folder, target) = try folderManager()
         let index = folderIndex(manager, folder)
 
         manager.addKeys(target, atFrame: 0)
@@ -278,8 +278,8 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
     ///
     /// **The `TargetChannel` half iterates the table rather than naming `.opacity`**, so the day a
     /// second row lands this covers it without being rewritten.
-    func testOneGroupPressPrimesEveryChannelKindAndAnEditPastItHoldsOnlyThatChannel() {
-        let (manager, folder, target) = folderManager(frames: 32)
+    func testOneGroupPressPrimesEveryChannelKindAndAnEditPastItHoldsOnlyThatChannel() throws {
+        let (manager, folder, target) = try folderManager(frames: 32)
         let index = folderIndex(manager, folder)
 
         manager.setNodeEffect(folder, to: .brightnessContrast(
@@ -344,8 +344,8 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
     /// whole point: after the four-step workflow there are no marks left, so a Remove row gated on
     /// the mark list would vanish exactly when the artist has an animation to edit. That is §2.28's
     /// second reported symptom — "a diamond with no Remove Keys".
-    func testRemoveIsOfferedForAGroupKeyframeThatHasNoMarkAndClearsEveryChannel() {
-        let (manager, folder, target) = folderManager()
+    func testRemoveIsOfferedForAGroupKeyframeThatHasNoMarkAndClearsEveryChannel() throws {
+        let (manager, folder, target) = try folderManager()
         let index = folderIndex(manager, folder)
 
         manager.addKeys(target, atFrame: 0)
@@ -376,8 +376,8 @@ final class FolderKeyframeEntryLogicTests: XCTestCase {
     /// `KeyframeTarget` in its own right (`TimelineFolderRowView`'s own note: aggregating its
     /// descendants' keys "would draw a marker with no target to attribute it to"), so the artist who
     /// clears the group's keyframe must not lose the drawing's.
-    func testRemovingAGroupKeyframeLeavesItsChildrensKeyframesAlone() {
-        let (manager, folder, target) = folderManager()
+    func testRemovingAGroupKeyframeLeavesItsChildrensKeyframesAlone() throws {
+        let (manager, folder, target) = try folderManager()
         let child = KeyframeTarget.layer(id: manager.layers[0].id)
 
         manager.addKeys(target, atFrame: 5)

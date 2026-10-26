@@ -287,9 +287,9 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
     /// §2.21 — a folder's grade animates exactly as a layer's, so the folder row carries a band too
     /// and its own field has to move. Asserted separately because the folder half of this key is
     /// built on a different branch of the same loop.
-    func testKeyingAFoldersGradeMovesTheFoldersHalfOfTheKey() {
+    func testKeyingAFoldersGradeMovesTheFoldersHalfOfTheKey() throws {
         let m = manager(layerCount: 1)
-        let group = m.addFolder(name: "Graded group")
+        let group = try XCTUnwrap(m.addFolder(name: "Graded group"))
         m.restackLayer(m.layers[0].id, above: .folder(group), parentFolderID: group)
         m.setNodeEffect(group, to: .brightnessContrast(Effect.BrightnessContrast(brightness: 1, contrast: 1)))
         let before = key(m)
@@ -302,9 +302,9 @@ final class TimelineLayoutKeyLogicTests: XCTestCase {
 
     /// The mark-without-a-grade asymmetry on the folder branch, which is a second `if` in the same
     /// loop and therefore an easy place to gate what the layer branch does not.
-    func testAFoldersMarkDrawsWithNoGradeOnIt() {
+    func testAFoldersMarkDrawsWithNoGradeOnIt() throws {
         let m = manager(layerCount: 1)
-        let group = m.addFolder(name: "Plain group")
+        let group = try XCTUnwrap(m.addFolder(name: "Plain group"))
         m.restackLayer(m.layers[0].id, above: .folder(group), parentFolderID: group)
         XCTAssertNil(m.folders.first { $0.id == group }?.effect, "Fixture: an ungraded group")
         XCTAssertTrue(m.addKeys(.folder(id: group), atFrame: 6), "Fixture: the mark should land")

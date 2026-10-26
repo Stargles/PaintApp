@@ -86,7 +86,7 @@ final class LiveHalvesStripMetalLogicTests: XCTestCase {
     /// what runs is the app's own call, not a test-only spelling of it.
     func testTheGPURefusesTheWholeHalfAndAdmitsEveryStripOfIt() throws {
         try skipUnlessGPUAvailable()
-        let manager = CanvasFixture.stripingZoo()
+        let manager = try CanvasFixture.stripingZoo()
         guard let recipe = sandwich(manager, active: 3) else { return }
         let engine = try XCTUnwrap(CompositorMetalEngine.shared)
 
@@ -141,7 +141,7 @@ final class LiveHalvesStripMetalLogicTests: XCTestCase {
     /// run takes a small budget as an argument, which the planner reads and the engine never sees.
     func testTheStrippedHalvesAreByteIdenticalToTheMetalWholeFrameHalves() throws {
         try skipUnlessGPUAvailable()
-        guard let recipe = sandwich(CanvasFixture.stripingZoo(), active: 3) else { return }
+        guard let recipe = sandwich(try CanvasFixture.stripingZoo(), active: 3) else { return }
         XCTAssertEqual(ChunkedCompositor.resolvedBackend(for: recipe.belowRecipe.tree), .metal,
                        "Premise: the lower half must be handed to the GPU at all")
 
@@ -237,7 +237,7 @@ final class LiveHalvesStripMetalLogicTests: XCTestCase {
     /// file measured nothing.
     func testTheGPUGenuinelyRenderedTheseHalvesRatherThanFallingBackToTheCPU() throws {
         try skipUnlessGPUAvailable()
-        guard let recipe = sandwich(CanvasFixture.stripingZoo(), active: 3) else { return }
+        guard let recipe = sandwich(try CanvasFixture.stripingZoo(), active: 3) else { return }
         for (name, request) in [("lower", recipe.resolve().below), ("upper", recipe.resolve().above)] {
             switch MetalCompositor.attempt(request) {
             case .image:

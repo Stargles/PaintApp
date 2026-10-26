@@ -95,8 +95,8 @@ final class FrameBakeKeyLogicTests: XCTestCase {
 
     // MARK: - Determinism
 
-    func testTheSameRecipeEncodesToTheSameBytesTwice() {
-        let manager = CanvasFixture.chunkingZoo()
+    func testTheSameRecipeEncodesToTheSameBytesTwice() throws {
+        let manager = try CanvasFixture.chunkingZoo()
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true) else {
             return XCTFail("No recipe.")
         }
@@ -108,8 +108,8 @@ final class FrameBakeKeyLogicTests: XCTestCase {
         XCTAssertFalse(bytes().isEmpty, "An empty encoding would make every document one file.")
     }
 
-    func testTheDigestIsSixtyFourLowercaseHexCharacters() {
-        let name = key(CanvasFixture.chunkingZoo())
+    func testTheDigestIsSixtyFourLowercaseHexCharacters() throws {
+        let name = key(try CanvasFixture.chunkingZoo())
         XCTAssertEqual(name.count, 64, "SHA-256 is 32 bytes, which is 64 hex characters.")
         XCTAssertTrue(name.allSatisfy { $0.isHexDigit && !$0.isUppercase },
                       "The filename must be lowercase hex: \(name)")
@@ -118,8 +118,8 @@ final class FrameBakeKeyLogicTests: XCTestCase {
     /// Two independently built recipes over the same document agree — which is what a store looking
     /// a frame up on the display path relies on, since it re-mints the recipe rather than keeping
     /// the one the baker used.
-    func testTwoRecipesOverTheSameDocumentAgree() {
-        let manager = CanvasFixture.chunkingZoo()
+    func testTwoRecipesOverTheSameDocumentAgree() throws {
+        let manager = try CanvasFixture.chunkingZoo()
         XCTAssertEqual(key(manager), key(manager))
     }
 
@@ -202,8 +202,8 @@ final class FrameBakeKeyLogicTests: XCTestCase {
     ///
     /// Pairwise distinct rather than merely consecutive: a field could otherwise move the digest back
     /// onto an earlier row's value and nothing would say so.
-    func testEveryDocumentFieldTheKeyCoversMovesTheDigest() {
-        let manager = CanvasFixture.chunkingZoo()
+    func testEveryDocumentFieldTheKeyCoversMovesTheDigest() throws {
+        let manager = try CanvasFixture.chunkingZoo()
         // A flat-colour value layer, which the zoo has none of — its two `.value` layers are in the
         // *other* mode (`layerEffect`), and `Layer.valueFill` is nil for those by construction.
         manager.addValueLayer(color: PaletteColor(hex: "445566"))
@@ -343,8 +343,8 @@ final class FrameBakeKeyLogicTests: XCTestCase {
     }
 
     /// The inputs that are not in the document: the sizing knob, the quality, the backend and the store's own format version.
-    func testEveryNonDocumentInputMovesTheDigest() {
-        let manager = CanvasFixture.chunkingZoo()
+    func testEveryNonDocumentInputMovesTheDigest() throws {
+        let manager = try CanvasFixture.chunkingZoo()
         var digests: [String: String] = [:]
         digests["baseline"] = key(manager)
         digests["resolution 75%"] = key(manager, resolution: .threeQuarter)
@@ -365,8 +365,8 @@ final class FrameBakeKeyLogicTests: XCTestCase {
     /// `RenderSizing.native` — which the eyedropper, every parity suite and the default recipe take —
     /// ignores the knob outright, so all three knob positions mint the same `canvasSize`. A key that
     /// read the size alone would put a full-resolution bake and a half-resolution one in one file.
-    func testTheResolutionKnobMovesTheDigestEvenWhenTheBufferDoesNot() {
-        let manager = CanvasFixture.chunkingZoo()
+    func testTheResolutionKnobMovesTheDigestEvenWhenTheBufferDoesNot() throws {
+        let manager = try CanvasFixture.chunkingZoo()
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true, sizing: .native) else {
             return XCTFail("No recipe.")
         }
@@ -379,8 +379,8 @@ final class FrameBakeKeyLogicTests: XCTestCase {
     }
 
     /// Tuning is encoded on the mask’s node, so only a recipe reading that mask changes its digest.
-    func testPerMaskTuningMovesOnlyTheMaskedDigest() {
-        let manager = CanvasFixture.chunkingZoo()
+    func testPerMaskTuningMovesOnlyTheMaskedDigest() throws {
+        let manager = try CanvasFixture.chunkingZoo()
         manager.layers[1].alphaMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
         let before = key(manager)
         manager.layers[1].alphaMask?.setTuning(threshold: 0.2, antialiasHalfWidth: 0.02)
@@ -389,8 +389,8 @@ final class FrameBakeKeyLogicTests: XCTestCase {
 
     /// The live `Compositor.backend` accessor, for the same reason — its own doc comment says "the
     /// bake key will read this accessor when it is built".
-    func testTheCompositorBackendMovesTheDigest() {
-        let manager = CanvasFixture.chunkingZoo()
+    func testTheCompositorBackendMovesTheDigest() throws {
+        let manager = try CanvasFixture.chunkingZoo()
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true) else {
             return XCTFail("No recipe.")
         }
@@ -615,7 +615,7 @@ final class FrameBakeKeyLogicTests: XCTestCase {
     /// The same list again, on a **folder** rather than a leaf. §3.3 puts the resolved tree in the
     /// key specifically because "a folder's grade is resolved here — no `LayerContentVersion` carries
     /// it", and a key built only from leaf versions would be blind to the whole of this test.
-    func testAFoldersGradeMovesTheDigest() {
+    func testAFoldersGradeMovesTheDigest() throws {
         var digests: [String: String] = [:]
         let grades: [(String, Effect?)] = [
             ("none", nil),
@@ -624,7 +624,7 @@ final class FrameBakeKeyLogicTests: XCTestCase {
             ("sobel", .sobel(Effect.Sobel())),
         ]
         let manager = CanvasFixture.manager(layerCount: 2)
-        let folder = manager.addFolder(name: "Graded")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Graded"))
         manager.layers[0].parentFolderID = folder
         manager.layers[1].parentFolderID = folder
         for (name, grade) in grades {

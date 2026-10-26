@@ -135,9 +135,9 @@ final class ColourMaskLogicTests: XCTestCase {
             CanvasFixture.solidImage(.red, rect: CGRect(x: 42, y: 20, width: 10, height: 10)))
         CanvasFixture.setBakedContent(manager, layerIndex: 2,
             CanvasFixture.solidImage(.blue, rect: CGRect(x: 0, y: 0, width: 64, height: 64)))
-        let parent = manager.addFolder(name: "Source")
-        let first = manager.addFolder(name: "First", parentFolderID: parent)
-        let second = manager.addFolder(name: "Second", parentFolderID: parent)
+        let parent = try XCTUnwrap(manager.addFolder(name: "Source"))
+        let first = try XCTUnwrap(manager.addFolder(name: "First", parentFolderID: parent))
+        let second = try XCTUnwrap(manager.addFolder(name: "Second", parentFolderID: parent))
         manager.folders[0].isVisible = false
         manager.folders[1].effect = .outline(.init(width: 2))
         manager.folders[2].effect = .outline(.init(width: 2))
@@ -209,7 +209,7 @@ final class ColourMaskLogicTests: XCTestCase {
         var other = AlphaMask(sources: [.layer(manager.layers[0].id)])
         other.setTuning(threshold: 0.5, antialiasHalfWidth: 0.1)
         manager.layers[1].alphaMask = other
-        let folder = manager.addFolder(name: "Masked group")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Masked group"))
         manager.layers[2].parentFolderID = folder
         manager.folders[0].alphaMask = other
         var held = other

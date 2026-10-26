@@ -615,7 +615,8 @@ extension LayerStackListView.Coordinator: UITableViewDelegate {
         let delete = UIContextualAction(style: .destructive, title: "Delete") { [weak self] _, _, done in
             guard let self else { return done(false) }
             if let folderID = row.folderID {
-                self.canvasManager.deleteFolder(folderID)
+                done(self.canvasManager.deleteFolder(folderID))
+                return
             } else if self.canvasManager.layers.indices.contains(row.layerIndex) {
                 self.canvasManager.deleteLayer(at: row.layerIndex)
             }
@@ -631,8 +632,7 @@ extension LayerStackListView.Coordinator: UITableViewDelegate {
 
         let duplicate = UIContextualAction(style: .normal, title: "Duplicate") { [weak self] _, _, done in
             guard let self, self.canvasManager.layers.indices.contains(row.layerIndex) else { return done(false) }
-            self.canvasManager.duplicateLayer(at: row.layerIndex)
-            done(true)
+            done(self.canvasManager.duplicateLayer(at: row.layerIndex))
         }
         duplicate.backgroundColor = .systemBlue
 

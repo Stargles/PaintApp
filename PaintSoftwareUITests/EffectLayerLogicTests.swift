@@ -183,8 +183,8 @@ final class EffectLayerLogicTests: XCTestCase {
     /// would be all-normal children and would decline a buffer, its children would be drawn straight
     /// onto the outer accumulator, and the right half below would be graded too — the wrong answer,
     /// reached by an optimisation rather than by a rule anyone wrote.
-    func testAnEffectInsideAnIsolatedGroupCannotReachOutsideIt() {
-        let (manager, folder) = greyFloorUnderAGroupHoldingAnEffect()
+    func testAnEffectInsideAnIsolatedGroupCannotReachOutsideIt() throws {
+        let (manager, folder) = try greyFloorUnderAGroupHoldingAnEffect()
         manager.setFolderIsolated(folder, isIsolated: true)
 
         guard let image = composite(manager) else { return XCTFail("Fixture must composite") }
@@ -202,8 +202,8 @@ final class EffectLayerLogicTests: XCTestCase {
     /// Worth pinning in both directions so the two are never quietly conflated — a later phase that
     /// "fixed" this by scoping effects to the folder regardless would be overriding a toggle the
     /// artist set.
-    func testAnEffectInsideAPassThroughGroupGradesTheOuterBackdrop() {
-        let (manager, folder) = greyFloorUnderAGroupHoldingAnEffect()
+    func testAnEffectInsideAPassThroughGroupGradesTheOuterBackdrop() throws {
+        let (manager, folder) = try greyFloorUnderAGroupHoldingAnEffect()
         manager.setFolderIsolated(folder, isIsolated: false)
 
         guard let image = composite(manager) else { return XCTFail("Fixture must composite") }
@@ -215,7 +215,7 @@ final class EffectLayerLogicTests: XCTestCase {
     /// A grey floor over the whole canvas, and above it an isolated group holding a grey left half
     /// plus an effect layer. The left half is inside the group, the right half is only the floor —
     /// so one pixel from each says whether the grade stayed in its container.
-    private func greyFloorUnderAGroupHoldingAnEffect() -> (CanvasManager, UUID) {
+    private func greyFloorUnderAGroupHoldingAnEffect() throws -> (CanvasManager, UUID) {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(grey))
         manager.addLayer()
@@ -223,7 +223,7 @@ final class EffectLayerLogicTests: XCTestCase {
                                       CanvasFixture.solidImage(grey, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
         manager.addValueLayer(effect: Self.brighten)
 
-        let folder = manager.addFolder(name: "Group")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Group"))
         manager.layers[1].parentFolderID = folder
         manager.layers[2].parentFolderID = folder
         return (manager, folder)
@@ -440,12 +440,12 @@ final class EffectLayerLogicTests: XCTestCase {
     }
 
     /// The two predicates phase 9a extended, asserted where they are cheapest to read.
-    func testAnEffectLayerEngagesTheCompositorAndBuffersItsEnclosingGroup() {
+    func testAnEffectLayerEngagesTheCompositorAndBuffersItsEnclosingGroup() throws {
         let manager = greyUnderAnEffect()
         XCTAssertTrue(manager.renderTree(atFrame: 0).needsCompositorOnCanvas,
                       "Core Animation cannot grade one sibling by what is under it")
 
-        let (grouped, folder) = greyFloorUnderAGroupHoldingAnEffect()
+        let (grouped, folder) = try greyFloorUnderAGroupHoldingAnEffect()
         grouped.setFolderIsolated(folder, isIsolated: true)
         guard let node = grouped.renderTree(atFrame: 0).first(where: { $0.id == folder }) else {
             return XCTFail("The group must be in the tree")
@@ -688,7 +688,7 @@ final class EffectLayerLogicTests: XCTestCase {
         CanvasFixture.setBakedContent(manager, layerIndex: 0, spectrumImage())
         CanvasFixture.setBakedContent(manager, layerIndex: 1, fullCanvas(grey))
         manager.addValueLayer(effect: Self.brighten)
-        let folder = manager.addFolder(name: "Group")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Group"))
         manager.layers[1].parentFolderID = folder
         manager.layers[2].parentFolderID = folder
 
@@ -887,7 +887,7 @@ final class EffectLayerLogicTests: XCTestCase {
     /// layer grades everything below it, container-wide (see the very first test in this file). A
     /// node grades only what is inside it — a sibling below the folder, in the same container, is
     /// untouched.
-    func testAnEffectNodeGradesOnlyItsOwnSlotAndNotWhatIsBelowItInTheContainer() {
+    func testAnEffectNodeGradesOnlyItsOwnSlotAndNotWhatIsBelowItInTheContainer() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         // Below/outside the folder: full-canvas grey, a sibling in the same container.
         CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(grey))
@@ -896,7 +896,7 @@ final class EffectLayerLogicTests: XCTestCase {
         // the composite even after grading.
         CanvasFixture.setBakedContent(manager, layerIndex: 1,
                                       CanvasFixture.solidImage(grey, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
-        let folder = manager.addFolder(name: "Effect Node")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Effect Node"))
         manager.layers[1].parentFolderID = folder
         guard let idx = manager.folders.firstIndex(where: { $0.id == folder }) else {
             return XCTFail("addFolder must produce a folder")
@@ -924,12 +924,12 @@ final class EffectLayerLogicTests: XCTestCase {
     /// against a backdrop lighter than the graded result must darken it — `.normal` (what the leaf form
     /// is pinned to, `testAnEffectLayerCarriesNoBlendModeButStillClipsToBelow`) would just replace the
     /// backdrop outright and ignore it.
-    func testAnEffectNodeCarriesItsOwnBlendModeUnlikeTheLayerForm() {
+    func testAnEffectNodeCarriesItsOwnBlendModeUnlikeTheLayerForm() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(UIColor(white: 200.0 / 255, alpha: 1)))
         manager.addLayer()
         CanvasFixture.setBakedContent(manager, layerIndex: 1, fullCanvas(grey))
-        let folder = manager.addFolder(name: "Effect Node")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Effect Node"))
         manager.layers[1].parentFolderID = folder
         guard let idx = manager.folders.firstIndex(where: { $0.id == folder }) else {
             return XCTFail("addFolder must produce a folder")
@@ -955,10 +955,10 @@ final class EffectLayerLogicTests: XCTestCase {
     /// The node-form analogue of `testOpacityMixesTheGradeBackTowardTheUngradedBackdrop`: the mix is
     /// toward the node's own ungraded slot composite, the same `compositeEffectMix` primitive with a
     /// different input.
-    func testOpacityOnAnEffectNodeMixesTowardItsOwnUngradedSlotComposite() {
+    func testOpacityOnAnEffectNodeMixesTowardItsOwnUngradedSlotComposite() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(grey))
-        let folder = manager.addFolder(name: "Effect Node")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Effect Node"))
         manager.layers[0].parentFolderID = folder
         guard let idx = manager.folders.firstIndex(where: { $0.id == folder }) else {
             return XCTFail("addFolder must produce a folder")
@@ -973,13 +973,13 @@ final class EffectLayerLogicTests: XCTestCase {
     }
 
     /// The node-form analogue of `testAMaskRestrictsWhereTheGradeApplies`.
-    func testAMaskOnAnEffectNodeRestrictsWhereItsGradeApplies() {
+    func testAMaskOnAnEffectNodeRestrictsWhereItsGradeApplies() throws {
         let manager = CanvasFixture.manager(layerCount: 2)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
         manager.layers[0].isVisible = false
         CanvasFixture.setBakedContent(manager, layerIndex: 1, fullCanvas(grey))
-        let folder = manager.addFolder(name: "Effect Node")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Effect Node"))
         manager.layers[1].parentFolderID = folder
         guard let idx = manager.folders.firstIndex(where: { $0.id == folder }) else {
             return XCTFail("addFolder must produce a folder")
@@ -1001,11 +1001,11 @@ final class EffectLayerLogicTests: XCTestCase {
     /// effect is silently never applied. And `enclosesABlend`'s existing `$0.effect != nil` check
     /// (phase 9a, stated generically over leaf *and* node children) must force an enclosing isolated
     /// group to buffer for a node exactly as it already does for a leaf.
-    func testAnEffectNodeBuffersItselfAndItsEnclosingIsolatedGroup() {
+    func testAnEffectNodeBuffersItselfAndItsEnclosingIsolatedGroup() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(grey))
-        let outer = manager.addFolder(name: "Outer")
-        let inner = manager.addFolder(name: "Effect Node", parentFolderID: outer)
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let inner = try XCTUnwrap(manager.addFolder(name: "Effect Node", parentFolderID: outer))
         manager.layers[0].parentFolderID = inner
         manager.setFolderIsolated(outer, isIsolated: true)
         guard let innerIdx = manager.folders.firstIndex(where: { $0.id == inner }) else {
@@ -1062,10 +1062,10 @@ final class EffectLayerLogicTests: XCTestCase {
 
     /// The node-form analogue of `testACompositingLayerDerivesIntoALeafCarryingItsEffect`:
     /// `RenderNode.effect` is one field for both wrappers, and this is the folder's half of that claim.
-    func testAFolderDerivesIntoANodeCarryingItsEffect() {
+    func testAFolderDerivesIntoANodeCarryingItsEffect() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(grey))
-        let folder = manager.addFolder(name: "Effect Node")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Effect Node"))
         manager.layers[0].parentFolderID = folder
         guard let idx = manager.folders.firstIndex(where: { $0.id == folder }) else {
             return XCTFail("addFolder must produce a folder")
@@ -1098,10 +1098,10 @@ final class EffectLayerLogicTests: XCTestCase {
     }
 
     /// One spectrum floor inside one effect node.
-    private func spectrumUnderAnEffectNode(_ effect: Effect) -> CanvasManager {
+    private func spectrumUnderAnEffectNode(_ effect: Effect) throws -> CanvasManager {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0, spectrumImage())
-        let folder = manager.addFolder(name: "Effect Node")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Effect Node"))
         manager.layers[0].parentFolderID = folder
         guard let idx = manager.folders.firstIndex(where: { $0.id == folder }) else {
             XCTFail("addFolder must produce a folder")
@@ -1119,7 +1119,7 @@ final class EffectLayerLogicTests: XCTestCase {
 
         var deltas: [(String, Int)] = []
         for (name, effect) in Self.sweep {
-            guard let (gpu, cpu) = gpuAndCPU(spectrumUnderAnEffectNode(effect)) else { return }
+            guard let (gpu, cpu) = gpuAndCPU(try spectrumUnderAnEffectNode(effect)) else { return }
             deltas.append((name, maxChannelDelta(gpu, cpu)))
         }
         let table = deltas.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
@@ -1144,7 +1144,7 @@ final class EffectLayerLogicTests: XCTestCase {
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 40, height: 64)))
         manager.layers[0].isVisible = false
         CanvasFixture.setBakedContent(manager, layerIndex: 1, spectrumImage())
-        let folder = manager.addFolder(name: "Effect Node")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Effect Node"))
         manager.layers[1].parentFolderID = folder
         guard let idx = manager.folders.firstIndex(where: { $0.id == folder }) else {
             return XCTFail("addFolder must produce a folder")
@@ -1247,7 +1247,7 @@ final class EffectLayerLogicTests: XCTestCase {
     /// Asserted on `renderTree` rather than on the key, because the key is private to the coordinator
     /// and the tree is the part of it that carries this claim. If this ever fails, the canvas has
     /// stopped repainting on an effect edit and no amount of content-version work will fix it.
-    func testChangingOnlyTheGradeMovesTheDerivedTree() {
+    func testChangingOnlyTheGradeMovesTheDerivedTree() throws {
         let manager = greyUnderAnEffect()
         let before = manager.renderTree(atFrame: 0)
         manager.setLayerEffect(layerIndex: 1, to: .brightnessContrast(Effect.BrightnessContrast(brightness: 1.9)))
@@ -1258,7 +1258,7 @@ final class EffectLayerLogicTests: XCTestCase {
         // The folder form of the same wrapper (§4.4's 1-input node, phase 9b). A grade on a *folder* is
         // reachable from nothing indexed by layer — `contentVersions` is per layer and a folder is not
         // a leaf — so the tree is the only thing that can carry it, which is why this half is here.
-        let (grouped, folder) = greyFloorUnderAGroupHoldingAnEffect()
+        let (grouped, folder) = try greyFloorUnderAGroupHoldingAnEffect()
         let beforeNode = grouped.renderTree(atFrame: 0)
         grouped.setNodeEffect(folder, to: Self.brighten)
         XCTAssertNotEqual(beforeNode, grouped.renderTree(atFrame: 0),
@@ -1425,9 +1425,9 @@ final class EffectLayerLogicTests: XCTestCase {
     ///
     /// Both directions again, because `setMixBlendMode` and `setNodeEffect` each clear what the other
     /// sets: a node that goes back to being a Mix must stop advertising the grade.
-    func testACompositorNodeRenamesItselfToFollowItsOpAndItsGrade() {
+    func testACompositorNodeRenamesItselfToFollowItsOpAndItsGrade() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
-        let node = manager.addCompositorNode(op: .mix(.multiply))
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.multiply)))
         XCTAssertEqual(manager.folders[0].name, "Mix 1", "Premise: it starts named for its op")
 
         manager.setNodeEffect(node, to: .blur(Effect.Blur(radius: 4)))
@@ -1827,13 +1827,13 @@ final class EffectLayerLogicTests: XCTestCase {
     /// directly; the pixel half is an exact equality with no hand-computed byte in it — the two
     /// isolation settings must produce the same picture precisely because *both* buffer, and if one
     /// of them ever stopped they would diverge here.
-    func testAFadedFolderHoldingAnInkEffectAlwaysBuffersRatherThanReWalking() {
-        func fixture(isolated: Bool) -> CanvasManager {
+    func testAFadedFolderHoldingAnInkEffectAlwaysBuffersRatherThanReWalking() throws {
+        func fixture(isolated: Bool) throws -> CanvasManager {
             let manager = CanvasFixture.manager(layerCount: 1)
             CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                           CanvasFixture.solidImage(Self.translucentInk, rect: Self.inkRect))
             manager.addValueLayer(effect: Self.outline)
-            let folder = manager.addFolder(name: "Group")
+            let folder = try XCTUnwrap(manager.addFolder(name: "Group"))
             manager.layers[0].parentFolderID = folder
             manager.layers[1].parentFolderID = folder
             manager.setFolderOpacity(folder, to: 0.5)
@@ -1841,7 +1841,7 @@ final class EffectLayerLogicTests: XCTestCase {
             return manager
         }
 
-        let passThrough = fixture(isolated: false)
+        let passThrough = try fixture(isolated: false)
         let folderNode = passThrough.renderTree(atFrame: 0).first { node in
             if case .node = node.content { return true }
             return false
@@ -1850,7 +1850,7 @@ final class EffectLayerLogicTests: XCTestCase {
                        "A faded folder buffers whatever its isolation says, so the ink re-walk never "
                        + "sees one and `split(atLeaf:)`'s copied opacity cannot be applied twice")
 
-        guard let open = liveCanvas(passThrough), let closed = liveCanvas(fixture(isolated: true)) else {
+        guard let open = liveCanvas(passThrough), let closed = liveCanvas(try fixture(isolated: true)) else {
             return XCTFail("Fixture must composite")
         }
         XCTAssertEqual(pixel(open, 32, 32), pixel(closed, 32, 32),

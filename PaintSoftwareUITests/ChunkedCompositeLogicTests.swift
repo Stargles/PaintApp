@@ -90,11 +90,11 @@ final class ChunkedCompositeLogicTests: XCTestCase {
     /// It moved to the shared support file when `ChunkedCompositeMetalLogicTests` arrived to hold the
     /// *shipped* backend to the same document. Two copies of a fixture this specific would drift, and
     /// a drifted copy would leave the Metal walk pinned against a document nobody had reasoned about.
-    private func zoo() -> CanvasManager { CanvasFixture.chunkingZoo() }
+    private func zoo() throws -> CanvasManager { try CanvasFixture.chunkingZoo() }
 
     /// **The pin.** Byte for byte, on the zoo, at a width that genuinely cuts it into several chunks.
-    func testChunkedCompositingIsByteIdenticalToTheWholeFrameWalk() {
-        let manager = zoo()
+    func testChunkedCompositingIsByteIdenticalToTheWholeFrameWalk() throws {
+        let manager = try zoo()
         assertFolderSpansAreContiguous(manager, "Fixture invariant")
         assertRenderTreeMatchesFlatOrder(manager, "Fixture invariant")
         XCTAssertEqual(manager.layers.count, 10, "Fixture: eight painted layers and two effect layers")
@@ -111,8 +111,8 @@ final class ChunkedCompositeLogicTests: XCTestCase {
     /// The same document at every width from one leaf to more than it has, because the interesting
     /// bugs live at the boundaries: a width of 1 puts a cut between every pair of nodes, and a width
     /// past the document's size must degenerate to exactly one chunk and the unchunked answer.
-    func testEveryChunkWidthProducesTheSameFrame() {
-        let manager = zoo()
+    func testEveryChunkWidthProducesTheSameFrame() throws {
+        let manager = try zoo()
         for width in [1, 2, 3, 5, 8, 40] {
             let chunks = assertChunkedMatchesWhole(manager, chunkSources: width,
                                                    "At a chunk width of \(width)")
@@ -125,8 +125,8 @@ final class ChunkedCompositeLogicTests: XCTestCase {
     /// The paper is what makes rule 3 a question at all, so the zoo is also swept without it — an
     /// `.ink` effect over a paper-free root grades the accumulator directly in both walks, and the two
     /// must still agree.
-    func testChunkedCompositingAgreesWithNoPaperEither() {
-        assertChunkedMatchesWhole(zoo(), chunkSources: 2, includeBackground: false,
+    func testChunkedCompositingAgreesWithNoPaperEither() throws {
+        assertChunkedMatchesWhole(try zoo(), chunkSources: 2, includeBackground: false,
                                   "With no paper, `paperInBackdrop` is false everywhere and no ink twin is carried")
     }
 
@@ -139,7 +139,7 @@ final class ChunkedCompositeLogicTests: XCTestCase {
     /// Deleting rule 1 means letting `spliced` flatten a node that `needsOwnBuffer`. MEASURED by
     /// mutation: with the `!node.needsOwnBuffer` clause removed, this fails at the first pixel where
     /// the two children overlap.
-    func testABufferedNodeIsAnAtomAndIsNeverCutOpen() {
+    func testABufferedNodeIsAnAtomAndIsNeverCutOpen() throws {
         let manager = CanvasFixture.manager(layerCount: 4)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 64, height: 64)))
@@ -149,7 +149,7 @@ final class ChunkedCompositeLogicTests: XCTestCase {
                                       CanvasFixture.solidImage(blue, rect: CGRect(x: 20, y: 20, width: 40, height: 40)))
         CanvasFixture.setBakedContent(manager, layerIndex: 3,
                                       CanvasFixture.solidImage(white, rect: CGRect(x: 0, y: 50, width: 64, height: 14)))
-        let folder = manager.addFolder(name: "Faded")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Faded"))
         manager.layers[1].parentFolderID = folder
         manager.layers[2].parentFolderID = folder
         manager.setFolderOpacity(folder, to: 0.5)
@@ -163,7 +163,7 @@ final class ChunkedCompositeLogicTests: XCTestCase {
     /// The other half of rule 1: **an atom that does not fit is assembled on its own and substituted**,
     /// rather than being composited over budget or dropped. The folder here holds three leaves against
     /// a width of one, so it cannot be run inline at all.
-    func testAnAtomTooBigForTheWidthIsAssembledAndSubstituted() {
+    func testAnAtomTooBigForTheWidthIsAssembledAndSubstituted() throws {
         let manager = CanvasFixture.manager(layerCount: 5)
         for (index, colour) in [red, green, blue, white, red].enumerated() {
             CanvasFixture.setBakedContent(manager, layerIndex: index,
@@ -171,7 +171,7 @@ final class ChunkedCompositeLogicTests: XCTestCase {
                                                                    rect: CGRect(x: index * 6, y: index * 5,
                                                                                 width: 40, height: 40)))
         }
-        let folder = manager.addFolder(name: "Three deep, faded")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Three deep, faded"))
         for index in 1...3 { manager.layers[index].parentFolderID = folder }
         manager.setFolderOpacity(folder, to: 0.4)
         manager.layers[2].blendMode = .multiply
@@ -196,7 +196,7 @@ final class ChunkedCompositeLogicTests: XCTestCase {
     /// Deleting rule 2 means letting `spliced` keep a pass-through `.stack` node whole. MEASURED by
     /// mutation: with the splice removed, the three-leaf folder exceeds the width, becomes an atom,
     /// and the Multiply child multiplies against transparency instead of against the red floor.
-    func testAPassThroughFolderIsSplicedRatherThanIsolated() {
+    func testAPassThroughFolderIsSplicedRatherThanIsolated() throws {
         let manager = CanvasFixture.manager(layerCount: 4)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 64, height: 64)))
@@ -208,7 +208,7 @@ final class ChunkedCompositeLogicTests: XCTestCase {
                                       CanvasFixture.solidImage(blue, rect: CGRect(x: 16, y: 16, width: 44, height: 44)))
         // Pass-through is the default for a folder made this way, and the Multiply child is what makes
         // "against the backdrop" and "against transparency" two different pictures.
-        let folder = manager.addFolder(name: "Pass-through")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Pass-through"))
         for index in 1...3 { manager.layers[index].parentFolderID = folder }
         manager.setFolderIsolated(folder, isIsolated: false)
         manager.layers[3].blendMode = .multiply
@@ -426,8 +426,8 @@ final class ChunkedCompositeLogicTests: XCTestCase {
     /// O(nodes) before anything is rasterized. Asserted twice over: no composite is recorded while the
     /// plan runs, and the plan is a value — the same input gives an equal answer, so nothing about it
     /// depends on state anybody else can move.
-    func testThePlanIsPureAndCompositesNothing() {
-        let manager = zoo()
+    func testThePlanIsPureAndCompositesNothing() throws {
+        let manager = try zoo()
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true) else {
             return XCTFail("Fixture must mint")
         }
@@ -447,8 +447,8 @@ final class ChunkedCompositeLogicTests: XCTestCase {
     ///
     /// Counted by the nil pattern of the returned sources rather than by a timer: a source is either
     /// a canvas-sized image or it is not, and which is which is the fact under test.
-    func testResolvingASubsetRasterizesOnlyThatSubset() {
-        let manager = zoo()
+    func testResolvingASubsetRasterizesOnlyThatSubset() throws {
+        let manager = try zoo()
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true) else {
             return XCTFail("Fixture must mint")
         }
@@ -477,8 +477,8 @@ final class ChunkedCompositeLogicTests: XCTestCase {
     /// A frame is one backend, whatever its chunks would each have chosen — the reason
     /// `Compositor.composite(_:resolving:)` exists. The zoo's whole tree grades, so it prefers the GPU;
     /// a two-leaf chunk of it, on its own, would not.
-    func testTheWholeFrameChoosesOneBackendRatherThanEachChunk() {
-        let manager = zoo()
+    func testTheWholeFrameChoosesOneBackendRatherThanEachChunk() throws {
+        let manager = try zoo()
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true) else {
             return XCTFail("Fixture must mint")
         }

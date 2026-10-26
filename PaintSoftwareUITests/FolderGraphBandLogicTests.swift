@@ -36,11 +36,11 @@ final class FolderGraphBandLogicTests: XCTestCase {
     ///
     /// The history is emptied afterwards, `FolderKeyframeEntryLogicTests.folderManager`'s reason:
     /// `addFolder` and `restackLayer` are structural edits and several tests count steps.
-    private func folderManager(frames: Int = 24) -> (manager: CanvasManager, folder: UUID,
+    private func folderManager(frames: Int = 24) throws -> (manager: CanvasManager, folder: UUID,
                                                      target: KeyframeTarget) {
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: frames)])
-        let group = manager.addFolder(name: "Group")
+        let group = try XCTUnwrap(manager.addFolder(name: "Group"))
         manager.restackLayer(manager.layers[0].id, above: .folder(group), parentFolderID: group)
         manager.currentLayerIndex = 0
         manager.history.removeAll()
@@ -90,8 +90,8 @@ final class FolderGraphBandLogicTests: XCTestCase {
     /// the folder and the layer, in both directions, and with the band both closed and open. The
     /// closed half matters: a pick is a selection, not a property of an open band, so the band has
     /// to open *on* the picked row rather than the pick being lost when there is no band to move.
-    func testPickingAFolderRowIsWhereTheBandOpensAndPickingALayerTakesItBack() {
-        let (manager, folder, target) = folderManager()
+    func testPickingAFolderRowIsWhereTheBandOpensAndPickingALayerTakesItBack() throws {
+        let (manager, folder, target) = try folderManager()
         XCTAssertNil(manager.selectedFolderID, "A fresh document has picked no folder")
         XCTAssertEqual(manager.graphBandTarget, layerRow(manager, 0),
                        "PREMISE: with nothing picked the band's row is the current layer")
@@ -120,8 +120,8 @@ final class FolderGraphBandLogicTests: XCTestCase {
     /// But **an undo that writes the same index back leaves the pick alone**, and that is the case
     /// a folder band's own drag reaches: the drag is a gesture bracket, its undo is a structure
     /// snapshot restore, and that restore assigns `currentLayerIndex` unconditionally.
-    func testAChangeOfCurrentLayerDropsThePickAndAnUndoOfTheBandsOwnDragDoesNot() {
-        let (manager, folder, target) = folderManager()
+    func testAChangeOfCurrentLayerDropsThePickAndAnUndoOfTheBandsOwnDragDoesNot() throws {
+        let (manager, folder, target) = try folderManager()
         manager.addLayer()
         manager.currentLayerIndex = 0
         manager.history.removeAll()
@@ -158,8 +158,8 @@ final class FolderGraphBandLogicTests: XCTestCase {
     /// `pinGraphBand`'s contract, on the second kind of row. A block lifted off a layer selects that
     /// layer inside the touch, which drops the folder pick; without the pin the band would reflow
     /// by 96 pt under a finger already dragging.
-    func testAPinnedFolderBandStaysPutWhileABlockDragSelectsALayer() {
-        let (manager, folder, target) = folderManager()
+    func testAPinnedFolderBandStaysPutWhileABlockDragSelectsALayer() throws {
+        let (manager, folder, target) = try folderManager()
         manager.selectFolderRow(folder)
         manager.isGraphEditorOpen = true
 
@@ -179,8 +179,8 @@ final class FolderGraphBandLogicTests: XCTestCase {
     /// **A deleted folder is not a row the band can be on, and an undo that brings it back brings
     /// the band with it.** The pick is an id, so it survives the folder's absence; `graphBandTarget`
     /// answers as if nothing were picked while the folder is gone.
-    func testAPickedFolderThatIsDeletedYieldsToTheLayerUntilItComesBack() {
-        let (manager, folder, target) = folderManager()
+    func testAPickedFolderThatIsDeletedYieldsToTheLayerUntilItComesBack() throws {
+        let (manager, folder, target) = try folderManager()
         manager.selectFolderRow(folder)
         manager.isGraphEditorOpen = true
         XCTAssertEqual(manager.graphBandExpansion?.target, target, "PREMISE")
@@ -198,8 +198,8 @@ final class FolderGraphBandLogicTests: XCTestCase {
     /// **Both halves of the timeline resolve a folder expansion to the folder's row**, through the
     /// one `TimelineRowLayout.make` — so the name column and the track agree about which row grew.
     /// A folder inside a collapsed parent resolves to no row, the layer rule read across.
-    func testTheRowLayoutResolvesAFolderExpansionToTheFoldersRow() {
-        let (manager, folder, target) = folderManager()
+    func testTheRowLayoutResolvesAFolderExpansionToTheFoldersRow() throws {
+        let (manager, folder, target) = try folderManager()
         manager.selectFolderRow(folder)
         manager.isGraphEditorOpen = true
         let rows = manager.layerStackRows
@@ -220,7 +220,7 @@ final class FolderGraphBandLogicTests: XCTestCase {
 
         // Inside a collapsed parent the folder row is not presented, and there is nothing to open
         // the band under.
-        let parent = manager.addFolder(name: "Parent")
+        let parent = try XCTUnwrap(manager.addFolder(name: "Parent"))
         manager.restackFolder(folder, above: .folder(parent), parentFolderID: parent)
         manager.toggleFolderExpanded(parent)
         XCTAssertFalse(manager.layerStackRows.contains { $0.folderID == folder },
@@ -243,7 +243,7 @@ final class FolderGraphBandLogicTests: XCTestCase {
     /// the folder target back to `layers[currentLayerIndex]` would list one `opacity` row too, and
     /// only the key frames tell them apart.
     func testAFoldersBandListsTheFoldersChannelsAndNotItsChildrens() throws {
-        let (manager, folder, target) = folderManager()
+        let (manager, folder, target) = try folderManager()
         keyOpacity(manager, target)
         manager.folders[folderIndex(manager, folder)].channelTracks[parallaxShareID] = curve([(0, 1), (8, 0.3)])
         // The child's own opacity, keyed on frames the folder does not key.
@@ -277,7 +277,7 @@ final class FolderGraphBandLogicTests: XCTestCase {
     /// popup over a folder band shows Opacity and Parallax — and hides on the folder's target, not
     /// the layer's.
     func testTheChannelListOverAFolderBandNamesTheFoldersGroupsAndFiltersOnTheFolder() throws {
-        let (manager, folder, target) = folderManager()
+        let (manager, folder, target) = try folderManager()
         keyOpacity(manager, target)
         manager.folders[folderIndex(manager, folder)].channelTracks[parallaxShareID] = curve([(0, 1), (8, 0.3)])
         manager.selectFolderRow(folder)
@@ -304,8 +304,8 @@ final class FolderGraphBandLogicTests: XCTestCase {
     /// so no container channel to reveal; `revealPoseChannel`'s `.container` arm asks the band's row
     /// and the row answers with no pose. The layer here is a plain drawing layer with no pose either,
     /// so both rows refuse the same way.
-    func testRevealingTheContainerChannelOverAFolderBandRaisesNoBox() {
-        let (manager, folder, target) = folderManager()
+    func testRevealingTheContainerChannelOverAFolderBandRaisesNoBox() throws {
+        let (manager, folder, target) = try folderManager()
         keyOpacity(manager, target)
         manager.selectFolderRow(folder)
         manager.isGraphEditorOpen = true
@@ -328,7 +328,7 @@ final class FolderGraphBandLogicTests: XCTestCase {
     /// of its own, keyed on the same frames, so a write routed to `layers[currentLayerIndex]` would
     /// move the layer's key at 8 and leave the folder's where it was — both assertions go red.
     func testANodeDragOnAFoldersOpacityCurveWritesTheFolderAndNotTheLayer() throws {
-        let (manager, folder, target) = folderManager()
+        let (manager, folder, target) = try folderManager()
         keyOpacity(manager, target)
         XCTAssertTrue(manager.setTargetChannelTrack(layerRow(manager, 0), channelID: opacityID,
                                                     to: curve([(0, 1), (8, 0)])))
@@ -370,8 +370,8 @@ final class FolderGraphBandLogicTests: XCTestCase {
     /// predicate — through the target-addressed funnels the menu now carries, each paired with the
     /// layer's own store staying untouched; and the pose writers refuse a folder outright, since it
     /// has no pose and no cels.
-    func testTheNodeMenusWritersReachAFoldersOwnStores() {
-        let (manager, folder, target) = folderManager()
+    func testTheNodeMenusWritersReachAFoldersOwnStores() throws {
+        let (manager, folder, target) = try folderManager()
         keyOpacity(manager, target)
         // The layer's own opacity curve shares the id and the frame 8 key, and carries a third key
         // the folder's does not: a writer that *read* the layer's curve and wrote the result onto
@@ -410,8 +410,8 @@ final class FolderGraphBandLogicTests: XCTestCase {
 
     /// **A folder's grade node goes through the folder overload of `setEffectParameterTrack`** —
     /// the third home a band can write to, on a node folder carrying a grade.
-    func testAGradeNodeOnAFolderWritesTheFoldersEffectTracks() {
-        let (manager, folder, target) = folderManager()
+    func testAGradeNodeOnAFolderWritesTheFoldersEffectTracks() throws {
+        let (manager, folder, target) = try folderManager()
         manager.setNodeEffect(folder, to: .brightnessContrast(
             Effect.BrightnessContrast(brightness: 1, contrast: 1)))
         XCTAssertTrue(manager.setEffectParameterTrack(target, parameterID: brightnessID,

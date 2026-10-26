@@ -165,6 +165,59 @@ final class MoveToNewLayerLogicTests: XCTestCase {
         XCTAssertGreaterThan(try alpha(0, at: inside), 200, "…and gives the source its pixels back")
     }
 
+
+    func testSelectionTransferCapacityUsesEachActualDestinationAndPreservesRefusedInk() throws {
+        for copying in [false, true] {
+            let (manager, source, vector, _, _) = vectorFixture()
+            let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.normal)))
+            for index in manager.layers.indices { manager.layers[index].parentFolderID = node }
+            select(manager, aroundLeft)
+            let ids = manager.layers.map(\.id), elements = vector.elements.map(\.id)
+            let image = try XCTUnwrap(vector.render())
+            let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(image.cgImage)))
+            let steps = manager.history.undoStack.count
+            if copying { manager.beginDuplicate() } else { manager.moveSelectionToNewLayer() }
+            XCTAssertEqual(manager.layers.map(\.id), ids)
+            XCTAssertEqual(vector.elements.map(\.id), elements)
+            XCTAssertEqual(manager.currentLayerIndex, source)
+            XCTAssertEqual(manager.selection?.bounds, aroundLeft)
+            XCTAssertNil(manager.vectorFloat)
+            XCTAssertEqual(manager.history.undoStack.count, steps)
+            XCTAssertEqual(try CanvasFixture.rgbaBytes(XCTUnwrap(XCTUnwrap(vector.render()).cgImage)), pixels)
+        }
+        let manager = CanvasFixture.manager(layerCount: 2)
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.normal)))
+        for index in manager.layers.indices { manager.layers[index].parentFolderID = node }
+        manager.currentLayerIndex = 0
+        let texture = try CanvasFixture.rasterTexture(
+            CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 24, width: 64, height: 16)),
+            size: CanvasFixture.canvasSize, strokeCount: 1)
+        manager.layers[0].cels[0].raster = texture
+        select(manager, aroundLeft)
+        let ids = manager.layers.map(\.id), steps = manager.history.undoStack.count
+        let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(texture.renderToUIImage().get().cgImage)))
+        manager.moveSelectionToNewLayer()
+        XCTAssertEqual(manager.layers.map(\.id), ids)
+        XCTAssertTrue(manager.layers[0].cels[0].raster === texture)
+        XCTAssertEqual(manager.selection?.bounds, aroundLeft)
+        XCTAssertEqual(manager.history.undoStack.count, steps)
+        manager.beginDuplicate()
+        XCTAssertEqual(manager.layers.count, 3, "Raster Duplicate retains its existing unlimited root destination")
+        XCTAssertNil(manager.layers[manager.currentLayerIndex].parentFolderID)
+        XCTAssertTrue(manager.commitFloatingPieceIfNeeded())
+        let duplicateID = manager.layers[manager.currentLayerIndex].id
+        let drawn = try XCTUnwrap(XCTUnwrap(PixelOps.rasterize(cel: manager.layers[manager.currentLayerIndex].cels[0],
+            canvasSize: CanvasFixture.canvasSize)).cgImage)
+        let duplicate = try XCTUnwrap(CanvasFixture.rgbaBytes(drawn))
+        XCTAssertTrue(stride(from: 3, to: duplicate.count, by: 4).contains { duplicate[$0] > 200 })
+        XCTAssertEqual(try CanvasFixture.rgbaBytes(XCTUnwrap(
+            manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)), pixels)
+        manager.undo()
+        XCTAssertEqual(manager.layers.map(\.id), ids)
+        manager.redo()
+        XCTAssertTrue(manager.layers.contains { $0.id == duplicateID && $0.parentFolderID == nil })
+    }
+
     // MARK: - TODO (108): the new layer's cel matches the source cel it was lifted from
 
     /// **The owner's own example**: a source cel spanning frames 3–5 in a 12-frame scene — the new

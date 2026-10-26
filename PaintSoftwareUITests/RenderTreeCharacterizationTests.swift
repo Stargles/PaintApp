@@ -112,10 +112,10 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         XCTAssertEqual(manager.renderTree(atFrame: 0)[1].id, group, "Every node points back at the model object it came from")
     }
 
-    func testNestedFoldersDeriveToNestedNodes() {
+    func testNestedFoldersDeriveToNestedNodes() throws {
         let manager = namedManager(["A", "B", "C"])
-        let outer = manager.addFolder(name: "Outer")
-        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let inner = try XCTUnwrap(manager.addFolder(name: "Inner", parentFolderID: outer))
         manager.layers[0].parentFolderID = outer
         manager.layers[1].parentFolderID = inner
         manager.layers[2].parentFolderID = inner
@@ -127,10 +127,10 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         XCTAssertEqual(manager.renderTree(atFrame: 0).count, 1, "One top-level node — the whole document is inside Outer")
     }
 
-    func testSiblingFoldersDeriveInSpanOrderBottomToTop() {
+    func testSiblingFoldersDeriveInSpanOrderBottomToTop() throws {
         let manager = namedManager(["A", "B", "C", "D"])
-        let lower = manager.addFolder(name: "Lower")
-        let upper = manager.addFolder(name: "Upper")
+        let lower = try XCTUnwrap(manager.addFolder(name: "Lower"))
+        let upper = try XCTUnwrap(manager.addFolder(name: "Upper"))
         manager.layers[0].parentFolderID = lower
         manager.layers[1].parentFolderID = lower
         manager.layers[2].parentFolderID = upper
@@ -160,9 +160,9 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         XCTAssertTrue(inputs[0].isEmpty, "The slot is simply empty")
     }
 
-    func testAnEmptyFolderNestedInsideAPopulatedOneKeepsItsDepth() {
+    func testAnEmptyFolderNestedInsideAPopulatedOneKeepsItsDepth() throws {
         let manager = namedManager(["A", "B"])
-        let outer = manager.addFolder(name: "Outer")
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
         manager.addFolder(name: "Empty", parentFolderID: outer)
         manager.layers[0].parentFolderID = outer
         manager.layers[1].parentFolderID = outer
@@ -177,9 +177,9 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// folder hides its rows; it must not hide its pixels. `rows(inContainer:depth:)` stops at a
     /// collapsed folder, so the render derivation cannot be that function — it descends
     /// unconditionally, and this is the test that says so.
-    func testACollapsedFolderStillRendersEverythingInsideIt() {
+    func testACollapsedFolderStillRendersEverythingInsideIt() throws {
         let manager = namedManager(["A", "B", "C"])
-        let folder = manager.addFolder(name: "Folder")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Folder"))
         manager.layers[1].parentFolderID = folder
         manager.layers[2].parentFolderID = folder
         manager.toggleFolderExpanded(folder)
@@ -197,9 +197,9 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// alone, so a hidden layer keeps its place in the tree and the compositor is what decides to
     /// skip it — the same split the deleted flat walk had, filtering at the point of drawing rather
     /// than by reordering.
-    func testHiddenLayersAndFoldersKeepTheirPlaceInTheTree() {
+    func testHiddenLayersAndFoldersKeepTheirPlaceInTheTree() throws {
         let manager = namedManager(["A", "B", "C"])
-        let folder = manager.addFolder(name: "Folder")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Folder"))
         manager.layers[1].parentFolderID = folder
         manager.layers[2].parentFolderID = folder
         manager.toggleLayerVisibility(layerIndex: 0)
@@ -224,9 +224,9 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// `CompositorParityLogicTests.testAChildReShownInsideAHiddenFolderIsGatedByTheGroup`. What the
     /// tree owes it is both flags, carried and unaltered — the derivation still interprets neither,
     /// which is what kept phase 4 a change to the compositor rather than a re-derivation.
-    func testAChildReShownInsideAHiddenFolderIsGatedByTheGroup() {
+    func testAChildReShownInsideAHiddenFolderIsGatedByTheGroup() throws {
         let manager = namedManager(["A", "B"])
-        let folder = manager.addFolder(name: "Folder")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Folder"))
         manager.layers[0].parentFolderID = folder
         manager.layers[1].parentFolderID = folder
 
@@ -250,9 +250,9 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// bottom-to-top. The tree filtered the same way must produce the same sequence, which is what let
     /// phase 3 delete that walk and route the thumbnail through the compositor. It survives as
     /// `CompositorParityLogicTests.flatWalkComposite`, which checks the same claim in pixels.
-    func testFilteringTheTreeByVisibilityReproducesTheOfflineCompositeOrder() {
+    func testFilteringTheTreeByVisibilityReproducesTheOfflineCompositeOrder() throws {
         let manager = namedManager(["A", "B", "C", "D"])
-        let folder = manager.addFolder(name: "Folder")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Folder"))
         manager.layers[1].parentFolderID = folder
         manager.layers[2].parentFolderID = folder
         manager.toggleLayerVisibility(layerIndex: 2)
@@ -272,9 +272,9 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// `opacity: 1` with a comment naming phase 4 as the removal — so this is the test that says the
     /// constants are gone, and it asserts all three because a partial wiring would still let every
     /// existing fixture pass.
-    func testAFoldersGroupPropertiesAreCarriedOntoItsNode() {
+    func testAFoldersGroupPropertiesAreCarriedOntoItsNode() throws {
         let manager = namedManager(["A"])
-        let folder = manager.addFolder(name: "Folder")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Folder"))
         manager.layers[0].parentFolderID = folder
         manager.setFolderOpacity(folder, to: 0.4)
         manager.setFolderIsolated(folder, isIsolated: false)
@@ -304,9 +304,9 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// `CoreGraphicsCompositor.draw` allocates on it and `MetalCompositor` declines on it, so a
     /// folder crossing it in the wrong direction is either a wasted canvas-sized buffer per group or
     /// group opacity silently applied per child.
-    func testOnlyAFadedGroupNeedsItsOwnBuffer() {
+    func testOnlyAFadedGroupNeedsItsOwnBuffer() throws {
         let manager = namedManager(["A"])
-        let folder = manager.addFolder(name: "Folder")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Folder"))
         manager.layers[0].parentFolderID = folder
 
         XCTAssertFalse(manager.renderTree(atFrame: 0)[0].needsOwnBuffer,
@@ -327,10 +327,10 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// A faded group nested in an untouched one buffers alone: the outer group is still a
     /// parenthesis and still allocates nothing, which is what `PerfBaselineTests` measures when it
     /// nests six levels deep.
-    func testNestingDoesNotSpreadTheBufferRuleToTheOuterGroup() {
+    func testNestingDoesNotSpreadTheBufferRuleToTheOuterGroup() throws {
         let manager = namedManager(["A"])
-        let outer = manager.addFolder(name: "Outer")
-        let inner = manager.addFolder(name: "Inner", parentFolderID: outer)
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let inner = try XCTUnwrap(manager.addFolder(name: "Inner", parentFolderID: outer))
         manager.layers[0].parentFolderID = inner
         manager.setFolderOpacity(inner, to: 0.5)
 
@@ -361,8 +361,8 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     @MainActor
     func testAFolderCycleIsBrokenWithoutLosingOrDuplicatingALayer() throws {
         let manager = namedManager(["A", "B"])
-        let first = manager.addFolder(name: "First")
-        let second = manager.addFolder(name: "Second")
+        let first = try XCTUnwrap(manager.addFolder(name: "First"))
+        let second = try XCTUnwrap(manager.addFolder(name: "Second"))
         manager.layers[0].parentFolderID = first
         manager.layers[1].parentFolderID = second
         // Written directly: `restackFolder` refuses to build this, and the point is that a document
@@ -387,7 +387,7 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         XCTAssertTrue(stride(from: 3, to: expected.count, by: 4).contains { expected[$0] > 0 },
                       "PREMISE: the real source composite is not blank before the metadata cycle")
         let sourceID = single.layers[0].id
-        let selfParent = single.addFolder(name: "Self")
+        let selfParent = try XCTUnwrap(single.addFolder(name: "Self"))
         single.layers[0].parentFolderID = selfParent
         let folderIndex = try XCTUnwrap(single.folders.firstIndex { $0.id == selfParent })
         single.folders[folderIndex].parentFolderID = selfParent
@@ -413,9 +413,9 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// A three-folder cycle, which resolves through a different branch of `folderSubtree` than the
     /// two-folder case above and would be the one to survive a naive "is my parent my direct child"
     /// check.
-    func testAThreeFolderCycleAlsoTerminates() {
+    func testAThreeFolderCycleAlsoTerminates() throws {
         let manager = namedManager(["A", "B", "C"])
-        let ids = (0..<3).map { manager.addFolder(name: "F\($0)") }
+        let ids = try (0..<3).map { try XCTUnwrap(manager.addFolder(name: "F\($0)")) }
         for index in 0..<3 { manager.layers[index].parentFolderID = ids[index] }
         for index in 0..<3 { manager.folders[index].parentFolderID = ids[(index + 1) % 3] }
 
@@ -429,11 +429,11 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// re-run against the render tree. Contiguity is what *makes* the derivation correct — a folder's
     /// span being contiguous is the reason its subtree can be a parenthesis in the flat array — so
     /// the two invariants are worth asserting side by side, after every step rather than at the end.
-    func testEveryTreeOperationLeavesTheDerivedOrderMatchingTheFlatOrder() {
+    func testEveryTreeOperationLeavesTheDerivedOrderMatchingTheFlatOrder() throws {
         let manager = namedManager(["A", "B", "C", "D"])
         let ids = manager.layers.map(\.id)
 
-        let outer = manager.addFolder(name: "Outer")
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
         manager.restackLayer(ids[3], above: .folder(outer), parentFolderID: outer)
         assertRenderTreeMatchesFlatOrder(manager, "after moving D into Outer")
         assertFolderSpansAreContiguous(manager, "after moving D into Outer")
@@ -487,10 +487,10 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// Operand order is read off the presented order, which is now the *only* place it lives: there
     /// is no stored slot index left for a test to check instead, which is precisely what makes
     /// dragging one child above the other swap the operands.
-    func testAMixNodeDerivesToOneInputPerChildWithTheLowestAsTheBackdrop() {
+    func testAMixNodeDerivesToOneInputPerChildWithTheLowestAsTheBackdrop() throws {
         let manager = namedManager(["A", "B"])
         let ids = manager.layers.map(\.id)
-        let node = manager.addCompositorNode(op: .mix(.multiply), name: "Mix")
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.multiply), name: "Mix"))
         manager.restackLayer(ids[0], above: .folder(node), parentFolderID: node)
         manager.restackLayer(ids[1], above: .folder(node), parentFolderID: node)
 
@@ -511,10 +511,10 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// The same tree after the operands are dragged past each other. **A test that only counted the
     /// inputs would pass with them swapped**, which is a different picture, so the order is the
     /// assertion.
-    func testDraggingOneOperandBelowTheOtherSwapsTheInputsInTheDerivedTree() {
+    func testDraggingOneOperandBelowTheOtherSwapsTheInputsInTheDerivedTree() throws {
         let manager = namedManager(["A", "B"])
         let ids = manager.layers.map(\.id)
-        let node = manager.addCompositorNode(op: .mix(.multiply), name: "Mix")
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.multiply), name: "Mix"))
         manager.restackLayer(ids[0], above: .folder(node), parentFolderID: node)
         manager.restackLayer(ids[1], above: .folder(node), parentFolderID: node)
 
@@ -532,11 +532,11 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// A node's operands are isolated and Normal whatever the folders and layers store, and **that
     /// now has to cover a layer child too** — the old rule keyed on the child being a slot-tagged
     /// folder, which a bare layer dropped straight in as an operand never was.
-    func testEveryChildOfANodeDerivesIsolatedAndNormalWhateverItStores() {
+    func testEveryChildOfANodeDerivesIsolatedAndNormalWhateverItStores() throws {
         let manager = namedManager(["A", "B"])
         let ids = manager.layers.map(\.id)
-        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix")
-        let group = manager.addFolder(name: "Operand")
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.normal), name: "Mix"))
+        let group = try XCTUnwrap(manager.addFolder(name: "Operand"))
         manager.restackLayer(ids[0], above: .folder(node), parentFolderID: node)
         manager.restackFolder(group, above: .folder(node), parentFolderID: node)
         manager.restackLayer(ids[1], above: .folder(group), parentFolderID: group)
@@ -567,10 +567,10 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// is beneath it. The stored field survives, because an older document carries one, and simply
     /// goes unread; opacity beside it does not, which is what makes this a decision about the mode
     /// rather than a node's properties going unread wholesale.
-    func testANodesOwnBlendModeIsInertButItsOpacityStillFades() {
+    func testANodesOwnBlendModeIsInertButItsOpacityStillFades() throws {
         let manager = namedManager(["A", "B"])
         let ids = manager.layers.map(\.id)
-        let node = manager.addCompositorNode(op: .mix(.multiply), name: "Mix")
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.multiply), name: "Mix"))
         manager.restackLayer(ids[0], above: .folder(node), parentFolderID: node)
         manager.restackLayer(ids[1], above: .folder(node), parentFolderID: node)
         manager.setFolderBlendMode(node, to: .screen)
@@ -587,10 +587,10 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// one step down in the same container, which inside a node is the *other operand* — and inputs
     /// are isolated from each other, so honouring it would quietly reintroduce the cross-input
     /// dependency the isolation rule exists to prevent.
-    func testAClipToBelowOperandDoesNotClipToTheOtherInput() {
+    func testAClipToBelowOperandDoesNotClipToTheOtherInput() throws {
         let manager = namedManager(["A", "B"])
         let ids = manager.layers.map(\.id)
-        let node = manager.addCompositorNode(op: .mix(.normal), name: "Mix")
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.normal), name: "Mix"))
         manager.restackLayer(ids[0], above: .folder(node), parentFolderID: node)
         manager.restackLayer(ids[1], above: .folder(node), parentFolderID: node)
         setBlendMode(.clipToBelow, ofLayer: ids[1], in: manager)
@@ -605,10 +605,10 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// The other half of the claim above, and the reason it is not simply "clip-to-below stopped
     /// working": the same two layers, in the same relative positions, inside an *ordinary* folder
     /// still resolve the clip against the entry one step down.
-    func testAClipToBelowLayerStillClipsInsideAnOrdinaryFolder() {
+    func testAClipToBelowLayerStillClipsInsideAnOrdinaryFolder() throws {
         let manager = namedManager(["A", "B"])
         let ids = manager.layers.map(\.id)
-        let group = manager.addFolder(name: "Group")
+        let group = try XCTUnwrap(manager.addFolder(name: "Group"))
         manager.restackLayer(ids[0], above: .folder(group), parentFolderID: group)
         manager.restackLayer(ids[1], above: .folder(group), parentFolderID: group)
         setBlendMode(.clipToBelow, ofLayer: ids[1], in: manager)
@@ -622,9 +622,9 @@ final class RenderTreeCharacterizationTests: XCTestCase {
 
     /// An ordinary folder is unchanged by any of this — it is still one input holding all its
     /// children, which is the arity-1 case §4.3 says a group is, and it keeps its own blend mode.
-    func testAnOrdinaryFolderStillDerivesToASingleStackedInput() {
+    func testAnOrdinaryFolderStillDerivesToASingleStackedInput() throws {
         let manager = namedManager(["A", "B"])
-        let folder = manager.addFolder(name: "Group")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Group"))
         for id in manager.layers.map(\.id) {
             manager.restackLayer(id, above: .folder(folder), parentFolderID: folder)
         }
@@ -671,8 +671,8 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// all"*; the bar of a value layer means "only here" now, so at 400 — past the grade's 12-frame
     /// bar — the leaf derives no effect, and everything else is byte-identical. That is asserted as
     /// its own clause rather than dropped, so the one thing the ruling moved is the one thing pinned.
-    func testTheTreeIsTheSameAtEveryFrameForADocumentWithNoTrack() {
-        let manager = gradedFixture()
+    func testTheTreeIsTheSameAtEveryFrameForADocumentWithNoTrack() throws {
+        let manager = try gradedFixture()
 
         let trees = [0, 7, 9].map { (frame: $0, tree: manager.renderTree(atFrame: $0)) }
         XCTAssertFalse(trees[0].tree.isEmpty, "Fixture premise: there is a tree to compare")
@@ -737,8 +737,8 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// **Only the animated node moves.** The leaf order, the shape, and every other node are the ones
     /// they were — a track changes a value inside one node and nothing structural, which is what makes
     /// the frame-varying tree safe for every derivation in this file that reads shape.
-    func testATrackedParameterMakesTheTreeDifferBetweenTwoFrames() {
-        let manager = gradedFixture()
+    func testATrackedParameterMakesTheTreeDifferBetweenTwoFrames() throws {
+        let manager = try gradedFixture()
         guard let gradeIndex = manager.layers.firstIndex(where: { $0.name == "Grade" }) else {
             return XCTFail("Fixture premise: the value layer is in the stack")
         }
@@ -776,8 +776,8 @@ final class RenderTreeCharacterizationTests: XCTestCase {
     /// travel by different lines of `renderNodes` and it is precisely the *node* line that used to
     /// read the raw `effect` field in every other codebase this pattern appears in. "Only the animated
     /// node moves" is checked here too: a folder track must not disturb the leaf order or any sibling.
-    func testATrackedFolderParameterMakesTheTreeDifferBetweenTwoFrames() {
-        let manager = gradedFixture()
+    func testATrackedFolderParameterMakesTheTreeDifferBetweenTwoFrames() throws {
+        let manager = try gradedFixture()
         guard let group = manager.folders.first(where: { $0.effect != nil })?.id else {
             return XCTFail("Fixture premise: the graded folder is in the document")
         }
@@ -822,7 +822,7 @@ final class RenderTreeCharacterizationTests: XCTestCase {
 
     /// The document both halves above are asserted against: a floor with a block only at 6–9, a folder
     /// carrying a node effect, and a `.value` layer in effect mode named "Grade".
-    private func gradedFixture() -> CanvasManager {
+    private func gradedFixture() throws -> CanvasManager {
         let manager = namedManager(["Floor", "Ink"])
         // The floor holds ink only in the middle of the scene, so "frame 0" and "frame 7" are not two
         // names for the same document.
@@ -830,7 +830,7 @@ final class RenderTreeCharacterizationTests: XCTestCase {
         XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: 6, frameCount: 4),
                       "Fixture premise: the floor has a block at 6–9 and none at 0")
 
-        let group = manager.addFolder(name: "Graded group")
+        let group = try XCTUnwrap(manager.addFolder(name: "Graded group"))
         manager.restackLayer(manager.layers[1].id, above: .folder(group), parentFolderID: group)
         manager.setNodeEffect(group, to: .brightnessContrast(Effect.BrightnessContrast(brightness: 1.2)))
         manager.addValueLayer(effect: .blur(Effect.Blur(radius: 4)), name: "Grade")

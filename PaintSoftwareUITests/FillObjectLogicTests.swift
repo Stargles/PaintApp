@@ -81,6 +81,36 @@ final class FillObjectLogicTests: XCTestCase {
         manager.dragOut(.gradient, from: CGPoint(x: 0, y: 32), to: CGPoint(x: 64, y: 32))
     }
 
+
+    func testAddedObjectsAndStreamsRefuseAFullNodeInsteadOfUsingTheOldUnsuitableSurface() throws {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        XCTAssertTrue(manager.addVectorLayer())
+        let existingVector = try XCTUnwrap(manager.layers[0].cels[0].vector)
+        XCTAssertTrue(manager.addValueLayer())
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.normal)))
+        for index in manager.layers.indices { manager.layers[index].parentFolderID = node }
+        let ids = manager.layers.map(\.id), active = manager.currentLayerIndex
+        manager.history.removeAll()
+        XCTAssertNil(manager.drawingSurfaceForNewObject(vectorOnly: true))
+        XCTAssertFalse(dragShape(.rectangle, on: manager))
+        manager.currentLayerIndex = 0
+        XCTAssertNil(manager.insertStream(host: "127.0.0.1", port: 4567,
+            status: StreamStatus(source: .init(kind: "window", name: "Capacity fixture"),
+                                 width: 64, height: 64, fps: 30, streaming: true)))
+        XCTAssertTrue(existingVector.streams.isEmpty, "A refused stream cannot land on the previously selected vector")
+        manager.currentLayerIndex = active
+        XCTAssertEqual(manager.layers.map(\.id), ids)
+        XCTAssertEqual(manager.currentLayerIndex, active)
+        XCTAssertTrue(manager.history.undoStack.isEmpty)
+        XCTAssertEqual(manager.layers[active].kind, .value)
+        manager.layers[0].parentFolderID = nil
+        XCTAssertTrue(dragShape(.rectangle, on: manager))
+        let vector = try XCTUnwrap(manager.layers[manager.currentLayerIndex].cels[0].vector)
+        XCTAssertEqual(vector.elements.compactMap(\.fill).count, 1)
+        let image = try XCTUnwrap(flattened(manager, layerIndex: manager.currentLayerIndex))
+        XCTAssertGreaterThan(pixel(image, 32, 32)[3], 200, "The admitted object actually draws")
+    }
+
     // MARK: - (129) Rectangle and Ellipse
 
     /// **The object is the fill tool's own kind, in the brush colour, centred on the press.** A

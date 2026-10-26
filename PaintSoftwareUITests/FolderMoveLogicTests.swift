@@ -33,7 +33,7 @@ final class FolderMoveLogicTests: XCTestCase {
 
     /// Three vector layers, each one stroke, two of them dragged into a folder — the document an
     /// artist has after "draw on three layers, group two of them".
-    private func fixture() -> Fixture {
+    private func fixture() throws -> Fixture {
         let manager = CanvasFixture.manager(layerCount: 0)
         var indices: [Int] = []
         for (name, y) in [("a", CGFloat(12)), ("b", CGFloat(32)), ("outside", CGFloat(52))] {
@@ -42,7 +42,7 @@ final class FolderMoveLogicTests: XCTestCase {
             manager.layers[at].cels[0].vector?.addStroke(stroke(y: y))
             indices.append(at)
         }
-        let folder = manager.addFolder(name: "Group")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Group"))
         for name in ["a", "b"] {
             guard let at = manager.layers.firstIndex(where: { $0.name == name }) else { continue }
             manager.layers[at].parentFolderID = folder
@@ -78,7 +78,7 @@ final class FolderMoveLogicTests: XCTestCase {
     /// **Every vector layer in the folder is a part of one float; the layer outside is not.** The box
     /// is one box over all of them, and each part carries exactly its own cel's ink.
     func testAFolderMoveLiftsEveryVectorLayerInsideItUnderOneBoxAndNothingOutside() throws {
-        let fx = fixture()
+        let fx = try fixture()
         XCTAssertTrue(fx.manager.beginVectorFolderMove(fx.folder), "a box came up")
         let float = try XCTUnwrap(fx.manager.vectorFloat)
         XCTAssertEqual(Set(float.parts.map(\.layerID)), Set(fx.inner.map { fx.manager.layers[$0].id }),
@@ -106,7 +106,7 @@ final class FolderMoveLogicTests: XCTestCase {
     /// **One nudge moves every layer in the folder by the same delta and the layer outside by none**,
     /// as one undo step; undo puts every layer back in one press.
     func testANudgeMovesEveryLayerInTheFolderTogetherAndUndoPutsThemAllBack() throws {
-        let fx = fixture()
+        let fx = try fixture()
         let before = (fx.inner + [fx.outside]).map { xs(fx.manager, $0) }
         XCTAssertTrue(fx.manager.beginVectorFolderMove(fx.folder))
         var moved = try XCTUnwrap(fx.manager.vectorFloat?.frame.transform)
@@ -140,7 +140,7 @@ final class FolderMoveLogicTests: XCTestCase {
     /// applied the box's local delta to every part would move the transformed layer's stored samples
     /// by 7 in *its* local space, which under a 2× canvas transform is 14 on the canvas.
     func testALayerUnderAnotherCanvasTransformMovesTheSameCanvasDistance() throws {
-        let fx = fixture()
+        let fx = try fixture()
         let scaled = fx.inner[1]
         canvas(fx.manager, scaled).transform = CGAffineTransform(scaleX: 2, y: 2)
         let beforeA = xs(fx.manager, fx.inner[0]), beforeB = xs(fx.manager, scaled)
@@ -163,7 +163,7 @@ final class FolderMoveLogicTests: XCTestCase {
     /// one** — a pixel piece is the other lifecycle, and one box cannot drag both. The raster layer's
     /// cel is untouched and nothing about it is suppressed.
     func testARasterLayerInsideTheFolderIsLeftWhereItIs() throws {
-        let fx = fixture()
+        let fx = try fixture()
         fx.manager.addLayer(name: "pixels")
         let pixels = fx.manager.currentLayerIndex
         fx.manager.layers[pixels].parentFolderID = fx.folder
@@ -176,8 +176,8 @@ final class FolderMoveLogicTests: XCTestCase {
 
     /// **Refused whole at an in-between, and it says so** — the single-layer Move's own banner. A
     /// folder moved with one layer left behind is the silent partial move the rule is against.
-    func testAFolderWithALayerAtAnInBetweenIsRefusedWithTheMovesOwnNotice() {
-        let fx = fixture()
+    func testAFolderWithALayerAtAnInBetweenIsRefusedWithTheMovesOwnNotice() throws {
+        let fx = try fixture()
         fx.manager.layers[fx.inner[1]].cels[0].interpolation = InterpolationRecipe(references: [], t: 0.5)
         XCTAssertFalse(fx.manager.beginVectorFolderMove(fx.folder))
         XCTAssertNil(fx.manager.vectorFloat, "nothing came up")
@@ -187,9 +187,9 @@ final class FolderMoveLogicTests: XCTestCase {
     }
 
     /// **An empty folder raises no box**, and neither does one that is not in the document.
-    func testAFolderWithNothingToMoveRaisesNoBox() {
-        let fx = fixture()
-        let empty = fx.manager.addFolder(name: "Empty")
+    func testAFolderWithNothingToMoveRaisesNoBox() throws {
+        let fx = try fixture()
+        let empty = try XCTUnwrap(fx.manager.addFolder(name: "Empty"))
         XCTAssertFalse(fx.manager.beginVectorFolderMove(empty))
         XCTAssertFalse(fx.manager.beginVectorFolderMove(UUID()))
         XCTAssertNil(fx.manager.vectorFloat)
@@ -198,8 +198,8 @@ final class FolderMoveLogicTests: XCTestCase {
     /// **A layer inside a nested folder travels with the outer folder's Move** — "every layer of the
     /// folder" at any depth, which is `descendantLayerIndices(ofFolder:)`'s answer.
     func testANestedFoldersLayerTravelsWithTheOuterFoldersMove() throws {
-        let fx = fixture()
-        let nested = fx.manager.addFolder(name: "Nested", parentFolderID: fx.folder)
+        let fx = try fixture()
+        let nested = try XCTUnwrap(fx.manager.addFolder(name: "Nested", parentFolderID: fx.folder))
         fx.manager.addVectorLayer(name: "deep")
         let deep = fx.manager.currentLayerIndex
         fx.manager.layers[deep].parentFolderID = nested
@@ -239,8 +239,8 @@ final class FolderMoveLogicTests: XCTestCase {
         var all: [String] { onTheGlass + elsewhere }
     }
 
-    private func frames() -> Frames {
-        let fx = fixture()
+    private func frames() throws -> Frames {
+        let fx = try fixture()
         let size = CanvasFixture.canvasSize
         func cel(_ start: Int, _ count: Int, y: CGFloat) -> Cel {
             let cel = Cel(id: UUID(), startFrame: start, frameCount: count,
@@ -274,7 +274,7 @@ final class FolderMoveLogicTests: XCTestCase {
     /// glass are lifted the ordinary way**: suppressed, measured into the box. The rest are carried
     /// whole and untouched until a nudge, so a hole in them would only show in a frame nobody is on.
     func testAllFramesCarriesEveryCelButOnlyTheOnesOnTheGlassAreSuppressedAndMeasured() throws {
-        let f = frames()
+        let f = try frames()
         f.manager.setFolderMoveScope(.allFrames)
         XCTAssertTrue(f.manager.beginVectorFolderMove(f.fx.folder))
         let float = try XCTUnwrap(f.manager.vectorFloat)
@@ -305,7 +305,7 @@ final class FolderMoveLogicTests: XCTestCase {
     /// that tells "moved once" from "moved once per frame it spans": a0 covers two frames and b0
     /// three, and both read 7, not 14 and 21.
     func testAllFramesMovesEveryCelOnceByTheBoxsDeltaInOneUndoStep() throws {
-        let f = frames()
+        let f = try frames()
         let before = Dictionary(uniqueKeysWithValues: f.all.map { ($0, xs(f, $0)) })
         let outsideBefore = xs(fx: f.fx, layer: f.fx.outside)
         f.manager.setFolderMoveScope(.allFrames)
@@ -339,7 +339,7 @@ final class FolderMoveLogicTests: XCTestCase {
     /// the control for the test above, run on the same folder, so a build that carried every frame
     /// under both scopes goes red here and not there.
     func testThisCelLeavesEveryOtherFrameWhereItWas() throws {
-        let f = frames()
+        let f = try frames()
         let before = Dictionary(uniqueKeysWithValues: f.all.map { ($0, xs(f, $0)) })
         XCTAssertEqual(f.manager.folderMoveScope, .thisCel, "the default scope")
         XCTAssertTrue(f.manager.beginVectorFolderMove(f.fx.folder))
@@ -354,7 +354,7 @@ final class FolderMoveLogicTests: XCTestCase {
     /// nudge made under This Cel stays made, and the next one carries every frame. Two steps on the
     /// stack, and each Undo takes back exactly what its nudge moved.
     func testChangingTheScopeUnderAStandingBoxSettlesTheMoveSoFarAndLiftsAgain() throws {
-        let f = frames()
+        let f = try frames()
         let before = Dictionary(uniqueKeysWithValues: f.all.map { ($0, xs(f, $0)) })
         XCTAssertTrue(f.manager.beginVectorFolderMove(f.fx.folder))
         try nudge(f.manager, byX: 4)
@@ -383,7 +383,7 @@ final class FolderMoveLogicTests: XCTestCase {
     /// **Choosing the scope the float already has lifts nothing again**, and a choice made with no
     /// folder box up is only the value the next lift reads.
     func testChoosingTheScopeAlreadyInForceLeavesTheBoxAloneAndWithNoBoxIsOnlyTheNextLiftsValue() throws {
-        let f = frames()
+        let f = try frames()
         f.manager.setFolderMoveScope(.allFrames)
         XCTAssertNil(f.manager.vectorFloat, "no box comes up by choosing")
         XCTAssertTrue(f.manager.beginVectorFolderMove(f.fx.folder))
@@ -399,7 +399,7 @@ final class FolderMoveLogicTests: XCTestCase {
     /// control run is what shows the route exists here to be skipped.
     func testAllFramesWritesNoPoseBaselineWhereThisCelHoldsOne() throws {
         for (scope, holdsBaseline) in [(FolderMoveScope.thisCel, true), (.allFrames, false)] {
-            let f = frames()
+            let f = try frames()
             XCTAssertTrue(f.manager.addKeys(.layer(id: f.manager.layers[f.a].id), atFrame: 0))
             f.manager.setFolderMoveScope(scope)
             XCTAssertTrue(f.manager.beginVectorFolderMove(f.fx.folder))
@@ -415,7 +415,7 @@ final class FolderMoveLogicTests: XCTestCase {
     /// folder are skipped under the scope that visits every cel, exactly as they are under the one
     /// that visits one.
     func testATransformationLayerAndAValueLayerInsideTheFolderAreNotCarried() throws {
-        let f = frames()
+        let f = try frames()
         f.manager.addTransformLayer()
         f.manager.layers[f.manager.currentLayerIndex].parentFolderID = f.fx.folder
         f.manager.addValueLayer()
@@ -430,7 +430,7 @@ final class FolderMoveLogicTests: XCTestCase {
     /// **A derived in-between on another frame is not carried, and one under the playhead still
     /// refuses the whole Move with the Move's own banner** — the rule is the same under both scopes.
     func testADerivedCelElsewhereIsSkippedAndOneUnderThePlayheadRefusesTheFolder() throws {
-        let f = frames()
+        let f = try frames()
         f.manager.layers[f.a].cels[1].interpolation = InterpolationRecipe(references: [], t: 0.5)
         f.manager.setFolderMoveScope(.allFrames)
         XCTAssertTrue(f.manager.beginVectorFolderMove(f.fx.folder))
@@ -445,8 +445,8 @@ final class FolderMoveLogicTests: XCTestCase {
 
     /// **A folder with drawings on other frames and none on this one raises no box** — there is no ink
     /// on the glass to hug, under either scope.
-    func testAFolderWithNothingOnThisFrameRaisesNoBoxEvenWhenOtherFramesHoldDrawings() {
-        let f = frames()
+    func testAFolderWithNothingOnThisFrameRaisesNoBoxEvenWhenOtherFramesHoldDrawings() throws {
+        let f = try frames()
         f.manager.currentFrame = 8
         f.manager.setFolderMoveScope(.allFrames)
         XCTAssertFalse(f.manager.beginVectorFolderMove(f.fx.folder))
@@ -460,7 +460,7 @@ final class FolderMoveLogicTests: XCTestCase {
     /// edge it reads alike — and it keys 0 at frame 0, 30 at frame 1 and 90 at frame 3: the span's
     /// start reads 0, the playhead reads 90, and only the nearest frame reads 30.
     func testACelOffThePlayheadIsLiftedAtTheFrameOfItNearestIt() throws {
-        let f = frames()
+        let f = try frames()
         f.manager.addTransformLayer()
         let mover = f.manager.currentLayerIndex
         f.manager.layers[mover].parentFolderID = f.fx.folder

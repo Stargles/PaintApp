@@ -1476,6 +1476,7 @@ extension CanvasManager {
         guard let selection = requested, let canvasSize,
               let celIndex = activeCelIndex(actedOnBy: selection) else { return }
         let sourceIndex = currentLayerIndex
+        guard admitChildChange(inContainer: layers[sourceIndex].parentFolderID) else { return }
         let cel = layers[sourceIndex].cels[celIndex]
         let sourceLayerID = layers[sourceIndex].id
         // **Cut in the layer's own space**, the loop pulled back through its pose (`beginMove`): the

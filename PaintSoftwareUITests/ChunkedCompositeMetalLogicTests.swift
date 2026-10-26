@@ -125,7 +125,7 @@ final class ChunkedCompositeMetalLogicTests: XCTestCase {
     /// `ChunkedCompositeLogicTests` holds the CPU walk to — at a width that genuinely cuts it.
     func testMetalChunkedCompositingIsByteIdenticalToTheMetalWholeFrameWalk() throws {
         try skipUnlessGPUAvailable()
-        let manager = CanvasFixture.chunkingZoo()
+        let manager = try CanvasFixture.chunkingZoo()
         assertFolderSpansAreContiguous(manager, "Fixture invariant")
         assertRenderTreeMatchesFlatOrder(manager, "Fixture invariant")
         XCTAssertEqual(manager.layers.count, 10, "Fixture: eight painted layers and two effect layers")
@@ -142,7 +142,7 @@ final class ChunkedCompositeMetalLogicTests: XCTestCase {
     /// the scratch pool, which is what the continuation clear exists to survive.
     func testEveryChunkWidthProducesTheSameMetalFrame() throws {
         try skipUnlessGPUAvailable()
-        let manager = CanvasFixture.chunkingZoo()
+        let manager = try CanvasFixture.chunkingZoo()
         for width in [1, 2, 3, 5, 8, 40] {
             let chunks = assertChunkedMatchesWholeOnGPU(manager, chunkSources: width,
                                                         "At a chunk width of \(width)")
@@ -159,7 +159,7 @@ final class ChunkedCompositeMetalLogicTests: XCTestCase {
     /// wherever the ink does, which is where a stale texture shows through.
     func testMetalChunkedCompositingAgreesWithNoPaperEither() throws {
         try skipUnlessGPUAvailable()
-        assertChunkedMatchesWholeOnGPU(CanvasFixture.chunkingZoo(), chunkSources: 2,
+        assertChunkedMatchesWholeOnGPU(try CanvasFixture.chunkingZoo(), chunkSources: 2,
                                        includeBackground: false,
                                        "With no paper the accumulator is translucent, and a chunk that "
                                        + "inherited a dirty texture composites onto the previous chunk")
@@ -347,7 +347,7 @@ final class ChunkedCompositeMetalLogicTests: XCTestCase {
                                       CanvasFixture.solidImage(blue, rect: CGRect(x: 20, y: 20, width: 40, height: 40)))
         CanvasFixture.setBakedContent(manager, layerIndex: 3,
                                       CanvasFixture.solidImage(white, rect: CGRect(x: 0, y: 50, width: 64, height: 14)))
-        let folder = manager.addFolder(name: "Faded")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Faded"))
         manager.layers[1].parentFolderID = folder
         manager.layers[2].parentFolderID = folder
         manager.setFolderOpacity(folder, to: 0.5)
@@ -370,7 +370,7 @@ final class ChunkedCompositeMetalLogicTests: XCTestCase {
                                                                    rect: CGRect(x: index * 6, y: index * 5,
                                                                                 width: 40, height: 40)))
         }
-        let folder = manager.addFolder(name: "Three deep, faded")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Three deep, faded"))
         for index in 1...3 { manager.layers[index].parentFolderID = folder }
         manager.setFolderOpacity(folder, to: 0.4)
         manager.layers[2].blendMode = .multiply
@@ -419,7 +419,7 @@ final class ChunkedCompositeMetalLogicTests: XCTestCase {
     /// silent.
     func testTheGPUGenuinelyRenderedTheseFixturesRatherThanFallingBackToTheCPU() throws {
         try skipUnlessGPUAvailable()
-        guard let recipe = CanvasFixture.chunkingZoo().makeFrameRecipe(atFrame: 0, includeBackground: true) else {
+        guard let recipe = try CanvasFixture.chunkingZoo().makeFrameRecipe(atFrame: 0, includeBackground: true) else {
             return XCTFail("Fixture must mint")
         }
         switch MetalCompositor.attempt(recipe.resolve()) {

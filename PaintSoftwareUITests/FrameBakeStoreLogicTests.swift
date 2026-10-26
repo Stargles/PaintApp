@@ -95,8 +95,8 @@ final class FrameBakeStoreLogicTests: XCTestCase {
     /// could pass with the channels transposed on both sides; `CanvasFixture.rgbaBytes` reads
     /// premultiplied-**last** RGBA through an independent context, so a swapped R and B would show
     /// up there and only there.
-    func testARealCompositedFrameRoundTripsByteForByte() {
-        let manager = CanvasFixture.chunkingZoo()
+    func testARealCompositedFrameRoundTripsByteForByte() throws {
+        let manager = try CanvasFixture.chunkingZoo()
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true),
               let composited = recipe.composite() else {
             return XCTFail("The zoo must composite.")

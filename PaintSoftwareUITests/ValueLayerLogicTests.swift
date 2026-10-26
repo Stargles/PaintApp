@@ -255,23 +255,23 @@ final class ValueLayerLogicTests: XCTestCase {
     /// for, and the one a flat stack cannot express: the folder is combined as a unit and *then*
     /// halved. Asserted against the same node with the grey painted into a raster layer instead, so
     /// what is measured is that a value layer is a usable operand rather than what Multiply does.
-    func testAValueLayerIsAnOperandOfAMixNode() {
-        func mixNode(secondOperand: (CanvasManager) -> Void) -> CanvasManager {
+    func testAValueLayerIsAnOperandOfAMixNode() throws {
+        func mixNode(secondOperand: (CanvasManager) -> Void) throws -> CanvasManager {
             let manager = CanvasFixture.manager(layerCount: 1)
             CanvasFixture.setBakedContent(manager, layerIndex: 0, fullCanvas(red))
             secondOperand(manager)
             // A node's children *are* its inputs (§4.3), one each: the bottom child is input 0.
-            let node = manager.addCompositorNode(op: .mix(.multiply), name: "Mix")
+            let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.multiply), name: "Mix"))
             manager.layers[0].parentFolderID = node
             manager.layers[1].parentFolderID = node
             return manager
         }
 
-        let painted = mixNode { manager in
+        let painted = try mixNode { manager in
             manager.addLayer()
             CanvasFixture.setBakedContent(manager, layerIndex: 1, fullCanvas(grey))
         }
-        let valued = mixNode { $0.addValueLayer(color: PaletteColor(hex: "808080")) }
+        let valued = try mixNode { $0.addValueLayer(color: PaletteColor(hex: "808080")) }
 
         assertPixelsIdentical(composite(valued), composite(painted),
                               "A value layer must be an operand of a Mix node like any other input")

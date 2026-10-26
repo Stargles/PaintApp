@@ -231,7 +231,7 @@ enum CanvasFixture {
     /// `ChunkedCompositeMetalLogicTests` holds the Metal walk to it, and the whole value of the second
     /// is that it is the *same* document: a copy that drifted by one rectangle would leave the backend
     /// the app actually ships pinned against a fixture nobody had reasoned about.
-    static func chunkingZoo() -> CanvasManager {
+    static func chunkingZoo() throws -> CanvasManager {
         let red = UIColor(red: 1, green: 0, blue: 0, alpha: 1)
         let green = UIColor(red: 0, green: 1, blue: 0, alpha: 1)
         let blue = UIColor(red: 0, green: 0, blue: 1, alpha: 1)
@@ -269,13 +269,13 @@ enum CanvasFixture {
         // The two folders. `parentFolderID` set by hand, as `CompositorParityLogicTests` does: the
         // contiguous-span invariant holds because these are adjacent indices, and
         // `assertFolderSpansAreContiguous` in the tests says so rather than assuming it.
-        let graded = manager.addFolder(name: "Graded 60%")
+        let graded = try XCTUnwrap(manager.addFolder(name: "Graded 60%"))
         manager.layers[2].parentFolderID = graded
         manager.layers[3].parentFolderID = graded
         manager.setFolderOpacity(graded, to: 0.6)
         manager.setNodeEffect(graded, to: .brightnessContrast(Effect.BrightnessContrast(brightness: 1.3)))
 
-        let isolated = manager.addFolder(name: "Isolated over a blend")
+        let isolated = try XCTUnwrap(manager.addFolder(name: "Isolated over a blend"))
         manager.layers[4].parentFolderID = isolated
         manager.layers[5].parentFolderID = isolated
         manager.setFolderIsolated(isolated, isIsolated: true)
@@ -313,8 +313,8 @@ enum CanvasFixture {
     /// or three bytes, and the gate here is byte-for-byte, so a small one would still be caught — but
     /// a large one makes the *failure* legible when it happens, which is what a fixture owes the
     /// person reading its output at 3am.
-    static func stripingZoo() -> CanvasManager {
-        let manager = chunkingZoo()
+    static func stripingZoo() throws -> CanvasManager {
+        let manager = try chunkingZoo()
         manager.addValueLayer(effect: .noise(Effect.Noise(amount: 0.5, isMonochrome: true, seed: 12_345)))
         manager.addValueLayer(effect: .posterize(Effect.Posterize(levels: 3, screen: .ordered,
                                                                    screenStrength: 1)))

@@ -364,9 +364,9 @@ final class MaskParityLogicTests: XCTestCase {
         XCTAssertNotNil(composite(manager), "…and the document renders rather than hanging")
     }
 
-    func testALayerMaskedByTheGroupContainingItIsIgnored() {
+    func testALayerMaskedByTheGroupContainingItIsIgnored() throws {
         let manager = clippedManager(hideSource: false)
-        let folder = manager.addFolder(name: "Group")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Group"))
         manager.layers[1].parentFolderID = folder
         manager.layers[1].alphaMask = AlphaMask(sources: [.folder(folder)])
 
@@ -375,10 +375,10 @@ final class MaskParityLogicTests: XCTestCase {
         XCTAssertNotNil(composite(manager))
     }
 
-    func testANonCyclicGroupSourceStillMasks() {
+    func testANonCyclicGroupSourceStillMasks() throws {
         // The mirror of the test above, so "ignore folder sources" cannot pass for "break cycles".
         let manager = clippedManager()
-        let folder = manager.addFolder(name: "Shapes")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Shapes"))
         manager.layers[0].parentFolderID = folder
         manager.layers[1].alphaMask = AlphaMask(sources: [.folder(folder)])
 
@@ -401,9 +401,9 @@ final class MaskParityLogicTests: XCTestCase {
         XCTAssertEqual(pixel(hidden, 48, 32), [0, 0, 0, 0], "…and the mask really did clip, in both")
     }
 
-    func testAHiddenSourceInsideAHiddenGroupStillContributes() {
+    func testAHiddenSourceInsideAHiddenGroupStillContributes() throws {
         let manager = clippedManager()
-        let folder = manager.addFolder(name: "Shapes")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Shapes"))
         manager.layers[0].parentFolderID = folder
         manager.toggleFolderVisibility(folder)
 
@@ -436,9 +436,9 @@ final class MaskParityLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers[1].alphaMask?.isEnabled, true)
     }
 
-    func testDeletingAFolderDropsItAsAMaskSource() {
+    func testDeletingAFolderDropsItAsAMaskSource() throws {
         let manager = clippedManager()
-        let folder = manager.addFolder(name: "Shapes")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Shapes"))
         manager.layers[0].parentFolderID = folder
         manager.layers[1].alphaMask = AlphaMask(sources: [.folder(folder)])
         manager.deleteFolder(folder)
@@ -725,7 +725,7 @@ final class MaskParityLogicTests: XCTestCase {
     func testAMaskedGroupAgreesBetweenTheBackends() throws {
         try skipUnlessGPUAvailable()
         let manager = clippedManager()
-        let folder = manager.addFolder(name: "Group")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Group"))
         manager.layers[1].parentFolderID = folder
         manager.layers[1].alphaMask = nil
         manager.folders[0].alphaMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
@@ -965,7 +965,7 @@ final class MaskParityLogicTests: XCTestCase {
     /// not exist: the active layer is drawn by Core Animation and is in neither sandwich half. So a
     /// live mask built from the leaf's own list would let ink cross the *group's* boundary and snap
     /// back on lift — §6.4's glitch, moved one level up rather than fixed.
-    func testAnEnclosingGroupsMaskClipsTheLiveStrokeToo() {
+    func testAnEnclosingGroupsMaskClipsTheLiveStrokeToo() throws {
         let manager = CanvasFixture.manager(layerCount: 3)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 0, y: 0, width: 32, height: 64)))
@@ -976,7 +976,7 @@ final class MaskParityLogicTests: XCTestCase {
         leafMask.setTuning(threshold: 0.1, antialiasHalfWidth: 0.05)
         groupMask.setTuning(threshold: 0.1, antialiasHalfWidth: 0.05)
         manager.layers[2].alphaMask = leafMask
-        guard let folderIndex = nest(layerIndex: 2, in: manager, mask: groupMask) else {
+        guard let folderIndex = try nest(layerIndex: 2, in: manager, mask: groupMask) else {
             return XCTFail("Fixture needs the group")
         }
         XCTAssertEqual(manager.folders[folderIndex].alphaMask, groupMask, "Fixture premise: the group is masked")
@@ -1033,7 +1033,7 @@ final class MaskParityLogicTests: XCTestCase {
         leafMask.setTuning(threshold: 0.1, antialiasHalfWidth: 0.05)
         groupMask.setTuning(threshold: 0.1, antialiasHalfWidth: 0.05)
         manager.layers[2].alphaMask = leafMask
-        guard nest(layerIndex: 2, in: manager, mask: groupMask) != nil else {
+        guard try nest(layerIndex: 2, in: manager, mask: groupMask) != nil else {
             return XCTFail("Fixture needs the group")
         }
 
@@ -1064,8 +1064,8 @@ final class MaskParityLogicTests: XCTestCase {
 
     /// Puts one layer alone inside a new masked folder, returning the folder's index in `folders`.
     /// `addFolder` plus a reparent rather than `groupLayers`, which needs two layers to group.
-    private func nest(layerIndex: Int, in manager: CanvasManager, mask: AlphaMask) -> Int? {
-        let folder = manager.addFolder(name: "Group", parentFolderID: nil)
+    private func nest(layerIndex: Int, in manager: CanvasManager, mask: AlphaMask) throws -> Int? {
+        let folder = try XCTUnwrap(manager.addFolder(name: "Group", parentFolderID: nil))
         guard let index = manager.folders.firstIndex(where: { $0.id == folder }) else { return nil }
         manager.layers[layerIndex].parentFolderID = folder
         manager.folders[index].alphaMask = mask
@@ -1189,15 +1189,15 @@ final class MaskParityLogicTests: XCTestCase {
     /// gone a node is a folder that composites its children, and §6.2's "a group can be masked and be
     /// a mask source" applies to it unchanged — the mask clips the *folded result*
     /// (`testAMixNodesMaskClipsTheFoldedResultRatherThanItsSlots`).
-    func testOpeningANodeMenuOpensASessionLikeAnyFolder() {
+    func testOpeningANodeMenuOpensASessionLikeAnyFolder() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
-        let node = manager.addCompositorNode(op: .mix(.normal))
+        let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.normal)))
 
         manager.syncMaskEditSession(toOptionsTarget: node)
         XCTAssertEqual(manager.maskEditTarget, .folder(node),
                        "A node's mask clips what it folds — the picture the slot-era exclusion could not offer")
 
-        let group = manager.addFolder(name: "Group")
+        let group = try XCTUnwrap(manager.addFolder(name: "Group"))
         manager.syncMaskEditSession(toOptionsTarget: group)
         XCTAssertEqual(manager.maskEditTarget, .folder(group), "An ordinary group is a target — §6.2 masks groups")
 

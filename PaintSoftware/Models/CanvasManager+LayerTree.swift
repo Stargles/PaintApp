@@ -118,35 +118,59 @@ extension CanvasManager {
 
     /// How many things sit directly inside `container` — the count arity is enforced against.
     func directChildCount(inContainer container: UUID) -> Int {
-        containerEntries(inContainer: container).count
+        var count = 0
+        for index in layers.indices where resolvedContainer(ofLayer: index) == container { count += 1 }
+        for folder in folders where resolvedContainer(ofFolder: folder.id) == container { count += 1 }
+        return count
     }
 
-    /// Whether a drop may come to rest **directly** inside `container`.
-    ///
-    /// A node's children *are* its inputs (§4.3), so a drop into one is ordinary and welcome — up to
-    /// the op's arity. A `.mix` is `.fixed(2)`, so a third child would be an operand the fold has no
-    /// place for; that one is refused. Ordinary folders and variadic ops declare no maximum and
-    /// accept anything.
-    ///
-    /// `moving` is what the gesture is carrying, and it is what makes **reordering inside a full node
-    /// still legal**: swapping the two operands of a `.fixed(2)` Mix moves a child that is already
-    /// there, so the count does not grow and the cap has nothing to say. Without it the arity check
-    /// would refuse exactly the drag the redesign exists to enable.
-    ///
-    /// The panel reads this to decline a drag before it lands; `restackLayer`/`restackFolder` ask it
-    /// again and enforce it regardless, since a stale row still on screen from before a structural
-    /// edit goes through the same call.
-    func canDrop(inContainer container: UUID?, moving movedID: UUID? = nil) -> Bool {
+    /// Admission is about the final projection, so replacement/reordering remains legal in a full
+    /// node, including an effect which retained its existing pair. No drawing payload is inspected.
+    func canChangeChildren(inContainer container: UUID?, removing ids: [UUID] = [], adding: Int = 1) -> Bool {
+        guard adding >= 0 else { return false }
         guard let container, let folder = folders.first(where: { $0.id == container }),
               let maximum = folder.maxInputCount else { return true }
-        if let movedID, isDirectChild(movedID, of: container) { return true }
-        return directChildCount(inContainer: container) < maximum
+        let current = directChildCount(inContainer: container)
+        let removed = Set(ids).filter { isDirectChild($0, of: container) }.count
+        guard removed <= current else { return false }
+        let (final, overflow) = (current - removed).addingReportingOverflow(adding)
+        return !overflow && (final <= current || final <= maximum)
+    }
+
+    @discardableResult
+    func admitChildChange(inContainer container: UUID?, removing ids: [UUID] = [], adding: Int = 1) -> Bool {
+        guard canChangeChildren(inContainer: container, removing: ids, adding: adding) else {
+            if let maximum = folders.first(where: { $0.id == container })?.maxInputCount {
+                raise(.nodeInputLimit(maximum))
+            }
+            return false
+        }
+        return true
+    }
+
+    /// The writer promotes to the RAW parent. A deleted/dangling parent projects to root; a cycle
+    /// predecessor stays recovered at root after the shortcut and is not a new input of its parent.
+    func admitChildPromotion(of folderID: UUID) -> Bool {
+        guard let folder = folders.first(where: { $0.id == folderID }) else { return false }
+        guard let parent = folder.parentFolderID, parent != folderID,
+              folders.contains(where: { $0.id == parent }) else { return true }
+        return admitChildChange(inContainer: parent, removing: [folderID],
+                                adding: directChildCount(inContainer: folderID))
+    }
+
+    /// The panel and both restacks ask the same final-count policy. A carried direct child
+    /// replaces itself, so reordering in a full or retained over-count node remains legal.
+    func canDrop(inContainer container: UUID?, moving movedID: UUID? = nil) -> Bool {
+        canChangeChildren(inContainer: container, removing: movedID.map { [$0] } ?? [])
     }
 
     /// Whether `movedID` — a layer id or a folder id — already sits directly inside `container`.
     private func isDirectChild(_ movedID: UUID, of container: UUID) -> Bool {
-        if let folder = folders.first(where: { $0.id == movedID }) { return folder.parentFolderID == container }
-        return layers.first(where: { $0.id == movedID })?.parentFolderID == container
+        if folders.contains(where: { $0.id == movedID }) {
+            return resolvedContainer(ofFolder: movedID) == container
+        }
+        guard let index = layers.firstIndex(where: { $0.id == movedID }) else { return false }
+        return resolvedContainer(ofLayer: index) == container
     }
 
     /// `layers` indices held by a folder at any depth, ascending. Contiguous by the invariant above.
@@ -463,25 +487,33 @@ extension CanvasManager {
     /// was higher in the stack on top. Returns the new folder's id.
     @discardableResult
     func groupLayers(_ draggedID: UUID, with targetID: UUID, name: String? = nil) -> UUID? {
-        guard draggedID != targetID,
-              let draggedIndex = layers.firstIndex(where: { $0.id == draggedID }),
+        guard draggedID != targetID, layers.contains(where: { $0.id == draggedID }),
               let targetIndex = layers.firstIndex(where: { $0.id == targetID }) else { return nil }
+        guard admitChildChange(inContainer: layers[targetIndex].parentFolderID,
+                               removing: [draggedID, targetID]) else { return nil }
 
-        let folder = LayerFolder(id: UUID(), name: name ?? defaultFolderName(effect: nil, op: nil),
-                                 parentFolderID: layers[targetIndex].parentFolderID)
-        let draggedWasAbove = draggedIndex > targetIndex
-        withStructureUndo(label: .groupLayers) {
+        var createdID: UUID?
+        guard withStructureTransaction(label: .groupLayers, {
+            guard let draggedIndex = layers.firstIndex(where: { $0.id == draggedID }),
+                  let targetIndex = layers.firstIndex(where: { $0.id == targetID }),
+                  admitChildChange(inContainer: layers[targetIndex].parentFolderID,
+                                   removing: [draggedID, targetID]) else { return false }
+            let folder = LayerFolder(id: UUID(), name: name ?? defaultFolderName(effect: nil, op: nil),
+                                     parentFolderID: layers[targetIndex].parentFolderID)
+            let draggedWasAbove = draggedIndex > targetIndex
             folders.append(folder)
             withPreservedActiveLayer {
                 let moved = layers.remove(at: draggedIndex)
-                let anchor = layers.firstIndex(where: { $0.id == targetID }) ?? min(targetIndex, layers.count)
+                let anchor = targetIndex - (draggedIndex < targetIndex ? 1 : 0)
                 layers.insert(moved, at: draggedWasAbove ? anchor + 1 : anchor)
                 for index in layers.indices where layers[index].id == draggedID || layers[index].id == targetID {
                     layers[index].parentFolderID = folder.id
                 }
             }
-        }
-        return folder.id
+            createdID = folder.id
+            return true
+        }) else { return nil }
+        return createdID
     }
 
     /// What merging these two layers would lose, if anything — the question the confirmation asks
@@ -952,12 +984,14 @@ extension CanvasManager {
     /// which this site never did either — a duplicated in-between came back **blank**, since a
     /// `.generate` cel stores nothing in the tiers a bare `Cel(...)` reads. No `interpolation:`
     /// argument, on either arm, for `duplicateCel`'s own reason: a copy never derives.
-    func duplicateLayer(at index: Int) {
-        guard layers.indices.contains(index) else { return }
+    @discardableResult
+    func duplicateLayer(at index: Int) -> Bool {
+        guard layers.indices.contains(index),
+              admitChildChange(inContainer: layers[index].parentFolderID) else { return false }
         let source = layers[index]
         var cels: [Cel] = []
         for cel in source.cels {
-            guard let tiers = copyTiers(of: cel) else { return }
+            guard let tiers = copyTiers(of: cel) else { return false }
             let copy = Cel(id: UUID(), startFrame: cel.startFrame, frameCount: cel.frameCount,
                            raster: tiers.raster,
                            bakedImage: tiers.bakedImage, vector: tiers.vector,
@@ -1020,9 +1054,11 @@ extension CanvasManager {
                          fill: source.fill,
                          blendMode: source.blendMode, alphaMask: source.alphaMask,
                          parentFolderID: source.parentFolderID, cels: cels)
-        withStructureUndo(label: .duplicateLayer) {
+        return withStructureTransaction(label: .duplicateLayer) {
+            guard admitChildChange(inContainer: copy.parentFolderID) else { return false }
             layers.insert(copy, at: index + 1)
             currentLayerIndex = index + 1
+            return currentLayerIndex == index + 1
         }
     }
 }

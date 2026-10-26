@@ -69,7 +69,7 @@ final class SandwichKeyLogicTests: XCTestCase {
     /// because it is testing a *cut*, and this one sweeps the ways a frame can reach a pixel because
     /// it is testing whether a key names them. Every one of these is a route by which
     /// `makeSandwichRecipe`'s `frame` argument becomes different bytes.
-    private func battery() -> [Battery] {
+    private func battery() throws -> [Battery] {
         var cases: [Battery] = []
 
         do {
@@ -135,7 +135,7 @@ final class SandwichKeyLogicTests: XCTestCase {
                                           CanvasFixture.solidImage(red, rect: CGRect(x: 4, y: 4, width: 40, height: 40)))
             CanvasFixture.setBakedContent(manager, layerIndex: 1, frame: 0,
                                           CanvasFixture.solidImage(green, rect: CGRect(x: 16, y: 16, width: 30, height: 30)))
-            let folder = manager.addFolder(name: "Graded")
+            let folder = try XCTUnwrap(manager.addFolder(name: "Graded"))
             manager.layers[1].parentFolderID = folder
             manager.setLayerBlendMode(layerIndex: 1, to: .multiply)
             if let index = manager.folders.firstIndex(where: { $0.id == folder }) {
@@ -183,7 +183,7 @@ final class SandwichKeyLogicTests: XCTestCase {
 
     /// **Two frames with one key are two frames with one picture.**
     func testTwoFramesThatShareAKeyCompositeToTheSameBytes() throws {
-        for battery in battery() {
+        for battery in try battery() {
             var equalPairs = 0, differingPairs = 0
             for a in 0..<battery.frames {
                 let keyA = battery.manager.sandwichKey(atFrame: a, activeLayerIndex: battery.active)
@@ -226,9 +226,9 @@ final class SandwichKeyLogicTests: XCTestCase {
     /// **This is not a test of a broken key for its own sake**: it is the mutation test written down,
     /// so that a later change which quietly makes the sweep vacuous — a battery whose documents stop
     /// varying, a comparison that stops comparing — fails here instead of passing everywhere.
-    func testTheSweepCatchesAKeyThatIsShortAField() {
+    func testTheSweepCatchesAKeyThatIsShortAField() throws {
         var caught: [String] = []
-        for battery in battery() {
+        for battery in try battery() {
             for a in 0..<battery.frames {
                 for b in (a + 1)..<battery.frames {
                     let keyA = battery.manager.sandwichKey(atFrame: a, activeLayerIndex: battery.active)

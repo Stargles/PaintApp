@@ -534,7 +534,7 @@ final class RecolorEffectLogicTests: XCTestCase {
         let red = UIColor(red: 1, green: 0, blue: 0, alpha: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                       CanvasFixture.solidImage(red, rect: CGRect(x: 8, y: 8, width: 32, height: 32)))
-        let folderID = manager.addFolder(name: "Group")
+        let folderID = try XCTUnwrap(manager.addFolder(name: "Group"))
         manager.layers[0].parentFolderID = folderID
         manager.setNodeEffect(folderID, to: .recolor(Effect.Recolor(entries: [
             entry(from: colour(255, 0, 0), to: colour(0, 255, 0), tolerance: 0.3, softness: 0),

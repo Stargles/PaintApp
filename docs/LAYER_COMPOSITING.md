@@ -183,15 +183,23 @@ exists to prevent. Suppressed in the derivation, measured on pixels in
 `testAClipToBelowInputDoesNotClipToTheOtherInput`, with the ordinary-folder case asserted beside it so
 the suppression cannot pass by clip-to-below having stopped working.
 
-**Storage — no new tree arithmetic, and now one guard rather than three.** A node is an ordinary
-`LayerFolder` carrying `compositorRole = .node(op:)`. Containment, spans, the restack arithmetic and
-the panel's rows all reuse the existing machinery. The one thing standing in front of it is **arity**:
-a `.mix` is `.fixed(2)`, so a third child is refused — in `canDrop(inContainer:moving:)`, which the
-panel reads to decline a drag before it lands, and again in `restackLayer`/`restackFolder`, because a
-stale row from before a structural edit goes through the same call. `moving:` is what keeps a
-*reorder* inside a full node legal: the count does not grow when the thing being dragged is already a
-child. Ordinary folders and variadic ops declare no maximum. The contiguity invariant generalises
-unchanged — each input is a contiguous span, and the node's span is the union of its inputs' spans.
+**Storage and admission share the layer tree.** A node is an ordinary `LayerFolder` carrying
+`compositorRole = .node(op:)`. Its `maxInputCount` is the one capacity truth: Mix takes two new
+direct inputs; an effect node takes one; root, ordinary folders and ungraded Stack are unlimited.
+The shared resolved-child admission used by `canDrop`, creation, full Duplicate, selection transfers,
+grouping and deletion tests the **final** count. Reordering, replacement or reduction stays legal even
+when loaded content or a later effect choice already exceeds its current maximum. No renderer drops
+extra children. Grouping removes its actual direct inputs before adding the new folder; deletion
+counts promotion into the surviving raw parent, including recovered cycle/dangling metadata. A
+promotion that would grow past the maximum refuses the whole deletion. Contiguous layer spans and
+input ordering stay unchanged.
+
+Refused commands show the existing notice banner (“This node takes … inputs. Move an input out
+first.”), publish no new structural content and add no operation undo entry. Folder/node creators
+return nil; layer creation and duplicate/delete return false. Existing tool settlement still precedes
+commands that normally settle an earlier edit. Raster selection Duplicate keeps its existing root
+destination; vector transfers and raster To New Layer use the source parent. Undo/redo and loading
+restore admitted or saved content without another admission check.
 
 **The op dropdown holds blend ops and effects, and an effect op is the arity-1 case.** One dropdown,
 two sections: pick a blend and the node takes two inputs; pick one of §7's thirteen effects and it
@@ -213,11 +221,13 @@ Three consequences, each settled:
   is two unrelated answers to "what does this node do", with nothing to say which runs first.
 - **A node already holding two children keeps both when the artist picks an effect**, so
   `maxInputCount` reads 1 against a real count of 2 and the node grades the assembled pair. Nothing
-  is destroyed by a dropdown. `canDrop`'s `<` handles the over-count exactly right — no third child
-  may land, and reordering the two that are there stays legal.
+  is destroyed by a dropdown. Shared admission prevents growth while allowing those inputs to be
+  reordered. Picking a Mix from Stack or an effect requires its existing inputs to fit the Mix
+  maximum before any role, grade, tracks or automatic name changes; changing the blend of an
+  already-Mix node adds no input and remains legal, including loaded over-count content.
 
-**Deleting a node promotes its children**, exactly like deleting an ordinary folder. There is no
-special case and no `deleteCompositorNode`: that existed only because a promoted *slot* folder would
+**Deleting a node promotes its children**, subject to the same final-count admission as an ordinary
+folder. There is no special case and no `deleteCompositorNode`: that existed only because a promoted *slot* folder would
 have been stranded, tagged as input to a node that no longer exists.
 
 **Migration from the slot era.** A node saved before this design is a node folder plus child folders

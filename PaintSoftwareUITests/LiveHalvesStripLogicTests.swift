@@ -125,8 +125,8 @@ final class LiveHalvesStripLogicTests: XCTestCase {
     /// **The pin.** The whole striping zoo, cut at a layer buried inside a graded folder — so both
     /// halves carry a half-group with the folder's opacity and grade on it, which is the shape a
     /// naive re-derivation of the cut gets wrong.
-    func testTheStrippedLiveHalvesAreByteIdenticalToTheWholeFrameOnes() {
-        let manager = CanvasFixture.stripingZoo()
+    func testTheStrippedLiveHalvesAreByteIdenticalToTheWholeFrameOnes() throws {
+        let manager = try CanvasFixture.stripingZoo()
         assertFolderSpansAreContiguous(manager, "Fixture invariant")
         assertRenderTreeMatchesFlatOrder(manager, "Fixture invariant")
 
@@ -156,8 +156,8 @@ final class LiveHalvesStripLogicTests: XCTestCase {
     /// **Cut in space, never in resolution — §2.12 as a size assertion.** The halves that come back
     /// from an over-budget document are the size the knob asked for, which is the whole ruling and
     /// the thing `affordableSize` used to violate.
-    func testAnOverBudgetHalfIsCutInSpaceRatherThanInResolution() {
-        guard let recipe = sandwich(CanvasFixture.stripingZoo(), active: 3) else { return }
+    func testAnOverBudgetHalfIsCutInSpaceRatherThanInResolution() throws {
+        guard let recipe = sandwich(try CanvasFixture.stripingZoo(), active: 3) else { return }
         let budget = budgetJustUnderRefusing(recipe.belowRecipe)
         XCTAssertGreaterThan(StripedCompositor.plan(for: recipe.belowRecipe, budgetBytes: budget).count, 1,
                              "Premise: this budget must genuinely force a cut")
@@ -188,8 +188,8 @@ final class LiveHalvesStripLogicTests: XCTestCase {
     /// **The premise is asserted, not assumed.** The same inequality is checked against the whole
     /// frame first and must *fail* there. Without that line a budget large enough to refuse nothing
     /// would make every assertion below trivially true.
-    func testNoCompositeOfTheLiveHalvesIsMintedAtASizeTheBudgetRefuses() {
-        guard let recipe = sandwich(CanvasFixture.stripingZoo(), active: 3) else { return }
+    func testNoCompositeOfTheLiveHalvesIsMintedAtASizeTheBudgetRefuses() throws {
+        guard let recipe = sandwich(try CanvasFixture.stripingZoo(), active: 3) else { return }
         let budget = budgetJustUnderRefusing(recipe.belowRecipe)
         // The whole tree's peak bounds either half's, so one number serves both and it is the
         // conservative direction — the same direction `chunkSources` takes it.

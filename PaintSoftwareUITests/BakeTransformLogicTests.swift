@@ -690,8 +690,8 @@ final class BakeTransformLogicTests: XCTestCase {
         fadeIn(manager, ownFade)
         let loop = addLoop(manager, period: 3)
 
-        let fading = manager.addFolder(name: "Fading")
-        let plain = manager.addFolder(name: "Plain")
+        let fading = try XCTUnwrap(manager.addFolder(name: "Fading"))
+        let plain = try XCTUnwrap(manager.addFolder(name: "Plain"))
         for id in inFading { manager.layers[index(id, manager)].parentFolderID = fading }
         for id in [steady, ownFade] { manager.layers[index(id, manager)].parentFolderID = plain }
         for group in [fading, plain] { manager.restackFolder(group, above: .bottom, parentFolderID: nil) }
@@ -815,7 +815,7 @@ final class BakeTransformLogicTests: XCTestCase {
     /// **Layers in a folder beneath the loop are looped by the same walk.**
     func testALayerInAFolderBeneathTheLoopIsWrittenOut() throws {
         let fx = walkerUnderALoop()
-        let folder = fx.manager.addFolder(name: "G")
+        let folder = try XCTUnwrap(fx.manager.addFolder(name: "G"))
         fx.manager.layers[index(fx.walker, fx.manager)].parentFolderID = folder
         fx.manager.restackFolder(folder, above: .bottom, parentFolderID: nil)
         let before = try scene(fx.manager)

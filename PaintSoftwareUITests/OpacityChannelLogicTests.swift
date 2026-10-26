@@ -142,9 +142,9 @@ final class OpacityChannelLogicTests: XCTestCase {
     /// Operands: the *folder's* node opacity in the tree at two frames, written through the same
     /// `TargetChannel.opacity` descriptor that the layer test above uses. One descriptor, two key
     /// paths; a build that special-cased the layer fails here with no other symptom.
-    func testAFoldersOpacityAnimatesThroughTheSameChannel() {
+    func testAFoldersOpacityAnimatesThroughTheSameChannel() throws {
         let manager = drawingManager()
-        let group = manager.addFolder(name: "Group")
+        let group = try XCTUnwrap(manager.addFolder(name: "Group"))
         manager.restackLayer(manager.layers[0].id, above: .folder(group), parentFolderID: group)
         guard let index = manager.folders.firstIndex(where: { $0.id == group }) else {
             return XCTFail("Fixture premise: the folder must be in the document")
@@ -788,7 +788,7 @@ final class OpacityChannelLogicTests: XCTestCase {
     /// nothing extra: one descriptor, two key paths.
     func testAFoldersReadoutIsTheSameChannelOnTheOtherHome() throws {
         let manager = drawingManager()
-        let folderID = manager.addFolder(name: "Group")
+        let folderID = try XCTUnwrap(manager.addFolder(name: "Group"))
         let index = try XCTUnwrap(manager.folders.firstIndex { $0.id == folderID },
                                   "PREMISE: the fixture has a folder to read")
         manager.folders[index].opacity = 1

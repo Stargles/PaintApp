@@ -1736,7 +1736,7 @@ final class PerfBaselineTests: XCTestCase {
     /// Peak memory here is process footprint, so it carries whatever the runner touched before — it
     /// is a smoke alarm, not a per-composite figure, and it is not comparable between runs.
     @MainActor
-    func testNestingLayersInFoldersDoesNotChangeCompositeCost() {
+    func testNestingLayersInFoldersDoesNotChangeCompositeCost() throws {
         Compositor.backend = .coreGraphics
         let flat = compositorManager(layerCount: 6)
         guard let flatRequest = flat.makeRenderRequest(atFrame: 0, includeBackground: true) else {
@@ -1747,7 +1747,7 @@ final class PerfBaselineTests: XCTestCase {
         let nested = compositorManager(layerCount: 6)
         var parent: UUID?
         for index in 0..<6 {
-            parent = nested.addFolder(name: "Depth \(index)", parentFolderID: parent)
+            parent = try XCTUnwrap(nested.addFolder(name: "Depth \(index)", parentFolderID: parent))
             nested.layers[index].parentFolderID = parent
         }
         guard let nestedRequest = nested.makeRenderRequest(atFrame: 0, includeBackground: true) else {

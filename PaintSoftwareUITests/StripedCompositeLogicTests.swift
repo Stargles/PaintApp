@@ -108,8 +108,8 @@ final class StripedCompositeLogicTests: XCTestCase {
 
     /// **The pin.** Byte for byte, on `CanvasFixture.stripingZoo()` — the chunking zoo plus the noise
     /// and dithered-posterize layers no apron can carry — at a height that genuinely cuts it.
-    func testStrippedCompositingIsByteIdenticalToTheWholeFrameWalk() {
-        let manager = CanvasFixture.stripingZoo()
+    func testStrippedCompositingIsByteIdenticalToTheWholeFrameWalk() throws {
+        let manager = try CanvasFixture.stripingZoo()
         assertFolderSpansAreContiguous(manager, "Fixture invariant")
         assertRenderTreeMatchesFlatOrder(manager, "Fixture invariant")
         XCTAssertEqual(manager.layers.count, 12,
@@ -170,8 +170,8 @@ final class StripedCompositeLogicTests: XCTestCase {
     /// The zoo with the paper off. A strip's paper rect is the frame's translated into the band, and
     /// with no paper there is none to translate — so this is the arm where the accumulator is
     /// translucent at the seams and any assembly that composited rather than copied would show.
-    func testStrippedCompositingAgreesWithNoPaperEither() {
-        let strips = assertStrippedMatchesWhole(CanvasFixture.stripingZoo(), stripBufferRows: 40,
+    func testStrippedCompositingAgreesWithNoPaperEither() throws {
+        let strips = assertStrippedMatchesWhole(try CanvasFixture.stripingZoo(), stripBufferRows: 40,
                                                 includeBackground: false,
                                                 "With no paper the frame is translucent at every seam, so "
                                                 + "a strip written with source-over instead of copy would "
@@ -690,8 +690,8 @@ final class StripedCompositeLogicTests: XCTestCase {
     /// **The plan tiles the frame exactly**: the cores abut, they never overlap, and their union is
     /// the whole canvas. That is what makes the assembly a copy rather than a composite — an overlap
     /// would double-draw a band and a gap would leave a transparent line.
-    func testTheStripPlanTilesTheFrameExactly() {
-        let manager = CanvasFixture.stripingZoo()
+    func testTheStripPlanTilesTheFrameExactly() throws {
+        let manager = try CanvasFixture.stripingZoo()
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true) else {
             return XCTFail("Fixture must mint")
         }
@@ -723,8 +723,8 @@ final class StripedCompositeLogicTests: XCTestCase {
     /// This is the claim that keeps the two cuts from disagreeing about what the budget is, and a
     /// drift in it would show up as a strip that is one row too tall — which is a memory overrun on
     /// the device and nothing at all on this Mac.
-    func testTheStripHeightIsTheChunkWidthFormulaSolvedForRows() {
-        let manager = CanvasFixture.stripingZoo()
+    func testTheStripHeightIsTheChunkWidthFormulaSolvedForRows() throws {
+        let manager = try CanvasFixture.stripingZoo()
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true) else {
             return XCTFail("Fixture must mint")
         }
@@ -755,8 +755,8 @@ final class StripedCompositeLogicTests: XCTestCase {
     /// Asserted through the window, because that is the observable: a recipe with a nil window
     /// rasterizes and keys exactly as it did before strips existed, so every document the compositor
     /// was measured on is untouched.
-    func testAFrameThatFitsIsCompositedWithNoWindowAtAll() {
-        let manager = CanvasFixture.stripingZoo()
+    func testAFrameThatFitsIsCompositedWithNoWindowAtAll() throws {
+        let manager = try CanvasFixture.stripingZoo()
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true) else {
             return XCTFail("Fixture must mint")
         }
@@ -791,8 +791,8 @@ final class StripedCompositeLogicTests: XCTestCase {
     /// The zoo is the fixture because it holds a buffered folder, a mask reaching across the stack
     /// and two `.ink` effects: all three are chunk-boundary hazards, and here they are met inside a
     /// strip boundary as well.
-    func testAStripIsChunkedWhenOneStripStillDoesNotFit() {
-        let manager = CanvasFixture.stripingZoo()
+    func testAStripIsChunkedWhenOneStripStillDoesNotFit() throws {
+        let manager = try CanvasFixture.stripingZoo()
         guard let recipe = manager.makeFrameRecipe(atFrame: 0, includeBackground: true) else {
             return XCTFail("Fixture must mint")
         }

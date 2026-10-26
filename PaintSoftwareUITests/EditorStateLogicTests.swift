@@ -70,7 +70,7 @@ final class EditorStateLogicTests: XCTestCase {
         var eraser = BrushLibrary.roundHard
         eraser.name = "Wide eraser"
         eraser.size = 60
-        let folderID = manager.addFolder(name: "Group")
+        let folderID = try XCTUnwrap(manager.addFolder(name: "Group"))
         manager.addViewPreset()
         manager.addViewPreset()
         let defaults = manager.editorState

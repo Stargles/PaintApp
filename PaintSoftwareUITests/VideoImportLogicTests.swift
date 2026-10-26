@@ -216,6 +216,126 @@ final class VideoImportLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers.count, before, "The second is the layer it arrived on.")
     }
 
+
+    func testRefusedCreationSettlementAndStagingKeepThePickedFileAndCreateNoOrphan() throws {
+        for consuming in [false, true] {
+            for reason in ["capacity", "settlement", "float", "stage"] {
+                let picked = try shortClip(named: "\(reason)-\(consuming)")
+                let original = try Data(contentsOf: picked)
+                let staging = directory.appendingPathComponent("stage-\(reason)-\(consuming)")
+                VideoImportStore.directoryOverride = staging
+                let manager = CanvasFixture.manager(layerCount: 1)
+                var allowsPixels = true
+                if reason == "capacity" {
+                    XCTAssertTrue(manager.addLayer())
+                    let node = try XCTUnwrap(manager.addCompositorNode(op: .mix(.normal)))
+                    for index in manager.layers.indices { manager.layers[index].parentFolderID = node }
+                } else if reason == "settlement" || reason == "float" {
+                    // Both refusal phases use a real red raster. Explicit video settlement must
+                    // admit the finish or floating Move before a picked file can be moved.
+                    let size = CanvasFixture.canvasSize
+                    let owner = RasterResidency(budgetBytes: 64 * 64 * 4 * 32,
+                                                hasHeadroom: { _ in allowsPixels })
+                    let source = try RasterSource.render(size: size, using: owner) { context in
+                        context.setFillColor(UIColor.red.cgColor)
+                        context.fill(CGRect(x: 20, y: 18, width: 9, height: 12))
+                        return true
+                    }.get()
+                    manager.layers[0].cels[0].raster = RasterLayerTexture(size: size, source: source, strokeCount: 1)
+                    if reason == "float" {
+                        manager.beginMove()
+                        let piece = try XCTUnwrap(manager.floatingPiece)
+                        XCTAssertEqual(piece.kind, .move, "PREMISE: a real raster move is lifted")
+                        XCTAssertEqual(piece.targetLayerID, manager.layers[0].id)
+                        allowsPixels = false
+                        XCTAssertTrue(manager.beginCanvasEdit(), "PREMISE: canvas-edit settlement alone does not close the float")
+                        XCTAssertEqual(manager.floatingPiece?.targetCelID, piece.targetCelID)
+                    } else {
+                        var session = try XCTUnwrap(manager.beginLiquify(layerID: manager.layers[0].id,
+                            profile: ToolProfile(preset: TestBrushes.hardRound, size: 40, opacity: 1), size: 40, seed: 7))
+                        session.samples = StrokeSamples([VectorSample(x: 24, y: 24), VectorSample(x: 38, y: 24)],
+                                                        channels: .pressureOnly)
+                        session.window = CGRect(x: 0, y: 0, width: 60, height: 48)
+                        manager.holdLiquify(&session)
+                        let procedure = try XCTUnwrap(manager.liveCelContentEdit?.procedure)
+                        _ = procedure.resolve(session.elementsBefore)
+                        XCTAssertFalse(procedure.hasFailed, "PREMISE: the actual finish is ready before admission refuses")
+                        allowsPixels = false
+                        manager.commitLiquify(session)
+                        XCTAssertTrue(procedure.isPending, "PREMISE: there is a real pending canvas edit")
+                    }
+                } else {
+                    try Data("ordinary file blocks the staging directory".utf8).write(to: staging)
+                }
+                manager.history.removeAll()
+                let layers = manager.layers.map(\.id), active = manager.currentLayerIndex
+                let identity = CelContentIdentity(manager.layers[active].cels[0])
+                XCTAssertFalse(manager.insertVideo(at: picked, consumingSource: consuming))
+                XCTAssertEqual(try Data(contentsOf: picked), original, "Refusal preserves the only owned picked copy")
+                let stagedAssets = try FileManager.default.subpathsOfDirectory(atPath: directory.path)
+                    .filter { $0.contains("_video.") }
+                XCTAssertTrue(stagedAssets.isEmpty, "A failed creation must not leave an unswept staged video")
+                XCTAssertEqual(manager.layers.map(\.id), layers, "No provisional layer survives a failed stage")
+                XCTAssertEqual(manager.currentLayerIndex, active)
+                XCTAssertEqual(CelContentIdentity(manager.layers[active].cels[0]), identity)
+                XCTAssertTrue(manager.history.undoStack.isEmpty, "No failed creation consumes an undo step")
+                if reason == "settlement" {
+                    XCTAssertTrue(try XCTUnwrap(manager.liveCelContentEdit?.procedure).isPending)
+                } else if reason == "float" {
+                    XCTAssertEqual(manager.floatingPiece?.kind, .move)
+                    XCTAssertEqual(manager.floatingPiece?.targetLayerID, layers[active])
+                    XCTAssertEqual(manager.floatingPiece?.targetCelID, manager.layers[active].cels[0].id)
+                }
+                allowsPixels = true
+            }
+        }
+
+        // A successful earlier Move is NOT part of the provisional new layer's rollback.
+        for consuming in [false, true] {
+            let picked = try shortClip(named: "stage-after-move-\(consuming)")
+            let pickedBytes = try Data(contentsOf: picked)
+            let staging = directory.appendingPathComponent("blocked-after-move-\(consuming)")
+            try Data("not a directory".utf8).write(to: staging)
+            VideoImportStore.directoryOverride = staging
+            let manager = CanvasFixture.manager(layerCount: 1)
+            let owner = RasterResidency(budgetBytes: 64 * 64 * 4 * 32, hasHeadroom: { _ in true })
+            let source = try RasterSource.render(size: CanvasFixture.canvasSize, using: owner) { context in
+                context.setFillColor(UIColor.red.cgColor)
+                context.fill(CGRect(x: 20, y: 18, width: 9, height: 12))
+                return true
+            }.get()
+            manager.layers[0].cels[0].raster = RasterLayerTexture(size: CanvasFixture.canvasSize,
+                                                                 source: source, strokeCount: 1)
+            let before = try XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(
+                manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)))
+            manager.beginMove()
+            var shifted = try XCTUnwrap(manager.floatingPiece).transform
+            shifted.position.x += 16
+            manager.updateFloatingPose(transform: shifted, distortQuad: nil)
+            let layers = manager.layers.map(\.id)
+            manager.history.removeAll()
+
+            XCTAssertFalse(manager.insertVideo(at: picked, consumingSource: consuming))
+            XCTAssertEqual(try Data(contentsOf: picked), pickedBytes)
+            XCTAssertEqual(manager.layers.map(\.id), layers, "Only the provisional layer is rolled back")
+            XCTAssertNil(manager.floatingPiece, "The successful earlier Move stays settled")
+            let after = try XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(
+                manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)))
+            let oldCore = (24 + 24 * 64) * 4, newCore = (40 + 24 * 64) * 4
+            XCTAssertEqual(Array(after[oldCore..<(oldCore + 4)]) + Array(after[newCore..<(newCore + 4)]),
+                           [0, 0, 0, 0, 255, 0, 0, 255], "The actual cel retains the legitimately shifted red pixels")
+            XCTAssertEqual(manager.history.undoStack.map(\.label), [.move])
+            XCTAssertEqual(manager.history.undo(), .move)
+            XCTAssertEqual(try CanvasFixture.rgbaBytes(XCTUnwrap(
+                manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)), before)
+            XCTAssertEqual(manager.history.redo(), .move)
+            XCTAssertEqual(try CanvasFixture.rgbaBytes(XCTUnwrap(
+                manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)), after)
+            let staged = try FileManager.default.subpathsOfDirectory(atPath: directory.path).filter { $0.contains("_video.") }
+            XCTAssertTrue(staged.isEmpty)
+        }
+    }
+
     // MARK: - Support
 
     private func shortClip(named name: String = "short") throws -> URL {

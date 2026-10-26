@@ -586,9 +586,9 @@ final class FrameBakerLogicTests: XCTestCase {
     /// `LayerContentVersion` — it is not a cel's content — and `renderTree(atFrame: 0)` sees only what
     /// the grade resolves to at frame 0, so a curve edited to change frame 2 and not frame 0 is
     /// visible in exactly one place: the tracks the structural stamp holds.
-    func testAnAnimatedFolderGradeIsAStructuralChange() {
+    func testAnAnimatedFolderGradeIsAStructuralChange() throws {
         let manager = perFrameDocument(frames: 3)
-        let folder = manager.addFolder(name: "Graded")
+        let folder = try XCTUnwrap(manager.addFolder(name: "Graded"))
         let baker = makeBaker(manager)
         baker.noteDocumentChanged()
         drain(baker)

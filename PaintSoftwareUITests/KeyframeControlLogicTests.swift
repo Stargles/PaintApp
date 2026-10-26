@@ -54,9 +54,9 @@ final class KeyframeControlLogicTests: XCTestCase {
     /// because `LayerFolder.effect` is legal on both and the group is what an artist reaches first.
     private func gradedFolderManager(
         _ effect: Effect = .brightnessContrast(Effect.BrightnessContrast(brightness: 1, contrast: 1))
-    ) -> (manager: CanvasManager, target: KeyframeTarget) {
+    ) throws -> (manager: CanvasManager, target: KeyframeTarget) {
         let manager = CanvasFixture.manager(layerCount: 1)
-        let group = manager.addFolder(name: "Graded group")
+        let group = try XCTUnwrap(manager.addFolder(name: "Graded group"))
         manager.restackLayer(manager.layers[0].id, above: .folder(group), parentFolderID: group)
         manager.setNodeEffect(group, to: effect)
         manager.history.removeAll()
@@ -962,8 +962,8 @@ final class KeyframeControlLogicTests: XCTestCase {
     /// for it"*. So this is `testTheOwnersABWorkflowProducesOneAnimation` run against a folder, and what
     /// it asserts is that the answers are indistinguishable from the layer's. A divergence here is the
     /// ruling not being implemented, whatever each number looks like on its own.
-    func testAFolderRunsTheWholeWorkflowExactlyAsALayerDoes() {
-        let (manager, target) = gradedFolderManager()
+    func testAFolderRunsTheWholeWorkflowExactlyAsALayerDoes() throws {
+        let (manager, target) = try gradedFolderManager()
 
         XCTAssertTrue(manager.addKeys(target, atFrame: 0))
         XCTAssertTrue(tracks(manager, target).isEmpty)
@@ -986,8 +986,8 @@ final class KeyframeControlLogicTests: XCTestCase {
 
     /// The undo path is the half most likely to be wired to only one of the two homes, because it is
     /// the half with a second mutation site. One step for the whole press, and the folder found by id.
-    func testAFolderKeyframeIsOneUndoStepAndItsUndoRemovesTheChannel() {
-        let (manager, target) = gradedFolderManager()
+    func testAFolderKeyframeIsOneUndoStepAndItsUndoRemovesTheChannel() throws {
+        let (manager, target) = try gradedFolderManager()
         XCTAssertEqual(manager.setEffectParameterKeys(target, frame: 0,
                                                       values: [brightnessID: 1.4, contrastID: 2.0]), 2,
                        "Two channels in one write")
@@ -1003,13 +1003,13 @@ final class KeyframeControlLogicTests: XCTestCase {
 
     /// The refusals reach the folder arm too — they are in the shared walk over `parameters`, not in a
     /// per-target guard that could have been written once and forgotten once.
-    func testAFolderRefusesTheSameParametersALayerDoes() {
-        let (manager, target) = gradedFolderManager(.posterize(Effect.Posterize()))
+    func testAFolderRefusesTheSameParametersALayerDoes() throws {
+        let (manager, target) = try gradedFolderManager(.posterize(Effect.Posterize()))
         XCTAssertEqual(manager.setEffectParameterKeys(target, frame: 0,
                                                       values: ["posterize.levels": 4]), 0)
         XCTAssertTrue(tracks(manager, target).isEmpty)
 
-        let (other, otherTarget) = gradedFolderManager()
+        let (other, otherTarget) = try gradedFolderManager()
         XCTAssertEqual(other.setEffectParameterKeys(otherTarget, frame: 0,
                                                     values: ["bloom.intensity": 0.5]), 0,
                        "An id this grade has no parameter for is never stored")
@@ -1019,8 +1019,8 @@ final class KeyframeControlLogicTests: XCTestCase {
     /// the timeline beside a row, and a folder's row is a summary band with no grade of its own to
     /// mean — so it keeps writing onto the current layer, and a folder's channels are reached through
     /// the settings bar and the channel panel.
-    func testTheStripsTargetIsStillTheCurrentLayerEvenWithAGradedFolderPresent() {
-        let (manager, target) = gradedFolderManager()
+    func testTheStripsTargetIsStillTheCurrentLayerEvenWithAGradedFolderPresent() throws {
+        let (manager, target) = try gradedFolderManager()
         manager.setEffectParameterKeys(target, frame: 0, values: [brightnessID: 1.5])
         manager.addKeys(target, atFrame: 0)
 
