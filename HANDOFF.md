@@ -303,3 +303,7 @@ Saving test-only successor4c846050 preserves productd151; root read three non-en
 ### Fill preview duplicate owner — October26
 
 Converter bounded report532bf2d1: LayerHostView.showFill replaces whole WindowSurfaceView on each working-size change, duplicating existing old-front-retention and LatestWins size ownership in WindowSurfaceView. This can mint B/C pairs independently behind one serial queue during finite grown-window updates. No unlimited leak/RSS/respring claim. Root authorizes source-only host regression/seam proposal using existing owners/probes; avoid new product test hooks, service, cache, or a large dependency cascade merely for tests. Actual root change/OLD regression required before removal.
+
+### Actual package path refusal regression — October26
+
+OLD497 selected2 JOINED2RED, root actual730/device/argv/methods reconciled. Only failures are validator384 accepting sibling requiredPNG and loader399 returning manager. Root LOOK5 originals: originalAred/originalBblue; loadedA is blue. All setup and Bwhole-byte preservation assertions passed. root-causal-acceptance.json records scope. This proves shared containment defect, not external sandbox escape/artwork loss/writer clobber. Vector proposing ONE resolver/failure contract and checking bypassing manifest fields before root authorizes fix; no old-address retirement or format repair yet. Native next is Autosave4c normal154.

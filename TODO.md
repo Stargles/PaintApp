@@ -75,7 +75,9 @@ that the final combined audit build has passed.
    witness28c is source-only; no source/artwork repair has run and no interpolation redesign is in scope.
    Additional package auditb431481b found unchecked resource paths and permanent old-layout fallback.
    Author finite sibling-resource rejection regressions through existing validator/load owners,
-   with all production unchanged; actual OLD failure is required before a central resolver fix.
+   with all production unchanged. OLD497 now demonstrates both required-PNG refusal failures;
+   loaded A actually shows sibling B’s blue pixels. Use one shared contained-address contract and
+   preserve legal current/old spellings until the separate one-shot repair.
    Inventory legal old addresses before a separate one-shot Projects/Backups/Trash repair and complete
    fallback retirement. No protected-package mutation or format change is authorized by inventory alone.
 7. Windows: run/fix DNS limits, clipboard filename collisions, keep-awake lifetime and awaited Quit
