@@ -28,8 +28,8 @@ Use the three existing agents; all source work stays in separate trees. No physi
 
 ### Current native and source work
 
-- **Native now:** temporary gradient render-stage diagnostic274 selected1, grant in its42d2 packet,
-  supervisor44715. Root-only Mac lease; all other native/staging/lifecycle work waits for join.
+- **Native now:** old Export f270 selected2 delegated to Converter under root grant4271be8c;
+  helper68759/session35410. All other native/staging/lifecycle work waits for join.
   Public fixture0c selected2 JOINED GREEN2; root reconciled actual730/IDs/device/argv and LOOKed all5
   whole originals (3gradient landscape,2rectangle portrait). No Undo-picture LOOK claim; no logic pass.
 - **Tap closed/harvested:**756 logic37/public6+bench1/Release1 GREEN. Independent cold square d7fa
@@ -44,8 +44,14 @@ Use the three existing agents; all source work stays in separate trees. No physi
   Bake traces renderer/affine/flatten. Original scalar mapper failure and corrected current API must
   get truthful causal proof; no matched-target attribution from earlier unequal-format assumptions.
   UI0c fixes only measured toolbar/dock obstruction (portrait leak refuted), same gestures/probes/
-  outcomes, and its selected2 now pass. Temporary diagnostic274 retains original2images/2tolerance;
-  other729 exact; all3extraimages retire WHOLE. Whole294/3logic1public controls remain pending.
+  outcomes, and its selected2 now pass. Temporary diagnostic274 JOINED1RED original4>2; source730
+  exact, root LOOK5 whole64² originals. Three finite fractions agree <=3.34e-16; all image sizes and
+  byte counts match. Flatten/direct, direct/rawMapped, reference/rawNative each byte-exact; ONE raw
+  CGGradient under different CTMs differs max8. Original image-to-image<=2 premise is invalid even
+  with identical analytic fields; no CoreGraphics internal algorithm claim. Root permits test-only
+  replacement: unchanged original probe, compare EACH image to independent neutral Oklab grey106
+  (t67/128) with2byte tolerance; add3noncollinear finite field checks<=1e-12. Product stays0ab. Remove
+  temporary observer WHOLE, compose UI0c, qualify whole294 and actual controls; no harvest yet.
 - **Resize:** unchanged warm2 gave1pass/1fail: old raster same-turn/no-busy assumptions obsolete;
   announced500-yield wait warm-passed but is not reliable queue completion. Root recorded0bc then
   accepted source designc78. Converter source381→safe test-onlye3fd uses ONE published phase,
@@ -78,8 +84,14 @@ Use the three existing agents; all source work stays in separate trees. No physi
   bounded cleanup; no implementation/oldnative yet, no extra service or unbounded completed-file pile.
   Existing export run/offMain cancellation fences are healthy; do not re-fix them. Old regressions
   f270d7e7 are source-only (selected2/whole26), preserving24 old methods and all production bytes.
-  Apple copy-only transfer semantics do not yet prove source-owner lifetime through the system copy;
-  do not implement deinit cleanup on an assumed ShareLink guarantee.
+  Apple copy-only transfer semantics do not prove source-owner lifetime through the system copy.
+  Primary-contract review53481e07 accepts a local UIActivityViewController adapter in ExportSheet:
+  already-finished URL, completion block retaining the immutable product through documented activity
+  completion/cancel. No existing app wrapper exists; no ItemSource/provider subclass is needed.
+  Do not release on SwiftUI dismantle/reset; no controller back-capture cycle. Producer+Photos+Send
+  and Share share ONE product owner in Phase, unique exclusive parent, unchanged filename; startup
+  cleanup only abandoned export namespace. App termination/remote upload completion remain unproved.
+  Author only after root accepts the actual old selected2 failure; preserve healthy producer fences.
 - **Group legacy cleanup:** root8a/c6 recorded unsupported nested MotionGroup defaults. Bake report
   2f0ecdec: all4fields existed/emitted since firstcbdae859, installed6fb file exactcurrent; parent
   omission for empty registry LEGAL and remains. All250 protected manifests omitgroups, none is a

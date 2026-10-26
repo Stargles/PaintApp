@@ -37,7 +37,9 @@ that the final combined audit build has passed.
    assertion: observe actual paint/CTMs, direct moved Frozen draw versus flatten, and one shared raw
    CGGradient under native CTM versus mapped identity. No product change or CG algorithm claim yet.
    Measured public fixture corrections0c passed both isolated UI checks; root inspected all5 whole
-   pictures. Temporary diagnostic274 is running; no gradient logic qualification or harvest yet.
+   pictures. Diagnostic274 isolated a native-rasterization difference despite identical colour fields.
+   Replace the invalid two-picture oracle with independent analytic field and per-picture colour
+   checks; keep the original probe and2byte per-render tolerance. No gradient harvest yet.
 3. Resize: one operation phase separates immediate safety locking from visible loading progress,
    using the existing worker and presentation task. Current successor546 is source-only; model/fault
    and genuine public progress/no-flash observation remain. Do not restore blocking PNG work.
@@ -47,6 +49,8 @@ that the final combined audit build has passed.
 5. Export: correct stale destination results and immutable file ownership together. Current proposal
    preserves artist filenames; old regressions f270 are prepared. Verify consumer lifetime and storage
    cleanup before implementing; a copy-only transfer declaration alone does not prove file lifetime.
+   Use the documented activity-completion boundary to retain the same file owner through Share,
+   without a separate transfer service. Old selected2 is running; no product change authorized yet.
 6. Saved group metadata: remove unsupported nested legacy defaults only after old rejection proof
    and a real nonempty previous-writer roundtrip. Legal omission of an empty registry stays. Old6fb
    witness28c is source-only; no source/artwork repair has run and no interpolation redesign is in scope.
