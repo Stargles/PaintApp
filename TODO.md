@@ -23,6 +23,9 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   Matched120-stroke image-manager miss improved120.1→29.2ms on the simulator. Minimal existing-Quad
   admission adds no cache/state/schema. Logic17 deliberate-failure batch is granted04f2dc13;
   separate public/benchmark controls remain pending. No iPad/RSS or four-sample timing claim.
+  Keep the new square-corner regression as its own cold public test, preserving all old round-workflow
+  assertions. The generic Clear reversal currently fails at the earlier round step, leaving the new
+  square Clear outcomes unreached; a separate behavior-focused method fixes that test structure.
   Preserve current
   numeric curve cap and every drawn outcome.
 - Correct the now-reproduced affine-gradient defect in the existing two-point mapper. Old9dd ran
