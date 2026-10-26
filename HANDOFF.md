@@ -28,8 +28,8 @@ Use the three existing agents; all source work stays in separate trees. No physi
 
 ### Current native and source work
 
-- **Native now:** old Export f270 selected2 delegated to Converter under root grant4271be8c;
-  helper68759/session35410. All other native/staging/lifecycle work waits for join.
+- **Native now:** current Resize546 whole47 under root grant in qualified-546 packet,
+  supervisor91285. All other native/staging/lifecycle work waits for join.
   Public fixture0c selected2 JOINED GREEN2; root reconciled actual730/IDs/device/argv and LOOKed all5
   whole originals (3gradient landscape,2rectangle portrait). No Undo-picture LOOK claim; no logic pass.
 - **Tap closed/harvested:**756 logic37/public6+bench1/Release1 GREEN. Independent cold square d7fa
@@ -91,7 +91,11 @@ Use the three existing agents; all source work stays in separate trees. No physi
   Do not release on SwiftUI dismantle/reset; no controller back-capture cycle. Producer+Photos+Send
   and Share share ONE product owner in Phase, unique exclusive parent, unchanged filename; startup
   cleanup only abandoned export namespace. App termination/remote upload completion remain unproved.
-  Author only after root accepts the actual old selected2 failure; preserve healthy producer fences.
+  Old f270 selected2 JOINED2RED: original issues1007–1008/1011–1012/1060–1061 hit exactly3 intended
+  targets, no premise/unwrap/refusal failures. Root reconciled730/IDs/device/nativeargv and LOOKed4
+  whole real48/64PNGs. Older Photos result marked B saved and suppressed B's own refusal; handed A
+  URL later returned B's333bytes rather than A's278. Root accepts source implementation of the ONE
+  immutable-product/activity-completion design above, preserving healthy producer cancellation.
 - **Group legacy cleanup:** root8a/c6 recorded unsupported nested MotionGroup defaults. Bake report
   2f0ecdec: all4fields existed/emitted since firstcbdae859, installed6fb file exactcurrent; parent
   omission for empty registry LEGAL and remains. All250 protected manifests omitgroups, none is a

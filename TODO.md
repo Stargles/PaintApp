@@ -50,7 +50,8 @@ that the final combined audit build has passed.
    preserves artist filenames; old regressions f270 are prepared. Verify consumer lifetime and storage
    cleanup before implementing; a copy-only transfer declaration alone does not prove file lifetime.
    Use the documented activity-completion boundary to retain the same file owner through Share,
-   without a separate transfer service. Old selected2 is running; no product change authorized yet.
+   without a separate transfer service. Old selected2 proved both defects (3actual assertion sites,
+   all premises healthy); root inspected actual A/B pictures and authorized the shared-owner fix.
 6. Saved group metadata: remove unsupported nested legacy defaults only after old rejection proof
    and a real nonempty previous-writer roundtrip. Legal omission of an empty registry stays. Old6fb
    witness28c is source-only; no source/artwork repair has run and no interpolation redesign is in scope.
