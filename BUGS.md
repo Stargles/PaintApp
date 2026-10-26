@@ -35,12 +35,11 @@ Chroma's direct offset route has no such normalization. No speculative input/tol
 
 ## Mode2 Undo can leave the edited cel thumbnail stale after a frame change — 2026-10-26
 
-Bounded source8e80ba71 trace: StrokeCanvasView.registerVectorUndo restores captured canvas geometry,
-then weak current view.onStrokeEnded resolves displayedCelIndex at the current playhead. CutA,
-wait for A thumbnail, scrubB, Undo can therefore queue B instead of restored A. Source evidence only;
-no native reproduction or Test1 attribution. Existing registerVectorElementsUndo captures layer/cel
-IDs and celContentChangedOutsideStroke; review that seam for the minimal correction. Agent report
-and independent/root review pending; no implementation yet.
+Actual CuttingModes4 atb60 is3pass/1intended thumbnail failure at526, with inspected whole
+landscape pictures. StrokeCanvasView.registerVectorUndo restores A then current-view callback
+resolves B, leaving A's thumbnail stale. Source1c99512c reuses existing cel ID/lookup and
+registerVectorElementsUndo; duplicate restore closures are removed. Independent peer accepted;
+logic70/public4 and meaningful fault checks remain pending. No Test1 attribution.
 
 
 ## Direct folder self-parent hides its artwork; creators bypass fixed input limits — 2026-10-25

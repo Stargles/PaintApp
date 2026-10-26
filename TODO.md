@@ -32,9 +32,9 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   CPU/oracles/tolerance/global flags stay exact. Ordinary cold appearance, Release and paired cost
   remain pending. Preserve original2d/702/3d2 RED. Matched Lens ABBA packet is prepared only.
   New public Chroma drawing test with two self.onHost compiler corrections60427 is integrated;
-  selected/whole11/outcome control UNRUN. Corrected permanent startup59 passed59/59; its10
-  first four controls are accepted, S5 is accepted separately after its test-only latch correction,
-  and five original cases are running. No single-current10-case claim. Gallery screenshots are
+  selected/whole11/outcome control UNRUN. Corrected permanent startup59 passed59/59. The first four controls, corrected once-only control
+  and remaining five controls are all causally accepted at their separate actual pins. No
+  single-current10-case claim. Gallery screenshots are
   unavailable; no LOOK. First1a92 compiler failure executed ZERO tests and stays immutable.
 - Public two-input Mix refusal workflow6ef; cold damaged-text recovery/byte-exact original in Trash;
   actual stable Glare landscape picture; wrong-cel Undo thumbnail public repro4432 then minimal fix.
@@ -43,12 +43,13 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   genuine remaining architecture review. Earlier qualification stays at its actual pin.
   Startup test correction537bc70f is harvested byte-exact from b55: selected1 passed, the real once-
   guard fault reaches original count119/125 without an exception. Old S5 crash is ZERO credit. Five
-  original unrun cases retain old60427 source/normal59 and run separately; no replay or retagging.
+  original cases closed5 assertion-red/6 canonical contracts at old60427 with normal59; no replay
+  or retagging. All730 source entries restored and children joined.
 - Physical Test1 only after fresh saved/unlocked readiness. Qualified merge/push before October29
   signing renewal, or resolve automatic old-main downgrade risk. Remove completed items WHOLE.
 
 Current integration730source/PBX1325/runnable5412fast6008full. Video67bd normal11/control1 are closed;
-the five original unrun60427 startup controls hold the sole native slot. Exact evidence/current
+the compiler-only07a78454 boundary build holds the sole native slot. Exact evidence/current
 lease live in HANDOFF.md and `~/PaintWork/s54-final-qualification/root-next-gates.json`.
 Owner rulings remain point-only vector Liquify; vector batch mending includes attached strokes but
 protects uncertain joins/outside outline; saves keep newest clock-bucket versions. Deferred features
@@ -104,15 +105,14 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ## Keep the edited cel's thumbnail correct after Undo — 2026-10-26
 
-Read-only bounded audit at8e80ba71 traces Mode2 CutA→scrubB→Undo to gesture history restoring
-canvasA but invoking current view.onStrokeEnded, which resolves current playheadB. Geometry and
-archive may be correct while A's thumbnail stays cut. Source-only finding, native reproduction not
-claimed. Review completed audit and reuse existing captured-layer/cel registration and invalidation;
-no new service/state/renderer, and no respring cause inferred.
+Actual whole CuttingModes4 atb60 is3pass/1intended thumbnail failure, with inspected whole
+landscape pictures. Undo restores A while current-view callback resolves B, leaving A's tile cut.
+Source1c99512c reuses existing cel ID, lookup and registerVectorElementsUndo; duplicate view
+closures are removed and the generic helper moves +Text→+Undo. No new state/service/renderer or
+respring attribution. Independent peer accepted source; runtime and fault checks remain pending.
 
-The whole CuttingModes4 run atb60 has reached the intended public failure at526: after CutA and
-scrubbingB, Undo does not refresh A's off-frame thumbnail. All earlier ink/tile/history premises
-passed; the final whole-class method is still running, so this is not yet a closed4-method result.
+The completed CuttingModes4 run atb60 reached the intended public failure at526 after CutA and
+scrubbingB. All earlier ink/tile/history premises passed; ReturnA/Redo/B outcomes were unreached.
 Before code, root accepts reusing registerVectorElementsUndo with the actual gesture canvas's
 existing layer/cel identity, same label/VectorUndoCost/changed-ink rectangle. Remove the view-owned
 duplicate restore/current-view callback closures whole; move the existing generic ElementSwap and

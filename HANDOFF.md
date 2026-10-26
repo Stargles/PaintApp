@@ -21,7 +21,8 @@ Product source **ac72a0ee** now harvests exact reviewed5a/2d effects,6ef public 
 4432 Undo regression with established precreation orientation,67bd explicit picked-file comparisons,
 and9e286 output-verified Lens benchmark, the successful permanent Text interaction and one public
 Chroma drawing test. The failed slider controller and diagnostic prints are excluded.
-The integrated source has not run; all original task pins/packets remain intact for qualification.
+Final assembled-source fast/UI gates have not run. Component runs retain their actual pins;
+the harvested startup test is byte-exact to its qualified b55 source.
 
 **What Kevin has:** installed, signed Release **6fb979f442f4d3da1299785de2a077a2058a4dfe** contains
 point-only vector Liquify, interior vector fill mending/Mend All Fills, newest clock-bucket backups
@@ -90,9 +91,10 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   sweep through the existing finger synthesizer. Temporaryfb87 is clean/source-prepared and exactdiff
   peer675d2f20 accepted; its one-selector experiment remains UNRUN/ungranted.
   Keep four attempts, original .005/50% and all drawing assertions; no product hook/controller state.
-- Sole native slot is Converter's exact five original UNRUN startup controls at60427 on56C,
-  grant4f338b56; operator88992/driver88993/session50865 started once. 4B33/39E remain shut. No
-  physical action, overlapping compiler/lifecycle/environment operations or old-case replay.
+- Sole native slot is Bake's compiler-only Debug app+UITests build07a78454 on56C, grant79f5ca69.
+  The prior five original startup controls closed and all children joined. 4B33/39E remain shut.
+  No tests, physical action, overlapping compiler/lifecycle/environment operations or automatic
+  annotation cascade are granted with this build.
 - Permanent startup normal59 passed59/59 at60427 (57 whole logic +2 explicit old Gallery methods,
   whole class3), root5283dbb2. Four original controls are assertion-red/root partially accepted;
   old S5 expectation exception/crash stays ZERO credit and its packet is immutable. The test-only
@@ -100,7 +102,10 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   guard-omission reached BOTH original counts119/125 (2 and3 versus1), without an exception;
   root8ebff7b7 accepts2 contracts, extra readiness120 is ZERO credit. Root harvested ONLY that test
   change at537bc70f; all730 entries match b55 exactly, receipt root-harvest-first-entry-537bc70f.
-  The five other original cases are running separately; do not retag this as one current10-case run.
+  The five other original cases closed separately with5 assertion-red cases and6/6 canonical
+  contracts reached, all730 restored/children joined; root causal7d2dc3bc. Restored stroke and recipe
+  handoff, damaged-payload validation, byte-exact displaced artwork and truthful gallery readiness
+  are covered at their actual pins. Do not retag this as one current10-case run.
   Gallery activities retain ZERO screenshots, so no LOOK is claimed for those old two methods.
 - Public Chroma test is integrated with only two self.onHost compile corrections60427; selected/
   whole11/outcome control remain UNRUN. Original1a92 startup compiler failure executed ZERO tests and
@@ -117,7 +122,8 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   state/service/renderer. Existing thumbnail logic test keeps all old expressions and checks A/B
   across Undo/Redo with real cold B renders. Author c34's cached-B operands are superseded unrun.
   Harvest only4 source/test paths, exclude3 author precode docs; packet69fca5cc/addendum21e44119.
-  Independent source peer pending. Logic70/public4/4faults are prepared only; no production fix is
+  Independent source peer b6a66de2 accepted the existing-owner patch and cold B render checks.
+  Logic70/public4/4faults are prepared only; no production fix is
   yet harvested or qualified. Earlier4432 and all baseline pictures/results remain immutable.
 
 ### Other required gates, in queue order
@@ -126,7 +132,7 @@ Warning core6 is clean bf5741b4: explicit existing serializer/lock/pure-owner de
 whole unused-local deletions. App+UITests Debug build-for-testing succeeds (NO tests), closure2f739.
 Seven original named warning rows disappear; preview stays unchanged and two new candidate-protocol
 warnings were reviewed before further code. Exact three-prefix successor07a78454 (author26ad/peerf9d7/
-root accepted) is source-prepared, compiler UNRUN: candidate protocol and existing lock-owned
+root accepted) is source-prepared and its one compiler-only build is running: candidate protocol and existing lock-owned
 RasterSource/RasterLayerTexture opt out of accidental isolation. No bodies/state/locks/budgets/
 Sendable/conformance/policies changed. Stop/review each new Surface/Backing/DabTarget/cache/checkpoint
 warning; no automatic cascade or actor hops. Busy refusal is immediate, but successful checkpoints
@@ -135,8 +141,9 @@ may block and pinned providers may retain bytes despite callback true. Preview r
 Tap audit found actual support outside the circular hit/outline (source-only rotated-square witness).
 Preferred c49baadd reuses canonical geometric object bodies and local swept primitive support.
 The stronger d046 raster-probe proposal is rejected: it changes hole/gap policy and needs unnecessary
-render/cache/refusal machinery. Bake is adding a tiny production-rendered witness to existing logic
-on old hit code before any production fix. Native alpha/hit/outline reproduction remains UNRUN.
+render/cache/refusal machinery. Bake committed tiny production-rendered witness a14038fc in an existing logic workflow on old
+hit code; no production changes. Native alpha/hit/outline reproduction remains UNRUN. Converter is
+independently challenging the proposed API/minimality while the compiler-only build runs.
 
 1. Finish above effects/control/public gesture slices, preserving immutable original packets and
    meaningful exact assertions. Before every native grant verify clean pin/source730/tool/argv,
