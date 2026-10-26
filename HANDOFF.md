@@ -28,9 +28,8 @@ Use the three existing agents; all source work stays in separate trees. No physi
 
 ### Current native and source work
 
-- **Native lease:** extracted OLD fill ownerbc2 selected1, root grant under
-  `layer-fill-owner-extracted-old-6b55a431`, supervisor session39409. All agents are source-only.
-  Earlier Export8ded normal87 joined86pass/1fail and all4c native work joined; no other native job.
+- **Native lease:** none. Extracted OLD fill ownerbc2 selected1 joined1RED at3intended targets;
+  Export8ded normal87 joined86pass/1fail; all4c native work joined. All agents are source-only.
 - **Tap:** qualification and exact9-path harvest3219 closed (logic37, independent public/bench8,
   controls17+7). Preserve868 safe curve cap and both curve tests. Final combined gates remain.
 - **Gradient:** permanent2e34a5ec productexact0ab/508, UIexact0c, TEMP observer removed whole.
@@ -82,7 +81,10 @@ Use the three existing agents; all source work stays in separate trees. No physi
   branch and complete host stack/pose/mask/layout by inverse reconstruction, no StrokeCanvas target
   cascade; ordinary immutable queue init. Currentbc2e55fd adds one finite owner test/source731/PBX1327,
   old18 exact, peer9a671743. A actually presents before queue-held B then C; three preguard targets
-  eligible, later C pixels/placement uncredited on OLD guard. No reuse fix yet; native above.
+  actual546/547/548 RED:3children, wrong owner identity,98304vs65536counter after C/B. All initial
+  A/front and deferred cleanup premises passed; later C outputs uncredited after guard. Root accepts
+  minimal existing-owner reuse: create fillSurface only when absent, remove replaced/callback branch
+  and false remake-in-place rationale whole. No added state/cache/queue/flag; source authoring queued.
 - **Saved metadata cleanup:** MotionGroup old previous-writer28c08b26 from actual6fb is729/PBX1329,
   selected3 prepared ONLY; B2BAF nonce unconsumed. Need build→join→runner-onlycopy→OLD→external
   real package capture before strict4field decode; omission of empty parent registry stays legal.
