@@ -18,31 +18,22 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
 
 **Next, in order:**
 
-- Fix two test interactions while preserving actual drawing checks. Diagnostic9e reaches landscape/
-  initial pictures, then opacity33% versus50%; text really selects the word, then targets a control in
-  the panel it closed. AA6 closed with unchanged original tolerances/outcomes:Text passed all drawn outcomes and root red-word→single-red-letter LOOK;Blend opacity
-  setup still failed. Retire Text's temporary print/past-action comment and reuse its successful
-  public word selection/toolbar read (integrated3e4a). Keep failed slider compensation out; prepared
-  cad2 observes actual native events through the existing bounded recorder. Actual1 reproduced
-  56.55% and stopped at the original setup assertion; no flight was requested because Settings'
-  recorder rows were below the visible scroll area (actual whole-frame LOOK). Reuse the existing
-  FlightRecorderUITests bounded left-gutter scroll in the temporary capture path, with all four
-  slider attempts/.005/50% outcomes unchanged. Preserve failedcad2 packet; no guessed controller.
-  Export must follow the bundle-owned AUT container returned after install and explicitly retain
-  address changes, checking every prior recording's kind/mode/bytes/hash; UUID stability is not an
-  install invariant. Old failed identity-check command remains immutable. No product recorder change.
-  Retire diagnostics, drive whole affected colour/text classes and meaningful controls.
-- Effects5a normal63 and13 safe controls qualify19 product/retained contracts plus3 separate premises,
-  rootb84a2549, exact730 restored. Corrected Chroma/CRTec50 now passed116/116, root5eeb1ea0. One existing
-  coordinate line cancels the centre before division; CPU/oracles/tolerance/global flags remain exact.
-  Its13 safe controls, ordinary cold appearance and paired Release cost remain pending. Preserve
-  old2d/702/3d2 RED evidence; division precision alone was ineffective. No diagnostic prints in product.
-  The existing Lens benchmark now requires real full-size output; the matched ec50 ABBA packet is
-  prepared only. It measures that GPU path, not CRT-local or whole-process cost.
-  New Chroma public drawing test is integrated, with only two self.onHost compiler corrections60427;
-  unchanged selected/whole11/outcome control are UNRUN. Originalstartup59 at1a92 executed ZERO tests
-  due to those compiler errors; named60427 normal59/control10 successor is prepared only. No recovery
-  runtime qualification follows from a compile correction. All failed packets stay immutable.
+- Finish the colour/text public interactions without weakening drawing checks. Successful Text route
+  is integrated3e4a. Completed d700 public recording covers all6 slider drags/335 native notes; root
+  receipt053369a5 verifies the native value is already wrong before model delivery, with no observed
+  stale reset/cancel/wrong-owner. Final tiny corrections deliver touches but change no value. Review
+  one existing continuous finger gesture before a single separately granted experiment; preserve
+  original .005/50%, four attempts and all outcomes, and use the accepted precreation landscape seam.
+  Delete temporary observer/capture/controller code whole before any normal harvest. Later Blend
+  outcomes remain unreached, and whole affected classes/controls remain open.
+- Effects5a normal63/13controls qualify19 contracts plus3 separate premises. Corrected Chroma/CRTec50
+  normal116/13safecontrols now qualifies17 canonical contracts; six extra issue occurrences get ZERO
+  credit. Exact730 restored/native joined. One coordinate line cancels the centre before division;
+  CPU/oracles/tolerance/global flags stay exact. Ordinary cold appearance, Release and paired cost
+  remain pending. Preserve original2d/702/3d2 RED. Matched Lens ABBA packet is prepared only.
+  New public Chroma drawing test with two self.onHost compiler corrections60427 is integrated;
+  selected/whole11/outcome control UNRUN. Corrected permanent startup59 is running once, with10
+  controls still separate. First1a92 compiler failure executed ZERO tests and stays immutable.
 - Public two-input Mix refusal workflow6ef; cold damaged-text recovery/byte-exact original in Trash;
   actual stable Glare landscape picture; wrong-cel Undo thumbnail public repro4432 then minimal fix.
 - Permanent maintenance/recovery and remaining relevant UI/mask controls; final exact fast Debug AND
@@ -51,8 +42,8 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
 - Physical Test1 only after fresh saved/unlocked readiness. Qualified merge/push before October29
   signing renewal, or resolve automatic old-main downgrade risk. Remove completed items WHOLE.
 
-Current integration730source/PBX1325/runnable5412fast6008full. Video comparison67bd normal11 holds
-the sole native slot; cleanup control1 needs actual green plus a separate grant. Exact evidence/current
+Current integration730source/PBX1325/runnable5412fast6008full. Video67bd normal11/control1 are closed;
+corrected60427 startup59 holds the sole native slot. Exact evidence/current
 lease live in HANDOFF.md and `~/PaintWork/s54-final-qualification/root-next-gates.json`.
 Owner rulings remain point-only vector Liquify; vector batch mending includes attached strokes but
 protects uncertain joins/outside outline; saves keep newest clock-bucket versions. Deferred features
