@@ -210,7 +210,9 @@ final class GlareUITests: PaintUITestCase {
         let largestDelta = paired.map { abs($0.0 - $0.1) }.max() ?? 255
         XCTAssertLessThanOrEqual(largestDelta, 35,
                                  "The held half-detail picture matches the full-detail glow footprint (max luma delta \(largestDelta))")
-        XCUIDevice.shared.orientation = .landscapeLeft
+        let landscape = rotateDevice(app, to: .landscapeLeft)
+        XCTAssertGreaterThan(landscape.width, landscape.height,
+                             "The owner-size capture waits for the landscape layout")
         attachScreenshot(app, "fog-glow-size-native-landscape")
     }
 }
