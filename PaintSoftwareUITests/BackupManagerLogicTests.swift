@@ -103,7 +103,11 @@ final class BackupManagerLogicTests: XCTestCase {
         defer { release.signal() }
         let startup = ProjectBackupManager.Startup(maintenance: {
             XCTAssertFalse(Thread.isMainThread, "Library maintenance must leave the first screen responsive")
-            calls.withLock { $0 += 1 }
+            let isFirstEntry = calls.withLock { count in
+                count += 1
+                return count == 1
+            }
+            guard isFirstEntry else { return }
             entered.fulfill()
             XCTAssertEqual(release.wait(timeout: .now() + 5), .success)
         })
