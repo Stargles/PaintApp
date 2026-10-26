@@ -120,6 +120,14 @@ navigation completion without landing. Trace and remove that false success. The 
 also permits newer edits/gestures during the background exit write; check that an older landed
 snapshot cannot close their only live document. Reuse existing clock/document/gesture owners;
 no per-attempt success flag or parallel save controller. Record design before further source edits.
+Root accepted the existing-owner design: an ineligible early save never authorizes exit; a still-
+current valid editor keeps its owed save through the driver. After actual landing, newer clock edits
+or unsettled stroke/resize/interactive content keep the editor open; same timer later saves them.
+Editing while an exit write is pending cancels that leave request; do not retain another exit-intent
+state or recursively snapshot. Reuse one computed unsettled-work predicate, preserve playback's
+existing exit policy, and do not reset an already-owed newer-edit deadline. Cold public failure must
+also exercise artist Gallery action and assert the editor/drawing remain; headless proof alone is
+not navigation proof.
 
 
 **Windows Quit finding recorded before code — October26:** source review8b605940 shows async-void
