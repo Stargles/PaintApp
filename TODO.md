@@ -39,6 +39,13 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
 - Permanent maintenance/recovery and remaining relevant UI/mask controls; final exact fast Debug AND
   Release, counts/skips/lints/PBX/graph/touched whole UI/full phase. Paired fill cost/whole RSS and
   genuine remaining architecture review. Earlier qualification stays at its actual pin.
+  Startup control10 stopped correctly: four intended assertion failures, then S5 crashed the test's
+  one-shot entry expectation before either once-only count assertion. S5 gets ZERO credit; five
+  later cases are UNRUN. Root reviewed a test-only correction before code: count every maintenance
+  callback under the existing lock, but only the first callback fulfills/waits on the existing latch.
+  Preserve Thread/readiness/count assertions and production unchanged; no overfulfillment setting
+  relaxation. Run a new positive then the exact once-guard fault separately. Continue the five
+  unrun original cases on frozen60427 with a separately granted bounded plan; never rerun/retag all10.
 - Physical Test1 only after fresh saved/unlocked readiness. Qualified merge/push before October29
   signing renewal, or resolve automatic old-main downgrade risk. Remove completed items WHOLE.
 

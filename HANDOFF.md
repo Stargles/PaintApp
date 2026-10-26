@@ -90,14 +90,20 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   sweep through the existing finger synthesizer. Temporaryfb87 is clean/source-prepared and exactdiff
   peer675d2f20 accepted; its one-selector experiment remains UNRUN/ungranted.
   Keep four attempts, original .005/50% and all drawing assertions; no product hook/controller state.
-- Sole native slot is Converter's **60427b21** startupcontrols10 on56C, grante9b145bd. Actual
-  operator72061/driver72063 started once. No concurrent compiler/lifecycle/environment operations.
+- Sole native slot is Vector's **bf5741b4** core6 Debug app+UITests build-for-testing on56C,
+  grant18dee72e, NO test execution. No concurrent compiler/lifecycle/environment operations.
   4B33/39E remain shut; no physical action. Check actual completion before granting the next job.
 - Chroma public drawing testee983 is integrated with only two explicit self.onHost compile corrections
   at60427b21; no outcome/input/action changed. Firststartup59 at1a92 compiled ZERO tests, root61eb736e;
   preserve that failed run. New permanent startup59/control10 are frozen at60427:57 whole logic plus
   two explicit old Gallery methods (whole class3); normal59 passed59/59, zero failures/skips/expected,
-  root5283dbb2 independently reconciled every ID/device/source730. Control10 is running separately.
+  root5283dbb2 independently reconciled every ID/device/source730. Control10 STOPPED after four
+  assertion-red cases and S5's expectation-overfulfillment exception/crash (ZERO credit); five later
+  cases remain UNRUN. All730 restored and children joined; root extraction records the actual issues.
+  Before code, root accepted a test-only first-entry latch: count every callback using the existing
+  lock, fulfill/wait only for the first call. Keep all original assertions/overfulfillment setting,
+  production and real fault unchanged. New positive/S5 gate plus five original unrun cases stay
+  separate; do not rerun all10 or call the exception an assertion failure.
   The actual Gallery activities retain ZERO screenshots; root claims no LOOK. Chroma selected/whole11/
   drawn effect-omission control also remain UNRUN. Do not count compilation as a drawing check.
 - Public capacity cold source **6ef391e4** extends an existing Sandwich workflow, one exact launch
