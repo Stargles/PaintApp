@@ -31,17 +31,37 @@ complete. Erasing respring cause, broad final regression/performance and remaini
 
 ### Current qualification and immediate queue
 
-Latest Tap isolated sourcee2e20c9a passed logic37/37 and publicUI6+existingbenchmark1 =7/7,
-zero fail/skip/expected; all730/IDs/device/native joins independently reconciled. Root LOOKed the
-three actual whole landscape originals: black square→corner selection/blue outline/liveClear→
-white/dimClear.14expected captures reached. Originalf7867 was6/1 from actual card occlusion;
-root LOOK established it before fixture-row correction. No product-hit failure inferred.
-Debug cold image manager miss is1484.8ms on120strokes/165480dabs; do not accept latency yet.
-Releasebaseline and a SOURCE-ONLY lazy geometry proposal are next;15controls stay unrun until
-performance direction settles. Root is currently preserving exact5 obsolete owned simulators;
-PRESERVE and DELETE require separate reviewed grants. Allcurrent56C/4B33/AC8/shared75C/ambiguousA4C
-and all requiredProducts remain protected. Read external lease before any native work.
+Exact5 obsolete owned simulators are deleted after independently verified data archives;
+13.05GiB actual DELETE-phase gain, all protected/unlisted identities exact. Together with10.11GiB
+cache cleanup and20.72GiB immutable-result dedup, disk reached47.06GiB/50.53GB free before new builds.
+Archives820782758bytes and all requiredProducts/artwork/results remain. CLAUDE phase margins apply.
 
+**Current Mac native lease:** Bake's serial756 batch, supervisor session10333: Debuglogic37 and
+DebugpublicUI6+benchmark1 have reported GREEN, Releasebenchmark1 is running. Root independent
+reconciliation/LOOK follow the joined batch. Existing e2baseline Release1 is root-accepted: actual
+manager image miss120.1ms/hit1.9ms on120strokes/165480dabs; no iPad/cache-virgin/RSS claim. New756
+keeps existing Quad support/predicates and skips unnecessary local hull allocation via conservative
+inclusive bounds; no cache/state/schema. Controls17 are prepared only, not granted. No source harvest.
+
+**Gradient:** old9dd actual selected1 is1intendedRGB-target failure (147grey vs108nativeCTM,
+difference39>predeclared2), all other outcomes/premises pass; root reconciled730/ID/device/command
+and LOOKed both whole64² originals (9da827ff). Affine-only correction0ab96d96 is independently
+source-accepted, same2points/API/schema, ordinary/singular/coincident behavior retained. Generic
+projective/lattice approximation unchanged. No corrected-source native run. Vector is adding one
+cold public Freeform/Done/Undo/Redo method to existing14; then combine279logic+15UI if confirmed
+(730paths/PBX1325/fast5412/full6009). Off-axis samples discriminate; whole-cel Freeform reaches
+same mapper after gesture END drops the bitmap latch. Old0ab279/3controls stay PREPARED_UNRUN.
+
+**Windows decoder:** source-only77e81aa1 adds4lines to existing Decode (expanded name255/root and
+reserved label prefixes), tests64lines in existing class. Old36c actual19 gave15pass/4intended
+refusal failures; root TRX reviewf069 accepts3canonical refusal sites. Exit capture wasNULL (no
+exit1claim); exact owned compiler37012 was already absent, no process signaled. Fixed whole171
+Debug/Release readiness SSH timed out once, so ZERO staging/tests; no retry. Packet5ea292f4,
+failed-readiness receipt3e6149bc. Windows is owner/availability waiting; keep working on Mac/source.
+No controls or source harvest. A future fresh Windows grant uses direct native+$LASTEXITCODE.
+
+Root production still8682859f; later root commits record findings/qualification only. Main/origin
+stillafd2030c; installed6fb unchanged. Use external root-next-gates.json/actual receipts for live leases.
 
 - Atadf, rebuilt **155/155**, zero failure/skip/expected across LayerTree59, MoveToNewLayer12,
   FillObject29, VideoImport11, TextRecipe13, VectorTextPersistence14 and SaveDamageGate17. All730
