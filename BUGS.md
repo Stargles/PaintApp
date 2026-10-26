@@ -31,14 +31,18 @@ and correction remain pending. Actual one-start/serial-reply/dispose callers sho
 proven lifecycle defect; real-link tests remain separate.
 
 
-## Affine gradient mapping — source lead, not yet a reproduced application defect (2026-10-26)
+## Affine gradient stretch changes interior colours — reproduced2026-10-26
 
-A bounded panel/gradient read challenges FillPaint.mapped's claim that mapping linear-gradient
-endpoints is exact for any affine transform. For a ramp(0,0)→(64,64), point(48,16) has t=.5;
-scaleX2 maps it to(96,16), but directly mapped endpoints give t=.65. Trace actual Move/bake/render
-consumers and intended transform semantics before claiming a product bug or changing code. Preserve
-existing projective/lattice approximation policy; no new saved format or second gradient system is
-authorized from this source counterexample. Record the actual drawn comparison first.
+Actual old-production witness9dd executed1case/1intended failure at the new RGB assertion560;
+all existing Move outcomes and new geometry/coverage premises passed. At the corresponding interior
+pixel, actual Freeform gave[147,147,147,255] versus native CTM[108,108,108,255], difference39 against
+predeclared2. Root independently reconciled730source/ID/device/command and viewed both whole64²
+originals. This confirms that pushing gradient endpoints through nonuniform affine scale changes
+the colour field. Correct only existing FillPaint.transformed(by:) by transporting the ramp's level
+sets in its current two-point representation; no new schema/state/renderer. Preserve ordinary
+similarity/reflection endpoints, current singular/coincident behavior and the generic projective/
+lattice approximation. Existing witness/oracles stay exact. Normal/control/cold UI gates pending.
+Evidence: native/affine-gradient-witness-selected1-9dd7c04d-run01/root-causal-look2.json.
 
 
 ## Curve flattening caps after an unbounded integer conversion — 2026-10-26

@@ -19,14 +19,15 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
 **Next, in order:**
 
 - Finish canonical Tap selection cost/controls before harvesting. Isolated logic37 and publicUI6+
-  benchmark1 passed; root inspected the square-selection stages. Release benchmark is running after
-  storage cleanup and passed1/1. Actual120-stroke image-manager miss120.1ms/hit1.9ms on the
+  benchmark1 passed; root inspected the square-selection stages. Release benchmark after
+  storage cleanup passed1/1. Actual120-stroke image-manager miss120.1ms/hit1.9ms on the
   simulator; minimal existing-Quad admission is now source-authorized, with cost/controls pending.
   Preserve current
   numeric curve cap and every drawn outcome.
-- Run the committed affine-gradient reproduction against original production before any fix. The
-  proposed correction stays in the existing two-point affine mapper; generic projective/lattice
-  behavior and saved format remain unchanged.
+- Correct the now-reproduced affine-gradient defect in the existing two-point mapper. Old9dd ran
+  1case/1intendedRGB failure (147 versus108), root independently reconciled/LOOKed2whole originals.
+  Preserve generic projective/lattice behavior, ordinary transforms and saved format; normal/control/
+  cold UI gates follow the minimal existing-owner correction.
 - Finish the colour/text public interactions without weakening drawing checks. Successful Text route
   is integrated3e4a. Completed d700 public recording covers all6 slider drags/335 native notes; root
   receipt053369a5 verifies the native value is already wrong before model delivery, with no observed
@@ -503,10 +504,11 @@ Inventory-only files are not reviewed code. New source is not called complete be
       13safecontrols; exact root harvests retain original CPU/oracles/tolerances/global flags. Curve
       narrowing8272 passed94/94+6safecontrols and is harvested868. Final assembled Release/cold UI/
       paired output-verified cost remain; no unsafe old cast or Test1-cause claim.
-- [ ] Trace the newly found affine-gradient source lead through actual Move/bake/render consumers:
-      direct endpoint mapping can change an interior colour parameter under nonuniform scale. The
-      source counterexample is not yet an application reproduction; verify the intended contract and
-      drawn result before any fix. Reuse existing gradient owners; no new schema/projective overhaul.
+- [ ] Correct confirmed affine-gradient colour-field transport through existing transformed(by:).
+      Actual9dd native Freeform/independentCTM mismatch39 exceeds predeclared2; all other outcomes/
+      premises pass, rootLOOK2. Retain two points/API/schema, ordinary/singular/coincident contracts
+      and separate projective/lattice approximation. Commit, meaningful controls and public drawn
+      stretch/Undo/Redo/whole class before qualification; no new gradient subsystem.
 - [ ] Finish file-level/independent review, new affected zero-skip baseline, actual assertion mutants,
       exact final fast Debug/Release, lints/PBX/graph, cold workflows/pictures and paired performance.
       Then fresh owner save/unlock/export, signed clean Release/device checks and actual eraser cause.
