@@ -28,7 +28,9 @@ Use the three existing agents; all source work stays in separate trees. No physi
 
 ### Current native and source work
 
-- **Native now:** none; autosave837 normal154 JOINED151pass/3fail, root reconciled730/IDs/device/argv.
+- **Native now:** autosave837 ordinary wholeUI2 under root grant216a6069/session11844 has JOINED;
+  originalsummary1pass/1explicitoptinskip/0fail, root full reconciliation/LOOK pending.
+  Autosave837 normal154 JOINED151pass/3fail, root reconciled730/IDs/device/argv.
   Three old encode/reuse-count assertions need actual durable-source tracing before any change.
   Original grant misspelled SaveDamage class in counts only; extraction-only5e557691 fixes it BEFORE
   results were read; actual native argv always selected correct SaveDamageGateLogicTests.
@@ -80,8 +82,13 @@ Use the three existing agents; all source work stays in separate trees. No physi
   Exact composition837c8d2b is frozen: product/other729 exactd151, wholeUIfile exact51f; source730,
   static fast5414/full6011. Normal154 actual151pass/3fail in old PNG encode/reuse profiles:
   reopened2clones, missing-live-file2clones, version-slot2clones. Do not weaken counts before tracing
-  actual immutable backing sources and proving resulting bytes/ledger. New retry/driver/store cases
-  passed but aggregate is RED. OrdinaryUI2/staged1/16controls UNRUN (ordinary1pass+1explicit skip).
+  actual immutable backing sources and proving resulting bytes/ledger. Triage8b009ea9 plus root
+  actual Store705–710/Source181–199 and same-run Residency947–967 refutes old encode-only premises:
+  unchanged protected sources clone on reopen/missing-live-file/version-slot. Root authorizes a
+  TEST-ONLY named successor with truthful0/2 profiles PLUS independent exact saved/reopened pixels/
+  bytes, backing/package isolation and live/version-ledger preservation; rename false old test names.
+  No product change. New retry/driver/store cases passed but aggregate remains RED. Staged1/16controls
+  remain UNRUN; ordinaryUI2 actual1pass+1explicitoptinskip is not zero-skipGREEN.
 - **Windows:** DNSold36c actual19=15pass/4refusalRED; rootf069 accepts3sites, nativeexitcaptureNULL.
   Fix77e81aa1 four lines +tests, whole171D/R and8controls UNRUN. Last one readiness probe16:34UTC
   timeout5ed2faf4, no commands/staging/lifecycle or repeat. Clipboard old0dd and power old05e are
@@ -203,6 +210,10 @@ plus exact callers. Source-demonstrated sibling `..` resource acceptance and per
 fallback are recorded in TODO/BUGS. Containment must refuse through ONE resolver; legal old-address
 retirement needs separate previous-writer/data inventory and one-shot Projects/Backups/Trash repair.
 No package mutation/test/fix yet. Keyed Rotate frame-distance loop is only an unmeasured cost boundary.
+Root authorizes source-only OLD containment regressions: two independent existing-class methods
+through actual raster validator and loader, paired valid sibling packages with different real PNGs.
+Only their fresh test fixtures may be edited; production and protected owner packages stay exact.
+Actual OLD intended refusal failures are required before implementing central path validation.
 Do not promote filenames/hashes/test names into review depth or claim whole-codebase certainty.
 
 ## Preserved evidence and safety boundaries

@@ -30,8 +30,11 @@ that the final combined audit build has passed.
 1. Saving: use one truthful landed-URL completion; failed saves stay in the editor and retry through
    the existing timer. Newer edits/live gestures must survive an older exit snapshot. Source d151
    and cold public Gallery-failure test51f are composed exactly at837. Actual normal154 gave151pass/
-   3fail: older PNG encode/reuse-count expectations disagree with durable-source cloning. Trace the
-   real bytes/source ownership before changing assertions; new retry/clock/store checks passed in
+   3fail: older PNG encode/reuse-count expectations disagree with durable-source cloning. Traced:
+   existing backing files are cloned independently of live-package stamps; the current contract
+   explicitly permits0encode/2reuse and same-run residency40 verifies real reopened bytes/pixels.
+   Replace those obsolete expectations with stronger exact-data, source-isolation and ledger checks;
+   new retry/clock/store checks passed in
    that batch. Public failure/cold retry and controls remain. Earlier f571/87 candidates stay held.
 2. Gradient movement: same two-point mapper, with no new renderer/schema. Matched bitmap formats
    still reproduce the interior colour mismatch (104vs108, unchanged tolerance2); investigate before
@@ -61,7 +64,8 @@ that the final combined audit build has passed.
    and a real nonempty previous-writer roundtrip. Legal omission of an empty registry stays. Old6fb
    witness28c is source-only; no source/artwork repair has run and no interpolation redesign is in scope.
    Additional package auditb431481b found unchecked resource paths and permanent old-layout fallback.
-   Prove sibling-resource rejection through existing validator/load owners, then centralize refusal.
+   Author finite sibling-resource rejection regressions through existing validator/load owners,
+   with all production unchanged; actual OLD failure is required before a central resolver fix.
    Inventory legal old addresses before a separate one-shot Projects/Backups/Trash repair and complete
    fallback retirement. No protected-package mutation or format change is authorized by inventory alone.
 7. Windows: run/fix DNS limits, clipboard filename collisions, keep-awake lifetime and awaited Quit
