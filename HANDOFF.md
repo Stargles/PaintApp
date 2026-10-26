@@ -94,7 +94,8 @@ complete. Erasing respring cause, broad final regression/performance and remaini
 - Sole native slot is Bake's one old-production Tap witness selected1 ata140 on56C, grant8ad75590.
   Normal rebuilding is required after the now-closed public Undo mutant. Source-alpha/dimensions
   premise must pass before crediting hit/outline/named-ID failures; conditional Clear is unreached
-  after a miss and receives0credit. 4B33/39E remain shut. No physical/lifecycle/env operation.
+  after a miss and receives0credit. 4B33 remains shut. Completed owned39E was archived and retired after the separate storage block;
+  only56C is active. No physical/env operation is granted.
 
 - Permanent startup normal59 passed59/59 at60427 (57 whole logic +2 explicit old Gallery methods,
   whole class3), root5283dbb2. Four original controls are assertion-red/root partially accepted;
@@ -236,3 +237,11 @@ ignored/untracked data. Their branches/Git objects and all external results/Prod
 External resume-20261026/finished-diagnostic-worktree-cleanup-receipt.json lists exact paths/pins and
 reconstruction. No active/future a140/fb87/Undo/numeric/benchmark tree was removed. Fetch/all110tmp
 branch logs were verified atbd8aa8ad; origin/main remainsafd2030c.
+
+Owned39E was retired at a later native-idle boundary after every app/shared container, Documents,
+Media, Preferences file/symlink/mode/byte was verified in a65,707,034-byte archive (1786 entries).
+External resume-20261026/retire-owned-39E retains plan/manifest/archive/verification/completion. The
+first free-space sample preceded delayed simulator purge; its addendum observes actual4.21GiB free.
+56C and prepared4B33 were unchanged. Frozen old39E plans are historical; new gates use56C/freshowned
+staging. Tap's first native attempt resumed only after this clearance, originalgrant8ad75590 plus
+storage-resume7e85b140; no native work ran during its initial blocked preflight.
