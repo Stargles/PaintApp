@@ -109,13 +109,13 @@ complete. Erasing respring cause, broad final regression/performance and remaini
 - Public capacity cold source **6ef391e4** extends an existing Sandwich workflow, one exact launch
   helper seam; no product hook/new test method. Real two-input Mix refusal/current row/history/drawing
   checks and notice ordering preserved. Source peer/root review then selected1/whole10/control remain.
-- Wrong-cel Undo thumbnail audit is independently source-accepted; old-production public repro
-  **4432f846** is source-ready/UNRUN. Drive CutA→waitAtilecut→scrubB→Undo; intended red is A's off-frame
-  thumbnail before returningA. Only after actual reproduction, reuse captured cel/layer IDs and
-  existing registerVectorElementsUndo, move its generic block whole from +Text to +Undo. No state/
-  service/renderer or crash attribution. Predicted red/unreached Redo is not qualification.
-  Root already harvested the regression at31e435de with accepted gallery-before-canvas orientation.
-  Drive CuttingModesUITests whole4; production Undo remains unchanged until actual reproduction.
+- Wrong-cel Undo public repro atb60 reached the actual intended526 assertion failure after all
+  earlier premises; first two other methods have passed, final method is still running. Do not call
+  the whole4 result closed yet. Root accepted the existing captured-identity/registerVectorElementsUndo
+  seam before implementation: same label/cost/changed-ink damage, remove duplicate view callback
+  closures whole and move generic ElementSwap/registration from +Text to +Undo. Extend existing
+  thumbnail logic workflow across frames and retain the public Redo/B oracles. No new state/service/
+  renderer or crash attribution. Earlier4432 remains immutable;31e precreation setup is preserved.
 
 ### Other required gates, in queue order
 

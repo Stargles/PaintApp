@@ -112,10 +112,15 @@ archive may be correct while A's thumbnail stays cut. Source-only finding, nativ
 claimed. Review completed audit and reuse existing captured-layer/cel registration and invalidation;
 no new service/state/renderer, and no respring cause inferred.
 
-Public regression4432 is source-ready, unrun. Before execution, reuse the accepted launch helper's
-gallery-before-canvas landscape setup in final integration, preserving every ink/tile/history check
-and actual landscape assertion. Its old late rotation is the same demonstrated setup cause as9e.
-Keep old4432 evidence intact; production Undo is unchanged until an actual target failure reproduces.
+The whole CuttingModes4 run atb60 has reached the intended public failure at526: after CutA and
+scrubbingB, Undo does not refresh A's off-frame thumbnail. All earlier ink/tile/history premises
+passed; the final whole-class method is still running, so this is not yet a closed4-method result.
+Before code, root accepts reusing registerVectorElementsUndo with the actual gesture canvas's
+existing layer/cel identity, same label/VectorUndoCost/changed-ink rectangle. Remove the view-owned
+duplicate restore/current-view callback closures whole; move the existing generic ElementSwap and
+registration block from +Text to +Undo. No new state/service/renderer or current-playhead lookup at
+undo time. Extend the existing shared thumbnail logic workflow across a frame change, preserving its
+drawn/cold-render assertions; existing public repro retains all Redo/B checks. Commit before faults.
 
 - [ ] Independently review the actual target/invalidation/undo ownership before a minimal root-cause fix.
 - [ ] Verify actual edited/restored drawing and thumbnail across frame changes, Undo/Redo, cold UI and
