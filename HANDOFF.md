@@ -79,6 +79,11 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   Both app and test shaders freshly compiled/linked; actual n/w values remain unobserved. Next:
   bounded test-only case/max-coordinate/pixel prints before any second product arithmetic change.
   Preserve original2d/702 RED evidence;13controls stay blocked. Chroma needs no duplicate change.
+  Actual3d2 CLOSED1RED/source730 and prints show wrong centre/axis red-blue channels with green/
+  coverage intact. Proposal3e5cf0b5/independent69efac5c accept one-line centred-numerator formulation
+  precise::divide(centre*2-frame,frame), cancelling the exact centre BEFOREdivision. Precode scope:
+  new branch from702, only that source line; original CPU/tests/flags retained, no diagnostic prints.
+  Finite model2048/1024 is bit-exact; other dimensions can round differently. Actual116 remains binding.
 - Video picked-file comparisons67bd passed11/11; one real source-cleanup fault reached both direct
   comparisons (four occurrences/two contracts), root causal30a0b97c; all730 restored. No throw/setup
   credit and no cel/version identity qualification. Normal rebuild follows any compiled mutant.

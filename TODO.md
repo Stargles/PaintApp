@@ -45,6 +45,12 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   prints to the existing failing loop; preserve all oracles/inputs/tolerances/math and inspect actual
   CPU/GPU output. No blanket parameter clamp. New public Chroma drawing test is integrated
   at34921e73 with independent source review; actual selected/whole11/control remain UNRUN.
+  Actual3d2 print-only run reproduces centre/axis red-blue shifts with green/alpha unchanged.
+  Source proposal3e5cf0b5 and independent69efac5c accept moving exact centre cancellation before
+  division in the SAME CRT line: precise::divide(centre*2-frame,frame). Owner2048/1024 arithmetic is
+  bit-exact in the finite model; nonpower-of-two rounding differs. Implement only that line on a new
+  branch from702, with all original tests/CPU/flags unchanged and no diagnostic prints harvested.
+  Native116 must pass unchanged; no byte/cost/optimizer guarantee follows from the source model.
 - Public two-input Mix refusal workflow6ef; cold damaged-text recovery/byte-exact original in Trash;
   actual stable Glare landscape picture; wrong-cel Undo thumbnail public repro4432 then minimal fix.
 - Permanent maintenance/recovery and remaining relevant UI/mask controls; final exact fast Debug AND
