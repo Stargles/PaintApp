@@ -17,6 +17,16 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Affine gradient mapping — source lead, not yet a reproduced application defect (2026-10-26)
+
+A bounded panel/gradient read challenges FillPaint.mapped's claim that mapping linear-gradient
+endpoints is exact for any affine transform. For a ramp(0,0)→(64,64), point(48,16) has t=.5;
+scaleX2 maps it to(96,16), but directly mapped endpoints give t=.65. Trace actual Move/bake/render
+consumers and intended transform semantics before claiming a product bug or changing code. Preserve
+existing projective/lattice approximation policy; no new saved format or second gradient system is
+authorized from this source counterexample. Record the actual drawn comparison first.
+
+
 ## Curve flattening caps after an unbounded integer conversion — 2026-10-26
 
 Source62b0df17: StrokeGeometry.flatteningSteps narrows ceil(control-polygon length) before min64.

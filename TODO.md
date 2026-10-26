@@ -482,6 +482,10 @@ Inventory-only files are not reviewed code. New source is not called complete be
       13safecontrols; exact root harvests retain original CPU/oracles/tolerances/global flags. Curve
       narrowing8272 passed94/94+6safecontrols and is harvested868. Final assembled Release/cold UI/
       paired output-verified cost remain; no unsafe old cast or Test1-cause claim.
+- [ ] Trace the newly found affine-gradient source lead through actual Move/bake/render consumers:
+      direct endpoint mapping can change an interior colour parameter under nonuniform scale. The
+      source counterexample is not yet an application reproduction; verify the intended contract and
+      drawn result before any fix. Reuse existing gradient owners; no new schema/projective overhaul.
 - [ ] Finish file-level/independent review, new affected zero-skip baseline, actual assertion mutants,
       exact final fast Debug/Release, lints/PBX/graph, cold workflows/pictures and paired performance.
       Then fresh owner save/unlock/export, signed clean Release/device checks and actual eraser cause.
