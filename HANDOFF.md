@@ -125,6 +125,13 @@ Use the three existing agents; all source work stays in separate trees. No physi
   address spellings pending separate one-shot repair; malformed refusal is no format rewrite.
   Author source-only successor from8f with exact existing regressions and positive legal-address
   tests, whole source/PBX preservation and finite control proposals. No compiler/native authority.
+  Preliminary7a source review found tidy validates legacy primaries but not every generated current
+  destination before mutation: a later linked destination can be discovered after an earlier move.
+  Root authorizes ONE test-only OLD witness before fixing this, preserving7a. Include whole-link/
+  manifest/neighbor guards with nonthrowing actual first-source/destination existence assertions.
+  Also authorize mechanical move of shared wire-field preflight to VectorCanvasData and its
+  transient decoder-context key to Layout, removing Engine→RecipeMetadata dependency whole. No new
+  type/service/state. Source-only successor/prepares; actual OLD tidy evidence before preflight fix.
 - **Fill owner duplication:** root/peer532bf2d1 found per-size WindowSurfaceView replacement duplicates
   existing old-front/size/LatestWins ownership. Small LayerFillView extraction398c preserves OLD
   branch and complete host stack/pose/mask/layout by inverse reconstruction, no StrokeCanvas target
