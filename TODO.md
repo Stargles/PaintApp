@@ -32,7 +32,11 @@ that the final combined audit build has passed.
    and cold public Gallery-failure test51f are prepared, not run. Earlier f571/87 candidates stay held.
 2. Gradient movement: same two-point mapper, with no new renderer/schema. Matched bitmap formats
    still reproduce the interior colour mismatch (104vs108, unchanged tolerance2); investigate before
-   accepting it. Measured public fixture corrections0c are running as two isolated UI checks.
+   accepting it. Actual508 matched-format run still fails4; bitmap-format cause is refuted. Root permits
+   a temporary test-only stage discriminator (three64²images) preserving the original probe/tolerance/
+   assertion: observe actual paint/CTMs, direct moved Frozen draw versus flatten, and one shared raw
+   CGGradient under native CTM versus mapped identity. No product change or CG algorithm claim yet.
+   Measured public fixture corrections0c are running as two isolated UI checks.
 3. Resize: one operation phase separates immediate safety locking from visible loading progress,
    using the existing worker and presentation task. Safe successor e3fd is source-only; model/fault
    and genuine public progress/no-flash observation remain. Do not restore blocking PNG work.
