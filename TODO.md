@@ -85,7 +85,9 @@ that the final combined audit build has passed.
 9. Run the final exact fast tier in Debug and Release, reconcile real counts, run identifier/helper/
    project checks, affected UI classes and the full phase gate. Then perform paired Release fill/effect
    measurements with output checks and whole-memory limits. Prior component results keep their actual pins.
-10. Finish the genuine remaining architecture review, qualified merge/push and device checks. Remove
+10. Finish the genuine remaining architecture review, qualified merge/push and device checks.
+    Reuse the existing fill surface’s resize/front/coalescing owner instead of replacing the whole
+    view for each grown preview window; prove preservation and bounded scheduling before changing it. Remove
     completed items whole at merge. Avoid the October29 renewal rebuilding old origin/main over repairs.
 
 Future interpolation overhaul, multi-cel selection, linear-light blending, audio/video editing and
