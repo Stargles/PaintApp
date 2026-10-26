@@ -36,6 +36,10 @@ that the final combined audit build has passed.
    Replace those obsolete expectations with stronger exact-data, source-isolation and ledger checks;
    new retry/clock/store checks passed in
    that batch. Public failure/cold retry and controls remain. Earlier f571/87 candidates stay held.
+   Staged837 actual1RED at119: refreshed failure notice covers the old blank-paper probe102.7pt.
+   Failed Gallery retains editor/stroke, but retry/cold-reopen are unreached. Same-distance blank
+   control below the stroke292.3pt is clear of notice/dock; fix that measured fixture, keep tolerances,
+   fresh nonce and exact empty-parent coordinator. No app workaround or deadline increase.
 2. Gradient movement: same two-point mapper, with no new renderer/schema. Matched bitmap formats
    still reproduce the interior colour mismatch (104vs108, unchanged tolerance2); investigate before
    accepting it. Actual508 matched-format run still fails4; bitmap-format cause is refuted. Root permits

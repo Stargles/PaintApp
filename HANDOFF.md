@@ -28,8 +28,10 @@ Use the three existing agents; all source work stays in separate trees. No physi
 
 ### Current native and source work
 
-- **Native now:** autosave837 ordinary wholeUI2 under root grant216a6069/session11844 has JOINED;
-  originalsummary1pass/1explicitoptinskip/0fail, root full reconciliation/LOOK pending.
+- **Native now:** none. Autosave837 staged1 grant a5030732/supervisor74677 JOINEDnative65/coord1;
+  original1RED only at119(blank paper afterGallery). Source730/IDs/device/argv root-reconciled.
+  Coordinator restored exact same empty-directory inode/mode in finally; no held path remains.
+  No failure-seen/foreground/cold ACK was reached and no foreground save proof is claimed.
   Autosave837 normal154 JOINED151pass/3fail, root reconciled730/IDs/device/argv.
   Three old encode/reuse-count assertions need actual durable-source tracing before any change.
   Original grant misspelled SaveDamage class in counts only; extraction-only5e557691 fixes it BEFORE
@@ -87,8 +89,16 @@ Use the three existing agents; all source work stays in separate trees. No physi
   unchanged protected sources clone on reopen/missing-live-file/version-slot. Root authorizes a
   TEST-ONLY named successor with truthful0/2 profiles PLUS independent exact saved/reopened pixels/
   bytes, backing/package isolation and live/version-ledger preservation; rename false old test names.
-  No product change. New retry/driver/store cases passed but aggregate remains RED. Staged1/16controls
-  remain UNRUN; ordinaryUI2 actual1pass+1explicitoptinskip is not zero-skipGREEN.
+  No product change. New retry/driver/store cases passed but aggregate remains RED. Test-only69909080
+  (85+/12−,3truthful renamed methods) prepared154/focused3; other729/UI/product exact837. New6data
+  controls separate from existing16/21recalculated controls; all UNRUN. OrdinaryUI2 actual1pass/
+  1explicitskip root reconciled730/IDs/device/argv (not zero-skipGREEN). CurrentgeometryVersion is1,
+  confirmed in source; prepared external coordinator's version1 witness is correct.
+  Staged837 failed after actual failed-Gallery editor/ink assertions passed: original bare row.13
+  maps102.7pt, inside refreshed notice capsule/shadow (AXtext75..92pt); root LOOKed whole original
+  79FE153B. No pixel-loss/product cause. Root permits a TEST-ONLY successor from699 using SAME.12
+  distance below core (.37=292.3pt), measured paper/toolbar/dock/notice clearance. All actual checks,
+  tolerances, existing fresh-nonce/empty-inode/sentinel/foreground-copy coordinator/deadlines stay.
 - **Windows:** DNSold36c actual19=15pass/4refusalRED; rootf069 accepts3sites, nativeexitcaptureNULL.
   Fix77e81aa1 four lines +tests, whole171D/R and8controls UNRUN. Last one readiness probe16:34UTC
   timeout5ed2faf4, no commands/staging/lifecycle or repeat. Clipboard old0dd and power old05e are
@@ -115,6 +125,11 @@ Use the three existing agents; all source work stays in separate trees. No physi
   whole real48/64PNGs. Older Photos result marked B saved and suppressed B's own refusal; handed A
   URL later returned B's333bytes rather than A's278. Root accepts source implementation of the ONE
   immutable-product/activity-completion design above, preserving healthy producer cancellation.
+  Source e4b3548d is frozen, normal81/public13/controls18 prepared only;3runtime paths, one test,
+  RENDER/STREAM docs. One immutable Sendable file/phase payload, compact UIKitfactory/localpopover;
+  no registry/service/extra generation. Root production/new5 review caught0c pre-gate blocking bake
+  read before PNG; e4b TEST-ONLY first-writing subscription fixes that setup, production exact0c.
+  Independent Converter peer reviewing before native. No compiler/runtime/Share-dispatch claim yet.
 - **Group legacy cleanup:** root8a/c6 recorded unsupported nested MotionGroup defaults. Bake report
   2f0ecdec: all4fields existed/emitted since firstcbdae859, installed6fb file exactcurrent; parent
   omission for empty registry LEGAL and remains. All250 protected manifests omitgroups, none is a
