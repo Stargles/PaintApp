@@ -17,6 +17,19 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Extreme finite CRT fringe exposes a GPU/CPU centre-normalization mismatch (2026-10-26)
+
+At2d30185d, actual normal116 passes115 and fails the retained CRT fringe comparison at303 four
+times, with channel deltas64/32/64/32. No compiler/crash/skip substitution. All730 source entries
+are restored exactly; original result is preserved under s54-final-qualification/native/
+chromatic-crt-normal116-2d30185d-run01. The13 negative controls remain blocked.
+
+Actual Metal build flags enable fast math. A finite reciprocal/FMA centre residual reproduces the
+four magnitudes at odd65 size with huge finite fringe; no NaN/overflow is required. This witness
+does not prove the exact native lowering. Review existing precise::divide at this CRT normalization
+only, retaining CPU operation order, ordinary equations, global flags and all existing tests.
+Chroma's direct offset route has no such normalization. No speculative input/tolerance change.
+
 ## Mode2 Undo can leave the edited cel thumbnail stale after a frame change — 2026-10-26
 
 Bounded source8e80ba71 trace: StrokeCanvasView.registerVectorUndo restores captured canvas geometry,

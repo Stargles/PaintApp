@@ -66,6 +66,12 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   narrowing; existing finite stored CRT Double narrows safely; existing apron planner caps before Int.
   No saved-format/key/range/state/service change. Four clamps are not the complete added instruction
   cost. Existing heavy GPU bench ignores nil: paired timings must first prove successful real output.
+  Actual2d normal116 CLOSED115pass/1fail, source730 exact:CRT fringe GPU/CPU comparison303 fails four
+  finite cases by64/32/64/32.13controls are BLOCKED. Vector/Converter trace fast Metal centre/frame
+  normalization: a finite FMA residual at the odd65 centre reproduces those deltas when multiplied
+  by huge fringe. This is a source witness, not actual lowering proof. Review existing
+  precise::divide(centre,frame) at the CRT seam, preserving CPU order/math/tests/tolerance and global
+  fast-math policy. Chroma has no such normalization, so no duplicate precision change is indicated.
 - Public capacity cold source **6ef391e4** extends an existing Sandwich workflow, one exact launch
   helper seam; no product hook/new test method. Real two-input Mix refusal/current row/history/drawing
   checks and notice ordering preserved. Source peer/root review then selected1/whole10/control remain.

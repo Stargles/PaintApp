@@ -28,6 +28,9 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   settings must not overflow sampling/apron conversion; ordinary edge pixels and saved values stay
   unchanged. Confirm successful actual GPU output before performance timing; its existing benchmark
   now checks real full-size results outside the clocks. Remaining controls/2d/performance are UNRUN.
+  Actual2d normal116 now115pass/1fail: four extreme finite CRT comparisons differ by64/32/64/32.
+  Keep its13controls blocked; trace and correct the actual centre-normalization precision seam,
+  preserving every original colour/coverage assertion and tolerance. No blanket parameter clamp.
 - Public two-input Mix refusal workflow6ef; cold damaged-text recovery/byte-exact original in Trash;
   actual stable Glare landscape picture; wrong-cel Undo thumbnail public repro4432 then minimal fix.
 - Permanent maintenance/recovery and remaining relevant UI/mask controls; final exact fast Debug AND
