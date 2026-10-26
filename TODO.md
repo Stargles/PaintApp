@@ -155,14 +155,15 @@ drawn/cold-render assertions; existing public repro retains all Redo/B checks. C
 The audit found that StrokeGeometry.flatteningSteps converts an unbounded control-polygon length
 before applying its documented64-chord cap. A finite current-format curved fill can carry controls
 above Int range; actual fill posing/Liquify mapping flattens before its later region/map checks.
-Source finding62b0df17; no native archive round-trip, unsafe cast or Test1 attribution is claimed.
-Fix the existing bound before conversion, preserving ordinary rounding and coordinates. Use the
-existing malformed/nil channel for invalid input if needed, no new schema or parallel validator.
+Source finding62b0df17 is corrected8272 and harvested8682859f: the existing bound moves before
+conversion, preserving ordinary rounding and coordinates. Current-format archive/reopen/nonlinear
+consumer and whole94 passed;6 safe owner controls qualify7 new canonical application statements.
+No unsafe old cast, new schema/parallel validator or Test1 attribution.
 
-- [ ] Verify a finite current-writer/read witness, implement the minimal existing-owner correction,
-      test ordinary/capped geometry and the real consumer. Never run the old unsafe cast on huge input.
-- [ ] Qualify safe bounded mutants, touched whole classes, cold drawn behavior and final fast gates;
-      review any newly reached downstream arithmetic separately, without claiming global bounds.
+- [x] Finite current-writer/read witness, existing-owner correction, ordinary/capped consumer tests
+      and6 safe controls are component-qualified/root-reviewed. Retain whole item until merged.
+- [ ] Final assembled Debug/Release and cold drawn gates; review any newly reached downstream
+      arithmetic separately, without claiming global bounds.
 
 ---
 
