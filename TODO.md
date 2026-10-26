@@ -68,6 +68,14 @@ the existing NativeMethods/Session seam; no new service/thread or changed sleep 
 Windows runtime proof; host is currently unavailable. Nearby's unfenced post-stop publication is
 only a source gap: actual retained-owner/visible stale behavior is unproved, so do not invent a bug.
 
+**Autosave failure follow-up recorded before code — October26:** current clock clears owed edits
+when an attempt starts. A settling refusal or failed disk write reports a short notice but does not
+restore scheduling; an idle open document has no autonomous retry until another edit/phase/save.
+This is not an owner ruling. Correct completion ownership through the existing driver/clock and
+save-result seam, preserving edits made during an in-flight save and ignoring stale document
+completions. Reuse one timer with a bounded delay; no retry service, polling loop or duplicate dirty
+state. Establish finite failure→recovery proof and meaningful controls before calling it fixed.
+
 Current integration730source/PBX1325/runnable5412fast6008full. Video67bd normal11/control1 are closed;
 numeric curve94 and6safecontrols are root-accepted; exact3-path fix harvested8682859f. Native
 tests are paused for root-owned retirement of five obsolete test simulators after verified app-data

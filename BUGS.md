@@ -17,6 +17,18 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## A failed autosave forgets that the open drawing still needs saving — 2026-10-26
+
+Current AutosaveClock.fire/saveStarted clear pending timestamps before the write, intentionally
+separating newer edits. ContentView's early settling refusal returns after a saveFailed notice;
+ProjectStore write failure also reports a notice then completes the attempt. saveFinished re-arms
+with no due time unless another edit occurred. No revision/dirty fallback schedules a retry, and
+the notice has no retry action. This is current implementation, not an owner/spec requirement.
+Source trace follows review443b4f18; its initial description of this as intentional was corrected.
+Use existing scheduler/save completion ownership, preserve newer edits and document identity, and
+defer failed retries through the same timer rather than spinning on an expired due time. Source
+proposal/regression/fix and runtime proof remain pending; existing newest-backup policy is separate.
+
 ## Colliding clipboard timestamps overwrite queued pictures — 2026-10-26
 
 Source review42f684d2: ClipboardImageStore.Save names PNGs to wall-clock milliseconds and
