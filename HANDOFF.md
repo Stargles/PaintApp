@@ -17,6 +17,11 @@ Root integration moved to `~/PaintWork/PaintApp-s54-qualified-integration`,
 `~/PaintWork/s54-final-qualification/root-next-gates.json`. Inspect actual completion receipts before
 assuming the native lease is idle. Do not copy stale agent HANDOFF/TODO files into integration.
 
+Product/test source **c9b36d30** now harvests exact reviewed5a/2d effects,6ef public Mix refusal,
+4432 Undo regression with established precreation orientation,67bd explicit picked-file comparisons,
+and9e286 output-verified Lens benchmark. Later documentation commits do not change those bytes.
+The integrated source has not run; all original task pins/packets remain intact for qualification.
+
 **What Kevin has:** installed, signed Release **6fb979f442f4d3da1299785de2a077a2058a4dfe** contains
 point-only vector Liquify, interior vector fill mending/Mend All Fills, newest clock-bucket backups
 and earlier audit fixes. Normal install/launch and usual-scene **“Looks right”** confirmation are
@@ -32,9 +37,10 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   canonical statements. Strict text26 actual cases qualify28 application statements plus2 fixture
   witnesses (ZERO application credit). Exact native assertion failures, restoration and independent
   causal review are preserved. Repeated loop/log occurrences do not inflate canonical counts.
-- **Capacity24 is currently granted to Vector on owned56C**, exact prepared plan at
-  `native/capacity-support24-adf0e453-driver-prepared/`.41 additional IDs targeted; no runtime credit
-  until closure/root extraction. Four outcomes stay separate: Fill103 is arrangement-only; Video274/
+- **Capacity24 closed and root-causally accepted**:24 actual assertion-red cases/22recipes qualify
+  all41 additional canonical statements;52 mapped native issue summaries,38 extras ZERO credit.
+  Root receiptced274d4 and extractioncbb095e2; all730 restored, children joined. Four outcomes stay
+  separate: Fill103 is arrangement-only; Video274/
   319 currently throw during missing-file reads; cel/version identity280 is a distinct contract with
   no eligible narrow real-owner fault found. Never fake an ID or delete a fixture to turn it red.
   Video335 is a cumulative method guard, never proof attributable to the last blocked stage alone.
@@ -44,10 +50,12 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   Opacity drag stopped at0.329955548 versus0.5; blend final outcomes unreached. Text really selected
   the whole word, then read a swatch in a closed panel. Existing toolbar.colorButton exposes the same
   activeEditColor and is the accepted replacement target, preserving every colour/drawing/typing
-  assertion. Bake diagnoses opacity source/gesture before further changes; no blind retry/tolerance.
-  Retire ALL temporary delivery logs/pictures before permanent normal qualification.
-- D1 effects source **5a067c9d** independently accepted; normal63 and13 safe controls prepared,
-  **UNRUN**. Duplicate periodic angles, apron-before-Int, and actual CPU/Metal transparent samplers
+  assertion. Successor **aa06e07f diagnostic2 is RUNNING under Bake's sole native lease on4B33**:
+  existing four attempts accumulate measured remaining endpoint error, exact tolerances/outcomes
+  unchanged. No product change. Retire ALL temporary delivery logs/pictures before permanent normal.
+- D1 effects source **5a067c9d** independently accepted; actual normal63 **63/63**, zero fail/skip,
+  exact IDs/device/source730 and root receiptea7824b4.13 safe controls remain **UNRUN**.
+  Duplicate periodic angles, apron-before-Int, and actual CPU/Metal transparent samplers
   bound positions before narrowing while preserving fractional outside-edge ink. Never run unsafe
   old casts with huge/NaN inputs as a crash-seeking control. Keep old5a packet/tree unchanged.
 - Chroma/CRT source **2d30185d**, net7 paths, independently reviewed c219071f. Normal116 and13 safe

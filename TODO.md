@@ -13,18 +13,20 @@ scene “Looks right” are complete. The erasing respring cause remains unresol
 **Current work:** final integration `PaintApp-s54-qualified-integration` starts atadf; oldadf tree is
 frozen for controls. Normal155 is155/155. Original capacity42 assertions and strict text28 application
 assertions have actual deliberate-failure/root causal proof;2 fixture witnesses have ZERO application
-credit. Capacity24 follow-on is granted/running, targeting41 further contracts, not yet qualified.
+credit. Capacity24 follow-on closed/root-causally accepted all41 further contracts across24 cases.
 Four remaining outcomes stay separate; no fake IDs, weakened expectations or fixture deletion.
 
 **Next, in order:**
 
 - Fix two test interactions while preserving actual drawing checks. Diagnostic9e reaches landscape/
   initial pictures, then opacity33% versus50%; text really selects the word, then targets a control in
-  the panel it closed. Use the existing toolbar's same-colour value; trace opacity before correction.
+  the panel it closed. Successoraa06 diagnostic2 is now running with measured slider-endpoint residual
+  correction and the toolbar's same-colour value; original tolerances/outcomes remain unchanged.
   Retire diagnostics, drive whole affected colour/text classes and meaningful controls.
-- Qualify reviewed effects5a normal63/13safe controls and2d normal116/13safe controls: huge finite
+- Effects5a normal63 passed63/63, source730 exact. Qualify its13safe controls and2d normal116/13safe controls: huge finite
   settings must not overflow sampling/apron conversion; ordinary edge pixels and saved values stay
-  unchanged. Confirm successful actual GPU output before performance timing. These fixes are UNRUN.
+  unchanged. Confirm successful actual GPU output before performance timing; its existing benchmark
+  now checks real full-size results outside the clocks. Remaining controls/2d/performance are UNRUN.
 - Public two-input Mix refusal workflow6ef; cold damaged-text recovery/byte-exact original in Trash;
   actual stable Glare landscape picture; wrong-cel Undo thumbnail public repro4432 then minimal fix.
 - Permanent maintenance/recovery and remaining relevant UI/mask controls; final exact fast Debug AND
