@@ -1493,6 +1493,144 @@ final class LayerPanelControlsUITests: PaintUITestCase {
 
 final class BlendModesAndCompositorUITests: PaintUITestCase {
 
+    /// Carry the headless Chroma fringe claim through the public brush, layer and effect controls.
+    /// The outside band belongs to white paper measured before the effect, not an assumed brush edge.
+    func testChromaticAberrationSplitsTheColourOntoPaperBesideAStroke() throws {
+        let app = XCUIApplication()
+        let size = CGSize(width: 2048, height: 2048)
+        XCTAssertTrue(launchIntoEditor(app, size: size, orientationBeforeCreatingCanvas: .landscapeLeft))
+        let window = app.windows.firstMatch
+        XCTAssertGreaterThan(window.frame.width, window.frame.height)
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        openBrushLibrary(app)
+        tapWhenHittable(app.buttons["brushPanel.group.Basics"], "The public Basics group")
+        let opaque = app.buttons["brushPanel.brush.Opaque Round"]
+        XCTAssertTrue(opaque.waitForExistence(timeout: 5))
+        if !opaque.isSelected { tapWhenHittable(opaque, "The Opaque Round brush") }
+        XCTAssertTrue(opaque.isSelected)
+        setBrushSize(app, normalized: 0.6)
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5))
+        setBrushColor(app, hex: "000000")
+
+        let hostFrame = canvas.frame
+        let windowFrame = window.frame
+        let paper = paperRect(in: canvas, canvasSize: size)
+        let row = rowAboveTheDock(canvas)
+        for point in [onHost(paper, 0.25, 0.25), onHost(paper, 0.60, 0.25)] {
+            XCTAssertTrue(visiblePaperRect(app, in: canvas, canvasSize: size)
+                .contains(CGPoint(x: point.dx, y: point.dy)))
+            XCTAssertTrue(windowFrame.contains(CGPoint(x: hostFrame.minX + point.dx * hostFrame.width,
+                                                       y: hostFrame.minY + point.dy * hostFrame.height)))
+            assertBelowTheToolbar(app, canvas, dy: point.dy, "The black stroke")
+            assertAboveTheDock(app, canvas, dy: point.dy, "The black stroke")
+        }
+        drawLine(on: canvas, from: onHost(paper, 0.25, 0.25), to: onHost(paper, 0.60, 0.25))
+        XCTAssertTrue(waitUntilFilled(canvas, dx: onHost(paper, 0.40, 0.25).dx, dy: row))
+
+        // One capture supplies both dimensions and bytes. Flat integers let the existing stability
+        // wait compare a row without adding an image reader or relying on tuple-array Equatable.
+        let readRow = { () throws -> [Int] in
+            let pixels = try XCTUnwrap(ScreenshotPixels(canvas.screenshot().image))
+            let first = Int(ceil(Double(onHost(paper, 0.20, 0.25).dx) * Double(pixels.width)))
+            let last = Int(floor(Double(onHost(paper, 0.90, 0.25).dx) * Double(pixels.width))) - 1
+            let y = Int(floor(row * Double(pixels.height)))
+            var bytes = [pixels.width, pixels.height, first, last, y]
+            for x in first...last {
+                let pixel = pixels.pixel(normalizedX: (Double(x) + 0.5) / Double(pixels.width),
+                                         normalizedY: (Double(y) + 0.5) / Double(pixels.height))
+                bytes.append(contentsOf: [Int(pixel.r), Int(pixel.g), Int(pixel.b), Int(pixel.a)])
+            }
+            return bytes
+        }
+        let before = try settled { try readRow() }
+        let beforePixels = stride(from: 5, to: before.count, by: 4).map { Array(before[$0..<($0 + 4)]) }
+        let white = try XCTUnwrap(beforePixels.last)
+        XCTAssertTrue(isWhitish((UInt8(white[0]), UInt8(white[1]), UInt8(white[2]), UInt8(white[3]))))
+        XCTAssertEqual(white[0], white[1])
+        XCTAssertEqual(white[1], white[2])
+        XCTAssertEqual(white[3], 255, "Screen alpha supports an exposed-paper premise, not kernel alpha")
+        let edge = try XCTUnwrap(beforePixels.lastIndex { $0 != white }, "A measured right silhouette")
+        let dark = beforePixels.indices.filter {
+            let p = beforePixels[$0]
+            return isInk((UInt8(p[0]), UInt8(p[1]), UInt8(p[2]), UInt8(p[3])))
+        }
+        let firstInk = try XCTUnwrap(dark.first)
+        let lastInk = try XCTUnwrap(dark.last)
+        let core = (firstInk + lastInk) / 2
+        let reach = max(1, Int(ceil(20 / size.width * paper.width * CGFloat(before[0]))))
+        guard core >= reach, core + reach < edge, edge + reach + 1 < beforePixels.count else {
+            XCTFail("The measured stroke needs a 20-canvas-pixel interior and exposed exterior")
+            return
+        }
+        let corePixel = beforePixels[core]
+        XCTAssertTrue(isInk((UInt8(corePixel[0]), UInt8(corePixel[1]), UInt8(corePixel[2]), UInt8(corePixel[3]))),
+                      "The measured interior control is actual dark ink")
+        XCTAssertTrue((core - reach...core + reach).allSatisfy { beforePixels[$0] == beforePixels[core] },
+                      "The interior control has uniform ink throughout the maximum displacement")
+        let band = (edge + 1)...(edge + reach)
+        XCTAssertTrue(band.allSatisfy { beforePixels[$0] == white },
+                      "The whole outside band is original white paper before any effect is added")
+        let far = edge + reach + 1
+        XCTAssertEqual(beforePixels[far], white, "The far-paper control lies beyond the maximum shift")
+        let strip = CGRect(x: Double(before[2]) / Double(before[0]),
+                           y: Double(before[4]) / Double(before[1]),
+                           width: Double(before[3] - before[2] + 1) / Double(before[0]),
+                           height: 1 / Double(before[1]))
+        XCTAssertTrue(visiblePaperRect(app, in: canvas, canvasSize: size).contains(strip))
+        XCTAssertTrue(windowFrame.contains(CGRect(x: hostFrame.minX + strip.minX * hostFrame.width,
+                                                  y: hostFrame.minY + strip.minY * hostFrame.height,
+                                                  width: strip.width * hostFrame.width,
+                                                  height: strip.height * hostFrame.height)))
+        assertBelowTheToolbar(app, canvas, dy: strip.minY, "The entire measured Chroma strip")
+        assertAboveTheDock(app, canvas, dy: strip.maxY, "The entire measured Chroma strip")
+        attachScreenshot(XCUIScreen.main, "chroma-black-stroke-before")
+
+        openLayerPanel(app)
+        addValueLayerFromAddMenu(app)
+        let valueRow = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(valueRow.waitForExistence(timeout: 5))
+        valueRow.tap()
+        app.buttons["layerOptions.blendModeButton"].tap()
+        let chroma = app.buttons["layerOptions.blendMode.chromaticaberration"]
+        XCTAssertTrue(chroma.waitForExistence(timeout: 5))
+        chroma.tap()
+        let title = app.staticTexts["layerOptions.subMenuTitle"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        closeLayerRail(app)
+        XCTAssertEqual(title.label, "Chromatic Aberration")
+        let offsetX = app.sliders["effectSettings.offsetX"]
+        let offsetY = app.sliders["effectSettings.offsetY"]
+        XCTAssertTrue(offsetX.waitForExistence(timeout: 5))
+        XCTAssertTrue(offsetY.waitForExistence(timeout: 5))
+        XCTAssertEqual(try XCTUnwrap(Double(try XCTUnwrap(offsetX.value as? String))), 3)
+        XCTAssertEqual(try XCTUnwrap(Double(try XCTUnwrap(offsetY.value as? String))), 0)
+        offsetX.adjust(toNormalizedSliderPosition: 1)
+        XCTAssertEqual(try XCTUnwrap(Double(try XCTUnwrap(offsetX.value as? String))), 20)
+        XCTAssertEqual(try XCTUnwrap(Double(try XCTUnwrap(offsetY.value as? String))), 0)
+
+        XCTAssertEqual(canvas.frame, hostFrame, "The effect card must not move the measured picture")
+        XCTAssertEqual(window.frame, windowFrame)
+        XCTAssertEqual(paperRect(in: canvas, canvasSize: size), paper)
+        XCTAssertTrue(visiblePaperRect(app, in: canvas, canvasSize: size).contains(strip))
+        assertBelowTheToolbar(app, canvas, dy: strip.minY, "The Chroma strip with its card open")
+        assertAboveTheDock(app, canvas, dy: strip.maxY, "The Chroma strip with its card open")
+        let after = try settled { try readRow() }
+        guard Array(after.prefix(5)) == Array(before.prefix(5)), after.count == before.count else {
+            XCTFail("The same displayed dimensions and integer pixel centres must be compared")
+            return
+        }
+        let afterPixels = stride(from: 5, to: after.count, by: 4).map { Array(after[$0..<($0 + 4)]) }
+        XCTAssertTrue(band.allSatisfy { afterPixels[$0][3] == 255 }, "The sampled screen remains opaque")
+        XCTAssertEqual(afterPixels[core], beforePixels[core], "The measured interior remains black")
+        XCTAssertEqual(afterPixels[far], beforePixels[far], "Paper beyond the maximum shift stays white")
+        XCTAssertTrue(band.contains { afterPixels[$0][0] != afterPixels[$0][2] },
+                      "Chroma must draw a red/blue fringe onto the original white paper beside the stroke")
+        attachScreenshot(XCUIScreen.main, "chroma-colour-fringe-on-paper")
+    }
+
     /// **§6.5's picker, at the panel rather than at `CanvasManager`.** Opening a layer's options menu
     /// *is* the mask-edit session, so every other row grows a checkmark and a fill-reference button
     /// while it is open, and both go away when it closes. What this pins that the logic tests cannot
