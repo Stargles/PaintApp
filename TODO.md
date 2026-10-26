@@ -18,6 +18,13 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
 
 **Next, in order:**
 
+- Finish canonical Tap selection cost/controls before harvesting. Isolated logic37 and publicUI6+
+  benchmark1 passed; root inspected the square-selection stages. Release benchmark is running after
+  storage cleanup; a local image-support admission proposal is unimplemented. Preserve current
+  numeric curve cap and every drawn outcome.
+- Run the committed affine-gradient reproduction against original production before any fix. The
+  proposed correction stays in the existing two-point affine mapper; generic projective/lattice
+  behavior and saved format remain unchanged.
 - Finish the colour/text public interactions without weakening drawing checks. Successful Text route
   is integrated3e4a. Completed d700 public recording covers all6 slider drags/335 native notes; root
   receipt053369a5 verifies the native value is already wrong before model delivery, with no observed
@@ -123,8 +130,11 @@ obsolete owned outputs/devices; do not touch unrelated personal files or other s
       Reclaim exact verified closed-result duplicate blobs and reviewed offline56C caches; retain
       evidence paths/artwork/baselines. Verify actual free space and bounded phase-boundary cleanup.
       External detailed plans/identity manifests live in resume-20261026/storage-inventory-20261026-vector.
-- [ ] Review conditional obsolete owned simulators/build caches only after ownership, verified
-      app-data archives and outstanding Products dependencies. No broad personal/global deletion.
+- [x] Five obsolete owned simulators deleted after independently verified data archives; all unlisted/
+      protected device identities exact. Actual DELETE-phase gain13.05GiB;47.06GiB/50.53GB free.
+      Keep820782758bytes of archives/manifests. RequiredProducts/shared/ambiguous devices remain held.
+- [x] Bound storage checks at native phase boundaries in CLAUDE.md. This item remains until merge;
+      no global/personal cleanup, mutable hardlinks or app background-cleanup service was added.
 
 ---
 
@@ -474,9 +484,9 @@ Inventory-only files are not reviewed code. New source is not called complete be
       required string can become empty without existing text-damage/save gating. Peer/scope accepted;
       remove saved required-field fallbacks through existing owners, preserve API defaults/explicit
       empty/legitimate nils. Current writer equals previousafd; no invented blank repair/schema.
-      Actual old-product writer capture1 at75365af5 must provide typed package provenance before strict
-      source edits; temporary capture delta is then removed whole. Original export has no text.
-      Real-package/mutation/cold qualification remains required.
+      Actual previous-writer four-file46680B package provenance and strict-decoder controls are
+      qualified. Temporary capture changes are removed; the original export contains no text.
+      Cold Cancel→Versions→UnsavedRestore and exact displaced Trash bytes remain to qualify.
 - [ ] Graph/capacity: shared resolved-destination/net-child admission is integrated at8e80; actual155
       normal and original42 deliberately broken contracts qualify. Capacity24follow-on qualifies all41 further contracts; public cold6ef
       remains open and four further outcome limits stay recorded. Keep proper-descendant semantics and

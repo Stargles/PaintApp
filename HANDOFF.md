@@ -154,23 +154,18 @@ is harvested8682859f. No unsafe old cast was executed. Existing broad selection 
 arithmetic and Test1 respring are not certified by this one cast fix. Next native needs normal rebuild
 because compiled mutant objects remain; final assembled Debug/Release/UI/performance are open.
 
-### Storage cleanup and Tap compiler checkpoint
+### Completed development-storage cleanup — October26
 
-Offline56C cache cleanup recovered10.11GiB actual, all original app/runner container entries exact
-postboot. Extended closed-result dedup recovered20.72GiB actual:994 original paths retain exact
-bytes/type/mode/uid/gid/flags/xattrs,920 new hardlinks,32 protected snapshots unchanged,2 actual
-summary readbacks identical. Free space now~35GiB. Both old Oct10 graph waiters53592/56641 and their
-sleep children were verified gone after exact parent SIGTERM; no native/source/artwork action.
-Older5 task simulators/build caches remain under ownership/dependency review; shared75C and
-metadata-onlyA4C are HOLD. Source/evidence/benchmark Products/artwork stay protected.
-
-Tap026 first normal37 build stopped with8compiler diagnostics at FOUR new test constructors; ZERO
-actual tests. Native/source730 joined/exact, original failure packet immutable. Existing generic
-StrokeSamples initializer needs explicit channels:.pressureOnly. Author is authorized to add ONLY
-those four arguments, preserving geometry/pressure/old+new assertions and all production bytes, then
-repin normal37/7/controls15; no implicit native retry. The +63 image/manager benchmark proposal stays
-unapplied until Tap qualification; prefer measuring it through final assembled fast runs, avoiding
-extra source pins/reruns. No native UI/performance credit yet.
+Offline56C cache cleanup recovered10.11GiB and immutable closed-result dedup20.72GiB. Exact5
+obsolete owned simulators are now deleted after independent archive verification; all unlisted/
+protected identities remain exact. Archives/manifests are retained (820782758 compressed bytes).
+The DELETE phase increased actual free space36518146048→50532110336bytes (+13.05GiB), leaving
+47.06GiB/50.53GB free. Receipts: resume-20261026/retire-owned-five-20261026/root-delete-verified.json
+and delete-completion.json. Shared75C, ambiguousA4C and all requiredProducts remain HOLD.
+No artwork/global/personal deletion or iPad operation. Phase-boundary storage checks are in CLAUDE.
+Native lease has moved to Bake for Releasebenchmark1e2; consult external completion/lease before
+another native command. Tap026 compiler failure executed0tests and f786 card-occlusion RED remain
+immutable; e2 logic37/publicUI6+benchmark1 have since passed. Release cost/15controls remain open.
 
 ### Other required gates, in queue order
 
@@ -184,22 +179,11 @@ partial annotations or automatically cascade through protocols/renderer classes.
 side-effect-free, no actor annotations are included. Future warning-only builds must finish collecting
 full diagnostics, then stop source expansion for review; do not cancel on a warning alone.
 
-Tap audit found actual support outside the circular hit/outline (source-only rotated-square witness).
-Preferred c49baadd reuses canonical geometric object bodies and local swept primitive support.
-The stronger d046 raster-probe proposal is rejected: it changes hole/gap policy and needs unnecessary
-render/cache/refusal machinery. Bake committed tiny production-rendered witness a14038fc in an existing logic workflow on old
-hit code; no production changes. Native alpha/hit/outline reproduction is now closed/accepted54fb7d33 on old production;
-  exact native issues253/268/270 follow positive rendered-alpha premise. Clear277 remains unrun.
-The independent API peer accepts the small sink with cost/continuity conditions. A finite source
-counterexample shows scatter can reach an unmappable posed site despite valid sample-box corners.
-The minimal future correction is one default-noop DabTarget discontinuity event from the existing
-three pose-refusal arms (streaming circle/image and replay), resetting only the geometry sink
-predecessor; no extra owner/fields/flags/closures or copied pose math. Ordinary drawing targets remain
-no-op; successful sites pay no added call. Do not misuse begin/endStroke/group, which own real
-mutation/opacity settlement. That prerequisite is now satisfied. Root authorizes implementation of this bounded existing-owner
-geometry change plus c7b38c7c stream event (independent peer37bf2443); preserve ordinary rendering
-and root-specific correction boundaries. No actor annotations, renderer pipeline/cache/resource
-framework, stroke-math duplication or speculative API redesign.
+Tap's old-production actual-alpha witness54fb7d33 established corner/outline loss before code.
+Current isolatede2 reuses canonical stamp geometry and a local preceding support, with one default-
+noop discontinuity event at existing pose-refusal arms. Rendering/opacity ownership stays unchanged.
+The whole Tap UI/logic passed; Release cost and deliberate faults precede harvesting. Keep root's
+868 curve-conversion cap when composing the shared StrokeGeometry file.
 
 1. Finish above effects/control/public gesture slices, preserving immutable original packets and
    meaningful exact assertions. Before every native grant verify clean pin/source730/tool/argv,
@@ -219,8 +203,8 @@ framework, stroke-math duplication or speculative API redesign.
    runnable5412fast/6008full; raw5415/6011 differs by exactly3 private static testBrush factories.
    These are static counts, not native qualification.
 6. Fill16 paired Release ABBA against protected old071 products, actual sampler/source/fence/cancel/
-   budget counts and whole RSS. Other genuine audit gaps: remaining vector internals, graph evaluation/
-   gestures, math/platform and aggregate memory.19 reviewed clusters are not all314 production files.
+   budget counts and whole RSS. Other genuine audit gaps are mapped by the current346-runtime-file evidence ledger; no whole-
+   codebase safety claim. Aggregate memory and unreviewed current bodies remain explicit.
    Font pipeline bounded follow-up7535f61c found no new defect; font packs are unshipped/deferred.
 7. Physical Test1 all-process capture needs fresh saved/unlocked readiness. No cause inferred from
    simulator memory, no Liquify applied in that scene. Finish qualified merge/push or resolve renewal

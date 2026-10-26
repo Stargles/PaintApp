@@ -27,6 +27,17 @@ subscription ranges received later review without another demonstrated defect. U
 vector/graph/math/platform/widget internals and private GPU/ImageIO ownership are not certified.
 Do not reopen a qualified seam solely because an initial external report says pending.
 
+Mechanical reconciliation at6b1a covers346 runtime paths:311Swift,2Metal,33C#. Explicit records
+support31 whole-body reads with unchanged current blobs,158 selected ranges or changed historical
+whole files,4 caller-only and153 inventory/unknown. These are evidence categories, not safe-file
+counts or proof a file was never read. The41-input ledger retains exact pins/ranges; do not inflate
+coverage from filenames/tests. Later whole TimelineRulerLabels/TimelineTrackExtent plus direct
+ruler/zoom callers found no new demonstrated defect (1297lines; known O(cels) bound rebuild remains).
+Remaining candidates are discovery-wire/socket ownership, Windows resource callers and small
+presentation/viewport owners. Existing qualified renderer/transport seams stay closed.
+Evidence: s54-architecture-audit/coverage-ledger-reconciliation-6b1a1b56/receipt-v2.json (0add88b4).
+
+
 ## Current findings and qualification
 
 | Finding | Root-cause correction through existing owner | Component evidence and remaining boundary |
