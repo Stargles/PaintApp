@@ -143,6 +143,24 @@ is harvested8682859f. No unsafe old cast was executed. Existing broad selection 
 arithmetic and Test1 respring are not certified by this one cast fix. Next native needs normal rebuild
 because compiled mutant objects remain; final assembled Debug/Release/UI/performance are open.
 
+### Storage cleanup and Tap compiler checkpoint
+
+Offline56C cache cleanup recovered10.11GiB actual, all original app/runner container entries exact
+postboot. Extended closed-result dedup recovered20.72GiB actual:994 original paths retain exact
+bytes/type/mode/uid/gid/flags/xattrs,920 new hardlinks,32 protected snapshots unchanged,2 actual
+summary readbacks identical. Free space now~35GiB. Both old Oct10 graph waiters53592/56641 and their
+sleep children were verified gone after exact parent SIGTERM; no native/source/artwork action.
+Older5 task simulators/build caches remain under ownership/dependency review; shared75C and
+metadata-onlyA4C are HOLD. Source/evidence/benchmark Products/artwork stay protected.
+
+Tap026 first normal37 build stopped with8compiler diagnostics at FOUR new test constructors; ZERO
+actual tests. Native/source730 joined/exact, original failure packet immutable. Existing generic
+StrokeSamples initializer needs explicit channels:.pressureOnly. Author is authorized to add ONLY
+those four arguments, preserving geometry/pressure/old+new assertions and all production bytes, then
+repin normal37/7/controls15; no implicit native retry. The +63 image/manager benchmark proposal stays
+unapplied until Tap qualification; prefer measuring it through final assembled fast runs, avoiding
+extra source pins/reruns. No native UI/performance credit yet.
+
 ### Other required gates, in queue order
 
 Compiler-warning source audit is bounded and remains UNHARVESTED. Core6bf5741b4 completed an

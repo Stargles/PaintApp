@@ -115,7 +115,9 @@ caches and repeated evidence blobs. Keep real artwork/exports, required benchmar
 needed source/evidence; prefer exact deduplication and verified archives. Delete only confirmed
 obsolete owned outputs/devices; do not touch unrelated personal files or other sessions' work.
 
-- [ ] Inventory complete: PaintWork~76GiB attributed, results~60GiB;56C OS caches~10GiB.
+- [x] Inventory and first cleanup:10.11GiB actual simulator caches plus20.72GiB exact report
+      dedup recovered;~35GiB free. All app data/evidence paths/protected baselines verified.
+      PaintWork initially~76GiB attributed, results~60GiB;56C OS caches~10GiB.
       Reclaim exact verified closed-result duplicate blobs and reviewed offline56C caches; retain
       evidence paths/artwork/baselines. Verify actual free space and bounded phase-boundary cleanup.
       External detailed plans/identity manifests live in resume-20261026/storage-inventory-20261026-vector.
