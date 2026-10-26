@@ -428,31 +428,133 @@ final class CuttingModesUITests: VectorEraserTestSupport {
     /// notch visible over restored geometry, which reads to the artist as corrupted artwork rather
     /// than as a bug in a preview.
     func testACutIsStillOneUndoStepNowThatItPreviews() throws {
+        defer { XCUIDevice.shared.orientation = .portrait }
         let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        let window = app.windows.firstMatch.frame.size
+        XCTAssertGreaterThan(window.width, window.height, "The artist's history route is landscape")
         addVectorLayer(app)
 
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        // A broad, opaque blue line still resolves in the actual timeline image, whose picture is
+        // aspect-filled. The wider cut below leaves a real gap after the surviving caps regrow.
+        openBrushLibrary(app)
+        tapWhenHittable(app.buttons["brushPanel.group.Basics"], "The public Basics brush group")
+        let opaque = app.buttons["brushPanel.brush.Opaque Round"]
+        XCTAssertTrue(opaque.waitForExistence(timeout: 5))
+        if !opaque.isSelected { tapWhenHittable(opaque, "The opaque blue line's brush") }
+        XCTAssertTrue(opaque.isSelected)
+        setBrushSize(app, normalized: 79.0 / 199)
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5))
+        setBrushColor(app, hex: "0000FF")
+        waitForTheKeyboardToLeave(app)
+        let onion = app.buttons["timeline.onionSkinToggle"]
+        XCTAssertTrue(onion.waitForExistence(timeout: 5))
+        XCTAssertEqual(onion.value as? String, "on", "A fresh document starts with onion skin on")
+        onion.tap()
+        XCTAssertEqual(onion.value as? String, "off", "A neighbouring ghost must not fill the real cut")
+        let exposed = visiblePaperRect(app, in: canvas)
+        for point in [CGPoint(x: 0.3, y: 0.5), CGPoint(x: 0.7, y: 0.5),
+                      CGPoint(x: 0.5, y: 0.4), CGPoint(x: 0.5, y: 0.6)] {
+            XCTAssertTrue(exposed.contains(point), "Every stroke/cut endpoint is on exposed paper")
+        }
         drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.5), to: CGVector(dx: 0.7, dy: 0.5))
         XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.strokes, 1, "Setup: one stroke")
 
+        // Both ordinary drawings must already exist before the cut, so Undo targets the cut rather
+        // than creating/splitting B. Split copies the whole line; B is the untouched control.
+        splitDrawing(app, layerIndex: 1, atFrame: 6)
+        let a = app.otherElements["timeline.cel.1.0"]
+        let b = app.otherElements["timeline.cel.1.1"]
+        XCTAssertEqual(readCel(app, layerIndex: 1, celIndex: 0)?.start, 0)
+        XCTAssertEqual(readCel(app, layerIndex: 1, celIndex: 0)?.length, 6)
+        XCTAssertEqual(readCel(app, layerIndex: 1, celIndex: 1)?.start, 6)
+        XCTAssertEqual(readCel(app, layerIndex: 1, celIndex: 1)?.length, 6)
+        XCTAssertTrue(waitForTile(app, layerIndex: 1, celIndex: 0))
+        XCTAssertTrue(waitForTile(app, layerIndex: 1, celIndex: 1))
+        let tileA = app.images["timeline.cel.1.0.tile"]
+        let tileB = app.images["timeline.cel.1.1.tile"]
+        let middle = CGVector(dx: 0.5, dy: 0.5)
+        // A quarter-block tap stays away from handles and leaves the playhead off the centre probe.
+        b.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).tap()
+        XCTAssertTrue((7...12).contains(readFrameLabel(app)?.current ?? -1))
+        XCTAssertTrue(waitUntil(canvas, middle, isBlue), "B begins as the same whole blue drawing")
+        a.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).tap()
+        XCTAssertTrue((1...6).contains(readFrameLabel(app)?.current ?? -1))
+        for tile in [tileA, tileB] {
+            XCTAssertGreaterThan(tile.frame.width, 60, "The thumbnail must expose an interior gap, not just handles")
+            XCTAssertGreaterThan(tile.frame.height, 12)
+            XCTAssertTrue(waitUntil(tile, middle, isBlue), "Both actual thumbnail centres begin blue")
+        }
+
         selectVectorEraserMode(app, "Cut")
+        openEraserPanel(app)
+        tapWhenHittable(app.buttons["eraserPanel.group.Basics"], "The public eraser Basics group")
+        let eraser = app.buttons["eraserPanel.brush.Opaque Round"]
+        XCTAssertTrue(eraser.waitForExistence(timeout: 5))
+        if !eraser.isSelected { tapWhenHittable(eraser, "The wide opaque cutting nib") }
+        XCTAssertTrue(eraser.isSelected)
+        setEraserSize(app, normalized: 1)
         drawLine(on: canvas, from: CGVector(dx: 0.5, dy: 0.40), to: CGVector(dx: 0.5, dy: 0.60))
         XCTAssertTrue(waitUntilBlank(canvas, dx: 0.5, dy: 0.5, timeout: 5), "The cut should land")
         let afterCut = vectorMarkerViaPanel(app, layerIndex: 1)
         XCTAssertEqual(afterCut?.strokes, 2, "Cut splits the line into two pieces")
         XCTAssertEqual(afterCut?.erases, 0, "…geometrically: Cut retains no punch")
 
+        // Transparent paper in a tile reveals the neutral block behind it. Require an actual
+        // readable neutral pixel and surviving blue sides; a missing/hidden image is not a cut tile.
+        let neutral: (RGBA?) -> Bool = { pixel in
+            guard let pixel else { return false }
+            return abs(Int(pixel.r) - Int(pixel.g)) < 15 && abs(Int(pixel.g) - Int(pixel.b)) < 15
+        }
+        XCTAssertEqual(tileState(app, layerIndex: 1, celIndex: 0), "1")
+        XCTAssertTrue(waitUntil(tileA, middle, neutral, timeout: 15), "A's actual cut tile must finish before scrubbing")
+        for x in [0.35, 0.65] {
+            XCTAssertTrue(waitUntil(tileA, CGVector(dx: x, dy: 0.5), isBlue), "A's tile retains blue on both sides of the gap")
+        }
+        b.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).tap()
+        XCTAssertTrue((7...12).contains(readFrameLabel(app)?.current ?? -1), "The bare scrub shows existing B")
+        XCTAssertTrue(waitUntil(canvas, middle, isBlue), "B was not cut")
+        XCTAssertTrue(waitUntil(tileB, middle, isBlue), "B's tile was not cut")
+        attachScreenshot(XCUIScreen.main, "cut-history-01-cut-A-next-to-whole-B-landscape")
         app.buttons["sideToolbar.undoButton"].tap()
 
+        // This assertion is deliberately BEFORE returning to A: its actual tile must refresh while
+        // the view shows B. The old view-completion callback queues the current B instead.
+        XCTAssertTrue(waitUntil(tileA, middle, isBlue, timeout: 15), "Undo refreshes restored A's actual off-frame thumbnail")
+        XCTAssertTrue(waitUntil(tileB, middle, isBlue), "Undo leaves B's tile unchanged")
+        XCTAssertTrue(waitUntil(canvas, middle, isBlue), "Undo leaves the displayed B drawing unchanged")
+        attachScreenshot(XCUIScreen.main, "cut-history-02-undo-off-frame-A-tile-landscape")
+        a.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).tap()
+        XCTAssertTrue((1...6).contains(readFrameLabel(app)?.current ?? -1))
         let afterUndo = vectorMarkerViaPanel(app, layerIndex: 1)
         XCTAssertEqual(afterUndo?.strokes, 1,
                        "One undo press must restore the whole line. Reading 2 means the preview "
                        + "committed a cut of its own and the gesture was applied twice")
+        XCTAssertTrue(waitUntil(canvas, middle, isBlue), "A's restored blue ink reaches the canvas")
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
                        "…and the restored ink must actually be on screen, with no released preview "
                        + "left sitting over it")
+        attachScreenshot(XCUIScreen.main, "cut-history-03-restored-A-landscape")
+
+        b.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).tap()
+        XCTAssertTrue((7...12).contains(readFrameLabel(app)?.current ?? -1))
+        let redo = app.buttons["sideToolbar.redoButton"]
+        XCTAssertTrue(redo.waitForExistence(timeout: 5) && redo.isEnabled)
+        redo.tap()
+        XCTAssertTrue(waitUntil(tileA, middle, neutral, timeout: 15), "Redo refreshes A's real gap tile while B is displayed")
+        XCTAssertTrue(waitUntil(tileB, middle, isBlue), "Redo leaves B's tile unchanged")
+        XCTAssertTrue(waitUntil(canvas, middle, isBlue), "Redo leaves B's whole drawing unchanged")
+        a.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).tap()
+        XCTAssertTrue((1...6).contains(readFrameLabel(app)?.current ?? -1))
+        XCTAssertTrue(waitUntilBlank(canvas, dx: 0.5, dy: 0.5, timeout: 10), "One Redo restores A's visible cut")
+        XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.strokes, 2)
+        for x in [0.35, 0.65] {
+            XCTAssertTrue(waitUntil(tileA, CGVector(dx: x, dy: 0.5), isBlue), "Redo keeps A's surviving thumbnail ink")
+        }
+        attachScreenshot(XCUIScreen.main, "cut-history-04-redone-A-gap-landscape")
     }
 
     // MARK: - Mode 3
