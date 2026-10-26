@@ -1,236 +1,137 @@
 # Handoff
 
 Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md.
-Verify origin, worktrees and every tmp branch. Main's handoff is behind. Kevin permits useful agents;
-conserve usage and prioritize quality. Root coordinates integration, independent evidence review and
-ONE native lease. Continue autonomously; do not park. Preserve real artwork and record before code.
+Verify origin, worktrees and every tmp branch: main's handoff is behind. Kevin permits useful agents;
+conserve usage and prioritize quality/architecture. Continue autonomously; do not park. Preserve real
+artwork and record findings/rulings before code. One Mac native lease; source work may proceed beside it.
 
-## Active continuation — October 26
+## Active continuation — October26
 
-Kevin is asleep until10a.m. tomorrow; no response is expected and no question is pending. Old physical
-readiness answers are consumed. No iPad restart/install overnight without fresh readiness.
+Kevin is asleep until10a.m. tomorrow. No owner question is pending. Old physical readiness answers
+are consumed: no overnight iPad restart/install without fresh saved/unlocked readiness.
 
-Root integration moved to `~/PaintWork/PaintApp-s54-qualified-integration`,
-`tmp/s54-qualified-integration`, starting at **adf0e453**. The old tree
-`~/PaintWork/PaintApp-s54-mend-free-caps` stays clean atadf for frozen controls. Main/origin remain
-**afd2030c831db7a746271fe306e8b5a5b9b02df6**; nothing new is merged/pushed. Current external authority:
-`~/PaintWork/s54-final-qualification/root-next-gates.json`. Inspect actual completion receipts before
-assuming the native lease is idle. Do not copy stale agent HANDOFF/TODO files into integration.
+**Integration:** `~/PaintWork/PaintApp-s54-qualified-integration`, `tmp/s54-qualified-integration`.
+Last product commit **8682859f5249e0ddf072dc3bc831c8aa4cbc2d5a**; later commits are records only.
+Main/origin **afd2030c831db7a746271fe306e8b5a5b9b02df6**; no new merge/push. Frozen oldadf tree
+`PaintApp-s54-mend-free-caps` remains for controls. Do not copy author HANDOFF/TODO into integration.
+Current root source730/PBX1325/runnable fast5412/full6008; gradient UI successor is full6009.
+Static counts are not final native qualification. Raw counts include3 private static testBrush factories.
 
-Product source **ac72a0ee** now harvests exact reviewed5a/2d effects,6ef public Mix refusal,
-4432 Undo regression with established precreation orientation,67bd explicit picked-file comparisons,
-and9e286 output-verified Lens benchmark, the successful permanent Text interaction and one public
-Chroma drawing test. The failed slider controller and diagnostic prints are excluded.
-Final assembled-source fast/UI gates have not run. Component runs retain their actual pins;
-the harvested startup test is byte-exact to its qualified b55 source.
+**What Kevin has:** installed signed Release **6fb979f442f4d3da1299785de2a077a2058a4dfe** includes
+point-only vector Liquify, interior/attached vector mending/Mend All Fills, newest clock-bucket
+backups and earlier fixes. Normal launch/usual-scene **“Looks right”** confirmed. Audit successors
+are not installed. Test1 erasing respring cause is still unproved.
 
-**What Kevin has:** installed, signed Release **6fb979f442f4d3da1299785de2a077a2058a4dfe** contains
-point-only vector Liquify, interior vector fill mending/Mend All Fills, newest clock-bucket backups
-and earlier audit fixes. Normal install/launch and usual-scene **“Looks right”** confirmation are
-complete. Erasing respring cause, broad final regression/performance and remaining audit are open.
+**Live authority:** `~/PaintWork/s54-final-qualification/root-next-gates.json` plus actual completion
+receipts. Agents: Bake owns canonical Tap; Vector owns gradient and save-scheduling review; Converter
+owns Windows source/regressions. Root reviews source, actual outcomes/causality/whole pictures and
+integration. Reuse these agents; full history/large inventories need not be reread.
 
-### Current qualification and immediate queue
+### Current native and source work
 
-Exact5 obsolete owned simulators are deleted after independently verified data archives;
-13.05GiB actual DELETE-phase gain, all protected/unlisted identities exact. Together with10.11GiB
-cache cleanup and20.72GiB immutable-result dedup, disk reached47.06GiB/50.53GB free before new builds.
-Archives820782758bytes and all requiredProducts/artwork/results remain. CLAUDE phase margins apply.
+- **Tap756:** actual Debuglogic37, Debugpublic6+benchmark1, Releasebenchmark1 all GREEN and root
+  independently reconciled. Root actually LOOKed3 whole square stages, d95110cc. Matched simulator
+  Release manager miss120.1→29.2ms on120strokes/24kknots/165480dabs; no iPad/RSS/cache-virgin or
+  four-sample timing-gate claim. Same Quad/predicates, conservative inclusive local admission before
+  hull allocation; no persistent cache/state/schema. Exact17 logic controls are RUNNING under grant
+  **04f2dc13**, all other Mac native HOLD. Wrong-seed LAST is conditional; no tuning. Root extraction
+  adapter6744bc05 retains exact28refs/23IDs. Public/benchmark controls remain separate. No harvest.
+- **Gradient:** actual old9dd selected1 failed only intended RGB comparison39>2 (147 vs108), all
+  premises passed; root reconciled and LOOKed both whole64² originals,9da827ff. Affine correction
+  **0ab96d96** uses same2points/API/schema to transport level lines; ordinary/singular/coincident
+  behavior retained, generic projective/lattice approximation unchanged. Clean UI-only successor
+  **17f8d53b** adds1 cold public Freeform/Done/Undo/Redo method; old14/helpers exact. Root source
+  acceptance6f72b7b6; combined279logic+15UI=294 and logic3/public1 controls PREPARED_UNRUN.
+  Actual off-axis committed pictures discriminate; whole-cel Freeform reaches mapper after END/Done.
+- **Windows DNS:** old36c actual19 gave15pass/4intended refusal failures; root original TRX reviewf069
+  accepts3 canonical refusal sites. Exit captureNULL, no nativeexit1claim. Exact compiler37012 was
+  already absent, no signal. Fix **77e81aa1** adds4lines to existing Decode plus64 testlines; whole171
+  Debug/Release readiness SSH timed out ONCE, ZERO staging/tests. Host HOLD/no repeated probes.
+  Fixed171D/R+8controls UNRUN; source not harvested. Future grant captures immediate LASTEXITCODE.
+- **New Windows findings recorded before code0cecd476:** wall-clock filename collision can overwrite
+  an earlier queued clipboard paste; asynchronous pipeline start/stop cannot balance thread-bound
+  execution-state requests. Converter authors a tiny clipboard regression and a source-only power
+  lifetime proposal. No production fix/native yet. Nearby post-stop publication is a lower-claim
+  source gap; visible retained-owner/restart behavior unproved, no speculative fix.
+- **New autosave finding recorded before codeb1cadfdc:** failed/refused save consumes clock eligibility;
+  notice alone does not retry an idle open document. This is implementation, NOT an owner ruling.
+  Vector proposes existing driver/clock/save-completion correction, same timer/bounded deferral,
+  preserving edits during save and document identity. No new service/poll/duplicate dirty state.
 
-**Current Mac native lease:** Bake has the exact17 logic-control grant04f2dc13; all other Mac native
-work is HOLD. Actual756 Debuglogic37, DebugpublicUI6+benchmark1 and Releasebenchmark1 are GREEN,
-root independently reconciled exact IDs/source730/device/commands and LOOKed3 whole square stages
-(d95110cc). Matched Release manager miss120.1→29.2ms on120strokes/165480dabs; no iPad/cache-virgin/
-RSS/four-sample timing-gate claim. New756 keeps existing Quad support/predicates and skips unnecessary
-local hull allocation through conservative inclusive bounds; no cache/state/schema. Controls17
-qualify logic only; public/benchmark mutation credit remains separate. No source harvest.
+### Component qualification already accepted
 
-**Gradient:** old9dd actual selected1 is1intendedRGB-target failure (147grey vs108nativeCTM,
-difference39>predeclared2), all other outcomes/premises pass; root reconciled730/ID/device/command
-and LOOKed both whole64² originals (9da827ff). Affine-only correction0ab96d96 is independently
-source-accepted, same2points/API/schema, ordinary/singular/coincident behavior retained. Generic
-projective/lattice approximation unchanged. No corrected-source native run. Vector's clean17f8d53b
-adds one cold public Freeform/Done/Undo/Redo method; old14/helpers byte-exact. Combined279logic+15UI
-is prepared294 (730paths/PBX1325/fast5412/full6009), root source review/native grant pending.
-Off-axis samples discriminate; whole-cel Freeform reaches
-same mapper after gesture END drops the bitmap latch. Old0ab279/3controls stay PREPARED_UNRUN.
+All entries below retain their actual pins; none substitutes for final assembled-source gates.
+Detailed actual receipts and uncredited limits are linked by root-next-gates.json.
 
-**Windows decoder:** source-only77e81aa1 adds4lines to existing Decode (expanded name255/root and
-reserved label prefixes), tests64lines in existing class. Old36c actual19 gave15pass/4intended
-refusal failures; root TRX reviewf069 accepts3canonical refusal sites. Exit capture wasNULL (no
-exit1claim); exact owned compiler37012 was already absent, no process signaled. Fixed whole171
-Debug/Release readiness SSH timed out once, so ZERO staging/tests; no retry. Packet5ea292f4,
-failed-readiness receipt3e6149bc. Windows is owner/availability waiting; keep working on Mac/source.
-No controls or source harvest. A future fresh Windows grant uses direct native+$LASTEXITCODE.
+| Owner/change | Accepted component evidence | Remaining boundary |
+|---|---|---|
+| Capacity/data protectionadf |155/155; original42 contracts; strict text28app+2fixture; follow-on24cases/41contracts|4separate unreached/arrangement outcomes; final gates|
+| Neighborhood effects5a |63/63;13safe faults/19app+3premises|Cold appearance/Release/paired cost|
+| Chroma/CRT ec50 |116/116;13safe faults/17contracts; one centre-before-division line harvested|6extra issues0credit; cold public11/paired cost|
+| Explicit picked video67bd |11/11;1owner fault/2comparisons,4occurrences|No throw/cel-identity credit|
+| Permanent startup |59/59; original4, corrected once-latch1 and remaining5 controls accepted at separate pins|No single-current10-case claim; no Gallery LOOK; final gates|
+| Wrong-cel Undo1c→d709 |70logic+4public GREEN;3logic+1public faults/6contracts; ROOTLOOK4|Separate B fixture control supplies0app credit; final gates|
+| Curve narrowing8272→868 |94/94;6safe faults/7contracts; current archive/reopen/nonlinear consumer|67extra issues0credit; no unsafe old cast/global math/Test1 claim|
+| Point-only Liquify47d |338logic/17faults/UI9/old workflows10; fastD&R5259 at oldpin|Final composed source and permanent converter retirement gates|
+| Interior vector mending83380 |126logic/UI4/29faults; ROOTLOOK6 owner-size pictures|Current paired Release cost/RSS/final gates|
+| Retention/newest policy |44slots3/6/24/7/4; actual reverse-order fault/restored cases|4GB logical soft startup cap; new failed-autosave eligibility is separate|
+| Stream transport7c177 |Windows166 D&R; Swift422/35controls at actual pins|DNS/new resource findings and real-link stage5|
 
-Root production still8682859f; later root commits record findings/qualification only. Main/origin
-stillafd2030c; installed6fb unchanged. Use external root-next-gates.json/actual receipts for live leases.
+No actor-annotation cascade is harvested. Warning-only6bf compiler0tests and07a interrupted compiler
+are not runtime fixes; only2pure dead locals are integrated. Original failed/diagnostic packets remain
+immutable. Old naïve stationary coalescing was REFUTED at1ULP; exact scan bypass retains samples and
+O(N) input storage. Do not reopen implemented findings from stale lower queue prose.
 
-- Atadf, rebuilt **155/155**, zero failure/skip/expected across LayerTree59, MoveToNewLayer12,
-  FillObject29, VideoImport11, TextRecipe13, VectorTextPersistence14 and SaveDamageGate17. All730
-  source/test/PBX entries match; root receipt15cb7fb5. Earlier cbb154/1 was a setup error: bare opacity
-  setter needs existing begin/commit history bracketing. Only the fixture changed, all outcomes kept.
-- Capacity original19 controls plus one real failed-history follow-on qualify all42 original
-  canonical statements. Strict text26 actual cases qualify28 application statements plus2 fixture
-  witnesses (ZERO application credit). Exact native assertion failures, restoration and independent
-  causal review are preserved. Repeated loop/log occurrences do not inflate canonical counts.
-- **Capacity24 closed and root-causally accepted**:24 actual assertion-red cases/22recipes qualify
-  all41 additional canonical statements;52 mapped native issue summaries,38 extras ZERO credit.
-  Root receiptced274d4 and extractioncbb095e2; all730 restored, children joined. Four outcomes stay
-  separate: Fill103 is arrangement-only; Video274/
-  319 currently throw during missing-file reads; cel/version identity280 is a distinct contract with
-  no eligible narrow real-owner fault found. Never fake an ID or delete a fixture to turn it red.
-  Video335 is a cumulative method guard, never proof attributable to the last blocked stage alone.
-- Public Blend/Text diagnostic **9e066893** closed **0pass/2fail**, all730 exact/native joined.
-  Landscape/paper/initial drawing premises now pass: rotate the actual gallery BEFORE creating the
-  canvas through the existing launch helper seam. Root inspected actual whole1080x810 images.
-  Opacity drag stopped at0.329955548 versus0.5; blend final outcomes unreached. Text really selected
-  the whole word, then read a swatch in a closed panel. Existing toolbar.colorButton exposes the same
-  activeEditColor and is the accepted replacement target, preserving every colour/drawing/typing
-  assertion. **AA6 diagnostic2 closed** with unchanged exact tolerances/outcomes:Text passed all drawn replacement outcomes;Blend still failed its opacity
-  setup at.565466642. Root independently reconciled2 IDs/source730 and inspected red word→one red W
-  plus57% readout (rootLOOK3ffea7b6). Harvest ONLY the successful Text route without its diagnostic
-  print/past-longpress comment; preserve every drawn colour/keyboard/selection/replacement outcome.
-  The failed integral slider helper is NOT integrated. Observe actual native slider events before
-  another gesture correction. Temporary observercad2 is source-reviewed/prepared through the existing
-  bounded flight recorder, already armed by normal editor launch. The completed observation is below.
-- D1 effects source **5a067c9d** independently accepted; actual normal63 **63/63**, zero fail/skip,
-  exact IDs/device/source730 and root receiptea7824b4. All13 safe controls closed assertion-red with
-  all730 restored. Rootb84a2549 qualifies19 product/retained statements;3 picture/geometry premises
-  are separate. Four unmapped issues and all setup prerequisites receive ZERO credit.
-  Duplicate periodic angles, apron-before-Int, and actual CPU/Metal transparent samplers
-  bound positions before narrowing while preserving fractional outside-edge ink. Never run unsafe
-  old casts with huge/NaN inputs as a crash-seeking control. Keep old5a packet/tree unchanged.
-- Chroma/CRT corrected source **ec50c8a0** passed **116/116**, zero failure/skip/expected; all730
-  exact, root5eeb1ea0. One existing CRT line now cancels its centre before division, preserving exact
-  centre/axis colour at huge finite fringe. Original CPU/tests/tolerance/global flags remain exact;
-  no new state/pass/schema/helper. All13 safe controls closed assertion-red; root causal receipt
-  ddc5f3fd accepts17 canonical contracts. Six additional issue occurrences receive ZERO credit.
-  All730 source entries are restored and native children joined; normal rebuilding remains required.
-  Earlier2d/702 each115/116 RED and print-only3d2 RED remain immutable. Actual returned pixels showed
-  lost centre/axis red-blue values with green/coverage intact; no actual optimizer instruction was
-  measured. Division precision alone was ineffective. Current source has no diagnostic prints.
-  Root harvested the exact line atac72. Ordinary cold/Release/paired cost/final integration remain.
-- Video picked-file comparisons67bd passed11/11; one real source-cleanup fault reached both direct
-  comparisons (four occurrences/two contracts), root causal30a0b97c; all730 restored. No throw/setup
-  credit and no cel/version identity qualification. Normal rebuild follows any compiled mutant.
-- d700 observation CLOSED at the unchanged56.55% setup failure; source730 exact and native joined.
-  Existing bounded Settings scrolling saved the public flight successfully:866 events include all6
-  hardware/native drag sequences and335 native notes. Root independently verified the original bytes,
-  owner identities, native indices/times and model Float32 assignments; receipt053369a5. The native
-  value is already wrong before model delivery, and the final two small corrective touches change
-  no native value. No stale reset/cancel/wrong-owner is observed in this execution. Internal UIKit
-  mechanics remain unproved; later Blend outcomes are unreached. Root inspected three whole images.
-  Export explicitly records the bundle-owned container change; its empty prior inventory supplies no
-  nonempty-library preservation claim. A source-only peer is reviewing one continuous held-thumb
-  sweep through the existing finger synthesizer. Temporaryfb87 is clean/source-prepared and exactdiff
-  peer675d2f20 accepted; its one-selector experiment remains UNRUN/ungranted.
-  Keep four attempts, original .005/50% and all drawing assertions; no product hook/controller state.
-- Native tests are paused during root-owned exact-five obsolete simulator retirement. PRESERVE
-  completed with verified archives; DELETE is running separately. Consult the external lease and
-  completion receipts before resuming. Offline56C cleanup recovered10.11GiB; all7941 Containers
-  entries were archived/verified, and all original PaintSoftware/Runner bundle/data entries remain
-  exact after boot. OS added one launch snapshot. Closed-result dedup recovered20.72GiB while
-  retaining every result path. 4B33 remains shut; all requiredProducts stay protected.
-  Tap old-production witness is root-accepted54fb7d33. Isolated currente2 logic37 and publicUI6+
-  benchmark1 are green, rootLOOK3 completed. Debug image-manager cold miss1484.8ms is unresolved;
-  Release baseline is prepared only, and performance/15controls precede harvesting.
+### Next gates, in order
 
-- Permanent startup normal59 passed59/59 at60427 (57 whole logic +2 explicit old Gallery methods,
-  whole class3), root5283dbb2. Four original controls are assertion-red/root partially accepted;
-  old S5 expectation exception/crash stays ZERO credit and its packet is immutable. The test-only
-  first-entry latch b55 preserves all104 old assertions. New selected1 passed1/1, then exact S5
-  guard-omission reached BOTH original counts119/125 (2 and3 versus1), without an exception;
-  root8ebff7b7 accepts2 contracts, extra readiness120 is ZERO credit. Root harvested ONLY that test
-  change at537bc70f; all730 entries match b55 exactly, receipt root-harvest-first-entry-537bc70f.
-  The five other original cases closed separately with5 assertion-red cases and6/6 canonical
-  contracts reached, all730 restored/children joined; root causal7d2dc3bc. Restored stroke and recipe
-  handoff, damaged-payload validation, byte-exact displaced artwork and truthful gallery readiness
-  are covered at their actual pins. Do not retag this as one current10-case run.
-  Gallery activities retain ZERO screenshots, so no LOOK is claimed for those old two methods.
-- Public Chroma test is integrated with only two self.onHost compile corrections60427; selected/
-  whole11/outcome control remain UNRUN. Original1a92 startup compiler failure executed ZERO tests and
-  stays immutable. Do not count compilation as a drawing check.
-- Public capacity cold source **6ef391e4** extends an existing Sandwich workflow, one exact launch
-  helper seam; no product hook/new test method. Real two-input Mix refusal/current row/history/drawing
-  checks and notice ordering preserved. Source peer/root review then selected1/whole10/control remain.
-- Wrong-cel Undo is component-qualified and harvested **d7090060** (4 source/test paths exactly1c;
-  no author docs). Actual oldb60 public4 was3pass/1intended526 failure; rootLOOK established stale A
-  tile with B displayed. Fix1c normallogic70 passed70/70;3 logic controls qualify5 application
-  contracts (root632b760f). Normalpublic4 passed4/4, including later ReturnA/Redo/B; root independently
-  reconciled IDs/source730/device and LOOKed all4 whole landscape images, receipt0b1cf559. Exact
-  original view-callback reversal1 reaches sole526 (root5e593e78), source730 restored/children joined.
-  Existing contentRevisions.celID/celIndices and registerVectorElementsUndo are reused; generic helper
-  moves +Text→+Undo, duplicate view restore/current-playhead callbacks removed whole. Same cost,
-  damage and history label; no new state/service/renderer. Fresh B renders validate unaffected drawing.
-  A separate fresh-equivalent-B fixture control is prepared only and supplies0 application credit;
-  final integrated Debug/Release/UI remain open. Original c34 cached-B test source remains superseded.
+1. Join Tap17, restore ALL730, root independently extract original issues and review causality.
+   Public old-scalar/Clear and output-asserted benchmark control proposals need separate grants.
+   Preserve **868's curve cap in StrokeGeometry's tail** when harvesting Tap upper hunks.
+2. Fresh grant gradient17f294 on56C after native idle/storage checks; inspect whole captures; qualify
+   3logic/public1 real-owner faults. No reuse of old0ab279 as an actual run. Then exact source harvest.
+3. Opacityfb87 held-thumb selected1 is UNRUN. Readiness893389b8 remains exact. Root ready ONLY4B33,
+   BEFORE9072 inventory→once helper063a/native d018→joined/source730→AFTER6ff6 preservation/unique
+   NEW manual flight. Output paths absent. Passing workflow may have no failure-only flight; do not
+   force a failure/retry. Original4attempts/.005/50% and all drawing outcomes stay exact. Remove
+   temporary observer/capture/controller WHOLE before harvest. Completed d700 native trace proved
+   wrong value before model, no observed stale reset/cancel/wrong owner; internal UIKit cause unproved.
+4. Whole Text5/Blend11, public Chroma and Mix/whole10/control, stable same-framebuffer Glare2+LOOK/
+   control. Successful permanent Text and Chroma source are already integrated. Old opacity failures
+   were setup, later blend outcomes unreached; do not weaken tolerances or infer product failure.
+5. Cold strict-text previous-writer4files46680B, external empty-library staging, Cancel→Versions→
+   UnsavedRestore blueold+rednew and exact displaced original in Trash. Ordinarywhole3 is2pass+1named
+   opt-in skip; stagedselected1 separate. Fresh owned staging device, never erased personal library.
+6. Relevant UI47/8classes+13faults/15IDs; mask6positive/11faults. Mask BUILD must JOIN, ALL730 restore,
+   then test-without-building. ROOTLOOK positive pictures BEFORE faults. Existing packets preserve IDs.
+7. Final exact CLAUDE fast Debug AND Release, IDs/static counts/4known explicit opt-in skips,
+   lints/PBX/graph/touched whole UI/full phase gate. No final assembled run yet.
+8. Paired Release Fill16ABBA against protected old071Products; real sampler/source/fence/cancel/budget
+   counts plus whole RSS. LensABBA refreeze final production ONCE, same output-asserted harness9e286.
+   Opt-in environment granted explicitly/finally unset; no simulator-to-device/RSS extrapolation.
+9. Finish bounded architecture/source candidates and new autosave/Windows owners without a parallel
+   validator/service, then their finite regression/controls. Windows only after fresh availability
+   grant; no host lifecycle/stream redeploy for tests. Previously qualified transport stays closed.
+10. Qualified FF merge/push from Desktop MAIN (never merge inside task tree), completed TODO items
+    removed WHOLE. Resolve renewal/old-main downgrade risk before October29. Physical Test1 needs
+    fresh saved/unlocked readiness; real streaming stage5 owner/laptop hands-on remains waiting.
 
-### Bounded curve narrowing fix — component-qualified and harvested8682859f
+### Storage and bounded architecture review
 
-Source8272 saturates subdivision length in CGFloat BEFORE Int; coordinates and ordinary rounding
-stay unchanged. Actual current-format archive/reopen/nonlinear fill mapping passes with finite1e20
-controls. Whole Liquify60+InkDistort34 passed94/94, zero skips/failures. Six safe real-owner faults
-reached all7 canonical new application statements;67 other issues get ZERO credit. Root independent
-normal/causal acceptance10a287a8, all730 restored/children joined. Exact3-source net patch18c29091
-is harvested8682859f. No unsafe old cast was executed. Existing broad selection indexing/error
-arithmetic and Test1 respring are not certified by this one cast fix. Next native needs normal rebuild
-because compiled mutant objects remain; final assembled Debug/Release/UI/performance are open.
+Cleanup complete:10.11GiB owned56C caches +20.72GiB immutable-result dedup +13.05GiB exact5 simulator
+DELETE-phase gain. About45GB recovered; free44.52GB before Tap17, owned generated caches979771392B.
+All result paths/bytes/metadata, artwork, needed Products, protected/unlisted devices remain. Five
+archives820782758B independently verified before deletion. No whole DerivedData/global/personal purge.
+CLAUDE phase checks: aim≥10GiB free, pause new batches<5GiB; owned2caches>4GiB means join first,
+then exact offline archive/validate/clean/boot-verify. No daemon/app cleanup service. All receipts:
+`resume-20261026/retire-owned-five-20261026`, `owned56C-offline-cache-cleanup`, closed-result dedup.
 
-### Completed development-storage cleanup — October26
-
-Offline56C cache cleanup recovered10.11GiB and immutable closed-result dedup20.72GiB. Exact5
-obsolete owned simulators are now deleted after independent archive verification; all unlisted/
-protected identities remain exact. Archives/manifests are retained (820782758 compressed bytes).
-The DELETE phase increased actual free space36518146048→50532110336bytes (+13.05GiB), leaving
-47.06GiB/50.53GB free. Receipts: resume-20261026/retire-owned-five-20261026/root-delete-verified.json
-and delete-completion.json. Shared75C, ambiguousA4C and all requiredProducts remain HOLD.
-No artwork/global/personal deletion or iPad operation. Phase-boundary storage checks are in CLAUDE.
-Native lease has moved to Bake for Releasebenchmark1e2; consult external completion/lease before
-another native command. Tap026 compiler failure executed0tests and f786 card-occlusion RED remain
-immutable; e2 logic37/publicUI6+benchmark1 have since passed. Release cost/15controls remain open.
-
-### Other required gates, in queue order
-
-Compiler-warning source audit is bounded and remains UNHARVESTED. Core6bf5741b4 completed an
-app+UITests Debug compile (0 tests): seven named warnings disappeared, but two candidate-protocol
-warnings surfaced. Exact three-prefix successor07a was deliberately interrupted on new cache/
-factory warnings652–654 (operator SIGINT/exit75, not a completed compiler failure;0 tests). All730
-source restored/children joined; completionfaab3917. Further opt-outs reach a materially larger
-existing pixel/primitive owner boundary. No runtime defect was established, so do not harvest
-partial annotations or automatically cascade through protocols/renderer classes. Root harvested only the two genuinely dead-local deletions ate88a25ab; both initializers are
-side-effect-free, no actor annotations are included. Future warning-only builds must finish collecting
-full diagnostics, then stop source expansion for review; do not cancel on a warning alone.
-
-Tap's old-production actual-alpha witness54fb7d33 established corner/outline loss before code.
-Current isolatede2 reuses canonical stamp geometry and a local preceding support, with one default-
-noop discontinuity event at existing pose-refusal arms. Rendering/opacity ownership stays unchanged.
-The whole Tap UI/logic passed; Release cost and deliberate faults precede harvesting. Keep root's
-868 curve-conversion cap when composing the shared StrokeGeometry file.
-
-1. Finish above effects/control/public gesture slices, preserving immutable original packets and
-   meaningful exact assertions. Before every native grant verify clean pin/source730/tool/argv,
-   selected IDs/actual device/positive baseline/output absence/native idle. No overlapping compilers.
-2. Cold damaged-text UI is integrated: actual previous-writer4-file46680B witness, copy-only external
-   staging, runner-only PAINTAPP_STRICT_TEXT_COLD_UI opt-in. Drive Cancel→Versions→UnsavedRestore and
-   original blue+new red. Externally prove displaced original whole bytes in Trash. Ordinary whole3
-   is2pass+1explicit skip; stagedselected1 is separate, not singlewhole3green. No product staging hook.
-3. Glare same-shot framebuffer stability correction is integrated; whole2/actual whole landscape LOOK
-   and meaningful no-rotation control remain. Old transitional/clipped portrait image is INVALID;
-   AX landscape alone is insufficient. Complete permanent maintenance/recovery controls after whole
-   temporary converter retirement; obsolete converter-only cold-library gates are retired with it.
-4. Repin relevant historicalUI47/8classes+13controls and mask6positive/11faults. Mask build must JOIN,
-   ALL source restore, then test-without-building; inspect positive whole pictures first.
-5. Final fast **Debug AND Release**, CLAUDE verbatim filename filter, actual/static method IDs, known
-   explicit skips, lints/PBX/graph/touched whole UI and full phase gate. Integration:730source/PBX1325,
-   runnable5412fast/6008full; raw5415/6011 differs by exactly3 private static testBrush factories.
-   These are static counts, not native qualification.
-6. Fill16 paired Release ABBA against protected old071 products, actual sampler/source/fence/cancel/
-   budget counts and whole RSS. Other genuine audit gaps are mapped by the current346-runtime-file evidence ledger; no whole-
-   codebase safety claim. Aggregate memory and unreviewed current bodies remain explicit.
-   Font pipeline bounded follow-up7535f61c found no new defect; font packs are unshipped/deferred.
-7. Physical Test1 all-process capture needs fresh saved/unlocked readiness. No cause inferred from
-   simulator memory, no Liquify applied in that scene. Finish qualified merge/push or resolve renewal
-   lifecycle BEFORE October29; remove completed TODO items WHOLE in the same merge.
+Independent25-production-file change review found no scoped duplicate owner/band-aid/zombie; deleted
+815lines/added396 in6fb..499. Current346-runtime-file ledger is an honest evidence map, not a safety
+certificate (31whole-current,158selected/changedhistorical,4calleronly,153unknown at6b1a). Later bounded
+reviews add timeline labels/extent+callers, root presentation/viewport3whole, DNS/Mdns, Windows
+resource8whole+2tests, save-scheduling3whole+ContentView and root FillWindow/Fill.metal whole bodies.
+Root fill review959e3ae8 found no new demonstrated defect; kernel cost/whole memory remain unmeasured.
+Do not promote filenames/hashes/test names into review depth or claim whole-codebase certainty.
 
 ## Preserved evidence and safety boundaries
 
@@ -267,8 +168,8 @@ exception applied ONLY to that artifact; ordinary five-day rule remains. `~/Pain
 fetches/builds old origin/main; prevent silent repaired-format downgrade before renewal. No daemon/
 main/policy change yet. Physical deviceE3B83820-DF74-5042-B52B-0D5BA17E4877.
 
-**Machine:** own simulator56CC563F logic booted for capacity24; fresh4B33D581 UI shutdown;39E/ACcold
-shutdown. DD `~/PaintWork/s54-architecture-audit/DerivedData`. Recheck disk before large work. Only
+**Machine:** own simulator56CC563F booted,4B33D581 shutdown with protected recordings;39E and
+the five retired devices are DELETED after verified archives. Shared75C8B97E/ambiguousA4C0B06E HOLD. DD `~/PaintWork/s54-architecture-audit/DerivedData`. Recheck disk before large work. Only
 specifically inventoried inactive compiler/owned shutdown derived system caches reclaimed; all app
 containers/artwork/products/results preserved. No global shutdown, erase or broad cleanup.
 
@@ -277,28 +178,8 @@ audio28/video30, dropped brush importers37, real-link streaming27stage5 owner/la
 
 ### Checkout/resource housekeeping
 
-Eight superseded historical diagnostic checkouts were removed after proving clean status and zero
-ignored/untracked data. Their branches/Git objects and all external results/Products/artwork remain.
-External resume-20261026/finished-diagnostic-worktree-cleanup-receipt.json lists exact paths/pins and
-reconstruction. No active/future a140/fb87/Undo/numeric/benchmark tree was removed. Fetch/all110tmp
-branch logs were verified atbd8aa8ad; origin/main remainsafd2030c.
-
-Owned39E was retired at a later native-idle boundary after every app/shared container, Documents,
-Media, Preferences file/symlink/mode/byte was verified in a65,707,034-byte archive (1786 entries).
-External resume-20261026/retire-owned-39E retains plan/manifest/archive/verification/completion. The
-first free-space sample preceded delayed simulator purge; its addendum observes actual4.21GiB free.
-56C and prepared4B33 were unchanged. Frozen old39E plans are historical; new gates use56C/freshowned
-staging. Tap's first native attempt resumed only after this clearance, originalgrant8ad75590 plus
-storage-resume7e85b140; no native work ran during its initial blocked preflight.
-
-### Owner steering — October26 disk use and architecture
-
-Kevin reports free disk dropped from about70GB, likely accumulated agent outputs, and requests a
-thorough cleanup. Recorded in TODO before new cleanup. Root already retired archived39E and deduped
-74 identical closed-result blobs by73 atomic hardlinks: all original paths/modes/bytes/hash exact,
-xcresult summary before/after identical, immediate1.65GiB reclaimed; actualfree5.61GiB then. External
-resume-20261026/closed-result-blob-dedup contains plan+completion. One earlier preflight stopped before
-mutation because this Mac Python lacks os.listxattr; the successful pass used native xattr reads.
-Next: independent full owned-storage inventory/cleanup, keep artwork/exports/needed binaries/evidence.
-He also reiterates root-cause architecture priority; give plain-language full task status, including
-later/owner-waiting work. No claim of absolute correctness before final regression/physical gates.
+Eight superseded clean historical diagnostic checkouts were removed, branches/Git/results/Products/
+artwork retained. Exact receipts/reconstruction under resume-20261026. Owned39E archive1786entries/
+65707034bytes verified before retirement; old39E plans are historical. New gates use56C/freshowned
+staging;4B33opacity stays protected. Fetch/worktrees/all110tmp logs previously verified; recheck before
+merge. Root records current work here; earlier narratives live in Git history and immutable receipts.
