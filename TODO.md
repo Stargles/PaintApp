@@ -107,6 +107,12 @@ packages before deciding whether these are legal omissions or retired compatibil
 interpolation redesign: this is only the saved-data/legacy-code rule. Any stricter saved format must
 first repair Projects/Backups/Trash once and round-trip actual previous-writer data; no source or
 artwork mutation is authorized by the finding alone.
+Read-only review2f0ecdec confirms every nested field existed and was emitted from firstcbdae859;
+installed6fb writer is exactcurrent. All250 protected manifests omit the entire registry legally;
+none supplies a nonempty group witness. Root authorizes removing only unsupported nested fallback
+acceptance after actual old rejection proof and nonempty previous-writer roundtrip. Legal bytes/schema
+are unchanged, so no speculative no-op repair is added; if an actual legal older writer omitted these
+fields, stop and provide the required one-shot repair first. Keep empty-parent omission and allmodes.
 
 **New source findings recorded before regression/fix — October26:** bounded Windows resource
 review42f684d2 found clipboard timestamp collisions can overwrite an earlier queued paste, and
