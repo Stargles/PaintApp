@@ -99,6 +99,14 @@ Use the three existing agents; all source work stays in separate trees. No physi
   now to inspect the real lifecycle, without treating the unpresented-controller test as app proof.
   Inspect actual
   dismissal identity before authoring the permanent cancel/return workflow, then remove TEMP whole.
+  TEMP309 selected1 nowGREEN/root730/device/argv reconciled and ROOTLOOK1 whole portrait screenshot.
+  Actual AX has exactly one `header.closeButton` under ActivityListView/UIActivityContentView;
+  screenshot shows its X beside Untitled.mp4. No guessed PopoverDismissRegion. Root authorizes
+  permanent source successor from91cf unit boundary: replace TEMP observation whole with scoped
+  unique real Close → activity disappears/parent Export returns → Done/close Actions → visible
+  stroke and relevant gesture proof using existing helpers; run owner1080x810 landscape and attach
+  whole terminal picture. Preserve existing public assertions/deadlines; no product hook or new
+  UI helper duplicate. Actual dismissal/return remains unrun until that successor is qualified.
   UIKit direct
   iPad contract is a compatibility gate, not source-certified. Existing18controls +new supporting
   UUID constructor control37b795 prepared/proposed only; no inherited credit.
