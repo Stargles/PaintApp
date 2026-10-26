@@ -41,7 +41,9 @@ that the final combined audit build has passed.
    control below the stroke292.3pt is clear of notice/dock; fix that measured fixture, keep tolerances,
    fresh nonce and exact empty-parent coordinator. Same4c run02 now passes the actual failure,
    Gallery refusal, autonomous foreground save and cold reopen with exact drawing bytes. Model154
-   passes too; controls and combined checks remain. No app workaround or deadline increase.
+   passes too; controls and combined checks remain. One unreachable final-pixel control is being
+   replaced in a separate proposal using the existing staged writer; original evidence is retained.
+   No app workaround or deadline increase.
 2. Gradient movement: same two-point mapper, with no new renderer/schema. Matched bitmap formats
    still reproduce the interior colour mismatch (104vs108, unchanged tolerance2); investigate before
    accepting it. Actual508 matched-format run still fails4; bitmap-format cause is refuted. Root permits

@@ -28,7 +28,8 @@ Use the three existing agents; all source work stays in separate trees. No physi
 
 ### Current native and source work
 
-- **Native lease:** gradient2e logic controls3, supervisor session40653/root-logic-controls3 grant.
+- **Native lease:** gradient2e logic controls3 joined0; source730 restored. Root extraction pending.
+  Next serial native grant: package-address OLD8f selected5, no central product fix yet.
   Extracted OLD fill ownerbc2 selected1 joined1RED at3intended targets; Export8ded normal87 joined
   86pass/1fail; all4c native work joined. All agents are source-only.
 - **Tap:** qualification and exact9-path harvest3219 closed (logic37, independent public/bench8,
@@ -50,7 +51,12 @@ Use the three existing agents; all source work stays in separate trees. No physi
   receipts: 837 blank probe under notice;4c run01 queried AUT before launch finished (no obstruction
   occurred). Run02 binds runner ready token BEFOREone AUT query; no deadline/tolerance/product change.
   Consumed noncesE682/FA828/3AB3; never reuse. OrdinaryUI2 at837 is1pass+1explicitoptin skip, ROOTLOOK1.
-  Exact scripts85310/88727 unchanged; geometryVersion is1. Current controls16+6 and public controls
+  Exact scripts85310/88727 unchanged; geometryVersion is1. Independent954c34 accepts16 existing
+  control recipes. New261 is readability-only; new275 first proposal cannot reach its assertion.
+  Root authorizes one named derivative replacing ONLYthat case with proposed7dc552b0 durable staged
+  copy corruption; preserve original6 and all other5 recipes, no product/test change. Exact valid
+  blank output through existing writer must reach275; extra272 failure gets0credit. Source-only
+  prepare/review first; no native authority implied. Current controls16+6 and public controls
   remain UNRUN; final source and ordinaryUI2 at4c still owed.
 - **Resize:** product381 ONE published operation phase derives safety/progress, existing LatestWins
   and delayed captured-ID view task; safe e3 fixture avoids unsafe stale second-resize mutant.
