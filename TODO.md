@@ -104,6 +104,19 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ---
 
+## Reclaim accumulated development and test storage — 2026-10-26
+
+Kevin reports free disk fell from about70GB and asks for thorough cleanup before it causes more
+problems. Inventory storage created by current/past agent work: test simulators, checkouts, compiler
+caches and repeated evidence blobs. Keep real artwork/exports, required benchmark binaries and all
+needed source/evidence; prefer exact deduplication and verified archives. Delete only confirmed
+obsolete owned outputs/devices; do not touch unrelated personal files or other sessions' work.
+
+- [ ] Report actual largest consumers/ownership, then reclaim confirmed disposable or duplicated
+      data. Verify preservation and actual free space; establish bounded housekeeping for future runs.
+
+---
+
 ## Keep the edited cel's thumbnail correct after Undo — 2026-10-26
 
 Actual whole CuttingModes4 atb60 is3pass/1intended thumbnail failure, with inspected whole
@@ -347,6 +360,9 @@ thorough audit: “codebase cleanliness and good architecture as well as perform
 with. Dont be afraid to prune.” Trace actual consumers before changing them; reuse one existing owner
 or seam, remove superseded paths whole, and measure claims. Real scenes contain300–1000 drawn cels:
 design around a window/byte budget, never load it all. Deferred features stay deferred.
+Kevin reiterates October26 that fixes must address root causes and preserve good architecture;
+remove superseded owners/paths instead of stacking workarounds. Independent review and actual
+regression evidence support bounded confidence, not a claim that every fix is certainly correct.
 
 The19 finding clusters and file-level gaps are in docs/ARCHITECTURE_AUDIT.md and external findings-index.json.
 Inventory-only files are not reviewed code. New source is not called complete because it is committed.

@@ -250,3 +250,15 @@ first free-space sample preceded delayed simulator purge; its addendum observes 
 56C and prepared4B33 were unchanged. Frozen old39E plans are historical; new gates use56C/freshowned
 staging. Tap's first native attempt resumed only after this clearance, originalgrant8ad75590 plus
 storage-resume7e85b140; no native work ran during its initial blocked preflight.
+
+### Owner steering — October26 disk use and architecture
+
+Kevin reports free disk dropped from about70GB, likely accumulated agent outputs, and requests a
+thorough cleanup. Recorded in TODO before new cleanup. Root already retired archived39E and deduped
+74 identical closed-result blobs by73 atomic hardlinks: all original paths/modes/bytes/hash exact,
+xcresult summary before/after identical, immediate1.65GiB reclaimed; actualfree5.61GiB then. External
+resume-20261026/closed-result-blob-dedup contains plan+completion. One earlier preflight stopped before
+mutation because this Mac Python lacks os.listxattr; the successful pass used native xattr reads.
+Next: independent full owned-storage inventory/cleanup, keep artwork/exports/needed binaries/evidence.
+He also reiterates root-cause architecture priority; give plain-language full task status, including
+later/owner-waiting work. No claim of absolute correctness before final regression/physical gates.
