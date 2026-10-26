@@ -2932,3 +2932,7 @@ and radius-ascent alternatives are unqualified; convenient paths and maximal squ
 independent counterexamples. Evidence: s54-final-qualification/native/
 square-ring-red-0ca9d759-run01/root-independent-acceptance.json. Source comparison remains under
 mend-free-caps-b865-readonly/square-ring-original-vs-endpoint/.
+
+## Resize Settings copy contradicts supported Undo — October26
+
+Root inspected actual546 transition frames: Settings Resize Canvas detail says “This cannot be undone”, while the active resize modal correctly offers Undo and the existing implementation records it. Correct the old detail in place; do not alter history behavior. Source-only finding, no claim that public Undo was already driven in that aborted workflow.

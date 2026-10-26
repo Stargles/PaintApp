@@ -53,8 +53,10 @@ that the final combined audit build has passed.
 3. Resize: one operation phase separates immediate safety locking from visible loading progress,
    using the existing worker and presentation task. Current successor546 passed47 model tests;
    public blank resize passed. Painted test missed the transient busy indicator and stopped, so
-   drawing/Undo outcomes remain unproved. Exact external video is preserved for inspection; no retry,
-   fixture growth or product-delay change. Fault checks remain. Keep PNG preparation off-main.
+   drawing/Undo outcomes remain unproved. Split the painted functional test from the invalid
+   one-cel busy premise; keep every ink/extent/Undo outcome. Busy exposure needs its own real-count
+   workflow. Correct stale Settings text that says resize cannot be undone. No product delay or
+   fixture growth/retry. Fault checks remain. Keep PNG preparation off-main.
 4. Tap selection: canonical brush geometry correction is integrated at3219c8b4. Model37, public8,
    Release benchmark1 and24 deliberate-failure cases passed at their recorded component pins; root
    inspected the independent square selection/Clear pictures. Final combined checks remain.
