@@ -17,224 +17,64 @@ failure paths; do not add a parallel cache/job system. Commit before deliberate 
 source afterward, drive affected UI and inspect pictures. Protect real artwork and keep format repairs
 one-shot. No evidence below establishes the cause of the Test1/backboardd respring.
 
-The per-cluster prepared/unqualified notes below are historical at their named initial revisions.
-Current component/native/fault status is in HANDOFF.md and its immutable evidence references; do not
-reopen a qualified finding solely because an old entry says pending. Coverage remains bounded:
-FontLibrary384/TextSettings25 whole lines additionally reviewed at8dcb without a new concrete defect;
-remaining typography/archive/panel and graph/tool file gaps stay bounded. External root font receipt
-78ff10a8 and coverage-gap-reconciliation-5b8e5738 distinguish review from inventory. A further source-only
-pass ate88a25ab covers selected graph editor close/context/menu/subscription and target/evaluation
-ownership ranges, without a new demonstrated defect (external graph-editor-lifecycle-e88a25ab.md).
-It does not certify every curve equation or UIKit teardown/interleaving. The concrete curve-flattening
-integer-conversion defect is recorded separately in TODO/BUGS before its minimal correction.
-
-## Findings queue
-
-### Migration identity
-
-Equal counts/bytes cannot prove an arbitrary existing destination is the same artwork; strict enumeration/failure semantics also need review.
-
-Unqualified implementation: `tmp/s54-library-ownership` de28149c, six regressions, parse/plutil only.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/persistence-review.md`.
-
-### Trash history ownership
-
-Expiring an old same-named Trash item may delete a different recent item’s backups.
-
-Unqualified implementation: `tmp/s54-library-ownership` de28149c, six regressions, parse/plutil only.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/persistence-review.md`.
-
-### Export cancellation
-
-Cancelled old I/O completion may clear a replacement export’s phase/focus.
-
-Unqualified implementation: `tmp/s54-background-ownership` ec46b3e6, five regressions. No native gate.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/persistence-review.md`.
-
-### Startup save-stage cleanup
-
-Detached startup sweep can overlap the save queue’s active staging directory.
-
-Unqualified implementation: `tmp/s54-background-ownership` ec46b3e6, five regressions. No native gate.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/persistence-review.md`.
-
-### Thumbnail backfill ownership
-
-Old document task remains strong and backfills after close/replacement.
-
-Unqualified implementation: `tmp/s54-background-ownership` ec46b3e6, five regressions. No native gate.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/persistence-review.md`.
-
-### Derived frame recovery
-
-Unreadable existing derived frames can indefinitely retry export; missing/evicted frames may stay clean and fail playback recovery.
-
-Prepared `tmp/s54-bake-lifecycle`: actual reads reject disposable invalid files with per-file accounting;
-clean-key resident misses forget/requeue their frames, with allocation/ring refusals kept separate.
-Fifteen tiny regression methods across store/baker/export cover drawn bytes, metadata readiness,
-real recomposites, close/reset ownership, shared-root caps/accounting, old-read/new-write ownership,
-checked hostile-header arithmetic and terminal typed export refusal. Review77278642's filesystem
-polling and per-instance ownership blockers are corrected in source; native qualification is pending.
-Parse/lints only; native reproduction/qualification,
-mutations, current UI/pictures and fast tiers remain root's gates.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/render-review.md`.
-
-### Baker close lifecycle
-
-Retained baker may refill cleared bookkeeping/ring after close; no demonstrated cross-project stale output.
-
-Prepared on the same branch: reuse `LatestWins` cancellation for bake and resident-read landings;
-gallery close detaches consumers/model, and reopening creates a fresh owner. Frozen work may finish
-one disposable disk write. Queued-job regressions are prepared; native gates remain unrun.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/render-review.md`.
-
-### Mask dependency budget
-
-Source correction prepared: `ChunkedCompositor.minimumSources` prices indivisible transitive mask
-closures, assembled node outputs and earlier mix slots; strip height uses that floor in the existing
-budget arithmetic. Mix assembly reserves earlier slot pictures while resolving later slots.
-`liveMaskRecipe` asks the same mask cache with metadata first, resolving only its dependency subset
-on a miss. Nested-mask pixel/count and planner regressions are prepared. Native and mutation gates
-remain pending; this bounds planned picture costs, not total process residency, and retains the
-minimum-one-row exception when even that row cannot fit.
-Live coverage now carries typed source refusal separately from neutral absent/deleted masks. The
-stroke factory resolves clipping before any recorder or document mutation and returns an immediate
-begin action only on success. The planned playback entry uses the existing rewind rule; take begin
-still precedes cel spawn. Refusal raises the shared drawing-read notice. Onion mask/source refusal
-uses the existing full blank/cancel/drop path, preventing wrong-frame ghosts and stale landings.
-Real declined-provider and planned-frame source tests plus a cold artist-path UI test are prepared;
-callback, recording, Liquify and onion refusal need external app-fault/UI qualification because views
-are absent from logic. Root's initial focused121 compiled119pass/2 stale one-source premises; their
-CPU/Metal replacements now require the true floor2, real nested calls and complete pixel parity.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/render-review.md`.
-
-### Video decoder residency
-
-Source-confirmed lifecycle gap: the shared64MiB ring/four readers had no production close/pressure
-owner. `tmp/s54-video-lifecycle` wires per-document closeable clients into the existing source, ring
-and MemoryPressure seam; short ownership resets fence old serial reads. Sample diagnostics count
-up to two distinct app-held buffers per cached reader separately from ring bytes; AVFoundation
-internal pools and RSS remain unmeasured.
-
-Remaining: native tiny regressions/mutants, cold UI/picture at owner size, fast tiers and device
-qualification. Source parsing and UI lints alone do not qualify the implementation.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/animation-media-review.md`.
-
-### Stream backpressure
-
-Writer and decoder inputs can queue unbounded work before bounded/latest output; same FIFO delays replacement notice.
-
-Remaining: verify/reproduce, then fix or reject the premise with evidence.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/stream-review.md`.
-
-### Stream framing limits
-
-C# declared-u32 allocation unbounded unlike Swift64MiB; receivers do not enforce stated chunk cap.
-
-Remaining: verify/reproduce, then fix or reject the premise with evidence.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/stream-review.md`.
-
-### Stream connection ownership
-
-Handshake readiness/current identity and joining client tasks need coherent ownership.
-
-Remaining: verify/reproduce, then fix or reject the premise with evidence.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/stream-review.md`.
-
-### Destructive test hooks
-
-The existing compile-time simulator guard originally covered only the Projects/Backups/Trash part of
-`-resetGallery`. Its synchronous `AppSettings` half also deletes preferences, and
-`-resetEditorPreferences`, `-resetPalettes`, `-resetBrushLibrary`, and
-`-simulateProjectCorruption` mutate persistent state. Those hooks now run only in simulator builds;
-the app's library-export hooks and temporary-scene seeds remain. Deleted
-`deploy/mac/parallel_test.sh` after source, shell-alias and history tracing found no operational
-caller; it depended on the retired `~/PaintApp` checkout and old simulator IDs. `fast_test.sh` remains
-the documented runner. No actual device damage is claimed. Verification is static only; physical
-exclusion follows from the compile-time target branch and is not claimed as simulator XCTest evidence.
-
-Remaining: verify/reproduce, then fix or reject the premise with evidence.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/infrastructure-review.md`.
-
-### Stored palette validation
-
-`PaletteColor.color` previously mapped unparsable hex to black. Parseability is now enforced at the
-shared immutable `PaletteColor` value, covering palette swatches, scene `ValueFill`, and recent colours;
-all parseable saved strings, including lowercase, `#`-prefixed, and opaque 8-digit forms, retain their
-exact spelling. The black fallback and palette-specific decoder are removed. Startup repair now adds
-strict current-manifest decode after its light package walk, so typed damage uses the existing backup
-restore and Trash path; when no valid backup exists, original bytes remain. Added
-`ColorPickerLogicTests.testParseablePaletteHexKeepsItsOriginalSpelling`,
-`ProjectStorageIntegrityLogicTests.testTypedColorDamageRestoresValidBackupAndPreservesDamagedPackageInTrash`,
-`ProjectStorageIntegrityLogicTests.testTypedColorDamageWithoutBackupLeavesOriginalBytesAndGalleryEntry`,
-and a cold drawn test in `GalleryRecoveryUITests` for retained Trash entry and rendered restored ink.
-No schema, normalization, migration, or new recovery framework. `git diff --check` only; compiler,
-native/UI run, screenshot inspection, and mutation qualification pending root.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/panels-utilities-review.md`.
-
-### Stationary stroke samples
-
-Pending stroke-fit samples grow during stationary holds; any coalescing must prove timing/brush/take equivalence and actual benefit.
-
-Remaining: verify/reproduce, then fix or reject the premise with evidence.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/stroke-geometry-review.md`.
-
-### Editable raster residency
-
-Normal open eagerly allocates a canvas-size editable CGContext per nonblank raster cel; save/freeze ownership must be included in a real byte-budgeted residency design.
-
-Remaining: verify/reproduce, then fix or reject the premise with evidence.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/document-residency-review.md`.
-
-### Brush preview identity and budget
-
-Confirmed by source trace at integrated pin `65a8afd8`: `BrushPreviewRow.image` is unkeyed and wins over
-the current-key cache value. After A renders, B renders, and A is restored, the cache-hit task exits
-without replacing row state, leaving B displayed indefinitely. The singleton cache strongly retains
-every unique brush/size/scale image; detached work can finish and insert even after the row task is
-cancelled. At the editor's 196×56 points and scale 2, one RGBA8 picture is 175,616 payload bytes;
-aggregate process RSS is unmeasured.
-
-The correction is scoped to the existing row/cache seam: completed state carries its request key
-(brush value, rounded dimensions and scale), and only a matching result can draw. Cache retention is
-bounded by actual image bytes and follows existing `MemoryPressurePolicy` warning/background trims.
-BRUSH.md changes from “unedited never re-renders” to retained hits plus deterministic rebuild after
-eviction. Qualification needs keyed A→B→A selection and stale completion coverage, byte/LRU/pressure
-logic assertions, and a cold editor UI that samples the rendered preview band at A→B→A. No native
-result yet.
-
-Remaining: verify/reproduce, then fix or reject the premise with evidence.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/brush-cel-review.md`.
-
-### Vector undo accounting
-
-Source-confirmed: stable IDs missed same-ID geometry replacements, flat512 consumers remained,
-and Move closures retained unused whole parts. `tmp/s54-vector-undo` replaces the proxy with one
-operation-scoped payload accountant, batches affected canvases, and captures only actual Move restore
-lists/IDs. Live sample arrays, rest/placement/ancestors and archived fill Data are priced without
-unpacking/decoding; inline bytes use a conservative allowance. PackedSampleRun is wire-only.
-
-Remaining: native focused controls/mutations, Debug/Release fast tiers, normal Move/precision UI and
-artist-size screenshots/device qualification. Source parse/lints are not footprint or RSS results.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/brush-cel-review.md`.
+Current statuses below replace the initial prepared/unqualified notes; those remain in Git history.
+The source-only reconciliation at91940f52 pins current owners and existing receipts, including whole-
+file equality for13 of18 selected owner files. That is not a count of reviewed files or new native
+qualification. The old19-cluster inventory additionally counted the now-retired temporary converter.
+
+Coverage remains bounded. FontLibrary/TextSettings and selected graph editor lifecycle/context/menu/
+subscription ranges received later review without another demonstrated defect. Unread portions of
+vector/graph/math/platform/widget internals and private GPU/ImageIO ownership are not certified.
+Do not reopen a qualified seam solely because an initial external report says pending.
+
+## Current findings and qualification
+
+| Finding | Root-cause correction through existing owner | Component evidence and remaining boundary |
+|---|---|---|
+| Migration identity | ProjectLibraryMigration uses strict ProjectFileTree enumeration/type/read/content comparison, not counts/bytes. | Implemented;847/base49. Final assembled gates remain. |
+| Trash history ownership | ProjectBackupManager purges by UUID ownership of live/retained Trash packages. | Implemented;847/base49. Retention/startup follow-ons keep their own pins. |
+| Export cancellation | FrameExportSession fences old I/O and focus/continuations by the existing run generation. | Implemented;847/base49. No replacement export service. |
+| Startup save-stage cleanup | ProjectBackupManager uses ProjectStore.serializingPackageMutation; permanent maintenance owns gallery readiness. | Serializer qualified847/base49; permanent startup59 and separate controls recorded in HANDOFF. Converter is retired after owner confirmation. |
+| Thumbnail backfill ownership | Document close cancels its task; backfill checks ownership between bounded batches of8. | Implemented;847/base49. An already-running synchronous batch may finish. |
+| Derived frame recovery and baker close | FrameBakeStore separates corrupt disposable data from allocation/ring refusal; FrameBaker close/LatestWins/requeue share actual demand ownership. | Implemented;847/base49. Headroom/unlink/late-write limits remain explicit. |
+| Mask dependency budget | ChunkedComposite prices transitive closure/held slots; one MaskResolver checks metadata before pixels and propagates refusal. |847/qualified52 ledger. App-view/recording/Liquify/onion UI controls and final-source gates remain. |
+| Video decoder residency | Per-manager VideoFrameSource clients close; pressure trims reader/ring ownership and fences late work. |847/52 ledger. Private AVFoundation pools and up to2 held native samples/reader are outside copied-ring accounting; real device/RSS remains. |
+| Stream backpressure/framing/connection | Completion-paced writer, bounded payload/chunks, joined-run/epoch fencing and exact failure settlement. | Swift422/35-gap16 controls; Windows166 Debug/Release and16 targets/15 recipes. Real-link stage5 remains owner/laptop waiting. |
+| Destructive test hooks | Compile-time simulator exclusion replaces runtime policy indirection; unused parallel_test.sh removed. | Implemented. Ordinary final app/UI/Release gates remain; never exercise destructive flags on the iPad. |
+| Stored palette validation | PaletteColor rejects malformed saved hex; existing backup damage/Trash path preserves original bytes. | Logic422/first29-gap8. Selected recovery UI passed and was LOOKed in676; that whole73-method run was67pass/5fail/1skip. |
+| Stationary samples | StrokePathFit bypasses redundant scans; LiveWalk drains prefixes without changing original samples/channels/timing. | Product/parity controls qualified in original126 union. Naive coalescing was refuted by1ULP timing; input storage remains O(N), not bounded. |
+| Editable raster residency | One RasterResidency charges sources/working reservations; immutable RasterSource backing/read leases, COW and serialized checkpoints share ownership. |430/finite-pass8/raster14/gap16/remaining35 and scaled cases. Final cold consumers/RSS remain; not eager all-cel hydration or an iPad respring explanation. |
+| Brush preview identity/budget | Exact BrushPreviewKey/row result identity and existing8MiB actual-image LRU/pressure owner. |422/first29-gap8; A→B→A UI individually passed676 and3 pictures LOOKed. Whole676 was not green. Final whole classes remain. |
+| Vector undo | One VectorUndoCost/UndoBudget prices actual retained payload; generic swaps live in +Undo; stroke Undo uses the edited cel identity. | Original accounting847/52; distinct wrong-cel fix1c passed70/public4/3logic+1public controls, rootLOOK4; harvested d709. Final assembled gates remain. |
+
+Detailed reconciliation and pinned inputs:
+`~/PaintWork/s54-architecture-audit/status-reconciliation-91940f52/` (receiptbcc5cca9).
+Earlier source traces/qualified ledgers stay under `~/PaintWork/s54-architecture-audit/` and their
+original component directories. Historical results are not retagged to current code.
+
+## Genuine remaining work
+
+- Complete assembled-source Debug/Release, affected whole UI/owner pictures, mask consumers and paired
+  Release Fill/Lens cost with process-memory/device limits stated. Five original assertion limits
+  remain unqualified: stale decoder-error arrangement, two topology checks, packed header metadata,
+  and shared slot-array comparisons. They are not five demonstrated unfixed product defects.
+- Finish the independently reproduced Tap corner correction through canonical geometry. It is still
+  isolated from root: logic37 passed; first public6+benchmark run was6pass/1fail because the new
+  landscape test tapped under its card. Root inspected the actual full frames. Preserve every outcome,
+  fix that fixture position, and measure image/manager cost before claiming smooth selection.
+- Finish the native opacity-gesture experiment and subsequent colour workflows without loosening
+  outcomes. Existing observations establish a native slider setup miss, not a blend-product defect.
+- Finish current-format damaged-text cold recovery, consumer UI and final integration. Qualified
+  strict-decoder/capacity/numeric/seed/text/curve fixes keep their actual pins in HANDOFF.
+- Finish genuine file-review gaps. Any further stationary-memory change needs exact-semantics design
+  and measured benefit; do not revive refuted coalescing or the deferred interpolation overhaul.
+- Physical Test1 allocation/cause and real-link stream stage5 need the actual devices. Do not invent
+  a platform-memory fix from simulator counts. Partial compiler-isolation candidates stay out.
+
+A separate source-only review of installed6fb→499017c7 covered the25 changed production paths
+(+396/−815) and found no demonstrated duplicate owner, band-aid or abandoned module. It reused actual
+retirement/capacity/strict-text/numeric/Undo receipts. It is not a whole-codebase correctness guarantee
+or another runtime pass (external benchmark-image-manager-peer-026276cf-499017c7, receipt2a174969).
 
 ## Current limits
 

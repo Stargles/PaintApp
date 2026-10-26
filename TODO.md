@@ -374,7 +374,8 @@ Kevin reiterates October26 that fixes must address root causes and preserve good
 remove superseded owners/paths instead of stacking workarounds. Independent review and actual
 regression evidence support bounded confidence, not a claim that every fix is certainly correct.
 
-The19 finding clusters and file-level gaps are in docs/ARCHITECTURE_AUDIT.md and external findings-index.json.
+The18 current finding headings and file-level gaps are in docs/ARCHITECTURE_AUDIT.md; the old19
+index also counted the now-retired temporary converter. Current statuses replace historical pending notes.
 Inventory-only files are not reviewed code. New source is not called complete because it is committed.
 
 - [ ] Data protection/background: finish final-source gates for strict migration/Trash ownership,
@@ -395,26 +396,12 @@ Inventory-only files are not reviewed code. New source is not called complete be
       is larger and no runtime defect is proved. Keep the source triage; the two dead-local
       deletions are harvested alone ate88a25ab. Finish drawn-workflow gates before considering a wider isolation migration.
       No automatic cascade, blanket namespace opt-out, new locks or actor hops.
-- [ ] Verify the new source-only Tap-selection candidate before a fix: VectorHitTest uses a circular
-      pressure-one radius/outline for noncircular tips. A rotated100-point square dab has visible
-      corner ink outside that hit radius. Check the actual shipped tip/render and selection contract,
-      then reuse existing authoritative brush geometry if confirmed; no new footprint/cache pipeline.
-      Old-production witness a140 now reproduced: actual256-square ink premise passes, but corner
-      hit253 and namedID270 miss; outline268 excludes1512 ink cells. Root54fb7d33 accepts this source-
-      linked reproduction, Clear277 remains unreached. Effect on other brush properties and cost
-      remain unproved. Implement the independently reviewed shared geometric sink; keep existing
-      body/gap policy, named IDs, margins and nonpaint handling; no raster probe/cache/state service.
-      Root challenged an unnecessary rendered-alpha proposal: the existing policy selects geometric
-      object bodies (text boxes, picture quads and continuous stroke spans), with no texture-hole or
-      dab-gap miss contract. Prefer the smaller canonical geometric proposalc49baadd: reuse the
-      existing walk/shared circle-image primitive geometry and local swept support for hit/outline.
-      No raster probe, mask/cache/admission framework or copied modulation math. First add/drive a
-      production-rendered rotated-square witness in existing Tap tests on old hit code, with its
-      alpha/render premise distinct from behavioral hit/outline credit, before production edits.
-      A finite source counterexample disproves universal posed-site continuity: scattered stamps can
-      fail mapping between valid ones. Proposed minimal shared DabTarget discontinuity event from
-      the3 existing pose-refusal arms resets only local geometry support; normal targets are no-op.
-      No new owner/state/flags/pose math or artificial stroke/group settlement.
+- [ ] Finish reproduced Tap corner correction through existing canonical brush geometry. Old native
+      witness confirms visible corner/outline loss; isolated f786 logic37 passes. Whole public6 plus
+      benchmark is6pass/1fail: actual whole frames show the new landscape test tapped under the card,
+      so no product-hit failure is inferred. Correct only that fixture row using existing dock helpers,
+      retain all outcomes, add the peer-reviewed image/actual-manager measurements in the existing
+      benchmark, then qualify UI/controls/cost. No new cache/service/renderer or duplicated brush math.
 - [ ] Qualify source-integrated removalec62d712 of geometry repair and converter-only UI/tests/fixtures/PBX paths: Kevin
       confirmed current scenes “Looks right” after the preserved250-package export and signed6fb
       install/normal launch. Keep permanent startup maintenance scheduling, truthful gallery readiness
@@ -457,7 +444,7 @@ Inventory-only files are not reviewed code. New source is not called complete be
       retention. Final823e proof distinguishes exact2 vs2.25 scale within one old rounded bucket and
       checks actual requested600×120 pixels. Shared PaletteColor rejects malformed persisted hex rather
       than silently displaying black; normal strings are byte-preserved. Brush/palette logic passed within normal1cf422. Cold A→B→A drawn row and typed-colour
-      recovery UI passed in the earlier676 UI73 gate. First29/gap8 fault qualification covers all53
+      recovery methods individually passed/LOOKed in676 (whole73 was67pass/5fail/1skip). First29/gap8 fault qualification covers all53
       selected brush/palette/metadata/curve assertions. Final-source whole UI classes remain pending.
 - [ ] Curve editor drag: sourcecf184033 is integrated. Existing moving returns the authoritative
       landed frame with the updated curve, so clamped continuation cannot freeze or retarget a neighbor.
@@ -488,13 +475,13 @@ Inventory-only files are not reviewed code. New source is not called complete be
       source edits; temporary capture delta is then removed whole. Original export has no text.
       Real-package/mutation/cold qualification remains required.
 - [ ] Graph/capacity: shared resolved-destination/net-child admission is integrated at8e80; actual155
-      normal and original42 deliberately broken contracts qualify. Capacity24follow-on/public cold6ef
-      remain open; four further outcome limits are recorded. Keep proper-descendant semantics and
+      normal and original42 deliberately broken contracts qualify. Capacity24follow-on qualifies all41 further contracts; public cold6ef
+      remains open and four further outcome limits stay recorded. Keep proper-descendant semantics and
       one resolver; no renderer truncation, fake IDs, duplicate state or new rollback service.
-- [ ] Effects numeric domains: source5a and2d are independently reviewed, UNRUN. Existing angle/apron/
-      CPU+Metal sampler owners prevent unsafe conversions while preserving fractional edges and saved
-      Double settings. Normal63/116,13safe controls each, public workflows and paired output-verified
-      performance remain. No ordinary-slider/Test1-cause claim.
+- [ ] Effects numeric domains are component-qualified:5a63/63+13safecontrols, ec50CRT116/116+
+      13safecontrols; exact root harvests retain original CPU/oracles/tolerances/global flags. Curve
+      narrowing8272 passed94/94+6safecontrols and is harvested868. Final assembled Release/cold UI/
+      paired output-verified cost remain; no unsafe old cast or Test1-cause claim.
 - [ ] Finish file-level/independent review, new affected zero-skip baseline, actual assertion mutants,
       exact final fast Debug/Release, lints/PBX/graph, cold workflows/pictures and paired performance.
       Then fresh owner save/unlock/export, signed clean Release/device checks and actual eraser cause.
