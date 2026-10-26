@@ -32,8 +32,8 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   CPU/oracles/tolerance/global flags stay exact. Ordinary cold appearance, Release and paired cost
   remain pending. Preserve original2d/702/3d2 RED. Matched Lens ABBA packet is prepared only.
   New public Chroma drawing test with two self.onHost compiler corrections60427 is integrated;
-  selected/whole11/outcome control UNRUN. Corrected permanent startup59 is running once, with10
-  controls still separate. First1a92 compiler failure executed ZERO tests and stays immutable.
+  selected/whole11/outcome control UNRUN. Corrected permanent startup59 passed59/59; its10
+  controls are running separately. Actual Gallery screenshots are unavailable, so no LOOK is claimed. First1a92 compiler failure executed ZERO tests and stays immutable.
 - Public two-input Mix refusal workflow6ef; cold damaged-text recovery/byte-exact original in Trash;
   actual stable Glare landscape picture; wrong-cel Undo thumbnail public repro4432 then minimal fix.
 - Permanent maintenance/recovery and remaining relevant UI/mask controls; final exact fast Debug AND
@@ -43,7 +43,7 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   signing renewal, or resolve automatic old-main downgrade risk. Remove completed items WHOLE.
 
 Current integration730source/PBX1325/runnable5412fast6008full. Video67bd normal11/control1 are closed;
-corrected60427 startup59 holds the sole native slot. Exact evidence/current
+corrected60427 startupcontrols10 holds the sole native slot. Exact evidence/current
 lease live in HANDOFF.md and `~/PaintWork/s54-final-qualification/root-next-gates.json`.
 Owner rulings remain point-only vector Liquify; vector batch mending includes attached strokes but
 protects uncertain joins/outside outline; saves keep newest clock-bucket versions. Deferred features

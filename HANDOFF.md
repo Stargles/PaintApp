@@ -87,15 +87,18 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   mechanics remain unproved; later Blend outcomes are unreached. Root inspected three whole images.
   Export explicitly records the bundle-owned container change; its empty prior inventory supplies no
   nonempty-library preservation claim. A source-only peer is reviewing one continuous held-thumb
-  sweep through the existing finger synthesizer before a separately granted one-selector experiment.
+  sweep through the existing finger synthesizer. Temporaryfb87 is clean/source-prepared and exactdiff
+  peer675d2f20 accepted; its one-selector experiment remains UNRUN/ungranted.
   Keep four attempts, original .005/50% and all drawing assertions; no product hook/controller state.
-- Sole native slot is Converter's corrected **60427b21** startup59 on56C, granta60b795b. Actual
-  operator67391/helper67393 started once. No concurrent compiler/lifecycle/environment operations.
+- Sole native slot is Converter's **60427b21** startupcontrols10 on56C, grante9b145bd. Actual
+  operator72061/driver72063 started once. No concurrent compiler/lifecycle/environment operations.
   4B33/39E remain shut; no physical action. Check actual completion before granting the next job.
 - Chroma public drawing testee983 is integrated with only two explicit self.onHost compile corrections
   at60427b21; no outcome/input/action changed. Firststartup59 at1a92 compiled ZERO tests, root61eb736e;
   preserve that failed run. New permanent startup59/control10 are frozen at60427:57 whole logic plus
-  two explicit old Gallery methods (whole class3); normal59 is running, control10 remains UNRUN. Chroma selected/whole11/
+  two explicit old Gallery methods (whole class3); normal59 passed59/59, zero failures/skips/expected,
+  root5283dbb2 independently reconciled every ID/device/source730. Control10 is running separately.
+  The actual Gallery activities retain ZERO screenshots; root claims no LOOK. Chroma selected/whole11/
   drawn effect-omission control also remain UNRUN. Do not count compilation as a drawing check.
 - Public capacity cold source **6ef391e4** extends an existing Sandwich workflow, one exact launch
   helper seam; no product hook/new test method. Real two-input Mix refusal/current row/history/drawing
@@ -114,8 +117,9 @@ Warning cleanup source direction and concrete six-file patchbb437dce were indepe
 reviewed before code: explicit existing serializer/lock/pure-owner boundaries and two whole unused
 local deletions only. No bodies/locks/policies/protocols change. Brush preview stays separate because
 its renderer/conformance dependencies need actual compiler evidence; no blanket unsafe annotations.
-Vector is authorized to implement the six-file patch on a separate branch, with no native work until
-a separate grant. First later app+UITests Debug compilation stops at unreviewed dependency scope.
+The exact six-file patch is committed clean atbf5741b4 on PaintApp-s54-warning-owner-core;
+source730/724unchanged, no compiler run. First later app+UITests Debug compilation stops at any
+unreviewed dependency scope. No preview annotations are bundled.
 
 1. Finish above effects/control/public gesture slices, preserving immutable original packets and
    meaningful exact assertions. Before every native grant verify clean pin/source730/tool/argv,
