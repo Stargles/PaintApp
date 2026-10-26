@@ -48,6 +48,8 @@ final class GalleryRecoveryUITests: PaintUITestCase {
         app.launchArguments = ["-simulateProjectCorruption"]
         app.launch()
 
+        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 15),
+                      "The maintained library must expose the gallery before recovery is judged")
         // If auto-repair failed, the tile would read as damaged instead of opening.
         let damagedLabel = app.staticTexts["Damaged — tap to recover"]
         XCTAssertTrue(damagedLabel.waitForNonExistence(timeout: 10),

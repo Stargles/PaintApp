@@ -342,7 +342,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
         XCTAssertEqual(decoded.images.map(\.fileName), ["a.png"])
     }
 
-    func testPreviousGeometryVersionMustBeConvertedBeforeCurrentDecode() throws {
+    func testMissingOrUnknownGeometryVersionFailsCurrentDecode() throws {
         var payload = try jsonObject(healthyPayload())
         payload.removeValue(forKey: "geometryVersion")
         XCTAssertThrowsError(try JSONDecoder().decode(VectorCanvasData.self, from: jsonData(payload)))

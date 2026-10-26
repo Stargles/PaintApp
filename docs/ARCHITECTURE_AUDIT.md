@@ -232,14 +232,6 @@ artist-size screenshots/device qualification. Source parse/lints are not footpri
 
 Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/brush-cel-review.md`.
 
-### Temporary repair startup scheduling
-
-PaintApp.init runs the one-shot conversion synchronously before first UI. Copy-only real-library timer measured11.013s around run() on owned M5 simulator,266 conversions; no iPad startup duration/watchdog claim. Need genuine cold-start reproduction and a minimal temporary scheduling/UI gate before device release. Do not dispatch @MainActor run() onto Task.detached and assume it moved. Retire all repair UI together after owner confirms.
-
-Remaining: verify/reproduce, then fix or reject the premise with evidence.
-
-Detailed source evidence: `/Users/juliapark/PaintWork/s54-architecture-audit/repair-timing/real-library-report.json`.
-
 ## Current limits
 
 The subagents reported account usage limits; their work is committed as WIP and must not be merged

@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct ProjectManifest: Codable {
-    /// The package boundary is readable without opening its cels. Once current, ordinary damage
-    /// belongs to backup recovery rather than the one-shot previous-format converter.
+    /// The current package boundary is readable without opening its cels; unreadable metadata
+    /// belongs to backup recovery.
     struct GeometryVersion: Decodable {
         private enum Key: String, CodingKey { case geometryVersion }
         init(from decoder: Decoder) throws {

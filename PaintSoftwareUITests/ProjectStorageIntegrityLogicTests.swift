@@ -145,6 +145,39 @@ final class ProjectStorageIntegrityLogicTests: XCTestCase {
         XCTAssertEqual(loaded.layers[0].cels[0].interpolation?.localEdits.first?.stroke.brush, TestBrushes.hardRound)
     }
 
+    func testCurrentTruncatedDrawingAndRecipeRecoverFromBackupAndPreserveDamagedPackages() throws {
+        for drawingDamage in [true, false] {
+            let package = try package("Projects/\(drawingDamage ? "drawing" : "recipe").paintproj") { manager in
+                manager.layers[0].cels[0].vector = VectorCanvas(size: CanvasFixture.canvasSize,
+                    elements: [.stroke(placedStroke())])
+            }
+            let goodBytes = try fileBytes(package)
+            let manifest = try JSONDecoder().decode(ProjectManifest.self,
+                from: Data(contentsOf: package.appendingPathComponent("manifest.json")))
+            let latest = ProjectBackupManager.latestSnapshotURL(
+                directory: ProjectBackupManager.backupsDirectory(projectID: manifest.id))
+            XCTAssertEqual(try fileBytes(latest), goodBytes, "The current writer supplies an exact valid backup")
+            let damagedFile = try (drawingDamage ? vectorURL(package) : recipeURL(package))
+            try Data("{ truncated current JSON".utf8).write(to: damagedFile)
+            let damagedBytes = try fileBytes(package)
+            XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: package))
+
+            ProjectBackupManager.repairCorruptedProjects()
+
+            XCTAssertEqual(try fileBytes(package), goodBytes,
+                           "Recovery restores the current writer's complete package bytes")
+            let loaded = try XCTUnwrap(ProjectStore.load(from: package))
+            XCTAssertFalse(loaded.loadDamage.isDamaged)
+            XCTAssertEqual(loaded.layers[0].cels[0].vector?.strokes.count, 1)
+            XCTAssertNotNil(loaded.layers[0].cels[0].interpolation)
+            let preserved = try XCTUnwrap(ProjectBackupManager.listTrash().first {
+                $0.displayName == package.deletingPathExtension().lastPathComponent
+            })
+            XCTAssertEqual(try fileBytes(preserved.url), damagedBytes,
+                           "Every damaged original file remains recoverable in Trash")
+        }
+    }
+
     func testTypedColorDamageRestoresValidBackupAndPreservesDamagedPackageInTrash() throws {
         let package = try package { $0.colorPanel.recordPainted(.red) }
         let manifestURL = package.appendingPathComponent("manifest.json")

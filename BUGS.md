@@ -255,23 +255,6 @@ Projects with the same name can have independent UUID histories. Purge now uses 
 Projects and retained Trash and preserves histories when ownership cannot be established. Native
 qualification remains pending.
 
-## One-shot geometry repair delays the first app screen — 2026-10-24
-
-Current: f69 worker/gated startup and permanent maintenance scheduling are integrated; startup/recovery logic including the corrected99-method union passed within normal1cf422. Genuine previous-writer whole-library cold UI remains pending; the repair-only11.013s is not a launch duration.
-
-`PaintApp.init` synchronously calls the @MainActor `PointGeometryRepair.run()` before constructing
-the gallery/error view. A copy-only native M5 measurement around run() alone took11.013s for266
-conversions of the preserved256-package library; second run0 and all3180 original file hashes match.
-The107s total test also includes copy/hash/reopen validation and is not the startup duration.
-No iPad watchdog failure or device duration is established. Reproduce a genuine old-library cold
-launch and make this temporary phase responsive before installation, preserving the rule that no
-gallery/recovery read occurs until conversion succeeds. A detached call to an @MainActor method
-does not move its work. Retire scheduling/UI together with the one-shot service after owner confirms
-current artwork. WIP `tmp/s54-repair-startup` removes the synchronous init call, gives the repair
-an explicitly nonisolated worker, and gates ContentView until repair+maintenance complete. Three
-new startup logic methods prepared; native compile/runtime/cold UI qualification remains unrun.
-Evidence: `~/PaintWork/s54-architecture-audit/repair-timing/capture-02/`.
-
 ## Interior mending counts ink already covered by Edge Overlap — 2026-10-24
 
 Current: the shared fill/contour correction is integrated in the fill265e component. Earlier focused

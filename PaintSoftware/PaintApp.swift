@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 struct PaintApp: App {
-    @StateObject private var geometryRepair = PointGeometryRepairStartup()
+    @StateObject private var startup = ProjectBackupManager.Startup()
     init() {
         // Scribble is refused for every text input the app ever shows, by the hook that has to be in
         // place before the first one is created. See `ScribbleRefusal`.
@@ -35,28 +35,14 @@ struct PaintApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                switch geometryRepair.phase {
-                case .preparing:
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .accessibilityIdentifier("startup.progress")
-                        Text("Preparing saved scenes")
-                            .font(.headline)
-                            .accessibilityIdentifier("startup.preparing")
-                        Text("Your scenes are being checked and kept safe. Please keep PaintApp open.")
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(32)
-                case .failed(let reason):
-                    ContentUnavailableView("Saved scenes need repair", systemImage: "externaldrive.badge.exclamationmark",
-                        description: Text("Saved scenes were kept for recovery. Please reopen the app to try again.\n\n" + reason))
-                        .accessibilityIdentifier("startup.failed")
-                case .ready:
+                if startup.isReady {
                     ContentView()
+                } else {
+                    ProgressView("Opening gallery")
+                        .accessibilityIdentifier("gallery.loading")
                 }
             }
-            .task { await geometryRepair.start() }
+            .task { await startup.start() }
         }
     }
 }

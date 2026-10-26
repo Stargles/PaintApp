@@ -1,4 +1,5 @@
 import XCTest
+import os
 
 /// Pure-logic tests for `ProjectBackupManager` — validation, rotation, restore selection, trash
 /// retention, app-update snapshots, the size cap, and the launch-time repair pass — run against a
@@ -91,6 +92,33 @@ final class BackupManagerLogicTests: XCTestCase {
         _ = makeProject(name: projectURL.deletingPathExtension().lastPathComponent, id: id)
         ProjectBackupManager.refreshLatestSnapshot(projectURL: projectURL, projectID: id)
         ProjectBackupManager.pruneBackups(forProjectID: id)
+    }
+
+    @MainActor
+    func testStartupMaintenanceRunsOnceOnWorkerAndKeepsGalleryGatedUntilFinished() async {
+        let entered = expectation(description: "maintenance worker entered")
+        entered.assertForOverFulfill = true
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        let startup = ProjectBackupManager.Startup(maintenance: {
+            XCTAssertFalse(Thread.isMainThread, "Library maintenance must leave the first screen responsive")
+            calls.withLock { $0 += 1 }
+            entered.fulfill()
+            XCTAssertEqual(release.wait(timeout: .now() + 5), .success)
+        })
+        XCTAssertFalse(startup.isReady)
+        let launch = Task { await startup.start() }
+        await fulfillment(of: [entered], timeout: 2)
+        XCTAssertFalse(startup.isReady, "The gallery cannot read a library still being maintained")
+        await startup.start()
+        XCTAssertEqual(calls.withLock { $0 }, 1, "Another window must share the in-flight pass")
+        XCTAssertFalse(startup.isReady)
+        release.signal()
+        await launch.value
+        XCTAssertTrue(startup.isReady, "The gallery opens only after maintenance completes")
+        await startup.start()
+        XCTAssertEqual(calls.withLock { $0 }, 1, "Completed maintenance does not repeat for another window")
     }
 
     // MARK: - Validation

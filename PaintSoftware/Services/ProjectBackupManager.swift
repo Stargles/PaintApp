@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import os
 
 /// Foolproof, space-bounded protection against losing artwork to app updates, crashes, and
@@ -147,6 +148,28 @@ nonisolated enum ProjectBackupManager {
 
     // MARK: - Launch-time maintenance
 
+    /// Every window shares one launch pass. The gallery and its writers only exist after the
+    /// maintenance worker has finished reconciling packages, backups and Trash.
+    @MainActor
+    final class Startup: ObservableObject {
+        @Published private(set) var isReady = false
+        private var started = false
+        private let maintenance: @Sendable () -> Void
+
+        init(maintenance: @escaping @Sendable () -> Void = { ProjectBackupManager.runStartupMaintenance() }) {
+            self.maintenance = maintenance
+        }
+
+        func start() async {
+            guard !started else { return }
+            started = true
+            await Task.detached(priority: .userInitiated) { [maintenance] in
+                maintenance()
+            }.value
+            isReady = true
+        }
+    }
+
     /// Compile-time platform fact used to keep persistent test resets and corruption off physical
     /// devices, including Release builds.
     static var isSimulator: Bool {
@@ -157,7 +180,7 @@ nonisolated enum ProjectBackupManager {
         #endif
     }
 
-    /// Runs once per launch behind the startup gate, after geometry conversion. Order matters: wipe for tests →
+    /// Runs once per launch behind the startup gate. Order matters: wipe for tests →
     /// test-corruption hook → stale temp cleanup → update snapshots → repair → purge. Every step
     /// is individually failure-proof (all `try?`); this pass must never crash the app it protects.
     static func runStartupMaintenance() {
