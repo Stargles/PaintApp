@@ -91,10 +91,11 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   sweep through the existing finger synthesizer. Temporaryfb87 is clean/source-prepared and exactdiff
   peer675d2f20 accepted; its one-selector experiment remains UNRUN/ungranted.
   Keep four attempts, original .005/50% and all drawing assertions; no product hook/controller state.
-- Sole native slot is Bake's compiler-only Debug app+UITests build07a78454 on56C, grant79f5ca69.
-  The prior five original startup controls closed and all children joined. 4B33/39E remain shut.
-  No tests, physical action, overlapping compiler/lifecycle/environment operations or automatic
-  annotation cascade are granted with this build.
+- Sole native slot is Vector's exact3 Undo logic controls at1c99512c on56C, grant9812ab9c.
+  Its normalwhole70 passed70/70, zero failure/skip/expected; root independently reconciled IDs,
+  source730 and device. Original grant helper/native hash field mismatch has an immutable extraction-
+  only addendum; actual native argv exactly matched the already-frozen proposal. Public4 is unrun.
+  4B33/39E remain shut; no physical/lifecycle/environment action is granted.
 - Permanent startup normal59 passed59/59 at60427 (57 whole logic +2 explicit old Gallery methods,
   whole class3), root5283dbb2. Four original controls are assertion-red/root partially accepted;
   old S5 expectation exception/crash stays ZERO credit and its packet is immutable. The test-only
@@ -123,7 +124,7 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   across Undo/Redo with real cold B renders. Author c34's cached-B operands are superseded unrun.
   Harvest only4 source/test paths, exclude3 author precode docs; packet69fca5cc/addendum21e44119.
   Independent source peer b6a66de2 accepted the existing-owner patch and cold B render checks.
-  Logic70/public4/4faults are prepared only; no production fix is
+  Logic70 passed70/70 and the3 logic controls are running; public4/public1 remain unrun. No fix is
   yet harvested or qualified. Earlier4432 and all baseline pictures/results remain immutable.
 
 ### Newly recorded bounded numeric audit lead
@@ -138,15 +139,15 @@ index/error arithmetic is not certified by fixing this one cast.
 
 ### Other required gates, in queue order
 
-Warning core6 is clean bf5741b4: explicit existing serializer/lock/pure-owner declarations and two
-whole unused-local deletions. App+UITests Debug build-for-testing succeeds (NO tests), closure2f739.
-Seven original named warning rows disappear; preview stays unchanged and two new candidate-protocol
-warnings were reviewed before further code. Exact three-prefix successor07a78454 (author26ad/peerf9d7/
-root accepted) is source-prepared and its one compiler-only build is running: candidate protocol and existing lock-owned
-RasterSource/RasterLayerTexture opt out of accidental isolation. No bodies/state/locks/budgets/
-Sendable/conformance/policies changed. Stop/review each new Surface/Backing/DabTarget/cache/checkpoint
-warning; no automatic cascade or actor hops. Busy refusal is immediate, but successful checkpoints
-may block and pinned providers may retain bytes despite callback true. Preview remains separate.
+Compiler-warning source audit is bounded and remains UNHARVESTED. Core6bf5741b4 completed an
+app+UITests Debug compile (0 tests): seven named warnings disappeared, but two candidate-protocol
+warnings surfaced. Exact three-prefix successor07a was deliberately interrupted on new cache/
+factory warnings652–654 (operator SIGINT/exit75, not a completed compiler failure;0 tests). All730
+source restored/children joined; completionfaab3917. Further opt-outs reach a materially larger
+existing pixel/primitive owner boundary. No runtime defect was established, so do not harvest
+partial annotations or automatically cascade through protocols/renderer classes. Bake is separating
+only the two genuinely dead-local deletions. Future warning-only builds must finish collecting
+full diagnostics, then stop source expansion for review; do not cancel on a warning alone.
 
 Tap audit found actual support outside the circular hit/outline (source-only rotated-square witness).
 Preferred c49baadd reuses canonical geometric object bodies and local swept primitive support.

@@ -49,7 +49,7 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   signing renewal, or resolve automatic old-main downgrade risk. Remove completed items WHOLE.
 
 Current integration730source/PBX1325/runnable5412fast6008full. Video67bd normal11/control1 are closed;
-the compiler-only07a78454 boundary build holds the sole native slot. Exact evidence/current
+the exact3 Undo logic controls hold the sole native slot after normal70 passed70/70. Exact evidence/current
 lease live in HANDOFF.md and `~/PaintWork/s54-final-qualification/root-next-gates.json`.
 Owner rulings remain point-only vector Liquify; vector batch mending includes attached strokes but
 protects uncertain joins/outside outline; saves keep newest clock-bucket versions. Deferred features
@@ -109,7 +109,8 @@ Actual whole CuttingModes4 atb60 is3pass/1intended thumbnail failure, with inspe
 landscape pictures. Undo restores A while current-view callback resolves B, leaving A's tile cut.
 Source1c99512c reuses existing cel ID, lookup and registerVectorElementsUndo; duplicate view
 closures are removed and the generic helper moves +Text→+Undo. No new state/service/renderer or
-respring attribution. Independent peer accepted source; runtime and fault checks remain pending.
+respring attribution. Independent peer accepted source. Normal logic70 passed70/70;3 logic controls are running.
+Public4/public1 and final integration remain pending.
 
 The completed CuttingModes4 run atb60 reached the intended public failure at526 after CutA and
 scrubbingB. All earlier ink/tile/history premises passed; ReturnA/Redo/B outcomes were unreached.
@@ -358,19 +359,13 @@ Inventory-only files are not reviewed code. New source is not called complete be
       queue/key/functions, lock-owned RasterStorage/RasterResidency and pure/locked CompositorBudget
       get explicit nonisolated boundaries; remove the unused PoseBake startFrame and estimate-only
       Onion canvasMP declarations whole. No bodies, locks, scheduling, protocols or policies change.
-      Root reviewed core6 patchbb437dce before implementation. Brush preview is a separate proposal;
-      do not cascade annotations into renderers/conformances. One later Debug app+UITests compile
-      must retain actual new diagnostics and stop at any unreviewed dependency boundary.
-      Actual core6 Debug app+UITests buildbf5741b4 succeeds; seven original named rows disappear,
-      preview remains and two candidate-interface warnings are newly exposed. Before more code,
-      review RasterResidencyCandidate and its two existing lock-owned conformers/callback callers.
-      Do not turn synchronous allocation/eviction into actor hops or silence their requirements.
-      Author26ad/independentf9d7/root review accepts exact three-declaration patchef3803 before code:
-      explicit nonisolated candidate protocol/RasterSource/RasterLayerTexture, no bodies/fields/
-      requirements/conformances/locks/policies changed. Busy try-lock refusal remains immediate;
-      other successful paths may checkpoint inline and a true callback does not free pinned bytes.
-      The next app+UITests compile must stop at any newly exposed Surface/Backing/DabTarget/cache/
-      checkpoint dependency; no automatic cascade, unsafe annotations or forced main-thread work.
+      Root reviewed core6 patchbb437dce before implementation. Its Debug app+UITests build succeeded
+      with0 tests, exposing candidate-interface warnings. The three-prefix successor07a was
+      interrupted on new cache/factory warnings (operator cancellation, not completed compiler
+      failure). Both annotation candidates stay UNHARVESTED: the coherent pixel/primitive boundary
+      is larger and no runtime defect is proved. Keep the source triage, separate two dead-local
+      deletions, and finish drawn-workflow gates before considering a wider isolation migration.
+      No automatic cascade, blanket namespace opt-out, new locks or actor hops.
 - [ ] Verify the new source-only Tap-selection candidate before a fix: VectorHitTest uses a circular
       pressure-one radius/outline for noncircular tips. A rotated100-point square dab has visible
       corner ink outside that hit radius. Check the actual shipped tip/render and selection contract,
