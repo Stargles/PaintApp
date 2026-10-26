@@ -29,7 +29,8 @@ that the final combined audit build has passed.
 
 1. Saving: use one truthful landed-URL completion; failed saves stay in the editor and retry through
    the existing timer. Newer edits/live gestures must survive an older exit snapshot. Source d151
-   and cold public Gallery-failure test51f are prepared, not run. Earlier f571/87 candidates stay held.
+   and cold public Gallery-failure test51f are composed exactly at837, prepared but not run. Earlier
+   f571/87 candidates stay held.
 2. Gradient movement: same two-point mapper, with no new renderer/schema. Matched bitmap formats
    still reproduce the interior colour mismatch (104vs108, unchanged tolerance2); investigate before
    accepting it. Actual508 matched-format run still fails4; bitmap-format cause is refuted. Root permits
@@ -41,8 +42,9 @@ that the final combined audit build has passed.
    Replace the invalid two-picture oracle with independent analytic field and per-picture colour
    checks; keep the original probe and2byte per-render tolerance. No gradient harvest yet.
 3. Resize: one operation phase separates immediate safety locking from visible loading progress,
-   using the existing worker and presentation task. Current successor546 is source-only; model/fault
-   and genuine public progress/no-flash observation remain. Do not restore blocking PNG work.
+   using the existing worker and presentation task. Current successor546 passed47 model tests;
+   public progress/Undo and no-flash recording are running. Fault checks remain. Do not restore PNG
+   preparation on the drawing thread.
 4. Tap selection: canonical brush geometry correction is integrated at3219c8b4. Model37, public8,
    Release benchmark1 and24 deliberate-failure cases passed at their recorded component pins; root
    inspected the independent square selection/Clear pictures. Final combined checks remain.

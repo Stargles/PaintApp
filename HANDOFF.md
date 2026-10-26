@@ -28,8 +28,9 @@ Use the three existing agents; all source work stays in separate trees. No physi
 
 ### Current native and source work
 
-- **Native now:** current Resize546 whole47 under root grant in qualified-546 packet,
-  supervisor91285. All other native/staging/lifecycle work waits for join.
+- **Native now:** Resize546 public2 with owned recorder under root grant in public-546 packet,
+  supervisor15068. Whole47 JOINED GREEN47; root reconciled actual730/IDs/device/argv. All other
+  native/staging/lifecycle work waits for helper AND exact recorder join.
   Public fixture0c selected2 JOINED GREEN2; root reconciled actual730/IDs/device/argv and LOOKed all5
   whole originals (3gradient landscape,2rectangle portrait). No Undo-picture LOOK claim; no logic pass.
 - **Tap closed/harvested:**756 logic37/public6+bench1/Release1 GREEN. Independent cold square d7fa
@@ -52,12 +53,14 @@ Use the three existing agents; all source work stays in separate trees. No physi
   replacement: unchanged original probe, compare EACH image to independent neutral Oklab grey106
   (t67/128) with2byte tolerance; add3noncollinear finite field checks<=1e-12. Product stays0ab. Remove
   temporary observer WHOLE, compose UI0c, qualify whole294 and actual controls; no harvest yet.
+  Permanent test-only successor2e34a5ec implements that oracle and exact UI0c with all runtime/45old
+  Resize methods unchanged; selected1/249/294 and renewed controls are being prepared, not run.
 - **Resize:** unchanged warm2 gave1pass/1fail: old raster same-turn/no-busy assumptions obsolete;
   announced500-yield wait warm-passed but is not reliable queue completion. Root recorded0bc then
   accepted source designc78. Converter source381→safe test-onlye3fd uses ONE published phase,
   derived existingisResizing, existing LatestWins atomic landing, whole-editor hit-test block,
   captured-ID existingviewtask. Current546 adds the actual painted public resize/Undo workflow;
-  normal47/public2of14 and11finite controls prepared, source730; all native/recording remains UNRUN.
+  normal47 GREEN47; public2of14+recording running;11finite controls still source-only, source730.
   Do not execute unsafe derived-safety mutant on381's stale second-resize fixture; e3fd attemptsFlip.
   Bake independent peer found no scoped blocker; no no-flash/visible-progress claim without video.
 - **Saving:** oldfd8 selected1 actual landing304 RED plus downstream unwrap306(0credit), root1e8bd7a8.
@@ -70,6 +73,9 @@ Use the three existing agents; all source work stays in separate trees. No physi
   ONE-stroke external-empty-folder obstruction/retry protocol. All existing foreground-valid-package
   BEFORE terminate/cold-pixels checks remain. Product/test compose, external guarded staging and
   native controls UNRUN; do not claim private ContentView proof from headless driver alone.
+  Exact composition837c8d2b is frozen: product/other729 exactd151, wholeUIfile exact51f; source730,
+  static fast5414/full6011. Normal154 and ordinaryUI2 prepared only (ordinary1pass+1explicit skip,
+  never call that zero-skip GREEN); guarded stagedselected1 and16controls repinned, all UNRUN.
 - **Windows:** DNSold36c actual19=15pass/4refusalRED; rootf069 accepts3sites, nativeexitcaptureNULL.
   Fix77e81aa1 four lines +tests, whole171D/R and8controls UNRUN. Last one readiness probe16:34UTC
   timeout5ed2faf4, no commands/staging/lifecycle or repeat. Clipboard old0dd and power old05e are
@@ -181,6 +187,9 @@ resource8whole+2tests, save-scheduling3whole+ContentView and root FillWindow/Fil
 Root fill review959e3ae8 found no new demonstrated defect; kernel cost/whole memory remain unmeasured.
 Root additional9whole bodies/1065lines plus exact callers b8b35d70 found Export destination lifetime
 and unsupported group defaults; bounded notes for strict file tree/metadata/Photos/smallmodels remain.
+Root additional9small input/model bodies504lines and exact callers515a7667 found no new demonstrated
+defect; no whole-app, arbitrary-input, decoder or performance safety inference. Current coverage-ledger
+reconciliation is source-only; changed historical blobs remain distinct from current whole reads.
 Do not promote filenames/hashes/test names into review depth or claim whole-codebase certainty.
 
 ## Preserved evidence and safety boundaries
