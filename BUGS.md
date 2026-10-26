@@ -49,8 +49,10 @@ Chroma's direct offset route has no such normalization. No speculative input/tol
 Actual CuttingModes4 atb60 is3pass/1intended thumbnail failure at526, with inspected whole
 landscape pictures. StrokeCanvasView.registerVectorUndo restores A then current-view callback
 resolves B, leaving A's thumbnail stale. Source1c99512c reuses existing cel ID/lookup and
-registerVectorElementsUndo; duplicate restore closures are removed. Independent peer accepted;
-logic70/public4 and meaningful fault checks remain pending. No Test1 attribution.
+registerVectorElementsUndo; duplicate restore closures are removed. Independent peer accepted.
+Normal70/public4 and3logic/1public controls passed at1c, qualifying6 application contracts; root
+inspected4wholelandscapeimages. Exact4-path fix harvested d7090060; assembled gates remain.
+No Test1 attribution.
 
 
 ## Direct folder self-parent hides its artwork; creators bypass fixed input limits — 2026-10-25

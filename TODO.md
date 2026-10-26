@@ -49,8 +49,8 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   signing renewal, or resolve automatic old-main downgrade risk. Remove completed items WHOLE.
 
 Current integration730source/PBX1325/runnable5412fast6008full. Video67bd normal11/control1 are closed;
-the normal rebuilt public Undo4 workflow holds the sole native slot; normal70 and3 logic controls
-are closed at their actual pins. Exact evidence/current
+the old-production Tap native corner witness holds the sole native slot. Undo normal70/public4
+and logic3/public1 controls are closed at their actual pins; exact4-path fix is harvested d7090060. Exact evidence/current
 lease live in HANDOFF.md and `~/PaintWork/s54-final-qualification/root-next-gates.json`.
 Owner rulings remain point-only vector Liquify; vector batch mending includes attached strokes but
 protects uncertain joins/outside outline; saves keep newest clock-bucket versions. Deferred features
@@ -110,8 +110,9 @@ Actual whole CuttingModes4 atb60 is3pass/1intended thumbnail failure, with inspe
 landscape pictures. Undo restores A while current-view callback resolves B, leaving A's tile cut.
 Source1c99512c reuses existing cel ID, lookup and registerVectorElementsUndo; duplicate view
 closures are removed and the generic helper moves +Text→+Undo. No new state/service/renderer or
-respring attribution. Independent peer accepted source. Normal logic70 passed70/70 and3 controls qualify5 contracts. Public4 is running; public1 and final
-integration remain pending.
+respring attribution. Independent peer accepted source. Normallogic70 and public4 passed70/70 and4/4. The3logic/1public
+controls qualify6 application contracts; root inspected all4 whole landscape pictures. Exact4-path
+source is harvested d7090060. Separate B fixture premise control and final integrated gates remain.
 
 The completed CuttingModes4 run atb60 reached the intended public failure at526 after CutA and
 scrubbingB. All earlier ink/tile/history premises passed; ReturnA/Redo/B outcomes were unreached.
@@ -122,7 +123,8 @@ registration block from +Text to +Undo. No new state/service/renderer or current
 undo time. Extend the existing shared thumbnail logic workflow across a frame change, preserving its
 drawn/cold-render assertions; existing public repro retains all Redo/B checks. Commit before faults.
 
-- [ ] Independently review the actual target/invalidation/undo ownership before a minimal root-cause fix.
+- [x] Actual reproduction, independent owner review and minimal existing-owner correction; component
+      logic/UI/controls passed at their recorded pins. Retain whole item until merged.
 - [ ] Verify actual edited/restored drawing and thumbnail across frame changes, Undo/Redo, cold UI and
       meaningful controls; final fast Debug/Release and touched-class gates before merge.
 
@@ -379,6 +381,10 @@ Inventory-only files are not reviewed code. New source is not called complete be
       No raster probe, mask/cache/admission framework or copied modulation math. First add/drive a
       production-rendered rotated-square witness in existing Tap tests on old hit code, with its
       alpha/render premise distinct from behavioral hit/outline credit, before production edits.
+      A finite source counterexample disproves universal posed-site continuity: scattered stamps can
+      fail mapping between valid ones. Proposed minimal shared DabTarget discontinuity event from
+      the3 existing pose-refusal arms resets only local geometry support; normal targets are no-op.
+      No new owner/state/flags/pose math or artificial stroke/group settlement.
 - [ ] Qualify source-integrated removalec62d712 of geometry repair and converter-only UI/tests/fixtures/PBX paths: Kevin
       confirmed current scenes “Looks right” after the preserved250-package export and signed6fb
       install/normal launch. Keep permanent startup maintenance scheduling, truthful gallery readiness

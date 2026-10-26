@@ -91,11 +91,11 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   sweep through the existing finger synthesizer. Temporaryfb87 is clean/source-prepared and exactdiff
   peer675d2f20 accepted; its one-selector experiment remains UNRUN/ungranted.
   Keep four attempts, original .005/50% and all drawing assertions; no product hook/controller state.
-- Sole native slot is Vector's normal rebuild+whole public4 at1c99512c on56C, grant1e589d63.
-  Its normalwhole70 passed70/70; exact3 logic controls qualify5 application contracts, root
-  causal632b760f, all730 restored and children joined. Root independently reconciled IDs/device. Original grant helper/native hash field mismatch has an immutable extraction-
-  only addendum; actual native argv exactly matched the already-frozen proposal. Public4 is running; public1 remains unrun.
-  4B33/39E remain shut; no physical/lifecycle/environment action is granted.
+- Sole native slot is Bake's one old-production Tap witness selected1 ata140 on56C, grant8ad75590.
+  Normal rebuilding is required after the now-closed public Undo mutant. Source-alpha/dimensions
+  premise must pass before crediting hit/outline/named-ID failures; conditional Clear is unreached
+  after a miss and receives0credit. 4B33/39E remain shut. No physical/lifecycle/env operation.
+
 - Permanent startup normal59 passed59/59 at60427 (57 whole logic +2 explicit old Gallery methods,
   whole class3), root5283dbb2. Four original controls are assertion-red/root partially accepted;
   old S5 expectation exception/crash stays ZERO credit and its packet is immutable. The test-only
@@ -114,19 +114,17 @@ complete. Erasing respring cause, broad final regression/performance and remaini
 - Public capacity cold source **6ef391e4** extends an existing Sandwich workflow, one exact launch
   helper seam; no product hook/new test method. Real two-input Mix refusal/current row/history/drawing
   checks and notice ordering preserved. Source peer/root review then selected1/whole10/control remain.
-- Wrong-cel Undo public repro b60 CLOSED4=3pass/1intended526 failure,0skip/expected; root exact
-  IDs/device/source730 plus LOOK e287c84a. Actual whole beforeUndo and late-video UndidErase toast
-  show B whole while off-frame A's thumbnail stays gapped. ReturnA/Redo/B outcomes were UNREACHED.
-  Fix source1c99512c is committed/prepared/UNRUN: observed stored cel ID plus existing celIndices
-  and actual vector identity reuse registerVectorElementsUndo; old view callback closures removed
-  whole, generic ElementSwap/registration moved +Text to +Undo. Same cost/damage/labels; no new
-  state/service/renderer. Existing thumbnail logic test keeps all old expressions and checks A/B
-  across Undo/Redo with real cold B renders. Author c34's cached-B operands are superseded unrun.
-  Harvest only4 source/test paths, exclude3 author precode docs; packet69fca5cc/addendum21e44119.
-  Independent source peer b6a66de2 accepted the existing-owner patch and cold B render checks.
-  Logic70 passed70/70,3 logic controls qualify5 contracts, and whole public4 is running; public1
-  remains unrun. No fix is
-  yet harvested or qualified. Earlier4432 and all baseline pictures/results remain immutable.
+- Wrong-cel Undo is component-qualified and harvested **d7090060** (4 source/test paths exactly1c;
+  no author docs). Actual oldb60 public4 was3pass/1intended526 failure; rootLOOK established stale A
+  tile with B displayed. Fix1c normallogic70 passed70/70;3 logic controls qualify5 application
+  contracts (root632b760f). Normalpublic4 passed4/4, including later ReturnA/Redo/B; root independently
+  reconciled IDs/source730/device and LOOKed all4 whole landscape images, receipt0b1cf559. Exact
+  original view-callback reversal1 reaches sole526 (root5e593e78), source730 restored/children joined.
+  Existing contentRevisions.celID/celIndices and registerVectorElementsUndo are reused; generic helper
+  moves +Text→+Undo, duplicate view restore/current-playhead callbacks removed whole. Same cost,
+  damage and history label; no new state/service/renderer. Fresh B renders validate unaffected drawing.
+  A separate fresh-equivalent-B fixture control is prepared only and supplies0 application credit;
+  final integrated Debug/Release/UI remain open. Original c34 cached-B test source remains superseded.
 
 ### Newly recorded bounded numeric audit lead
 
@@ -154,8 +152,14 @@ Tap audit found actual support outside the circular hit/outline (source-only rot
 Preferred c49baadd reuses canonical geometric object bodies and local swept primitive support.
 The stronger d046 raster-probe proposal is rejected: it changes hole/gap policy and needs unnecessary
 render/cache/refusal machinery. Bake committed tiny production-rendered witness a14038fc in an existing logic workflow on old
-hit code; no production changes. Native alpha/hit/outline reproduction remains UNRUN. Converter is
-independently challenging the proposed API/minimality while the compiler-only build runs.
+hit code; no production changes. Native alpha/hit/outline reproduction is running separately; old production remains unchanged.
+The independent API peer accepts the small sink with cost/continuity conditions. A finite source
+counterexample shows scatter can reach an unmappable posed site despite valid sample-box corners.
+The minimal future correction is one default-noop DabTarget discontinuity event from the existing
+three pose-refusal arms (streaming circle/image and replay), resetting only the geometry sink
+predecessor; no extra owner/fields/flags/closures or copied pose math. Ordinary drawing targets remain
+no-op; successful sites pay no added call. Do not misuse begin/endStroke/group, which own real
+mutation/opacity settlement. Implement only after actual old-production corner witness succeeds.
 
 1. Finish above effects/control/public gesture slices, preserving immutable original packets and
    meaningful exact assertions. Before every native grant verify clean pin/source730/tool/argv,
