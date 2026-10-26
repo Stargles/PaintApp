@@ -127,6 +127,14 @@ The exact six-file patch is committed clean atbf5741b4 on PaintApp-s54-warning-o
 source730/724unchanged, no compiler run. First later app+UITests Debug compilation stops at any
 unreviewed dependency scope. No preview annotations are bundled.
 
+Actualbf core6 compilation now succeeds for app+UITests (no tests), closure2f739223. Seven original
+named warnings disappear; preview is unchanged and two candidate-protocol requirements are newly
+exposed. Author26ad/peerf9d7/root accepted exact three-line patchef3803 before code: existing weak
+candidate protocol and two lock-owning RasterSource/RasterLayerTexture classes opt out of accidental
+default isolation. No body/state/lock/budget/Sendable/conformance changes. Stop/review every newly
+exposed dependency; no actor hops. Busy refusal is immediate; successful checkpoints may block and
+pinned providers may retain bytes despite callback true. This is source direction, not runtime proof.
+
 1. Finish above effects/control/public gesture slices, preserving immutable original packets and
    meaningful exact assertions. Before every native grant verify clean pin/source730/tool/argv,
    selected IDs/actual device/positive baseline/output absence/native idle. No overlapping compilers.

@@ -351,6 +351,12 @@ Inventory-only files are not reviewed code. New source is not called complete be
       preview remains and two candidate-interface warnings are newly exposed. Before more code,
       review RasterResidencyCandidate and its two existing lock-owned conformers/callback callers.
       Do not turn synchronous allocation/eviction into actor hops or silence their requirements.
+      Author26ad/independentf9d7/root review accepts exact three-declaration patchef3803 before code:
+      explicit nonisolated candidate protocol/RasterSource/RasterLayerTexture, no bodies/fields/
+      requirements/conformances/locks/policies changed. Busy try-lock refusal remains immediate;
+      other successful paths may checkpoint inline and a true callback does not free pinned bytes.
+      The next app+UITests compile must stop at any newly exposed Surface/Backing/DabTarget/cache/
+      checkpoint dependency; no automatic cascade, unsafe annotations or forced main-thread work.
 - [ ] Verify the new source-only Tap-selection candidate before a fix: VectorHitTest uses a circular
       pressure-one radius/outline for noncircular tips. A rotated100-point square dab has visible
       corner ink outside that hit radius. Check the actual shipped tip/render and selection contract,
