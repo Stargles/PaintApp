@@ -29,8 +29,10 @@ that the final combined audit build has passed.
 
 1. Saving: use one truthful landed-URL completion; failed saves stay in the editor and retry through
    the existing timer. Newer edits/live gestures must survive an older exit snapshot. Source d151
-   and cold public Gallery-failure test51f are composed exactly at837, prepared but not run. Earlier
-   f571/87 candidates stay held.
+   and cold public Gallery-failure test51f are composed exactly at837. Actual normal154 gave151pass/
+   3fail: older PNG encode/reuse-count expectations disagree with durable-source cloning. Trace the
+   real bytes/source ownership before changing assertions; new retry/clock/store checks passed in
+   that batch. Public failure/cold retry and controls remain. Earlier f571/87 candidates stay held.
 2. Gradient movement: same two-point mapper, with no new renderer/schema. Matched bitmap formats
    still reproduce the interior colour mismatch (104vs108, unchanged tolerance2); investigate before
    accepting it. Actual508 matched-format run still fails4; bitmap-format cause is refuted. Root permits
@@ -43,8 +45,9 @@ that the final combined audit build has passed.
    checks; keep the original probe and2byte per-render tolerance. No gradient harvest yet.
 3. Resize: one operation phase separates immediate safety locking from visible loading progress,
    using the existing worker and presentation task. Current successor546 passed47 model tests;
-   public progress/Undo and no-flash recording are running. Fault checks remain. Do not restore PNG
-   preparation on the drawing thread.
+   public blank resize passed. Painted test missed the transient busy indicator and stopped, so
+   drawing/Undo outcomes remain unproved. Exact external video is preserved for inspection; no retry,
+   fixture growth or product-delay change. Fault checks remain. Keep PNG preparation off-main.
 4. Tap selection: canonical brush geometry correction is integrated at3219c8b4. Model37, public8,
    Release benchmark1 and24 deliberate-failure cases passed at their recorded component pins; root
    inspected the independent square selection/Clear pictures. Final combined checks remain.
@@ -57,6 +60,10 @@ that the final combined audit build has passed.
 6. Saved group metadata: remove unsupported nested legacy defaults only after old rejection proof
    and a real nonempty previous-writer roundtrip. Legal omission of an empty registry stays. Old6fb
    witness28c is source-only; no source/artwork repair has run and no interpolation redesign is in scope.
+   Additional package auditb431481b found unchecked resource paths and permanent old-layout fallback.
+   Prove sibling-resource rejection through existing validator/load owners, then centralize refusal.
+   Inventory legal old addresses before a separate one-shot Projects/Backups/Trash repair and complete
+   fallback retirement. No protected-package mutation or format change is authorized by inventory alone.
 7. Windows: run/fix DNS limits, clipboard filename collisions, keep-awake lifetime and awaited Quit
    teardown when the host is reachable. No repeated connection polling or speculative nearby fixes.
 8. Complete the remaining colour/effect/recovery workflows, relevant whole UI classes and mask checks.

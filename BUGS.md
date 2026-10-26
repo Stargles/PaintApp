@@ -17,6 +17,24 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Package resource names can point outside their package — 2026-10-26
+
+Bounded source reviewb431481b/cba09da0: ProjectPackageLayout.resolve/existingURL accepts slash-separated
+`..` components. Actual metadata/raster validator and loader consumers add no containment check, so
+otherwise-valid A can name `../B.paintproj/images/<validPNG>` and accept B's picture as its own.
+This is a source-confirmed package-ownership defect; no sandbox escape, observed artwork loss or
+writer-side corruption is claimed. First prove a finite sibling-package fixture through the actual
+validator/load owners. Correct one existing resolver/failure contract; callers propagate refusal,
+never map an invalid path to omitted pixels or empty geometry. No legal writer spelling must change.
+
+## Permanent old package-layout fallbacks violate the current-format rule — 2026-10-26
+
+ProjectPackageLayout keeps bare old sidecar/video fallbacks permanently, and tidyEveryProject only
+normalizes Projects while expressly leaving Backups/Trash old. Actual load/validation still uses
+that path. Retire it separately from containment: inventory protected bytes and actual previous-writer
+packages, provide one-shot repair across Projects/Backups/Trash for every legal old address, then
+keep only the current decoder. Do not delete legal historical support before that proof/repair.
+
 ## Older export destinations can publish into a replacement export — 2026-10-26
 
 Source: Export Something Else remains enabled during destination work. FrameExportSession resets
@@ -26,6 +44,9 @@ permit a new same-frame/movie export to replace bytes named by older pending con
 loss or Photos framework read timing is claimed. Prove finite old cases through existing session
 seams, then correct actual product/publication ownership without another service or unbounded temp
 files. Existing export-loop Task cancellation checks are healthy and are not this finding.
+Actual f270 selected2 reproduced exactly3 intended assertion sites with all premises healthy; root
+inspected all4 original48/64PNG products. Shared immutable-file owner implementation is authorized;
+no native correction or Share-lifetime qualification yet.
 
 
 ## Canvas transform safety and visible progress are conflated — 2026-10-26

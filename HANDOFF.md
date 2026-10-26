@@ -28,9 +28,10 @@ Use the three existing agents; all source work stays in separate trees. No physi
 
 ### Current native and source work
 
-- **Native now:** Resize546 public2 with owned recorder under root grant in public-546 packet,
-  supervisor15068. Whole47 JOINED GREEN47; root reconciled actual730/IDs/device/argv. All other
-  native/staging/lifecycle work waits for helper AND exact recorder join.
+- **Native now:** none; autosave837 normal154 JOINED151pass/3fail, root reconciled730/IDs/device/argv.
+  Three old encode/reuse-count assertions need actual durable-source tracing before any change.
+  Original grant misspelled SaveDamage class in counts only; extraction-only5e557691 fixes it BEFORE
+  results were read; actual native argv always selected correct SaveDamageGateLogicTests.
   Public fixture0c selected2 JOINED GREEN2; root reconciled actual730/IDs/device/argv and LOOKed all5
   whole originals (3gradient landscape,2rectangle portrait). No Undo-picture LOOK claim; no logic pass.
 - **Tap closed/harvested:**756 logic37/public6+bench1/Release1 GREEN. Independent cold square d7fa
@@ -60,7 +61,10 @@ Use the three existing agents; all source work stays in separate trees. No physi
   accepted source designc78. Converter source381→safe test-onlye3fd uses ONE published phase,
   derived existingisResizing, existing LatestWins atomic landing, whole-editor hit-test block,
   captured-ID existingviewtask. Current546 adds the actual painted public resize/Undo workflow;
-  normal47 GREEN47; public2of14+recording running;11finite controls still source-only, source730.
+  normal47 GREEN47; public2of14 actual1pass/1fail at busy exposure344 (all earlier premises healthy),
+  downstream landing/Undo unreached. Whole recording5d198e15 is45.9MB, exact recorder70357 SIGINT
+  joined0, helper/source730 joined; current busy/no-flash interpretation pending actual frame review.
+  Root LOOKed actual before2048 stroke picture only.11finite controls still source-only.
   Do not execute unsafe derived-safety mutant on381's stale second-resize fixture; e3fd attemptsFlip.
   Bake independent peer found no scoped blocker; no no-flash/visible-progress claim without video.
 - **Saving:** oldfd8 selected1 actual landing304 RED plus downstream unwrap306(0credit), root1e8bd7a8.
@@ -74,8 +78,10 @@ Use the three existing agents; all source work stays in separate trees. No physi
   BEFORE terminate/cold-pixels checks remain. Product/test compose, external guarded staging and
   native controls UNRUN; do not claim private ContentView proof from headless driver alone.
   Exact composition837c8d2b is frozen: product/other729 exactd151, wholeUIfile exact51f; source730,
-  static fast5414/full6011. Normal154 and ordinaryUI2 prepared only (ordinary1pass+1explicit skip,
-  never call that zero-skip GREEN); guarded stagedselected1 and16controls repinned, all UNRUN.
+  static fast5414/full6011. Normal154 actual151pass/3fail in old PNG encode/reuse profiles:
+  reopened2clones, missing-live-file2clones, version-slot2clones. Do not weaken counts before tracing
+  actual immutable backing sources and proving resulting bytes/ledger. New retry/driver/store cases
+  passed but aggregate is RED. OrdinaryUI2/staged1/16controls UNRUN (ordinary1pass+1explicit skip).
 - **Windows:** DNSold36c actual19=15pass/4refusalRED; rootf069 accepts3sites, nativeexitcaptureNULL.
   Fix77e81aa1 four lines +tests, whole171D/R and8controls UNRUN. Last one readiness probe16:34UTC
   timeout5ed2faf4, no commands/staging/lifecycle or repeat. Clipboard old0dd and power old05e are
@@ -190,6 +196,13 @@ and unsupported group defaults; bounded notes for strict file tree/metadata/Phot
 Root additional9small input/model bodies504lines and exact callers515a7667 found no new demonstrated
 defect; no whole-app, arbitrary-input, decoder or performance safety inference. Current coverage-ledger
 reconciliation is source-only; changed historical blobs remain distinct from current whole reads.
+New ledger at1f5:81exact-current whole/165selected-historical/4caller/96unknown across346runtimefiles;
+not safety percentages. Root9405 shorthand was wrong; actual prior input report hashes5e2d01a2.
+Bake package/target reviewb431481b/cba09da0 reads2456runtime lines, wholeLayout998/Target398/metadata136
+plus exact callers. Source-demonstrated sibling `..` resource acceptance and permanent legacy-layout
+fallback are recorded in TODO/BUGS. Containment must refuse through ONE resolver; legal old-address
+retirement needs separate previous-writer/data inventory and one-shot Projects/Backups/Trash repair.
+No package mutation/test/fix yet. Keyed Rotate frame-distance loop is only an unmeasured cost boundary.
 Do not promote filenames/hashes/test names into review depth or claim whole-codebase certainty.
 
 ## Preserved evidence and safety boundaries
