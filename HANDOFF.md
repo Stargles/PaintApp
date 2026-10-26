@@ -50,6 +50,20 @@ as an honest union3, not one whole3 green run. Three static testBrush factories 
 census differences: TextHitTestLogicTests, VectorCanvasDataLogicTests, VectorTextPersistenceLogicTests.
 They are private static factories, not XCTest instance methods. No native staging has run.
 
+Normal155 at8e80ba71 stopped at compilation before any test: DrawingView.performNoticeAction's
+explicit no-action switch lacks the new nodeInputLimit case. Native65/helper1 joined; root verified
+all completion hashes and exact730 restoration. Preserve failed run01; it is not runtime evidence.
+Next source scope, recorded before edits: add ONLY that existing no-action case (actionTitle already
+nil); harvest exact reviewed cold methodfb25cfc4 and Glare capture5c7566e3 paths. All existing outcomes
+remain. Rebuild a new-pin normal155 under a separate grant. No retry/retag of the failed run.
+Cold method peer8aaff832 accepts source+runner preparation, native still UNRUN. Glare capture is the
+exact reviewed same-shot/stable-framebuffer patch, native/whole-picture LOOK still UNRUN.
+
+A new bounded Mode2 undo audit reports a possible stale thumbnail after CutA→scrubB→Undo: gesture
+history restores captured canvasA but current view completion queues thumbnailB. Agent is tracing
+the existing captured-cel registration/invalidation seam; source report/root review pending before
+implementation. No Test1 crash attribution or allocation rewrite.
+
 Native is idle, normal132 source hold released. Reuse owned booted56C without lifecycle changes for
 next logic155 after root verifies prepare and grants execution. Converter-only cold256 gates are
 retired with the feature; meaningful current-format maintenance/gallery/recovery controls remain.

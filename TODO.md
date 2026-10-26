@@ -24,6 +24,11 @@ premises still block exact50% Blend and selected-word restyle/replacement outcom
 picture remains transitional/invalid despite passing layout assertion; capture-only successor awaits
 review/application. The red aggregate is not a green fault baseline.
 
+Normal155 build at8e80ba71 failed before tests: the new layer-limit notice was missing from an
+explicit DrawingView no-action switch. Root verified exact730 closure/no retry. Next code scope is
+that one existing switch case plus exact independently reviewed cold recoveryfb25 and stable Glare
+capture5c7566e3 test paths; then separately granted new-pin normal155. All runtime gates remain open.
+
 **In queue order (items remain until merged):**
 
 - Integrate independently reviewed shared layer-input capacity888cd4b9 (all51 preimages exact) and
@@ -100,6 +105,20 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 **The measurement baseline is [PERFORMANCE.md](PERFORMANCE.md) §1, not here**: the owner works at
 2048x1024, and every figure taken before 2026-08-17 was at 4096², eight times the pixels.
+
+---
+
+## Keep the edited cel's thumbnail correct after Undo — 2026-10-26
+
+Read-only bounded audit at8e80ba71 traces Mode2 CutA→scrubB→Undo to gesture history restoring
+canvasA but invoking current view.onStrokeEnded, which resolves current playheadB. Geometry and
+archive may be correct while A's thumbnail stays cut. Source-only finding, native reproduction not
+claimed. Review completed audit and reuse existing captured-layer/cel registration and invalidation;
+no new service/state/renderer, and no respring cause inferred.
+
+- [ ] Independently review the actual target/invalidation/undo ownership before a minimal root-cause fix.
+- [ ] Verify actual edited/restored drawing and thumbnail across frame changes, Undo/Redo, cold UI and
+      meaningful controls; final fast Debug/Release and touched-class gates before merge.
 
 ---
 

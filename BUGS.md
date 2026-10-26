@@ -17,6 +17,16 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Mode2 Undo can leave the edited cel thumbnail stale after a frame change — 2026-10-26
+
+Bounded source8e80ba71 trace: StrokeCanvasView.registerVectorUndo restores captured canvas geometry,
+then weak current view.onStrokeEnded resolves displayedCelIndex at the current playhead. CutA,
+wait for A thumbnail, scrubB, Undo can therefore queue B instead of restored A. Source evidence only;
+no native reproduction or Test1 attribution. Existing registerVectorElementsUndo captures layer/cel
+IDs and celContentChangedOutsideStroke; review that seam for the minimal correction. Agent report
+and independent/root review pending; no implementation yet.
+
+
 ## Direct folder self-parent hides its artwork; creators bypass fixed input limits — 2026-10-25
 
 Source audit e181cc14 and independent peers confirm two separate causes. Existing resolvedContainer
