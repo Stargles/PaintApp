@@ -11,10 +11,10 @@ Kevin is asleep until10a.m. tomorrow. No owner question is pending. Old physical
 are consumed: no overnight iPad restart/install without fresh saved/unlocked readiness.
 
 **Integration:** `~/PaintWork/PaintApp-s54-qualified-integration`, `tmp/s54-qualified-integration`.
-Last product commit **8682859f5249e0ddf072dc3bc831c8aa4cbc2d5a**; later commits are records only.
+Tap d7fa source is now harvested in the next product commit; preserve868 curve cap exactly.
 Main/origin **afd2030c831db7a746271fe306e8b5a5b9b02df6**; no new merge/push. Frozen oldadf tree
 `PaintApp-s54-mend-free-caps` remains for controls. Do not copy author HANDOFF/TODO into integration.
-Current root source730/PBX1325/runnable fast5412/full6008; gradient UI successor is full6009.
+Current root source730/PBX1325/runnable fast5412/full6009 after independent Tap square test.
 Static counts are not final native qualification. Raw counts include3 private static testBrush factories.
 
 **What Kevin has:** installed signed Release **6fb979f442f4d3da1299785de2a077a2058a4dfe** includes
@@ -35,8 +35,10 @@ integration. Reuse these agents; full history/large inventories need not be rere
   four-sample timing-gate claim. Same Quad/predicates, conservative inclusive local admission before
   hull allocation; no persistent cache/state/schema. All17 logic controls actually assertion-red,
   root causal78117db7 qualifies23/23canonical statements; extras get0credit. All730 restored/children
-  joined. Public/benchmark controls remain separate; Bake extracts square workflow into its own cold
-  UI method so Clear can reach that regression independently. No production/logic change or harvest.
+  joined. Independent square d7fa normal8 GREEN, root ID/source/device reconciled and actually LOOKed3 whole
+  images. Public2/benchmark5 controls7 all assertion-red; root a8206a35 accepts11 canonical statements,
+ 4extra issues0credit and missing-selection geometry limit retained. Exact9paths harvested from
+ fda→d7fa, preserving868 tail cap and both curve testfiles; final assembled gates remain.
 - **Gradient:** actual old9dd selected1 failed only intended RGB comparison39>2 (147 vs108), all
   premises passed; root reconciled and LOOKed both whole64² originals,9da827ff. Affine correction
   **0ab96d96** uses same2points/API/schema to transport level lines; ordinary/singular/coincident
@@ -68,7 +70,7 @@ integration. Reuse these agents; full history/large inventories need not be rere
   Old **fd8a9058** actual selected1 fails intended landing304 plus downstream nilreload306(0credit),
   all first failure/unblock premises pass; root1e8bd7a8 reconciles730/ID/device/joined. First timer candidatef571 is HOLD: failed artist save still navigates away/stops retry.
   Vector now makes the existing landed URL? the sole truthful completion, removes onSaveFailed whole,
-  and permits gallery navigation only after actual landing; same timer/default intervals/weak identity. No new service/poll/duplicate dirty state. Bake authors separate cold public folder/one-
+  and permits gallery navigation only after actual landing; same timer/default intervals/weak identity. No new service/poll/duplicate dirty state. Bake source51f adds actual Gallery failure before the existing cold public folder/one-
   stroke failure/retry test with external owned-empty-folder fixture; valid FOREGROUND package must
   precede terminate/reopen so scene-phase save cannot mask failure. No new product hook/controller.
 

@@ -26,8 +26,8 @@ enum VectorHitTest {
 
     /// Whether `element`'s drawn shape covers `point`.
     ///
-    /// **A stroke is its ink**: the centre line widened by the stamp radius at full pressure — the
-    /// widest the stroke ever draws — and by `slop`. **An eraser mark is not an object a touch can be
+    /// **A stroke is its canonical stamp geometry**, joined locally across spacing gaps and widened
+    /// by `slop`; texture holes remain part of the object body. **An eraser mark is not an object a touch can be
     /// on**: it has no ink of its own, only a hole, and tapping the hole is tapping what shows through.
     ///
     /// **A fill is its path**, under the fill's own rule, so the hole in a ring is not the ring. A
@@ -39,8 +39,7 @@ enum VectorHitTest {
         switch element {
         case .stroke(let stroke):
             guard stroke.composite == .paint, !stroke.samples.isEmpty else { return false }
-            let limit = slop + StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush, size: stroke.size)
-            return StrokeGeometry.distanceSquared(from: point, toPolyline: stroke.samples) <= limit * limit
+            return VectorStrokeRenderWalk(stroke).geometry(at: point, slop: slop).hit
         case .fill(let fill):
             return fill.cgPath?.contains(point, using: fill.evenOddFill ? .evenOdd : .winding) ?? false
         case .text(let text):
@@ -69,10 +68,9 @@ enum VectorHitTest {
         switch element {
         case .stroke(let stroke):
             guard !stroke.samples.isEmpty else { return nil }
-            var box = CGRect.null
-            for sample in stroke.samples { box = box.union(CGRect(origin: sample.point, size: .zero)) }
-            let reach = StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush, size: stroke.size)
-            return CGPath(rect: box.insetBy(dx: -(reach + outlineMargin), dy: -(reach + outlineMargin)), transform: nil)
+            let box = VectorStrokeRenderWalk(stroke).geometry().bounds
+            guard !box.isNull else { return nil }
+            return CGPath(rect: box.insetBy(dx: -outlineMargin, dy: -outlineMargin), transform: nil)
         case .fill(let fill):
             guard let box = fill.cgPath?.boundingBoxOfPath, !box.isNull else { return nil }
             return CGPath(rect: box.insetBy(dx: -outlineMargin, dy: -outlineMargin), transform: nil)

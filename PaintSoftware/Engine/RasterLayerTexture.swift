@@ -20,6 +20,9 @@ protocol DabTarget: AnyObject {
     /// mapping the finished stamp, so consumers derive path geometry from the matching recipe.
     /// Existing positional tools read travel; pixel targets ignore the metadata.
     func dabSite(at point: CGPoint, travel: CGPoint, parameter: CGFloat?)
+    /// A finished primitive could not be mapped. Geometry consumers must not join across it;
+    /// drawing targets ignore it without ending the stroke or its opacity group.
+    func dabDiscontinuity()
     func beginStroke()
     func endStroke()
 
@@ -87,6 +90,16 @@ protocol DabTarget: AnyObject {
 
 extension DabTarget {
     func dabSite(at point: CGPoint, travel: CGPoint, parameter: CGFloat?) {}
+    func dabDiscontinuity() {}
+}
+
+/// The stamp's geometric square before the painting bounds add interpolation spill.
+func dabImageQuad(at point: CGPoint, diameter: CGFloat, angle: CGFloat) -> Quad {
+    let r = diameter / 2, c = cos(angle), s = sin(angle)
+    func corner(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+        CGPoint(x: point.x + c * x - s * y, y: point.y + s * x + c * y)
+    }
+    return Quad(corner(-r, -r), corner(r, -r), corner(r, r), corner(-r, r))
 }
 
 /// The pixels an image dab of `diameter` turned by `angle` about `point` can touch.

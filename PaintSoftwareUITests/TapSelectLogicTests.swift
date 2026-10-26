@@ -118,13 +118,82 @@ final class TapSelectLogicTests: XCTestCase {
     /// **A stroke is its ink**: a point within the stamp radius of the centre line is on it, and one
     /// beyond the radius and a fingertip is not — measured on a 10-wide stroke, so the answer cannot be
     /// the centre line's alone.
-    func testAStrokeIsHitWhereItIsInkedAndNotBeyondItsWidth() {
+    func testAStrokeIsHitWhereItIsInkedAndNotBeyondItsWidth() throws {
         let wide = VectorElement.stroke(stroke(from: CGPoint(x: 10, y: 30), to: CGPoint(x: 50, y: 30), size: 10))
         XCTAssertTrue(VectorHitTest.covers(wide, point: CGPoint(x: 30, y: 30), slop: 0), "on the centre line")
         XCTAssertTrue(VectorHitTest.covers(wide, point: CGPoint(x: 30, y: 34), slop: 0), "inside the inked half-width")
         XCTAssertFalse(VectorHitTest.covers(wide, point: CGPoint(x: 30, y: 37), slop: 0), "beyond the ink")
         XCTAssertTrue(VectorHitTest.covers(wide, point: CGPoint(x: 30, y: 37), slop: 4), "…which a fingertip's slop reaches")
         XCTAssertFalse(VectorHitTest.covers(wide, point: CGPoint(x: 3, y: 30), slop: 0), "past the end of the line")
+
+        // Spacing and transparent mask holes remain part of a stroke object's body.
+        for tip: BrushTip in [.round, .stamp(.builtIn(.square))] {
+            var brush = TestBrushes.hardRound
+            brush.tip = tip
+            brush.dab = BrushDabSettings(size: 1, flow: 1, spacing: 4, hardness: 1)
+            brush.modulations = BrushModulations([])
+            let spaced = VectorElement.stroke(VectorStroke(brush: brush, color: black, size: 10, opacity: 1,
+                samples: [VectorSample(x: 20, y: 40, pressure: 1), VectorSample(x: 100, y: 40, pressure: 1)]))
+            XCTAssertTrue(VectorHitTest.covers(spaced, point: CGPoint(x: 40, y: 40), slop: 0),
+                          "Tap keeps the local body between deliberately separated stamps")
+            XCTAssertFalse(VectorHitTest.covers(spaced, point: CGPoint(x: 40, y: 47), slop: 0),
+                           "The body does not grow to the padded painting bounds")
+            XCTAssertTrue(VectorHitTest.covers(spaced, point: CGPoint(x: 40, y: 47), slop: 3),
+                          "Both primitive bodies retain the geometric fingertip collar")
+        }
+        let lone = VectorElement.stroke(stroke(from: CGPoint(x: 30, y: 30), to: CGPoint(x: 30, y: 30), size: 4))
+        XCTAssertTrue(VectorHitTest.covers(lone, point: CGPoint(x: 34, y: 30), slop: 2), "A lone dab keeps its fingertip collar")
+        XCTAssertFalse(VectorHitTest.covers(lone, point: CGPoint(x: 34.25, y: 30), slop: 2), "The collar has a finite outer edge")
+        let other = VectorElement.stroke(stroke(from: CGPoint(x: 100, y: 30), to: CGPoint(x: 100, y: 30), size: 4))
+        XCTAssertNil(VectorHitTest.topmost(in: [lone, other], at: CGPoint(x: 60, y: 30), slop: 0),
+                     "Separate stroke walks never share a connecting support")
+
+        var loopBrush = TestBrushes.hardRound
+        loopBrush.dab = BrushDabSettings(size: 1, flow: 1, spacing: 0.5, hardness: 1)
+        loopBrush.modulations = BrushModulations([])
+        var squareBrush = loopBrush
+        squareBrush.tip = .stamp(.builtIn(.square))
+        let square = VectorElement.stroke(VectorStroke(brush: squareBrush, color: black, size: 4, opacity: 1,
+            samples: [VectorSample(x: 30, y: 30, pressure: 1)]))
+        XCTAssertTrue(VectorHitTest.covers(square, point: CGPoint(x: 32, y: 30), slop: 0),
+                      "Local image admission includes the exact maximum quad edge")
+        XCTAssertTrue(VectorHitTest.covers(square, point: CGPoint(x: 34, y: 30), slop: 2),
+                      "Local image admission includes the exact maximum slop edge")
+        var loop = VectorStroke(brush: loopBrush, color: black, size: 4, opacity: 1,
+            samples: StrokeSamples([CGPoint(x: 40, y: 40), CGPoint(x: 80, y: 20), CGPoint(x: 120, y: 40),
+                      CGPoint(x: 120, y: 100), CGPoint(x: 80, y: 120), CGPoint(x: 40, y: 100),
+                      CGPoint(x: 40, y: 40)].map { VectorSample(x: $0.x, y: $0.y, pressure: 1) }, channels: .pressureOnly))
+        for tip: BrushTip in [.round, .stamp(.builtIn(.square))] {
+            var shaped = loopBrush
+            shaped.tip = tip
+            loop.brush = shaped
+            XCTAssertFalse(VectorHitTest.covers(.stroke(loop), point: CGPoint(x: 80, y: 70), slop: 0),
+                           "Local support links leave a curved loop's interior empty")
+        }
+
+        var hollowBrush = loopBrush
+        hollowBrush.tip = .stamp(.builtIn(.bristleOpen))
+        let hollow = VectorStroke(brush: hollowBrush, color: black, size: 80, opacity: 1,
+                                  samples: [VectorSample(x: 100, y: 100, pressure: 1)])
+        let picture = VectorCanvas.empty(size: CGSize(width: 200, height: 200))
+        picture.addStroke(hollow)
+        let image = try XCTUnwrap(picture.render()?.cgImage)
+        let bytes = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(image, width: 200, height: 200))
+        let hole = try XCTUnwrap((80..<120).flatMap { y in (80..<120).map { (x: $0, y: y) } }
+            .first { bytes[($0.y * 200 + $0.x) * 4 + 3] == 0 })
+        XCTAssertTrue(bytes.enumerated().contains { $0.offset % 4 == 3 && $0.element > 0 }, "PREMISE: the hollow tip draws ink")
+        XCTAssertTrue(VectorHitTest.covers(.stroke(hollow), point: CGPoint(x: hole.x, y: hole.y), slop: 0),
+                      "An actual transparent tip hole is still inside the stroke object")
+
+        for densityGate in [false, true] {
+            var silent = hollow
+            var gated = hollowBrush
+            if densityGate { gated.dab.density = 0 } else { gated.dab.flow = 0 }
+            silent.brush = gated
+            XCTAssertFalse(VectorHitTest.covers(.stroke(silent), point: CGPoint(x: 100, y: 100), slop: 0),
+                           "An entirely gated walk has no emitted body to select")
+            XCTAssertNil(VectorHitTest.outline(of: .stroke(silent)), "No emitted support has no outline")
+        }
     }
 
     /// An eraser mark has no ink of its own, only a hole — tapping it is tapping what shows through.
@@ -224,6 +293,57 @@ final class TapSelectLogicTests: XCTestCase {
         XCTAssertNotNil(element(fillID, in: vector), "…and left the fill whole")
         XCTAssertEqual(vector.elements.count, 1)
         XCTAssertNil(manager.selection, "the tapped object is gone, and its selection with it")
+
+        // The production renderer, not a copied square formula, establishes this outer ink.
+        // All buffers below belong to one tiny logic fixture, never a hit-test implementation.
+        let turnedManager = CanvasFixture.manager()
+        let side = 256
+        turnedManager.canvasSize = CGSize(width: side, height: side)
+        turnedManager.addVectorLayer()
+        turnedManager.selectionMode = .tap
+        let turned = try XCTUnwrap(turnedManager.layers[turnedManager.currentLayerIndex].cels[0].vector)
+        var square = TestBrushes.hardRound
+        square.tip = .stamp(.builtIn(.square))
+        square.dab = BrushDabSettings(size: 1, flow: 1, spacing: 0.1, hardness: 1)
+        square.dab.angle.base = 0.125
+        square.modulations = BrushModulations([])
+        let cornered = VectorStroke(id: UUID(), brush: square, color: black, size: 100, opacity: 1,
+                                    samples: [VectorSample(x: 100, y: 100, pressure: 1)], composite: .paint)
+        turned.addStroke(cornered)
+        let native = try XCTUnwrap(turned.render()?.cgImage)
+        XCTAssertEqual(native.width, side, "PREMISE: the production picture is the tiny native fixture")
+        XCTAssertEqual(native.height, side, "PREMISE: the production picture is the tiny native fixture")
+        let pixels = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(native, width: side, height: side))
+        let outer = CGPoint(x: 162, y: 100)
+        let outerAlpha = (100 * side + 162) * 4 + 3
+        XCTAssertGreaterThan(pixels[outerAlpha], 0, "PREMISE: production rendering inks the rotated square's outer corner")
+        guard pixels[outerAlpha] > 0 else { return }
+
+        XCTAssertEqual(VectorHitTest.topmost(in: turned.elements, at: outer)?.id, cornered.id,
+                       "Tap reaches the real rotated corner beyond the circular width hint")
+        let heldInk = try XCTUnwrap(VectorHitTest.outline(of: .stroke(cornered)))
+        var outsidePixels = 0
+        for y in 0..<side {
+            for x in 0..<side where pixels[(y * side + x) * 4 + 3] > 0 {
+                let cell = CGRect(x: x, y: y, width: 1, height: 1)
+                if !heldInk.contains(CGPoint(x: cell.minX, y: cell.minY))
+                    || !heldInk.contains(CGPoint(x: cell.maxX, y: cell.minY))
+                    || !heldInk.contains(CGPoint(x: cell.maxX, y: cell.maxY))
+                    || !heldInk.contains(CGPoint(x: cell.minX, y: cell.maxY)) {
+                    outsidePixels += 1
+                }
+            }
+        }
+        XCTAssertEqual(outsidePixels, 0, "The Tap outline holds every production-ink cell, including the turned corners")
+        turnedManager.selectObject(at: outer)
+        XCTAssertEqual(turnedManager.selection?.objects?.elements, [cornered.id],
+                       "The actual corner tap names the whole brush object")
+        // A missed tap must not get credit from Clear's separate no-selection behavior.
+        guard turnedManager.selection?.objects?.elements == [cornered.id] else { return }
+        turnedManager.clearSelectionPixels()
+        let cleared = try XCTUnwrap(turned.render()?.cgImage)
+        let clearedPixels = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(cleared, width: side, height: side))
+        XCTAssertEqual(clearedPixels[outerAlpha], 0, "Clear removes the corner ink selected through the public manager")
     }
 
     /// And Move lifts exactly the tapped object: the float carries the stroke and nothing else.
@@ -348,6 +468,69 @@ final class TapSelectLogicTests: XCTestCase {
         XCTAssertEqual(manager.selection?.objects?.elements, [line.id], "the stroke is selected where it is drawn (x 30…50)")
         manager.selectObject(at: CGPoint(x: 12, y: 30))
         XCTAssertNil(manager.selection, "…and a tap where it is stored selects nothing")
+
+        var brush = TestBrushes.hardRound
+        brush.dab = BrushDabSettings(size: 1, flow: 1, spacing: 0.5, hardness: 1)
+        brush.modulations = BrushModulations([])
+        let ancestor = StrokeSamples([VectorSample(x: 20, y: 60, pressure: 1), VectorSample(x: 140, y: 60, pressure: 1)], channels: .pressureOnly)
+        var piece = VectorStroke(brush: brush, color: black, size: 8, opacity: 1,
+                                samples: [VectorSample(x: 50, y: 60, pressure: 1), VectorSample(x: 90, y: 60, pressure: 1)])
+        piece.lattice = DabLattice(samples: ancestor, parameters: [0.25, 7.0 / 12])
+        let placed = VectorCanvas.posing(.stroke(piece), through: CGAffineTransform(translationX: 20, y: 30))
+        XCTAssertTrue(VectorHitTest.covers(placed, point: CGPoint(x: 90, y: 90), slop: 0), "The retained range is hit where its pose shows it")
+        XCTAssertFalse(VectorHitTest.covers(placed, point: CGPoint(x: 40, y: 90), slop: 0), "A hidden ancestor dab cannot enter the body")
+        let pieceOutline = try XCTUnwrap(VectorHitTest.outline(of: placed))
+        XCTAssertFalse(pieceOutline.contains(CGPoint(x: 40, y: 90)), "The outline also uses only the visible range")
+
+        var scattered = brush
+        scattered.dab.scatterAcross = 0.8
+        scattered.modulations = BrushModulations([BrushModulation(.size, .pressure, amount: -0.5)])
+        let variedRun = StrokeSamples([VectorSample(x: 20, y: 100, pressure: 0.2), VectorSample(x: 140, y: 100, pressure: 1)], channels: .pressureOnly)
+        let varied = VectorStroke(brush: scattered, color: black, size: 20, opacity: 1, samples: variedRun, seed: 2)
+        let actual = BrushStamper.bake(samples: variedRun, brush: scattered, color: .black, brushSize: 20,
+                                      brushOpacity: 1, random: varied.dabRandom).dabs
+        XCTAssertGreaterThan(actual.count, 3, "PREMISE: a real modulated scattered walk")
+        for dab in actual {
+            XCTAssertTrue(VectorHitTest.covers(.stroke(varied), point: dab.center, slop: 0),
+                          "The canonical modulated/scattered stamp centres are selectable")
+        }
+
+        // A valid source quad need not contain every scattered centre. This seed places exactly
+        // one finished dab on the pole, between two finite dabs; neither query nor replay may link it.
+        let map = Homography(a: 1, b: 0, c: 0, d: 0, e: 1, f: 0, g: 0, h: 1.0 / 30, i: -70.0 / 30)
+        let sourceBox = CGRect(x: 10, y: 90, width: 180, height: 20)
+        let quad = try XCTUnwrap(PoseQuad(box: sourceBox, mappedThrough: map))
+        XCTAssertTrue(quad.isValid, "PREMISE: the authored source quad is valid")
+        let parent = StrokeSamples([VectorSample(x: 20, y: 100, pressure: 1), VectorSample(x: 180, y: 100, pressure: 1)], channels: .pressureOnly)
+        for tip: BrushTip in [.round, .stamp(.builtIn(.square))] {
+            var crossing = brush
+            crossing.tip = tip
+            crossing.dab.scatterAcross = 1.5641612270790493
+            var fragment = VectorStroke(brush: crossing, color: black, size: 20, opacity: 1,
+                samples: [VectorSample(x: 20, y: 100, pressure: 1), VectorSample(x: 41, y: 100, pressure: 1)], seed: 2)
+            fragment.lattice = DabLattice(samples: parent, parameters: [0, 0.13125])
+            let native = BrushStamper.bake(samples: parent, brush: crossing, color: .black, brushSize: 20,
+                brushOpacity: 1, random: fragment.dabRandom, visibleRange: 0...0.13125)
+            XCTAssertEqual(native.dabs.count, 3, "PREMISE: exactly the three canonical sites")
+            let pose = BrushStamper.DabPose(map)
+            XCTAssertNil(pose.applied(to: native.dabs[1]), "PREMISE: only the middle finished site has no image")
+            let first = try XCTUnwrap(pose.applied(to: native.dabs[0]))
+            let last = try XCTUnwrap(pose.applied(to: native.dabs[2]))
+            let bridge = CGPoint(x: first.center.x * 0.75 + last.center.x * 0.25,
+                                 y: first.center.y * 0.75 + last.center.y * 0.25)
+            for dab in [first, last] {
+                XCTAssertGreaterThan(hypot(bridge.x - dab.center.x, bridge.y - dab.center.y), dab.radius * sqrt(2),
+                                     "PREMISE: the proposed bridge is outside both surviving supports")
+            }
+            let shown = try XCTUnwrap(VectorCanvas.posing(.stroke(fragment), through: map))
+            XCTAssertTrue(VectorHitTest.covers(shown, point: first.center, slop: 0), "The valid posed support is retained")
+            XCTAssertFalse(VectorHitTest.covers(shown, point: bridge, slop: 0), "A dropped posed site breaks local geometric continuity")
+
+            let replay = TapContinuityTarget()
+            BrushStamper.replay(native, into: replay, through: pose)
+            XCTAssertEqual(replay.events, ["begin", "group", "stamp", "break", "stamp", "merge", "end"],
+                           "Replay reports the same discontinuity without splitting its one opacity group")
+        }
     }
 
     /// **A loop drawn over a tapped selection replaces it** — an object is not a region to add to.
@@ -744,4 +927,16 @@ final class TapSelectLogicTests: XCTestCase {
         manager.redo()
         XCTAssertEqual(manager.selection?.objects?.elements, [above.id], "redo: the tap's set, on the layer that shows it")
     }
+}
+
+/// Observes only the existing primitive/group stream; it does not reproduce hit or pose math.
+private final class TapContinuityTarget: DabTarget {
+    var events: [String] = []
+    func beginStroke() { events.append("begin") }
+    func endStroke() { events.append("end") }
+    func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode, texture: BrushTextureSettings?) { events.append("group") }
+    func endStrokeGroup() { events.append("merge") }
+    func dabDiscontinuity() { events.append("break") }
+    func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor, alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) { events.append("stamp") }
+    func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat, angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode) { events.append("stamp") }
 }

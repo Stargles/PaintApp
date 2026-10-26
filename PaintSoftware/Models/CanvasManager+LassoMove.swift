@@ -72,40 +72,6 @@ struct MoveBoxInk {
         clusters = elements.compactMap(Self.cluster(of:))
     }
 
-    /// **Andrew's monotone chain**, `O(n log n)`, paid once at the lift so that a knob drag's per-frame
-    /// cost is the hull's size rather than the display list's.
-    ///
-    /// It is here because the measurement asked for it, and it was written only after the measurement
-    /// asked. `PerfBaselineTests.testWhatOneFrameOfTheBoxKnobCosts` on a 24,000-sample cel, Debug,
-    /// 2026-08-28: **2.223 ms a frame without the hull and 0.401 ms with it** — a quarter of a 120 Hz
-    /// frame against a twentieth, on a path that runs on every touch-move of a drag. A drawn stroke's
-    /// hull is a handful of turning points where its sample list is hundreds, and the reduction is
-    /// exact, so there was nothing to trade.
-    ///
-    /// `<= 0` drops collinear points as well as reflex ones, so a straight stroke reduces to its two
-    /// ends. Fewer than four points are already their own hull and are returned untouched, which is
-    /// also what makes a single dab — the degenerate disc — cost nothing to measure.
-    static func hull(of points: [CGPoint]) -> [CGPoint] {
-        guard points.count > 3 else { return points }
-        let sorted = points.sorted { $0.x == $1.x ? $0.y < $1.y : $0.x < $1.x }
-        func cross(_ o: CGPoint, _ a: CGPoint, _ b: CGPoint) -> CGFloat {
-            (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
-        }
-        func chain(_ points: [CGPoint]) -> [CGPoint] {
-            var result: [CGPoint] = []
-            for point in points {
-                while result.count >= 2,
-                      cross(result[result.count - 2], result[result.count - 1], point) <= 0 {
-                    result.removeLast()
-                }
-                result.append(point)
-            }
-            result.removeLast()
-            return result
-        }
-        return chain(sorted) + chain(sorted.reversed())
-    }
-
     /// **Ink, and the half-width that wraps it** — the four kinds, each reduced to whichever of the
     /// two it actually has.
     ///
@@ -131,7 +97,7 @@ struct MoveBoxInk {
         switch element {
         case .stroke(let stroke):
             guard !stroke.samples.isEmpty else { return nil }
-            return Cluster(hull: hull(of: stroke.samples.map { CGPoint(x: $0.x, y: $0.y) }),
+            return Cluster(hull: StrokeGeometry.hull(of: stroke.samples.map { CGPoint(x: $0.x, y: $0.y) }),
                            reach: StrokeGeometry.stampRadius(forPressure: 1, brush: stroke.brush,
                                                              size: stroke.size))
         case .fill(let fill):
@@ -154,7 +120,7 @@ struct MoveBoxInk {
                 }
             }
             guard !points.isEmpty else { return nil }
-            return Cluster(hull: hull(of: points), reach: 0)
+            return Cluster(hull: StrokeGeometry.hull(of: points), reach: 0)
         case .image(let image):
             return Cluster(hull: image.corners, reach: 0)
         case .video(let video):

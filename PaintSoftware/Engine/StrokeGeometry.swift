@@ -124,6 +124,55 @@ enum StrokeGeometry {
                       width: (maxX - minX) + 2 * padding, height: (maxY - minY) + 2 * padding)
     }
 
+    /// Andrew's monotone chain. Move-box measurement reduces its native samples once; Tap uses
+    /// the same arithmetic on at most eight vertices from two consecutive image supports.
+    ///
+    /// `<= 0` drops collinear points as well as reflex ones, so a straight stroke reduces to its two
+    /// ends. Fewer than four points are already their own hull and are returned untouched, which is
+    /// also what makes a single dab — the degenerate disc — cost nothing to measure.
+    static func hull(of points: [CGPoint]) -> [CGPoint] {
+        guard points.count > 3 else { return points }
+        let sorted = points.sorted { $0.x == $1.x ? $0.y < $1.y : $0.x < $1.x }
+        func cross(_ o: CGPoint, _ a: CGPoint, _ b: CGPoint) -> CGFloat {
+            (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+        }
+        func chain(_ points: [CGPoint]) -> [CGPoint] {
+            var result: [CGPoint] = []
+            for point in points {
+                while result.count >= 2,
+                      cross(result[result.count - 2], result[result.count - 1], point) <= 0 {
+                    result.removeLast()
+                }
+                result.append(point)
+            }
+            result.removeLast()
+            return result
+        }
+        return chain(sorted) + chain(sorted.reversed())
+    }
+
+    /// A convex primitive or local support hull, with a geometric fingertip collar.
+    static func contains(_ point: CGPoint, inConvex polygon: [CGPoint], slop: CGFloat) -> Bool {
+        guard polygon.count >= 3, point.x.isFinite, point.y.isFinite else { return false }
+        var area: CGFloat = 0
+        var positive = false, negative = false
+        for index in polygon.indices {
+            let a = polygon[index], b = polygon[(index + 1) % polygon.count]
+            area += a.x * b.y - b.x * a.y
+            let cross = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x)
+            positive = positive || cross > 0
+            negative = negative || cross < 0
+        }
+        if area.isFinite && area != 0 && !(positive && negative) { return true }
+        guard slop > 0 else { return false }
+        for index in polygon.indices {
+            if distanceSquared(from: point, toSegment: polygon[index], polygon[(index + 1) % polygon.count]) <= slop * slop {
+                return true
+            }
+        }
+        return false
+    }
+
     // MARK: - Capsule chain
 
     /// One link of a stroke's rendered footprint: the region swept by a disk moving from `a` to `b`

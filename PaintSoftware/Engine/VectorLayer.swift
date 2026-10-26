@@ -442,6 +442,81 @@ struct VectorStrokeRenderWalk {
                                  brushOpacity: stroke.opacity, isEraser: isEraser,
                                  random: stroke.dabRandom, visibleRange: visibleRange)
     }
+
+    /// The same emitted geometry that paints the stroke. A nil point keeps bounds-only consumers
+    /// free of hit tests and local hulls. Texture holes and spacing gaps retain stroke-body picking;
+    /// a walk whose density/flow gates emit nothing has no selectable body.
+    func geometry(at point: CGPoint? = nil, slop: CGFloat = 0) -> (bounds: CGRect, hit: Bool) {
+        let target = BoundsDabTarget(point: point, slop: slop)
+        stamp(into: target, isEraser: stroke.composite == .erase)
+        return (target.bounds, target.hit)
+    }
+}
+
+/// Retains only one preceding support, never a whole walk or a global stroke hull.
+private final class BoundsDabTarget: DabTarget {
+    private enum Support { case circle(CGPoint, CGFloat), image(Quad) }
+    private let point: CGPoint?
+    private let slop: CGFloat
+    private var previous: Support?
+    private(set) var bounds = CGRect.null
+    private(set) var hit = false
+
+    init(point: CGPoint?, slop: CGFloat) { self.point = point; self.slop = max(0, slop) }
+    func dabDiscontinuity() { previous = nil }
+    func beginStroke() { previous = nil }
+    func endStroke() { previous = nil }
+    func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode, texture: BrushTextureSettings?) { previous = nil }
+    func endStrokeGroup() { previous = nil }
+
+    func stampCircle(at center: CGPoint, radius: CGFloat, color: UIColor,
+                     alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
+        bounds = bounds.union(dabCircleBounds(at: center, radius: radius))
+        guard let point, !hit else { return }
+        let capsule: StrokeGeometry.Capsule
+        if case .circle(let before, let r)? = previous {
+            capsule = .init(a: before, b: center, ra: r + slop, rb: radius + slop)
+        } else {
+            capsule = .init(dabAt: center, radius: radius + slop)
+        }
+        hit = capsule.contains(point)
+        previous = .circle(center, radius)
+    }
+
+    func stampImage(_ texture: BrushTextureRef, at center: CGPoint, diameter: CGFloat,
+                    angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode) {
+        bounds = bounds.union(dabImageBounds(at: center, diameter: diameter, angle: angle))
+        guard let point, !hit else { return }
+        let quad = dabImageQuad(at: center, diameter: diameter, angle: angle)
+        let previous = self.previous
+        self.previous = .image(quad)
+        var local = quad.boundingBox
+        if case .image(let before)? = previous { local = local.union(before.boundingBox) }
+        let minX = local.minX, maxX = local.maxX, minY = local.minY, maxY = local.maxY
+        var certain = minX.isFinite && maxX.isFinite && minY.isFinite && maxY.isFinite
+        // Check the actual vertices too: uncertain/rounded bounds must fall through, never
+        // decide membership. Save the current support even when its local query is rejected.
+        for index in 0..<4 {
+            let p = quad[index]
+            certain = certain && p.x.isFinite && p.y.isFinite
+                && p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY
+            if case .image(let before)? = previous {
+                let p = before[index]
+                certain = certain && p.x.isFinite && p.y.isFinite
+                    && p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY
+            }
+            if !certain { break }
+        }
+        if certain && (point.x < minX - slop || point.x > maxX + slop
+                       || point.y < minY - slop || point.y > maxY + slop) { return }
+        let polygon: [CGPoint]
+        if case .image(let before)? = previous {
+            polygon = StrokeGeometry.hull(of: before.points + quad.points)
+        } else {
+            polygon = quad.points
+        }
+        hit = StrokeGeometry.contains(point, inConvex: polygon, slop: slop)
+    }
 }
 
 extension DabLattice {
@@ -7773,22 +7848,6 @@ final class VectorCanvas {
         cg.restoreGState()
     }
 
-    private final class BoundsDabTarget: DabTarget {
-        private(set) var bounds = CGRect.null
-        func beginStroke() {}
-        func endStroke() {}
-        func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode, texture: BrushTextureSettings?) {}
-        func endStrokeGroup() {}
-        func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
-                         alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
-            bounds = bounds.union(dabCircleBounds(at: point, radius: radius))
-        }
-        func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
-                        angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode) {
-            bounds = bounds.union(dabImageBounds(at: point, diameter: diameter, angle: angle))
-        }
-    }
-
     /// Exact painted footprint from the ordinary brush walk, retaining only its bounds. Point
     /// edits can rephase dabs across a whole stroke, so their preview covers this before/after union.
     static func paintedBounds(of elements: [VectorElement]) -> CGRect {
@@ -7796,9 +7855,7 @@ final class VectorCanvas {
         for element in elements {
             switch element {
             case .stroke(let stroke):
-                let target = BoundsDabTarget()
-                stamp(stroke: stroke, into: target, isEraser: stroke.composite == .erase)
-                bounds = bounds.union(target.bounds)
+                bounds = bounds.union(VectorStrokeRenderWalk(stroke).geometry().bounds)
             case .fill(let fill):
                 if let path = fill.cgPath { bounds = bounds.union(path.boundingBoxOfPath) }
             case .image, .text, .video, .stream: break

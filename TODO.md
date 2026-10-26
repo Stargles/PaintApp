@@ -22,7 +22,9 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   benchmark1 and Release1 passed; root independently reconciled each and LOOKed3 square stages.
   Matched120-stroke image-manager miss improved120.1→29.2ms on the simulator. Minimal existing-Quad
   admission adds no cache/state/schema. Logic17 closed/root-causally accepted78117db7 all23contracts;
-  separate public/benchmark controls remain pending. No iPad/RSS or four-sample timing claim.
+  independent square d7fa normal8 and public2/benchmark5 controls7 now qualify11 further statements
+  (4extra issues0credit). Root LOOKed3 whole independent-square pictures;9source paths harvested,
+  preserving868 curve cap and both curve tests. Final assembled gates remain. No iPad/RSS or four-sample timing claim.
   Keep the new square-corner regression as its own cold public test, preserving all old round-workflow
   assertions. The generic Clear reversal currently fails at the earlier round step, leaving the new
   square Clear outcomes unreached; a separate behavior-focused method fixes that test structure.
@@ -169,7 +171,7 @@ curve94+6controls and Undo70/public4+logic3/public1 are harvested at their actua
 source gates remain. Storage cleanup is COMPLETE (10.11GiB caches+20.72GiB result dedup+13.05GiB
 exact5 retired-device DELETE phase), artwork/results/protected devices preserved. Root unchanged warm resize2
 owns the native lease now; gradient294 joined289pass/5fail and is independently reconciled.
-Tap17 is closed; independent cold square d7fa and cold autosave386 are source-ready/unrun.
+Tap17 and d7fa8/controls7 are closed; cold autosave51f and gradient fixture successors are source-only.
 Live authority: HANDOFF.md and `~/PaintWork/s54-final-qualification/root-next-gates.json`.
 Owner rulings remain point-only vector Liquify; vector batch mending includes attached strokes but
 protects uncertain joins/outside outline; saves keep newest clock-bucket versions. Deferred features

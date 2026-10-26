@@ -4829,6 +4829,94 @@ final class PerfBaselineTests: XCTestCase {
         XCTAssertLessThan(perFrame, perFrameRebuilt,
                           "reducing the display list once at the lift must beat re-walking it, or "
                           + "`VectorFloat.ink` is carrying weight for nothing")
+
+        // Tap asks only the displayed cel. Count the actual canonical dabs separately from the
+        // timed miss/hit/outline; retain at most one baked walk while obtaining those counts.
+        let dabs = strokes.reduce(0) { total, stroke in
+            total + autoreleasepool {
+                BrushStamper.bake(samples: stroke.samples, brush: stroke.brush, color: .black,
+                                  brushSize: stroke.size, brushOpacity: stroke.opacity,
+                                  random: stroke.dabRandom).dabs.count
+            }
+        }
+        let last = strokes[strokes.count - 1]
+        let point = last.samples[last.samples.count / 2].point
+        var missed: VectorElement?, hit: VectorElement?, outline: CGPath?
+        let missSeconds = time { missed = VectorHitTest.topmost(in: elements, at: CGPoint(x: -50, y: -50), slop: 0) }
+        let hitSeconds = time { hit = VectorHitTest.topmost(in: elements, at: point, slop: 0) }
+        let outlineSeconds = time { outline = hit.flatMap(VectorHitTest.outline) }
+        report("Canonical Tap on the displayed drawing", [
+            ("canvas", "2048x1024"), ("strokes", "\(strokes.count)"), ("samples", "\(points)"),
+            ("emittedDabs", "\(dabs)"), ("missWalks", "\(strokes.count)"), ("hitWalks", "1"), ("outlineWalks", "1"),
+            ("miss", milliseconds(missSeconds)), ("hit", milliseconds(hitSeconds)), ("outline", milliseconds(outlineSeconds))
+        ])
+        XCTAssertGreaterThan(dabs, points, "PREMISE: this measures canonical stamp work, not only stored knots")
+        XCTAssertNil(missed, "A miss scans the real displayed drawing without selecting an object")
+        XCTAssertEqual(hit?.id, last.id, "A hit reaches the actual last stroke")
+        XCTAssertTrue(outline?.contains(point) == true, "The selected object's outline holds its hit point")
+
+        // A second, sequential fixture exercises real image-tip links and the public manager.
+        // Only stroke records/display lists are added: all 24k sample-channel buffers stay shared
+        // with the round fixture above. No source picture or canvas-sized mask is created here.
+        autoreleasepool {
+            var imageBrush = strokes[0].brush
+            imageBrush.tip = .stamp(.builtIn(.square))
+            let imageStrokes = strokes.map { stroke -> VectorStroke in
+                var image = stroke
+                image.brush = imageBrush
+                return image
+            }
+            let imageElements = imageStrokes.map { VectorElement.stroke($0) }
+            let imageDabs = imageStrokes.reduce(0) { total, stroke in
+                total + autoreleasepool {
+                    BrushStamper.bake(samples: stroke.samples, brush: stroke.brush, color: .black,
+                                      brushSize: stroke.size, brushOpacity: stroke.opacity,
+                                      random: stroke.dabRandom).dabs.count
+                }
+            }
+            let imageLast = imageStrokes[imageStrokes.count - 1]
+            let imagePoint = imageLast.samples[imageLast.samples.count / 2].point
+            var imageMissed: VectorElement?, imageHit: VectorElement?, imageOutline: CGPath?
+            let imageMissSeconds = time {
+                imageMissed = VectorHitTest.topmost(in: imageElements, at: CGPoint(x: -50, y: -50), slop: 0)
+            }
+            let imageHitSeconds = time {
+                imageHit = VectorHitTest.topmost(in: imageElements, at: imagePoint, slop: 0)
+            }
+            let imageOutlineSeconds = time { imageOutline = imageHit.flatMap(VectorHitTest.outline) }
+            XCTAssertGreaterThan(imageDabs, points, "PREMISE: image queries traverse emitted stamps")
+            XCTAssertNil(imageMissed, "The image-tip miss traverses the displayed drawing")
+            XCTAssertEqual(imageHit?.id, imageLast.id, "The image-tip hit reaches the actual last stroke")
+            XCTAssertTrue(imageOutline?.contains(imagePoint) == true, "The image-tip outline holds its hit point")
+
+            let manager = CanvasFixture.manager()
+            manager.canvasSize = canvasSize
+            manager.addVectorLayer()
+            manager.selectionMode = .tap
+            guard let vector = manager.layers[manager.currentLayerIndex].cels[0].vector else {
+                XCTFail("PREMISE: the public manager has its displayed vector cel")
+                return
+            }
+            vector.restoreElements(imageElements, changedInk: nil)
+            // Setup, actual dab counting and every assertion are outside these clocks. These
+            // are end-to-end selection costs, including display posing, outline and publication.
+            let managerMissSeconds = time { _ = manager.selectObject(at: CGPoint(x: -50, y: -50)) }
+            XCTAssertNil(manager.selection, "The actual manager leaves a bare-paper miss unselected")
+            let managerHitSeconds = time { _ = manager.selectObject(at: imagePoint) }
+            XCTAssertEqual(manager.selection?.objects?.elements, [imageLast.id],
+                           "The actual manager names the last image-tip stroke")
+            XCTAssertTrue(manager.selection?.path.contains(imagePoint) == true,
+                          "The actual published selection holds its hit point")
+            report("Canonical image Tap and actual manager on the displayed drawing", [
+                ("canvas", "2048x1024"), ("strokes", "\(imageStrokes.count)"), ("samples", "\(points)"),
+                ("emittedDabs", "\(imageDabs)"), ("directMissWalks", "\(imageStrokes.count)"),
+                ("directHitWalks", "1"), ("directOutlineWalks", "1"),
+                ("managerMissWalks", "\(imageStrokes.count)"), ("managerHitAndOutlineWalks", "2"),
+                ("directMiss", milliseconds(imageMissSeconds)), ("directHit", milliseconds(imageHitSeconds)),
+                ("directOutline", milliseconds(imageOutlineSeconds)),
+                ("actualManagerMiss", milliseconds(managerMissSeconds)), ("actualManagerHit", milliseconds(managerHitSeconds))
+            ])
+        }
     }
 
     // MARK: - What a vector-only document pays for its raster tier (PERFORMANCE.md item 14)

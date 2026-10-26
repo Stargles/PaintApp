@@ -93,16 +93,25 @@ final class TapSelectUITests: PaintUITestCase {
     /// come alive (Edit, Clear), no editor opens, and Clear takes the stroke away — the pixels under
     /// the tap go back to paper — which is how the artist can tell *that stroke* was selected.
     func testTappingAStrokeSelectsItAndTheSelectPanelsVerbsActOnIt() throws {
-        let (app, canvas, paper) = launch()
-        let from = onHost(paper, 0.25, 0.5), to = onHost(paper, 0.75, 0.5)
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(window.width, window.height, "PREMISE: the owner's landscape window")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = paperRect(in: canvas)
+        let row = rowAboveTheDock(canvas)
+        let from = CGVector(dx: onHost(paper, 0.25, 0.5).dx, dy: row)
+        let to = CGVector(dx: onHost(paper, 0.75, 0.5).dx, dy: row)
         drawLine(on: canvas, from: from, to: to)
-        let middle = onHost(paper, 0.5, 0.5)
+        let middle = CGVector(dx: onHost(paper, 0.5, 0.5).dx, dy: row)
         XCTAssertTrue(waitUntil(canvas, middle, isInk), "PREMISE: the stroke is on the paper")
 
         chooseTapMode(app)
         let clear = app.buttons["selectPanel.clearButton"]
         XCTAssertTrue(clear.waitForExistence(timeout: 5))
         XCTAssertFalse(clear.isEnabled, "PREMISE: nothing is selected, so Clear is dim")
+        assertAboveTheDock(app, canvas, dy: middle.dy, "The round stroke tap")
         canvas.coordinate(withNormalizedOffset: middle).tap()
 
         XCTAssertTrue(app.buttons["selectPanel.editDisclosure"].waitForExistence(timeout: 5))
@@ -115,6 +124,57 @@ final class TapSelectUITests: PaintUITestCase {
         clear.tap()
         XCTAssertTrue(waitUntil(canvas, middle, isWhitish), "Clear took away the stroke that was tapped")
         XCTAssertFalse(clear.isEnabled, "…and with it the selection")
+
+    }
+
+    /// A fresh square stamp is selected at its real outer corner, then Clear removes the whole object.
+    func testTappingASquareStampsOuterCornerSelectsAndClearsTheWholeStroke() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(window.width, window.height, "PREMISE: the owner's landscape window")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = paperRect(in: canvas)
+        let clear = app.buttons["selectPanel.clearButton"]
+
+        // Edit the ordinary selected brush through its public controls, then tap a single square.
+        app.buttons["toolbar.brushButton"].tap()
+        openBrushLibrary(app)
+        XCTAssertTrue(tapWhenHittable(app.buttons["brushPanel.brush.Opaque Round"], "Opaque Round"))
+        openBrushEditor(app)
+        let tip = app.buttons["brushPanel.tipPicker"]
+        XCTAssertTrue(tapWhenHittable(tip, "The tip picker"))
+        XCTAssertTrue(tapWhenHittable(app.buttons["brushPanel.tipOption.square"], "Square"))
+        XCTAssertEqual(tip.value as? String, "Square", "PREMISE: the public picker selected the square mask")
+        app.sliders["brushPanel.sizeSlider"].adjust(toNormalizedSliderPosition: 1)
+        closeBrushEditor(app)
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5), "PREMISE: the canvas is reachable after brush editing")
+        let center = CGVector(dx: onHost(paper, 0.5, 0.5).dx, dy: rowAboveTheDock(canvas))
+        let visible = visiblePaperRect(app, in: canvas)
+        let squareHost = canvas.frame
+        let radius = paper.width * 100 / 2048 // Size200 endpoint, half the canonical diameter.
+        let radiusY = radius * canvas.frame.width / canvas.frame.height
+        let corner = CGVector(dx: center.dx + radius * 0.85, dy: center.dy + radiusY * 0.85)
+        XCTAssertTrue(visible.contains(CGPoint(x: corner.dx, y: corner.dy)), "PREMISE: the corner is on visible paper")
+        assertBelowTheToolbar(app, canvas, dy: center.dy - radiusY, "The square stamp")
+        assertAboveTheDock(app, canvas, dy: center.dy + radiusY, "The square stamp")
+        XCTAssertTrue(waitUntil(canvas, corner, isWhitish), "PREMISE: the future outer corner is untouched paper")
+        canvas.coordinate(withNormalizedOffset: center).tap()
+        XCTAssertTrue(waitUntil(canvas, corner, isInk), "PREMISE: the actual square inks its outer corner beyond the round radius")
+        attachScreenshot(XCUIScreen.main, "tap-square-corner-before-selection")
+        chooseTapMode(app)
+        assertAboveTheDock(app, canvas, dy: corner.dy, "The outer-corner tap")
+        XCTAssertEqual(canvas.frame, squareHost, "The same canvas supplies drawing and selection coordinates")
+        canvas.coordinate(withNormalizedOffset: corner).tap()
+        XCTAssertTrue(clear.isEnabled, "The square's real outer corner selects its object")
+        attachScreenshot(XCUIScreen.main, "tap-square-corner-selected")
+        clear.tap()
+        XCTAssertTrue(waitUntil(canvas, corner, isWhitish), "Clear removes the selected square's outer corner")
+        XCTAssertTrue(waitUntil(canvas, center, isWhitish), "…and its body, not just the tapped pixel")
+        XCTAssertFalse(clear.isEnabled, "The cleared square leaves no selected object")
+        attachScreenshot(XCUIScreen.main, "tap-square-corner-cleared")
     }
 
     // MARK: - Fill

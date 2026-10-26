@@ -708,6 +708,7 @@ extension BrushStamper {
         func dabSite(at point: CGPoint, travel: CGPoint, parameter: CGFloat?) {
             inner.dabSite(at: point, travel: travel, parameter: parameter)
         }
+        func dabDiscontinuity() { inner.dabDiscontinuity() }
 
         /// Forwarded untouched. A pose moves, scales and turns *dabs*; it has no opinion about what
         /// the finished stroke may reach or how it meets what is under it — and because the merge's
@@ -720,7 +721,9 @@ extension BrushStamper {
 
         func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
                          alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
-            guard let center = pose.map.map(point), let k = pose.scale(at: point) else { return }
+            guard let center = pose.map.map(point), let k = pose.scale(at: point) else {
+                inner.dabDiscontinuity(); return
+            }
             inner.stampCircle(at: center, radius: radius * k, color: color,
                               alpha: alpha, hardness: hardness, blendMode: blendMode)
         }
@@ -730,7 +733,9 @@ extension BrushStamper {
         func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
                         angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode) {
             guard let center = pose.map.map(point), let k = pose.scale(at: point),
-                  let turn = pose.rotation(at: point) else { return }
+                  let turn = pose.rotation(at: point) else {
+                inner.dabDiscontinuity(); return
+            }
             inner.stampImage(texture, at: center, diameter: diameter * k, angle: angle + turn,
                              color: color, alpha: alpha, blendMode: blendMode)
         }
@@ -779,7 +784,9 @@ extension BrushStamper {
         target.beginStrokeGroup(opacity: stroke.opacity, blendMode: stroke.blendMode,
                                 texture: stroke.texture)
         for dab in stroke.dabs {
-            guard let moved = pose.applied(to: dab) else { continue }
+            guard let moved = pose.applied(to: dab) else {
+                target.dabDiscontinuity(); continue
+            }
             switch moved.tip {
             case .round(let hardness):
                 target.stampCircle(at: moved.center, radius: moved.radius, color: moved.color,
