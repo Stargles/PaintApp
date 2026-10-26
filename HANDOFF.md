@@ -76,7 +76,12 @@ Use the three existing agents; all source work stays in separate trees. No physi
   only factory Share cleanup assertion1273 failed twice; all Photos/Send/queued writer/namespace
   cases pass. Bake authoring TEST-ONLY explicit autoreleasepool +weak controller-retirement premise,
   original file/content/callback assertions intact; no product change/delay/poll. Actual system
-  Share adaptation, Cancel/Close identity and return-to-drawing/gesture remain unrun. UIKit direct
+  Share adaptation, Cancel/Close identity and return-to-drawing/gesture remain unrun. Root authorizes
+  ONE test-only TEMP source successor after542 peer: append named whole-screen and full app AX
+  attachments after the existing public Share assertion, no changed fixture/assertion/gesture/
+  deadline. Run that cold exact public method after normal Share ownership passes, inspect actual
+  dismissal identity before authoring the permanent cancel/return workflow, then remove TEMP whole.
+  UIKit direct
   iPad contract is a compatibility gate, not source-certified. Existing18controls +new supporting
   UUID constructor control37b795 prepared/proposed only; no inherited credit.
 - **Contained package addresses:** OLD497 selected2 actual2RED at validator384/load399, ROOTLOOK5
