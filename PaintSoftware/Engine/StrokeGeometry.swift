@@ -1184,7 +1184,7 @@ enum StrokeGeometry {
             length += hypot(polygon[index].x - polygon[index - 1].x,
                             polygon[index].y - polygon[index - 1].y)
         }
-        return min(64, max(4, Int(length.rounded(.up))))
+        return Int(min(64, max(4, length.rounded(.up))))
     }
 
     private static func quadPoint(_ p0: CGPoint, _ c: CGPoint, _ p1: CGPoint, _ t: CGFloat) -> CGPoint {

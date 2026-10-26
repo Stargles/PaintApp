@@ -113,6 +113,23 @@ final class LiquifyLogicTests: XCTestCase {
             let actual = sqrt(StrokeGeometry.distanceSquared(from: exact, toSegment: edges[index].0, edges[index].1))
             XCTAssertLessThanOrEqual(actual, edges[index].2 + 0.0000001, "the emitted bound must cover the real curve, including between chord endpoints")
         }
+
+        // Tiny and fractional curves keep the same chord floor, rounding and cap.
+        for (length, expected) in [(CGFloat(0.2), 4), (4.2, 5), (63.2, 64), (80, 64)] {
+            let curve = CGMutablePath()
+            let end = CGPoint(x: length, y: 0)
+            curve.move(to: .zero)
+            curve.addQuadCurve(to: end, control: CGPoint(x: length / 2, y: 0))
+            let flat = try XCTUnwrap(StrokeGeometry.flattened(curve))
+            var points: [CGPoint] = []
+            flat.applyWithBlock { element in
+                if element.pointee.type == .moveToPoint || element.pointee.type == .addLineToPoint {
+                    points.append(element.pointee.points[0])
+                }
+            }
+            XCTAssertEqual(points.count, expected + 1, "One move plus the documented bounded chord count")
+            XCTAssertEqual(points.last, curve.currentPoint, "Flattening preserves the ordinary curve endpoint")
+        }
     }
 
     func testCurvedSelectionRasterPictureMovesInsideAndLeavesTransparentExteriorExact() throws {

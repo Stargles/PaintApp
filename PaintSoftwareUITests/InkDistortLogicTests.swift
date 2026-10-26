@@ -382,6 +382,58 @@ final class InkDistortLogicTests: XCTestCase {
         _ = raw
         XCTAssertGreaterThan(Self.distance(from: target, to: naive), 4,
                              "which the un-flattened one does not — this is what the flatten buys")
+
+        // Finite off-canvas controls survive the current fill writer/read seam. The nonaffine
+        // consumer must cap its source chords before narrowing their control-polygon length.
+        for cubic in [false, true] {
+            let large = CGMutablePath()
+            large.move(to: .zero)
+            let end = CGPoint(x: 0, y: 10)
+            if cubic {
+                large.addCurve(to: end, control1: CGPoint(x: 1e20, y: 0),
+                               control2: CGPoint(x: 1e20, y: 10))
+            } else {
+                large.addQuadCurve(to: end, control: CGPoint(x: 1e20, y: 0))
+            }
+            large.closeSubpath()
+            let written = VectorCanvasData(elements: [.fill(VectorFillElement(path: large, color: Self.ink))], transform: [])
+            let read = try JSONDecoder().decode(VectorCanvasData.self, from: JSONEncoder().encode(written))
+            let reopened = try XCTUnwrap(read.fills.first)
+            let stored = try XCTUnwrap(reopened.cgPath)
+            var storedPoints: [CGPoint] = []
+            stored.applyWithBlock { element in
+                for index in 0..<VectorGeometryMap.pointCount(of: element.pointee.type) {
+                    storedPoints.append(element.pointee.points[index])
+                }
+            }
+            XCTAssertTrue(storedPoints.allSatisfy { $0.x.isFinite && $0.y.isFinite },
+                          "PREMISE: the current writer reopens finite curve coordinates")
+            XCTAssertTrue(storedPoints.contains { $0.x > CGFloat(Int.max) },
+                          "PREMISE: archived controls exceed Int range without a nonfinite value")
+
+            let perspective = Homography(a: 1, b: 0, c: 0, d: 0, e: 1, f: 0, g: 0, h: 0.001, i: 1)
+            XCTAssertNil(perspective.affine(), "PREMISE: exercise the real nonaffine fill arm")
+            guard case .fill(let transformed) = try XCTUnwrap(VectorCanvas.mapping(.fill(reopened), through: perspective)),
+                  let transformedPath = transformed.cgPath else { return XCTFail("The finite archived fill must map") }
+            var mappedPoints: [CGPoint] = []
+            var commands: [CGPathElementType] = []
+            transformedPath.applyWithBlock { element in
+                commands.append(element.pointee.type)
+                for index in 0..<VectorGeometryMap.pointCount(of: element.pointee.type) {
+                    mappedPoints.append(element.pointee.points[index])
+                }
+            }
+            XCTAssertEqual(commands.filter { $0 == .addLineToPoint }.count, 64,
+                           "The real fill consumer retains its source-space chord cap")
+            XCTAssertEqual(mappedPoints.first, .zero, "The curve begins at its mapped source endpoint")
+            let last = try XCTUnwrap(mappedPoints.last)
+            let expectedEnd = try XCTUnwrap(perspective.map(end))
+            XCTAssertEqual(last.x, expectedEnd.x, accuracy: 0.00001)
+            XCTAssertEqual(last.y, expectedEnd.y, accuracy: 0.00001,
+                           "The source endpoint survives mapping and the fill archive's precision")
+            XCTAssertGreaterThan(try XCTUnwrap(mappedPoints.map(\.x).max()), 1e19,
+                                 "The chord cap does not clamp finite off-canvas geometry")
+        }
     }
 
     /// **A mapped fill keeps its animation group** — under the projective arm and under the affine one
