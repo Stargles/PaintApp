@@ -82,9 +82,15 @@ complete. Erasing respring cause, broad final regression/performance and remaini
 - Video picked-file comparisons67bd passed11/11; one real source-cleanup fault reached both direct
   comparisons (four occurrences/two contracts), root causal30a0b97c; all730 restored. No throw/setup
   credit and no cel/version identity qualification. Normal rebuild follows any compiled mutant.
-- Sole native slot is now Bake'scad2 opacity observation on owned4B33, grant8bcb9c50. Root shutdown
-  only56C and booted4B33;39E remains shut. Before/after inventory/export covers only a unique newly
-  saved public manual flight, preserving old Recordings and all source730. No physical action.
+- cad2 observation CLOSED1RED at original opacity setup56.55%; source730 exact, helper/native joined.
+  Public flight was NOT requested: Settings opened but clipped before recorder rows. Agent and root
+  whole-frame LOOK confirm it. Reuse existing FlightRecorderUITests bounded left-gutter scrolling in
+  a separate temporary diagnostic successor, preserving four attempts/.005/50% and original failure.
+  Old AFTER export independently stopped on changed AUT container address. Its before inventory was
+  empty, so no old recording is alleged lost. New read-only export must track bundle-owned current
+  address explicitly and verify prior kind/mode/byte/hash preservation instead of stable UUID.
+- Sole native slot is now Vector's3d2 CRT pixel diagnostic1 on owned56C, grant e5c4b8ab. Root shutdown
+  only4B33 and booted56C;39E remains shut. No physical action. CRT controls stay blocked.
 - Chroma cold drawing testee983 is independently accepted and integrated34921e73: public controls
   split colour onto previously white paper beside real black ink, preserving its dark core/far paper.
   Actual selected/whole11/control are UNRUN.

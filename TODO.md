@@ -23,7 +23,14 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   the panel it closed. AA6 closed with unchanged original tolerances/outcomes:Text passed all drawn outcomes and root red-word→single-red-letter LOOK;Blend opacity
   setup still failed. Retire Text's temporary print/past-action comment and reuse its successful
   public word selection/toolbar read (integrated3e4a). Keep failed slider compensation out; prepared
-  cad2 observes actual native events through the existing bounded recorder. Native trace is pending.
+  cad2 observes actual native events through the existing bounded recorder. Actual1 reproduced
+  56.55% and stopped at the original setup assertion; no flight was requested because Settings'
+  recorder rows were below the visible scroll area (actual whole-frame LOOK). Reuse the existing
+  FlightRecorderUITests bounded left-gutter scroll in the temporary capture path, with all four
+  slider attempts/.005/50% outcomes unchanged. Preserve failedcad2 packet; no guessed controller.
+  Export must follow the bundle-owned AUT container returned after install and explicitly retain
+  address changes, checking every prior recording's kind/mode/bytes/hash; UUID stability is not an
+  install invariant. Old failed identity-check command remains immutable. No product recorder change.
   Retire diagnostics, drive whole affected colour/text classes and meaningful controls.
 - Effects5a normal63 passed63/63, source730 exact. Its13safe controls now qualify19 product/retained
   contracts plus3 separate premises, rootb84a2549; exact730 restored. Finish2d normal116/13safe controls: huge finite
