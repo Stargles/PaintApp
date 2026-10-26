@@ -36,20 +36,22 @@ Exact5 obsolete owned simulators are deleted after independently verified data a
 cache cleanup and20.72GiB immutable-result dedup, disk reached47.06GiB/50.53GB free before new builds.
 Archives820782758bytes and all requiredProducts/artwork/results remain. CLAUDE phase margins apply.
 
-**Current Mac native lease:** Bake's serial756 batch, supervisor session10333: Debuglogic37 and
-DebugpublicUI6+benchmark1 have reported GREEN, Releasebenchmark1 is running. Root independent
-reconciliation/LOOK follow the joined batch. Existing e2baseline Release1 is root-accepted: actual
-manager image miss120.1ms/hit1.9ms on120strokes/165480dabs; no iPad/cache-virgin/RSS claim. New756
-keeps existing Quad support/predicates and skips unnecessary local hull allocation via conservative
-inclusive bounds; no cache/state/schema. Controls17 are prepared only, not granted. No source harvest.
+**Current Mac native lease:** Bake has the exact17 logic-control grant04f2dc13; all other Mac native
+work is HOLD. Actual756 Debuglogic37, DebugpublicUI6+benchmark1 and Releasebenchmark1 are GREEN,
+root independently reconciled exact IDs/source730/device/commands and LOOKed3 whole square stages
+(d95110cc). Matched Release manager miss120.1→29.2ms on120strokes/165480dabs; no iPad/cache-virgin/
+RSS/four-sample timing-gate claim. New756 keeps existing Quad support/predicates and skips unnecessary
+local hull allocation through conservative inclusive bounds; no cache/state/schema. Controls17
+qualify logic only; public/benchmark mutation credit remains separate. No source harvest.
 
 **Gradient:** old9dd actual selected1 is1intendedRGB-target failure (147grey vs108nativeCTM,
 difference39>predeclared2), all other outcomes/premises pass; root reconciled730/ID/device/command
 and LOOKed both whole64² originals (9da827ff). Affine-only correction0ab96d96 is independently
 source-accepted, same2points/API/schema, ordinary/singular/coincident behavior retained. Generic
-projective/lattice approximation unchanged. No corrected-source native run. Vector is adding one
-cold public Freeform/Done/Undo/Redo method to existing14; then combine279logic+15UI if confirmed
-(730paths/PBX1325/fast5412/full6009). Off-axis samples discriminate; whole-cel Freeform reaches
+projective/lattice approximation unchanged. No corrected-source native run. Vector's clean17f8d53b
+adds one cold public Freeform/Done/Undo/Redo method; old14/helpers byte-exact. Combined279logic+15UI
+is prepared294 (730paths/PBX1325/fast5412/full6009), root source review/native grant pending.
+Off-axis samples discriminate; whole-cel Freeform reaches
 same mapper after gesture END drops the bitmap latch. Old0ab279/3controls stay PREPARED_UNRUN.
 
 **Windows decoder:** source-only77e81aa1 adds4lines to existing Decode (expanded name255/root and

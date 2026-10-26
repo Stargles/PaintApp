@@ -18,10 +18,11 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
 
 **Next, in order:**
 
-- Finish canonical Tap selection cost/controls before harvesting. Isolated logic37 and publicUI6+
-  benchmark1 passed; root inspected the square-selection stages. Release benchmark after
-  storage cleanup passed1/1. Actual120-stroke image-manager miss120.1ms/hit1.9ms on the
-  simulator; minimal existing-Quad admission is now source-authorized, with cost/controls pending.
+- Finish canonical Tap selection controls before harvesting. Actual756 logic37, publicUI6+
+  benchmark1 and Release1 passed; root independently reconciled each and LOOKed3 square stages.
+  Matched120-stroke image-manager miss improved120.1→29.2ms on the simulator. Minimal existing-Quad
+  admission adds no cache/state/schema. Logic17 deliberate-failure batch is granted04f2dc13;
+  separate public/benchmark controls remain pending. No iPad/RSS or four-sample timing claim.
   Preserve current
   numeric curve cap and every drawn outcome.
 - Correct the now-reproduced affine-gradient defect in the existing two-point mapper. Old9dd ran
