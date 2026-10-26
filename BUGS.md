@@ -17,6 +17,20 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Oversized compressed discovery names evade the decoder's work bound — 2026-10-26
+
+Source-confirmed at72885a50 in Windows DnsName.Decode: buffer/pointer checks do not bound the
+expanded name or reject reserved nonpointer label prefixes. IsPaintstreamQuery decodes every
+question. A finite45377-byte malformed packet could repeat a15361-octet name5001times; the
+76810359 joined characters are source arithmetic, not a reproduced attack/allocation/RSS result.
+RFC1035 limits each label to63octets and the expanded wire name to255including lengths/root.
+The existing decoder should refuse before allocating an overlong label result, preserving physical
+Consumed/pointer accounting and the existing query refusal. No socket/rate/cache framework or
+UDP512-byte cap. Source report dns-mdns-bounded-72885a50/receipt-v2.json02599089; native regression
+and correction remain pending. Actual one-start/serial-reply/dispose callers showed no further
+proven lifecycle defect; real-link tests remain separate.
+
+
 ## Affine gradient mapping — source lead, not yet a reproduced application defect (2026-10-26)
 
 A bounded panel/gradient read challenges FillPaint.mapped's claim that mapping linear-gradient

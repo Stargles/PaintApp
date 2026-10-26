@@ -453,6 +453,12 @@ Inventory-only files are not reviewed code. New source is not called complete be
       completion correction passed within normal1cf422/422, zero skips; final35 stream/fit/walk
       controls qualify at their selected mapped assertions; remaining assertion gaps and final-source/UI
       gates stay pending. Windows fake transcripts return synchronized snapshots. Real-link stage5 remains owner-waiting; no deploy.
+- [ ] Bound discovery-name decoding at its existing Windows DnsName.Decode owner. Source72885a50
+      lacks RFC1035's255-octet expanded-name/63-octet-label bound; compressed repeated questions can
+      amplify work despite physical packet checks. Record finite255/256 and compression/Consumed
+      regression before a minimal guard; preserve valid discovery/QU and the existing20jump limit.
+      No giant exhaustion attempt, protocol service/cache/rate limiter or unrelated socket rewrite.
+      Actual attack/latency/RSS is unmeasured; root report02599089 is source evidence only.
 - [ ] Brush/editor: bounded8MiB actual-image preview LRU and keyed row result replace unbounded/unkeyed
       retention. Final823e proof distinguishes exact2 vs2.25 scale within one old rounded bucket and
       checks actual requested600×120 pixels. Shared PaletteColor rejects malformed persisted hex rather
