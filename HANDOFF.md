@@ -78,12 +78,20 @@ Use the three existing agents; all source work stays in separate trees. No physi
   extra generation. Source peers32fa/1f370 scoped accepted. Cross-module `.popover` conflict removed
   through persistent-root modal sheet; unchanged scanner6 passed in actual normal87. Result86/87:
   only factory Share cleanup assertion1273 failed twice; all Photos/Send/queued writer/namespace
-  cases pass. Bake authoring TEST-ONLY explicit autoreleasepool +weak controller-retirement premise,
-  original file/content/callback assertions intact; no product change/delay/poll. Actual system
+  cases pass. Test-only5420 explicit pool/weak premise actualselected1 fails1277 twice: UIKit retains
+  the never-presented controller even after the pool, so file-retirement assertions are uncredited.
+  Root reconciled730/device/method/argv. SDK26.5 UIActivityViewController.h explicitly specifies its
+  copied completion property clears after perform/dismiss. Next root source-only test successor
+  removes failed pool/weak premise WHOLE; retain all original content/callback/file assertions,
+  manually model the documented handler-clear boundary while holding the controller alive. This
+  tests callback ownership only; real UIKit perform/dismiss remains public. No product workaround,
+  polling/delay or controller subclass. Actual system
   Share adaptation, Cancel/Close identity and return-to-drawing/gesture remain unrun. Root authorizes
   ONE test-only TEMP source successor after542 peer: append named whole-screen and full app AX
   attachments after the existing public Share assertion, no changed fixture/assertion/gesture/
-  deadline. Run that cold exact public method after normal Share ownership passes, inspect actual
+  deadline. Actual542 controller-premise failure changes order: run that cold exact public method
+  now to inspect the real lifecycle, without treating the unpresented-controller test as app proof.
+  Inspect actual
   dismissal identity before authoring the permanent cancel/return workflow, then remove TEMP whole.
   UIKit direct
   iPad contract is a compatibility gate, not source-certified. Existing18controls +new supporting

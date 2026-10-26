@@ -40,7 +40,8 @@ that the final combined audit build has passed.
 4. Tap selection: canonical brush geometry correction is integrated. Its model, public drawing and
    deliberate-failure checks passed separately. Final combined checks remain.
 5. Export: one immutable finished-file owner and separate output directory protect handed-off files
-   and reject stale destination answers. Finish the controller-retirement test, complete destination
+   and reject stale destination answers. Correct the test's unsupported immediate controller-
+   retirement premise using UIKit's documented callback-clear boundary, complete destination
    tests and observe actual system Share dismissal before testing cancel → drawing and gestures.
    Preserve the existing presentation safety rule; no separate transfer registry or service.
 6. Saved data: implement one shared checked package-address boundary before reads and writes. The
