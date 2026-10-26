@@ -28,10 +28,10 @@ Use the three existing agents; all source work stays in separate trees. No physi
 
 ### Current native and source work
 
-- **Native lease:** gradient2e logic controls3 joined0; root accepts6canonical application targets,
-  receipt3f3bcbca. Package OLD8f selected5 joined1/native65; root reconciled730/device/methods/argv,
-  accepts11application boundary assertions with healthy premises. No compiler children remain.
-  Next serial native: gradient public1, then reviewed fill47/Export Share1. Agents source-only.
+- **Native lease:** fill116 three-whole-class47, session15082/helper99096. Previous gradient public1
+  joined0/source730restored but intended colour targetUNREACHED: extension witness failed first.
+  Investigation source/results-only; no retry/product change/credit. Gradient logic3 accepts6targets;
+  package OLD8f5 accepts11boundary assertions. Agents source-only; Export Share1 follows fill47.
   Extracted OLD fill ownerbc2 selected1 joined1RED at3intended targets; Export8ded normal87 joined
   86pass/1fail; all4c native work joined. All agents are source-only.
 - **Tap:** qualification and exact9-path harvest3219 closed (logic37, independent public/bench8,
@@ -42,7 +42,9 @@ Use the three existing agents; all source work stays in separate trees. No physi
   old picture-to-picture premise despite equal fields. ROOTLOOK2 tiny images +3public originals;
   orientation reportcb0e18c5 proves EXIF8/display2160x1620/2x = owner1080x810 landscape (rawIHDR
   portrait is not orientation evidence). Controls3logic actualRED/sixcanonical targets accepted;
-  four old translation extras0credit; public1 UNRUN. OldResize45 explicitly
+  four old translation extras0credit. Public1 actualRED at prior extension witness, intended517
+  colour assertionunreached0credit; Vector tracing whether witness couples to wrong paint colour.
+  All730source restored. Original normal249/ROOTLOOK remain separate. OldResize45 explicitly
   separate; currentResize47 composition needs joint296, not silent filtering. No harvest yet.
 - **Saving:** productd151 sole landedURL? completion deletes old failure callback; failed saves keep
   editor and owed edits, reuse existing timer, shared unsettled-state predicate protects newer work.
