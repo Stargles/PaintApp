@@ -81,6 +81,12 @@ This is not an owner ruling. Correct completion ownership through the existing d
 save-result seam, preserving edits made during an in-flight save and ignoring stale document
 completions. Reuse one timer with a bounded delay; no retry service, polling loop or duplicate dirty
 state. Establish finite failure→recovery proof and meaningful controls before calling it fixed.
+Old fd8 selected1 now actually fails only the intended landed-package assertion after the real
+ENOTDIR failure and successful obstruction removal; no second edit. Root reconciled all730/ID/device.
+Add a cold public callback check through a unique EMPTY gallery folder and test-runner/external
+markers only: preserve/swap/restore that exact directory, observe real saveFailed, then prove a
+valid package while the app is STILL FOREGROUND before cold reopening its pixels. A scene-phase
+save must not mask a missing automatic retry. No new app hook/controller or real-library mutation.
 
 Current integration730source/PBX1325/runnable5412fast6008full. Component-qualified Video11,
 curve94+6controls and Undo70/public4+logic3/public1 are harvested at their actual pins; final assembled
