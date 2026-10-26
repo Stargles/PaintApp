@@ -342,6 +342,15 @@ Inventory-only files are not reviewed code. New source is not called complete be
       Root reviewed core6 patchbb437dce before implementation. Brush preview is a separate proposal;
       do not cascade annotations into renderers/conformances. One later Debug app+UITests compile
       must retain actual new diagnostics and stop at any unreviewed dependency boundary.
+      Actual core6 Debug app+UITests buildbf5741b4 succeeds; seven original named rows disappear,
+      preview remains and two candidate-interface warnings are newly exposed. Before more code,
+      review RasterResidencyCandidate and its two existing lock-owned conformers/callback callers.
+      Do not turn synchronous allocation/eviction into actor hops or silence their requirements.
+- [ ] Verify the new source-only Tap-selection candidate before a fix: VectorHitTest uses a circular
+      pressure-one radius/outline for noncircular tips. A rotated100-point square dab has visible
+      corner ink outside that hit radius. Check the actual shipped tip/render and selection contract,
+      then reuse existing authoritative brush geometry if confirmed; no new footprint/cache pipeline.
+      Native reproduction, effect on other brush properties and cost remain unproved.
 - [ ] Qualify source-integrated removalec62d712 of geometry repair and converter-only UI/tests/fixtures/PBX paths: Kevin
       confirmed current scenes “Looks right” after the preserved250-package export and signed6fb
       install/normal launch. Keep permanent startup maintenance scheduling, truthful gallery readiness
