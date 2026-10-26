@@ -138,7 +138,6 @@ extension CanvasManager {
         // read below is the whole drawing.
         guard commitAllInteractiveState() else { return .refused(.pendingEdit) }
 
-        let startFrame = cel.startFrame
         let layerID = layers[layerIndex].id
         // From the uncut track — see `poseBakeSegments` for why the order matters.
         let segments = Self.poseBakeSegments(tracks: cel.transformTracks, frameCount: cel.frameCount)

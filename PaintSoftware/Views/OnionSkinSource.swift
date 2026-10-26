@@ -1009,7 +1009,6 @@ enum OnionSkinBudget {
         let size = compositeSize(for: canvasSize, resolution: resolution)
         let megapixel = 1024.0 * 1024.0
         let compositeMP = Double(size.width * size.height) / megapixel
-        let canvasMP = Double(canvasSize.width * canvasSize.height) / megapixel
         let composite = compositeMillisecondsPerMegapixelPerSkin * compositeMP * Double(skins)
         let miss = sourceMissMilliseconds(canvasSize: canvasSize, compositeSize: size)
         let misses = sourceMissesPerRebuild(for: canvasSize, resolution: resolution, skins: skins,
