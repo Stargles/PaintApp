@@ -95,6 +95,11 @@ archive may be correct while A's thumbnail stays cut. Source-only finding, nativ
 claimed. Review completed audit and reuse existing captured-layer/cel registration and invalidation;
 no new service/state/renderer, and no respring cause inferred.
 
+Public regression4432 is source-ready, unrun. Before execution, reuse the accepted launch helper's
+gallery-before-canvas landscape setup in final integration, preserving every ink/tile/history check
+and actual landscape assertion. Its old late rotation is the same demonstrated setup cause as9e.
+Keep old4432 evidence intact; production Undo is unchanged until an actual target failure reproduces.
+
 - [ ] Independently review the actual target/invalidation/undo ownership before a minimal root-cause fix.
 - [ ] Verify actual edited/restored drawing and thumbnail across frame changes, Undo/Redo, cold UI and
       meaningful controls; final fast Debug/Release and touched-class gates before merge.

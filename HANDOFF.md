@@ -63,6 +63,10 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   thumbnail before returningA. Only after actual reproduction, reuse captured cel/layer IDs and
   existing registerVectorElementsUndo, move its generic block whole from +Text to +Undo. No state/
   service/renderer or crash attribution. Predicted red/unreached Redo is not qualification.
+  Before native, harvest only its VectorEraser test delta into this integration and use the already
+  accepted gallery-before-canvas orientation seam.4432 still turns after creating the canvas, the
+  known9e setup cause. Remove prelaunch orientation assignment/late rotation; preserve defer, actual
+  landscape assertion and every drawing/tile/history outcome. Production Undo remains unchanged.
 
 ### Other required gates, in queue order
 
