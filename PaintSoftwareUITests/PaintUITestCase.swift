@@ -121,7 +121,8 @@ class PaintUITestCase: XCTestCase {
     /// Also serves as the regression test for the launch-time freeze: if that bug ever
     /// comes back, `waitForExistence` below times out and the test fails.
     @discardableResult
-    func launchIntoEditor(_ app: XCUIApplication, size: CGSize? = nil) -> Bool {
+    func launchIntoEditor(_ app: XCUIApplication, size: CGSize? = nil,
+                          orientationBeforeCreatingCanvas: UIDeviceOrientation? = nil) -> Bool {
         // The app-wide preferences outlive a launch — Fingers Can Paint, Render Resolution, the gallery
         // folder (`AppSettings`) — and a test that opens a new document wants the defaults, not
         // whatever the last test left. A scene's own tools start at the defaults in every new one.
@@ -139,6 +140,11 @@ class PaintUITestCase: XCTestCase {
         }
         hasLaunchedIntoEditor = true
         app.launch()
+        // A fresh canvas captures its initial viewport centre. Orient the launched gallery first
+        // when a caller needs a centred landscape canvas, rather than turning an existing drawing.
+        if let orientationBeforeCreatingCanvas {
+            rotateDevice(app, to: orientationBeforeCreatingCanvas)
+        }
         return openNewCanvas(app, size: size)
     }
 

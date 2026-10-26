@@ -2304,7 +2304,13 @@ final class SandwichCompositingUITests: PaintUITestCase {
     /// drop uses, and the layer becomes **input 0** — the backdrop — because it is the only child.
     func testALayerDropsStraightIntoANodeAndBecomesItsFirstInput() throws {
         let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        XCTAssertEqual(app.windows.firstMatch.frame.size, CGSize(width: 1080, height: 810),
+                       "PREMISE: this public capacity workflow is drawn at the owner's landscape size")
+        let canvas = drawCrossedStrokesOnTwoLayers(app)
+        _ = try XCTUnwrap(waitForPixel(canvas, at: crossing, matches: {
+            $0.r > 200 && $0.g < 80 && $0.b > 200 && $0.a > 240
+        }), "PREMISE: the upper magenta stroke actually covers the lower cyan one")
         openLayerPanel(app)
         addMixNodeFromAddMenu(app)
         XCTAssertTrue(app.staticTexts["layerPanel.folder.Mix 1"].waitForExistence(timeout: 5))
@@ -2316,6 +2322,79 @@ final class SandwichCompositingUITests: PaintUITestCase {
                        "A node takes a drop like any other folder — that is the whole point of storing it as one")
         XCTAssertEqual(app.otherElements["layerPanel.row.0.compositor"].value as? String, "input,0",
                        "And the row says which operand it is, which the named slot folders used to carry")
+
+        dragRow(layerCell(app, layerIndex: 1), onto: folderCell(app, named: "Mix 1"), dropDY: 0.5)
+        XCTAssertEqual(rowFolder(app, layerIndex: 1), "Mix 1", "The second drawn layer fills the Mix")
+        XCTAssertEqual(app.otherElements["layerPanel.row.1.compositor"].value as? String, "input,1")
+        XCTAssertEqual(app.otherElements["layerPanel.row.0.compositor"].value as? String, "input,0")
+        XCTAssertFalse(app.staticTexts["layerPanel.row.2"].exists, "PREMISE: exactly two drawn inputs")
+
+        // Read the artwork beside the actual rail, above the actual dock, rather than its chrome.
+        let paper = visiblePaperRect(app, in: canvas)
+        let sideband = CGVector(dx: crossing.dx, dy: 0.42)
+        let rail = app.tables["layerPanel.list"]
+        XCTAssertTrue(rail.waitForExistence(timeout: 5))
+        for point in [crossing, sideband] {
+            XCTAssertTrue(paper.contains(CGPoint(x: point.dx, y: point.dy)), "PREMISE: visible paper")
+            assertAboveTheDock(app, canvas, dy: point.dy, "Mix capacity artwork probe")
+            let screenPoint = CGPoint(x: canvas.frame.minX + canvas.frame.width * point.dx,
+                                      y: canvas.frame.minY + canvas.frame.height * point.dy)
+            XCTAssertFalse(rail.frame.contains(screenPoint), "PREMISE: the layer rail does not cover the probe")
+        }
+        _ = try XCTUnwrap(waitForPixel(canvas, at: crossing, matches: {
+            $0.r > 200 && $0.g < 80 && $0.b > 200 && $0.a > 240
+        }), "PREMISE: filling the actual two-input Mix retains the magenta picture")
+        _ = try XCTUnwrap(waitForPixel(canvas, at: sideband, matches: {
+            $0.r > 240 && $0.g > 240 && $0.b > 240
+        }), "PREMISE: the neighbouring paper is actually bare")
+        attachScreenshot(XCUIScreen.main, "mix-capacity-full-two-inputs")
+
+        let current = app.images["layerPanel.row.1.current"]
+        if !current.exists { app.staticTexts["layerPanel.row.1"].tap() }
+        XCTAssertTrue(current.waitForExistence(timeout: 5), "PREMISE: the upper Mix input is active")
+        app.buttons["layerPanel.row.1.visibility"].tap()
+        _ = try XCTUnwrap(waitForPixel(canvas, at: crossing, matches: {
+            $0.r < 80 && $0.g > 200 && $0.b > 200 && $0.a > 240
+        }), "PREMISE: hiding the magenta input leaves cyan as the immediately preceding successful edit")
+
+        // This menu remains available in a full node. The constructor must refuse, with its real
+        // ordinary-lived notice; capture it before slower topology and artwork observations.
+        addVectorLayerFromOpenPanel(app)
+        let notice = app.staticTexts["canvasNotice"]
+        let noticeReached = notice.waitForExistence(timeout: 5)
+        let noticeCode = noticeReached ? notice.value as? String : nil
+        attachScreenshot(XCUIScreen.main, "mix-capacity-third-input-refused")
+        XCTAssertTrue(noticeReached, "A full Mix explains why a third input was refused")
+        XCTAssertEqual(noticeCode, "nodeInputLimit", "The visible notice identifies the input limit")
+        XCTAssertFalse(app.staticTexts["layerPanel.row.2"].exists, "The refused add creates no third layer")
+        XCTAssertFalse(app.staticTexts["timeline.layerName.2"].exists, "The timeline gains no extra artwork layer")
+        XCTAssertTrue(current.exists, "Refusal keeps the same upper input selected")
+        for index in 0...1 {
+            XCTAssertEqual(rowFolder(app, layerIndex: index), "Mix 1", "Refusal keeps both existing inputs")
+            XCTAssertEqual(app.otherElements["layerPanel.row.\(index).compositor"].value as? String,
+                           "input,\(index)", "Refusal preserves their actual operand order")
+        }
+        XCTAssertNotNil(waitForPixel(canvas, at: crossing, matches: {
+            $0.r < 80 && $0.g > 200 && $0.b > 200 && $0.a > 240
+        }), "Refusal leaves the cyan artwork unchanged")
+        XCTAssertNotNil(waitForPixel(canvas, at: sideband, matches: {
+            $0.r > 240 && $0.g > 240 && $0.b > 240
+        }), "Refusal adds no marks to the bare paper")
+
+        let undo = app.buttons["sideToolbar.undoButton"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        undo.tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: crossing, matches: {
+            $0.r > 200 && $0.g < 80 && $0.b > 200 && $0.a > 240
+        }), "One Undo must restore the successful hide's magenta input, not consume a refused add")
+        XCTAssertFalse(app.staticTexts["layerPanel.row.2"].exists, "Undo still leaves only the original two layers")
+        XCTAssertTrue(current.exists, "Undo retains the original active input")
+        for index in 0...1 {
+            XCTAssertEqual(rowFolder(app, layerIndex: index), "Mix 1", "Undo keeps both original inputs")
+            XCTAssertEqual(app.otherElements["layerPanel.row.\(index).compositor"].value as? String,
+                           "input,\(index)", "Undo preserves the full Mix's operand order")
+        }
+        attachScreenshot(XCUIScreen.main, "mix-capacity-undo-previous-hide")
     }
 
     /// The mode is the entire content of a Mix's op, so it is editable and it shows on the row without
