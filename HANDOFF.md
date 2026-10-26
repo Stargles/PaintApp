@@ -53,6 +53,12 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   assertion. Successor **aa06e07f diagnostic2 is RUNNING under Bake's sole native lease on4B33**:
   existing four attempts accumulate measured remaining endpoint error, exact tolerances/outcomes
   unchanged. No product change. Retire ALL temporary delivery logs/pictures before permanent normal.
+  AA6 has now CLOSED:Text passed all drawn replacement outcomes;Blend still failed its opacity
+  setup at.565466642. Root independently reconciled2 IDs/source730 and inspected red word→one red W
+  plus57% readout (rootLOOK3ffea7b6). Harvest ONLY the successful Text route without its diagnostic
+  print/past-longpress comment; preserve every drawn colour/keyboard/selection/replacement outcome.
+  The failed integral slider helper is NOT integrated. Observe actual native slider events before
+  another gesture correction; current sole native lease is Vector's2dnormal116 on56C.
 - D1 effects source **5a067c9d** independently accepted; actual normal63 **63/63**, zero fail/skip,
   exact IDs/device/source730 and root receiptea7824b4.13 safe controls remain **UNRUN**.
   Duplicate periodic angles, apron-before-Int, and actual CPU/Metal transparent samplers
