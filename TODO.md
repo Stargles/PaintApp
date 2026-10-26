@@ -84,6 +84,9 @@ that the final combined audit build has passed.
    preserve legal current/old spellings until the separate one-shot repair. Check raw brush-table,
    texture, nested-media, clone/write and migration joins at the same boundary so the correction
    fixes ownership centrally; reject invalid references without silently dropping content.
+   Additional five old-source checks now reproduce invalid table/texture/nested-media/link/write
+   handling at11assertions with healthy premises. Implement one shared checked address authority
+   before IO, reusing the current file-tree checks; no separate sanitizer per consumer.
    Inventory legal old addresses before a separate one-shot Projects/Backups/Trash repair and complete
    fallback retirement. No protected-package mutation or format change is authorized by inventory alone.
 7. Windows: run/fix DNS limits, clipboard filename collisions, keep-awake lifetime and awaited Quit

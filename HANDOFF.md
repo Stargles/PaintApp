@@ -28,8 +28,10 @@ Use the three existing agents; all source work stays in separate trees. No physi
 
 ### Current native and source work
 
-- **Native lease:** gradient2e logic controls3 joined0; source730 restored. Root extraction pending.
-  Next serial native grant: package-address OLD8f selected5, no central product fix yet.
+- **Native lease:** gradient2e logic controls3 joined0; root accepts6canonical application targets,
+  receipt3f3bcbca. Package OLD8f selected5 joined1/native65; root reconciled730/device/methods/argv,
+  accepts11application boundary assertions with healthy premises. No compiler children remain.
+  Next serial native: gradient public1, then reviewed fill47/Export Share1. Agents source-only.
   Extracted OLD fill ownerbc2 selected1 joined1RED at3intended targets; Export8ded normal87 joined
   86pass/1fail; all4c native work joined. All agents are source-only.
 - **Tap:** qualification and exact9-path harvest3219 closed (logic37, independent public/bench8,
@@ -39,7 +41,8 @@ Use the three existing agents; all source work stays in separate trees. No physi
   scalar/per-render grey oracle preserves original probe/tolerance2; raw diagnostic274 disproved
   old picture-to-picture premise despite equal fields. ROOTLOOK2 tiny images +3public originals;
   orientation reportcb0e18c5 proves EXIF8/display2160x1620/2x = owner1080x810 landscape (rawIHDR
-  portrait is not orientation evidence). Controls3logic+1public UNRUN. OldResize45 explicitly
+  portrait is not orientation evidence). Controls3logic actualRED/sixcanonical targets accepted;
+  four old translation extras0credit; public1 UNRUN. OldResize45 explicitly
   separate; currentResize47 composition needs joint296, not silent filtering. No harvest yet.
 - **Saving:** productd151 sole landedURL? completion deletes old failure callback; failed saves keep
   editor and owed edits, reuse existing timer, shared unsettled-state predicate protects newer work.
@@ -82,8 +85,15 @@ Use the three existing agents; all source work stays in separate trees. No physi
   not bypass it or turn invalid refs into empty content. Preserve legal old spellings until separate
   repair. Extensioneeddc56c adds5methods194lines/all730production exact; sourceblocked by SourceTime
   extra rotation arg at515; Converter peer e4d2bd6f accepts remainder. Sole correction8f931efe
-  preserves all other729source, assertions/data/spans; selected5/whole33 prepared, native unrun.
-  No actual extension run or central fix yet. Report97b21355/addendum6617; no owner package touched.
+  preserves all other729source, assertions/data/spans. Actual selected5 fails at11intended boundary
+  statements (15legacy summaries/17log occurrences), all writer/load/render/isolation premises pass.
+  Actual texture restore and image-write side effects stay inside disposable guarded roots; no
+  protected artwork touched. Root authorizes ONE throwing checked ProjectPackageLayout authority
+  per97b21355/addendum6617, reusing ProjectFileTree, covering every inventoried reader/writer/clone/
+  tidy join before IO. No per-consumer sanitizer/default/placeholder fallback. Preserve legal old
+  address spellings pending separate one-shot repair; malformed refusal is no format rewrite.
+  Author source-only successor from8f with exact existing regressions and positive legal-address
+  tests, whole source/PBX preservation and finite control proposals. No compiler/native authority.
 - **Fill owner duplication:** root/peer532bf2d1 found per-size WindowSurfaceView replacement duplicates
   existing old-front/size/LatestWins ownership. Small LayerFillView extraction398c preserves OLD
   branch and complete host stack/pose/mask/layout by inverse reconstruction, no StrokeCanvas target
