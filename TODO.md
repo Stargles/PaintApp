@@ -2,7 +2,8 @@
 
 ## Current owner-facing status — October 26
 
-Continue autonomously; do not park. Kevin is asleep until10a.m. tomorrow. Conserve usage and use
+**Parked at Kevin's explicit request. Resume only when he asks.** Kevin is asleep until10a.m.
+tomorrow. Conserve usage and use
 agents for independent work. Architecture, correctness and performance take priority over speed.
 No question is pending. Old iPad readiness is consumed; do not restart it overnight.
 
@@ -41,7 +42,8 @@ that the final combined audit build has passed.
    deliberate-failure checks passed separately. Final combined checks remain.
 5. Export: one immutable finished-file owner and separate output directory protect handed-off files
    and reject stale destination answers. Correct the test's unsupported immediate controller-
-   retirement premise using UIKit's documented callback-clear boundary, complete destination
+   retirement premise using UIKit's documented callback-clear boundary; that focused test and
+   all87destination/presentation checks now pass. Complete the actual system Share close/return
    tests and observe actual system Share dismissal before testing cancel → drawing and gestures.
    Preserve the existing presentation safety rule; no separate transfer registry or service.
 6. Saved data: implement one shared checked package-address boundary before reads and writes. The

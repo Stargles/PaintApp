@@ -2,10 +2,56 @@
 
 Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md.
 Verify origin, worktrees and every tmp branch: main's handoff is behind. Kevin permits useful agents;
-conserve usage and prioritize quality/architecture. Continue autonomously; do not park. Preserve real
+conserve usage and prioritize quality/architecture. Latest instruction: checkpoint and park; wait
+for Kevin to resume. Preserve real
 artwork and record findings/rulings before code. One Mac native lease; source work may proceed beside it.
 
-## Active continuation — October26
+## Parked checkpoint — October26
+
+Kevin explicitly requested **checkpoint and park**. All three agents stopped with clean trees;
+all root native supervisors joined and no compiler/test process remains. No new merge, push or
+iPad install. Latest installed Release remains6fb, owner-confirmed. Last integration product3219;
+later root commits are records only. Resume only when Kevin asks.
+
+**Resume at these concrete boundaries:**
+
+1. Export91cf5d38 focused callback-owner1 and whole87 nowGREEN, independently reconciled all730,
+   methods/device/argv. The earlier542 pool/weak premise was false; its file assertions remain
+   uncredited. Actual TEMP309 public Share1 GREEN and ROOTLOOK1 proves unique system
+   ActivityListView descendant `header.closeButton`; closing/return/gestures remain unrun.
+   Permanent UI tree `PaintApp-s54-export-share-return` is clean65b44e13, **precode/docs only**,
+   all730source exact91cf; do not mistake it for implemented UI. Remove TEMP whole before shipping.
+2. Fill116 normal47 remains46pass/1fail; all19surface and16LatestWins checks pass. Existing reduced
+   FillWindow fixture cannot admit its1400² native reference7,840,000B under705,600B cap. No delay
+   change or retry. Converter trace d6c761f7 freezes this; first verify full admission of the
+   source-only400² candidate (native640,000B, unchanged356²window/≤120²working budget), then record
+   a meaningful fixture correction. Current4fault recipes prepared only, baseline47 notGREEN.
+3. Gradient2e actual249 +logic3/sixcanonical targets accepted. Public fault1 fails earlier coupled
+   near-white right extension: intended517colour0credit. ROOTLOOK2/report97c5bc77 support fixed
+   BEFORE-only LEFT witness. Clean8e5d100e changes exactly that condition; whole15/public1 against
+   fresh15positive PREPARED, **native UNRUN**. Current Resize47 composition still needs joint296.
+4. Central address correction source63d4a91c (source-only positive-oracle ordering successor of7a)
+   is clean under docs-only1dad39ca in `PaintApp-s54-package-address`. Packetcac7780d; normal36/291/
+   new3 prepared,13controls proposed, **compiler/native UNRUN**. OLD8f5 actual11boundary targets
+   accepted separately. Rootb0 authorizes wire-field owner lift +finite OLD two-cel later-linked
+   tidy-destination witness; **neither started**. Run actual OLD evidence before preflight fix.
+5. Autosave4c normal154 and staged failure→autonomous save→cold reopen1 GREEN/ROOTLOOK4. Existing16
+   and named new6 durable-output-v2 controls source-prepared only (38a25832);261readability-only,
+   original275proposal unreachable, only new real-output fault may qualify275. Current controls,
+   ordinaryUI/current composition remain. Resizeac functional/UI and separate fixed300progress,
+   old-writer MotionGroup capture, opacity/recovery/effect/mask workflows, final gates/performance,
+   remaining audit/Windows/device checks stay queued below and in TODO.
+6. Read-only address inventory1515229d preserves all6311files/1,112,688,965B across250+256 original
+   packages. No legacy fallback addresses found, but ALL are pre-conversion and lack geometryVersion:
+   **not current-readable samples** and not permission to synthesize versions/repair protected data.
+
+Machine: about39GiB free at park; about50GB reclaimed cumulatively. Owned56C caches last measured
+2.6GiB; remeasure before another batch and use the reviewed exact-cache cleanup at4GiB. No personal
+simulator/artwork purge. Temporary unqualified root operator experiment was removed whole; continue
+using existing frozen d231/b478 helpers and derive class labels from actual command/census. Current
+root-next-gates.json records PARKED; actual run receipts outrank stale historical metadata.
+
+## State before parking — detailed scope and evidence
 
 Kevin is asleep until10a.m. tomorrow. No owner question is pending. Old physical readiness answers
 are consumed: no overnight iPad restart/install without fresh saved/unlocked readiness.
@@ -22,15 +68,16 @@ point-only vector Liquify, interior/attached vector mending/Mend All Fills, newe
 backups and earlier fixes. Normal launch/usual-scene **“Looks right”** confirmed. Audit successors
 are not installed. Test1 erasing respring cause is still unproved.
 
-**Live authority:** `~/PaintWork/s54-final-qualification/root-next-gates.json` plus actual completion
+**Authority:** `~/PaintWork/s54-final-qualification/root-next-gates.json` plus actual completion
 receipts. Root orchestrates native work, source/causal review, whole-picture inspection and integration.
 Use the three existing agents; all source work stays in separate trees. No physical action overnight.
 
-### Current native and source work
+### Native and source work at checkpoint
 
-- **Native lease:** fill116 three-whole-class47 joined1/native65:46pass/1fail. All19surface tests
+- **Native lease:** NONE, parked. Latest Export91cf normal87 GREEN87, all supervisors joined.
+  Fill116 three-whole-class47 joined1/native65:46pass/1fail. All19surface tests
   pass; existing reduced-budget FillWindow preview unwrap fails. Trace separately before any change,
-  no retries/delay inflation or GREEN47 claim. Next native Export542 focusedShare1. Previous gradient public1
+  no retries/delay inflation or GREEN47 claim. Previous gradient public1
   joined0/source730restored but intended colour targetUNREACHED: extension witness failed first.
   Investigation source/results-only; no retry/product change/credit. Gradient logic3 accepts6targets;
   package OLD8f5 accepts11boundary assertions. Agents source-only; Export Share1 follows fill47.
