@@ -743,7 +743,9 @@ final class LayerTreeCharacterizationTests: XCTestCase {
             CanvasFixture.setBakedContent(manager, layerIndex: 0,
                 CanvasFixture.solidImage(.red, rect: CGRect(x: 12, y: 12, width: 24, height: 24)))
             manager.history.removeAll()
+            manager.beginStructureGesture()
             manager.setFolderOpacity(node, to: 0.5)
+            manager.commitStructureGesture(label: .opacity)
             let layers = manager.layers.map(\.id), folders = manager.folders.map(\.id)
             let active = manager.layers[manager.currentLayerIndex].id
             let before = try XCTUnwrap(Compositor.composite(
