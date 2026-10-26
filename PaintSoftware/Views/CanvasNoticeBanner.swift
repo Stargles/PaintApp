@@ -63,7 +63,7 @@ struct CanvasNoticeBanner: View {
         switch notice.kind {
         case .noLayers:         return "square.stack.3d.up.slash"
         case .hiddenLayer:      return "eye.slash"
-        case .noDrawingSurface: return "nosign"
+        case .noDrawingSurface, .nodeInputLimit: return "nosign"
         case .historyUndo:      return "arrow.uturn.backward"
         case .historyRedo:      return "arrow.uturn.forward"
         case .nothingToPick, .nothingPaintedThere: return "eyedropper"
