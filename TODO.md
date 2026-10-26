@@ -27,80 +27,39 @@ that the final combined audit build has passed.
 
 **Work in progress and queue:**
 
-1. Saving: use one truthful landed-URL completion; failed saves stay in the editor and retry through
-   the existing timer. Newer edits/live gestures must survive an older exit snapshot. Source d151
-   and cold public Gallery-failure test51f are composed exactly at837. Actual normal154 gave151pass/
-   3fail: older PNG encode/reuse-count expectations disagree with durable-source cloning. Traced:
-   existing backing files are cloned independently of live-package stamps; the current contract
-   explicitly permits0encode/2reuse and same-run residency40 verifies real reopened bytes/pixels.
-   Replace those obsolete expectations with stronger exact-data, source-isolation and ledger checks;
-   new retry/clock/store checks passed in
-   that batch. Public failure/cold retry and controls remain. Earlier f571/87 candidates stay held.
-   Staged837 actual1RED at119: refreshed failure notice covers the old blank-paper probe102.7pt.
-   Failed Gallery retains editor/stroke, but retry/cold-reopen are unreached. Same-distance blank
-   control below the stroke292.3pt is clear of notice/dock; fix that measured fixture, keep tolerances,
-   fresh nonce and exact empty-parent coordinator. Same4c run02 now passes the actual failure,
-   Gallery refusal, autonomous foreground save and cold reopen with exact drawing bytes. Model154
-   passes too; controls and combined checks remain. One unreachable final-pixel control is being
-   replaced in a separate proposal using the existing staged writer; original evidence is retained.
-   No app workaround or deadline increase.
-2. Gradient movement: same two-point mapper, with no new renderer/schema. Matched bitmap formats
-   still reproduce the interior colour mismatch (104vs108, unchanged tolerance2); investigate before
-   accepting it. Actual508 matched-format run still fails4; bitmap-format cause is refuted. Root permits
-   a temporary test-only stage discriminator (three64²images) preserving the original probe/tolerance/
-   assertion: observe actual paint/CTMs, direct moved Frozen draw versus flatten, and one shared raw
-   CGGradient under native CTM versus mapped identity. No product change or CG algorithm claim yet.
-   Measured public fixture corrections0c passed both isolated UI checks; root inspected all5 whole
-   pictures. Diagnostic274 isolated a native-rasterization difference despite identical colour fields.
-   Replace the invalid two-picture oracle with independent analytic field and per-picture colour
-   checks; keep the original probe and2byte per-render tolerance. No gradient harvest yet.
-3. Resize: one operation phase separates immediate safety locking from visible loading progress,
-   using the existing worker and presentation task. Current successor546 passed47 model tests;
-   public blank resize passed. Painted test missed the transient busy indicator and stopped, so
-   drawing/Undo outcomes remain unproved. Split the painted functional test from the invalid
-   one-cel busy premise; keep every ink/extent/Undo outcome. Busy exposure needs its own real-count
-   workflow. Correct stale Settings text that says resize cannot be undone. No product delay or
-   fixture growth/retry. Fault checks remain. Keep PNG preparation off-main.
-4. Tap selection: canonical brush geometry correction is integrated at3219c8b4. Model37, public8,
-   Release benchmark1 and24 deliberate-failure cases passed at their recorded component pins; root
-   inspected the independent square selection/Clear pictures. Final combined checks remain.
-5. Export: correct stale destination results and immutable file ownership together. Current proposal
-   preserves artist filenames; old regressions f270 are prepared. Verify consumer lifetime and storage
-   cleanup before implementing; a copy-only transfer declaration alone does not prove file lifetime.
-   Use the documented activity-completion boundary to retain the same file owner through Share,
-   without a separate transfer service. Old selected2 proved both defects (3actual assertion sites,
-   all premises healthy); root inspected actual A/B pictures and authorized the shared-owner fix.
-   Independent source review found no scoped product blocker; migrate one obsolete flat-output test
-   expectation to the owned UUID subdirectory before normal tests. The proposed Share UI also
-   conflicts with the app’s existing no-popover freeze rule; preserve that rule, use the existing
-   modal presentation path, and verify Share/cancel followed by drawing and gestures.
-6. Saved group metadata: remove unsupported nested legacy defaults only after old rejection proof
-   and a real nonempty previous-writer roundtrip. Legal omission of an empty registry stays. Old6fb
-   witness28c is source-only; no source/artwork repair has run and no interpolation redesign is in scope.
-   Additional package auditb431481b found unchecked resource paths and permanent old-layout fallback.
-   Author finite sibling-resource rejection regressions through existing validator/load owners,
-   with all production unchanged. OLD497 now demonstrates both required-PNG refusal failures;
-   loaded A actually shows sibling B’s blue pixels. Use one shared contained-address contract and
-   preserve legal current/old spellings until the separate one-shot repair. Check raw brush-table,
-   texture, nested-media, clone/write and migration joins at the same boundary so the correction
-   fixes ownership centrally; reject invalid references without silently dropping content.
-   Additional five old-source checks now reproduce invalid table/texture/nested-media/link/write
-   handling at11assertions with healthy premises. Implement one shared checked address authority
-   before IO, reusing the current file-tree checks; no separate sanitizer per consumer.
-   Inventory legal old addresses before a separate one-shot Projects/Backups/Trash repair and complete
-   fallback retirement. No protected-package mutation or format change is authorized by inventory alone.
-7. Windows: run/fix DNS limits, clipboard filename collisions, keep-awake lifetime and awaited Quit
-   teardown when the host is reachable. No repeated connection polling or speculative nearby fixes.
-8. Complete the remaining colour/effect/recovery workflows, relevant whole UI classes and mask checks.
-   Cold recovery must preserve the exact displaced original; a setup failure proves no drawing result.
-9. Run the final exact fast tier in Debug and Release, reconcile real counts, run identifier/helper/
-   project checks, affected UI classes and the full phase gate. Then perform paired Release fill/effect
-   measurements with output checks and whole-memory limits. Prior component results keep their actual pins.
-10. Finish the genuine remaining architecture review, qualified merge/push and device checks.
-    Reuse the existing fill surface’s resize/front/coalescing owner instead of replacing the whole
-    view for each grown preview window. Extracted old owner now demonstrates3views and premature
-    C allocation; reuse fix authorized, actual drawing/placement and controls still owed. Remove
-    completed items whole at merge. Avoid the October29 renewal rebuilding old origin/main over repairs.
+1. Saving: the failed-save correction keeps the drawing open, preserves newer edits and retries
+   through the existing timer. The model checks and cold failure → automatic save → reopen workflow
+   pass. Finish deliberate-failure checks, ordinary UI checks and final composition.
+2. Gradient movement: keep the existing two-point paint representation and correct its affine
+   colour calculation. The component and model fault checks pass. The public fault test stopped at
+   an earlier drawing witness; investigate that witness before claiming the colour check is proved.
+   Compose with the current resize checks and complete qualification before integration.
+3. Resize: retain one operation phase, the existing worker and atomic landing. Model checks pass;
+   finish the painted drawing/Undo workflow with its corrected functional premise. Test visible
+   progress separately with one fixed real-count scene. No artificial delay or growing fixture.
+4. Tap selection: canonical brush geometry correction is integrated. Its model, public drawing and
+   deliberate-failure checks passed separately. Final combined checks remain.
+5. Export: one immutable finished-file owner and separate output directory protect handed-off files
+   and reject stale destination answers. Finish the controller-retirement test, complete destination
+   tests and observe actual system Share dismissal before testing cancel → drawing and gestures.
+   Preserve the existing presentation safety rule; no separate transfer registry or service.
+6. Saved data: implement one shared checked package-address boundary before reads and writes. The
+   old code reproduces required-raster, brush-table/texture, nested-media, link and write failures.
+   Preserve legal old spellings until the separate one-shot Projects/Backups/Trash repair. Capture a
+   real previous-writer group package before strict metadata cleanup; retain accepted UInt64 seeds
+   and legal optional omissions. No protected artwork mutation during inventory.
+7. Windows: complete DNS limits, clipboard filename collisions, keep-awake lifetime and awaited Quit
+   teardown when the host is reachable. No repeated connection polling. The real-link check needs
+   the owner/laptop; previous transport tests retain their actual source pins.
+8. Complete the remaining colour/effect/recovery workflows, relevant whole UI classes and mask
+   checks. Cold recovery must preserve the exact displaced original; setup failures prove no drawing.
+9. Run the exact fast tier in Debug and Release, reconcile counts and check identifiers/helpers/
+   project structure, affected UI classes and the full phase gate. Then run paired Release fill/
+   effect measurements with correct-output checks and whole-memory limits.
+10. Finish the architecture review and integrate qualified changes, then merge/push and check the
+    device with fresh readiness. The fill preview now reuses its existing surface owner; complete
+    its drawing and fault checks. The Test1 erasing respring still needs fresh physical evidence.
+    Remove finished items whole at merge. Resolve the October29 automatic build's old-main risk.
 
 Future interpolation overhaul, multi-cel selection, linear-light blending, audio/video editing and
 other explicitly deferred features stay written down. Dropped brush importers are not reopened.
