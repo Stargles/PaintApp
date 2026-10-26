@@ -328,6 +328,13 @@ Inventory-only files are not reviewed code. New source is not called complete be
       Video normal11 log has259 warning occurrences,182 distinct location/message rows; not182bugs.
       Do not silence warnings with blanket unsafe annotations or change scheduling without tracing
       callers. Unused locals may be pruned after confirming their initializer has no required effect.
+      Source/independent review accepts a bounded first patch: only existing package serializer
+      queue/key/functions, lock-owned RasterStorage/RasterResidency and pure/locked CompositorBudget
+      get explicit nonisolated boundaries; remove the unused PoseBake startFrame and estimate-only
+      Onion canvasMP declarations whole. No bodies, locks, scheduling, protocols or policies change.
+      Root reviewed core6 patchbb437dce before implementation. Brush preview is a separate proposal;
+      do not cascade annotations into renderers/conformances. One later Debug app+UITests compile
+      must retain actual new diagnostics and stop at any unreviewed dependency boundary.
 - [ ] Qualify source-integrated removalec62d712 of geometry repair and converter-only UI/tests/fixtures/PBX paths: Kevin
       confirmed current scenes “Looks right” after the preserved250-package export and signed6fb
       install/normal launch. Keep permanent startup maintenance scheduling, truthful gallery readiness

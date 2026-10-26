@@ -110,6 +110,13 @@ complete. Erasing respring cause, broad final regression/performance and remaini
 
 ### Other required gates, in queue order
 
+Warning cleanup source direction and concrete six-file patchbb437dce were independently/root
+reviewed before code: explicit existing serializer/lock/pure-owner boundaries and two whole unused
+local deletions only. No bodies/locks/policies/protocols change. Brush preview stays separate because
+its renderer/conformance dependencies need actual compiler evidence; no blanket unsafe annotations.
+Vector is authorized to implement the six-file patch on a separate branch, with no native work until
+a separate grant. First later app+UITests Debug compilation stops at unreviewed dependency scope.
+
 1. Finish above effects/control/public gesture slices, preserving immutable original packets and
    meaningful exact assertions. Before every native grant verify clean pin/source730/tool/argv,
    selected IDs/actual device/positive baseline/output absence/native idle. No overlapping compilers.
