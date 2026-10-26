@@ -46,7 +46,8 @@ integration. Reuse these agents; full history/large inventories need not be rere
   Swift type-checking; root closure13d0fe85. Expression-only successor **7e50cf4a** preserves all81
   candidates/order/predicates/assertions; root acceptance0f6edba0. Whole279logic+15UI=294 JOINED:289pass/5fail, root exact IDs/source/device reconciled.
   Remaining RGB4>2, new UI room premise, old rectangle paper probe and2resize busy-state failures.
-  Root runs unchanged warm resize selected2 under3c0a8bb7/supervisor86376; agents source-trace
+  Root warm resize selected2 JOINED1pass/1fail: small raster immediate/no-busy premise obsolete;
+  announced passed warm (not proof against ordering). Recorded safety/progress separation review. Agents trace
   gradient math and UI geometry/isolation. All other Mac native HOLD. Logic3/public1 PREPARED_UNRUN.
   Actual off-axis committed pictures discriminate; whole-cel Freeform reaches mapper after END/Done.
 - **Windows DNS:** old36c actual19 gave15pass/4intended refusal failures; root original TRX reviewf069

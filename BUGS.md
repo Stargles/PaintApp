@@ -17,6 +17,16 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Canvas transform safety and visible progress are conflated — 2026-10-26
+
+Root actual gradient whole294 and unchanged warm resize2 expose the older raster-resize test's
+obsolete synchronous premise.4dbffaea correctly prepares durable source outputs off-main, but every
+raster operation raises isResizing, which also immediately drives the spinner. Old comments/spec
+promise fast operations do not flash. This is not a reason to restore blocking PNG work or weaken
+size/history/save-gate checks. Review the existing progress owner so operation safety remains active
+while brief work need not announce; public visibility proof and finite completion wait remain owed.
+
+
 ## Failed artist saves still leave the unsaved document — 2026-10-26
 
 Actual caller trace after the failed-autosave witness: ProjectStore completion only means attempt

@@ -69,6 +69,19 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
 - Physical Test1 only after fresh saved/unlocked readiness. Qualified merge/push before October29
   signing renewal, or resolve automatic old-main downgrade risk. Remove completed items WHOLE.
 
+**Qualification defects recorded before follow-up code — October26:** the gradient reference uses
+UIGraphics automatic range while real VectorCanvas uses standard range; same stops do not establish
+same quantization. Correct the reference target to the actual renderer format, preserving native CTM,
+probe, tolerance2 and all outcomes; old39/4 deltas remain actual but do not alone prove matched-target
+colour behavior. No product change justified by this mismatch.
+Unchanged warm resize2 gives1pass/1fail: raster small resize still violates immediate completion/no-
+busy assumptions. Actual worker path added in4dbffaea always holds the shared lock while source PNGs
+are prepared, so the old same-turn test premise is obsolete. Do not restore synchronous PNG work or
+merely flip that test: verify the artist's no-flash contract and separate operation safety from visible
+announcement if needed, reusing existing owner/worker. Announced500-yield completion was warm-green;
+that finite-spin wait does not guarantee an off-main queue has finished. Preserve actual size/history
+and gating outcomes with completion-based bounded waits. Source design review and public proof owed.
+
 **New source findings recorded before regression/fix — October26:** bounded Windows resource
 review42f684d2 found clipboard timestamp collisions can overwrite an earlier queued paste, and
 thread-bound keep-awake requirements are acquired/cleared across asynchronous continuations.
