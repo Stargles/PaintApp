@@ -31,6 +31,18 @@ complete. Erasing respring cause, broad final regression/performance and remaini
 
 ### Current qualification and immediate queue
 
+Latest Tap isolated sourcee2e20c9a passed logic37/37 and publicUI6+existingbenchmark1 =7/7,
+zero fail/skip/expected; all730/IDs/device/native joins independently reconciled. Root LOOKed the
+three actual whole landscape originals: black square→corner selection/blue outline/liveClear→
+white/dimClear.14expected captures reached. Originalf7867 was6/1 from actual card occlusion;
+root LOOK established it before fixture-row correction. No product-hit failure inferred.
+Debug cold image manager miss is1484.8ms on120strokes/165480dabs; do not accept latency yet.
+Releasebaseline and a SOURCE-ONLY lazy geometry proposal are next;15controls stay unrun until
+performance direction settles. Root is currently preserving exact5 obsolete owned simulators;
+PRESERVE and DELETE require separate reviewed grants. Allcurrent56C/4B33/AC8/shared75C/ambiguousA4C
+and all requiredProducts remain protected. Read external lease before any native work.
+
+
 - Atadf, rebuilt **155/155**, zero failure/skip/expected across LayerTree59, MoveToNewLayer12,
   FillObject29, VideoImport11, TextRecipe13, VectorTextPersistence14 and SaveDamageGate17. All730
   source/test/PBX entries match; root receipt15cb7fb5. Earlier cbb154/1 was a setup error: bare opacity

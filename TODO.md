@@ -397,11 +397,12 @@ Inventory-only files are not reviewed code. New source is not called complete be
       deletions are harvested alone ate88a25ab. Finish drawn-workflow gates before considering a wider isolation migration.
       No automatic cascade, blanket namespace opt-out, new locks or actor hops.
 - [ ] Finish reproduced Tap corner correction through existing canonical brush geometry. Old native
-      witness confirms visible corner/outline loss; isolated f786 logic37 passes. Whole public6 plus
-      benchmark is6pass/1fail: actual whole frames show the new landscape test tapped under the card,
-      so no product-hit failure is inferred. Correct only that fixture row using existing dock helpers,
-      retain all outcomes, add the peer-reviewed image/actual-manager measurements in the existing
-      benchmark, then qualify UI/controls/cost. No new cache/service/renderer or duplicated brush math.
+      witness confirms visible corner/outline loss; isolated e2 logic37 and wholeUI6+benchmark1 pass.
+      Root LOOKed3actual whole square stages. Original landscaped test-row failure was card occlusion,
+      corrected through existing dock helpers with unchanged outcomes. All14captures reached.
+      New coldDebug image miss costs~1.48s for120strokes/165480dabs; Release baseline and minimal
+      lazy-derived geometry admission review are needed before acceptance. Keep exact local body/gap
+      semantics; no new cache/index/service or duplicate brush math. Controls15 remain unrun.
 - [ ] Qualify source-integrated removalec62d712 of geometry repair and converter-only UI/tests/fixtures/PBX paths: Kevin
       confirmed current scenes “Looks right” after the preserved250-package export and signed6fb
       install/normal launch. Keep permanent startup maintenance scheduling, truthful gallery readiness

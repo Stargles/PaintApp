@@ -6607,3 +6607,37 @@ Evidence: `~/PaintWork/s54-final-qualification/vector-mend-independent-proof/ras
 including `result.json` and `root-independent-acceptance.json`. The original interrupted first build
 ran no test and produced zero measurements; it remains preserved and excluded. No permanent
 benchmark API, telemetry, source hook, extra test method or runtime threshold was added.
+
+
+## Current canonical Tap candidate cost — 2026-10-26, not yet accepted
+
+MEASURED once in Debug on owned iPad9 simulator56C, sourcee2e20c9a,2048×1024. Existing
+PerfBaselineTests.testWhatOneFrameOfTheBoxKnobCosts passed inside actual normal7 (whole public
+Tap UI6 plus this one method); logic37 separately passed. This is a cold unposed single-vector-cel
+fixture with120 strokes/24,000 stored knots and165,480 actual emitted dabs. The original round
+fixture remains resident while the sequential square-tip fixture shares its sample buffers; setup,
+baking/counts and output assertions are outside clocks. These are not iPad/Release/RSS/interaction
+latency measurements, four-sample stability evidence, or an accepted frame budget.
+
+| Query | Round | Square image tip |
+|---|---:|---:|
+| Direct miss across120 strokes |198.3ms |1332.1ms |
+| Direct hit on last stroke |1.6ms |6.3ms |
+| Direct outline |2.2ms |1.7ms |
+| Actual manager miss |not measured |1484.8ms |
+| Actual manager hit plus outline/selection/history |not measured |10.5ms |
+
+Walk counts120/1/1 and manager120/2 are source inferences for this unposed fixture, not per-dab
+predicate telemetry. The public manager uses its ordinary6pt collar; direct queries use0. Both point
+choices are well inside/outside. No bitmap-render time or aggregate process-memory result is implied.
+The slow image miss must be reviewed before accepting this correction. Prepare a Release baseline
+first; then consider lazy derived geometry admission in the existing BoundsDabTarget, preserving the
+previous raw primitive even while rejecting an outside point. Shared accumulated painting bounds
+conservatively contain local swept supports. A cheap inclusive/slop-aware admission may avoid
+unnecessary quad/hull allocation; its actual cost benefit and exact geometry still require proof.
+No new persistent Tap cache/index, copied brush math or speculative warm-provenance API is approved.
+
+Evidence: `~/PaintWork/s54-final-qualification/native/tap-ui6-benchmark1-e2e20c9a-run01/`
+(actual benchmark output, root independent7, all14 named captures and root LOOK3). The earlierf786
+run was6/7 because its newly landscaped fixture tapped under the card; it is not a product miss or
+an accepted fast run. Root inspected actual whole before/after frames before changing only that row.
