@@ -44,8 +44,10 @@ integration. Reuse these agents; full history/large inventories need not be rere
   **17f8d53b** adds1 cold public Freeform/Done/Undo/Redo method; old14/helpers exact. Root source
   acceptance6f72b7b6. First17f normal294 compiled ZERO tests: new nested probe expression exceeded
   Swift type-checking; root closure13d0fe85. Expression-only successor **7e50cf4a** preserves all81
-  candidates/order/predicates/assertions; root acceptance0f6edba0. Whole279logic+15UI=294 now RUNNING
-  under grant88219d52/supervisor54451. All other Mac native HOLD. Logic3/public1 PREPARED_UNRUN.
+  candidates/order/predicates/assertions; root acceptance0f6edba0. Whole279logic+15UI=294 JOINED:289pass/5fail, root exact IDs/source/device reconciled.
+  Remaining RGB4>2, new UI room premise, old rectangle paper probe and2resize busy-state failures.
+  Root runs unchanged warm resize selected2 under3c0a8bb7/supervisor86376; agents source-trace
+  gradient math and UI geometry/isolation. All other Mac native HOLD. Logic3/public1 PREPARED_UNRUN.
   Actual off-axis committed pictures discriminate; whole-cel Freeform reaches mapper after END/Done.
 - **Windows DNS:** old36c actual19 gave15pass/4intended refusal failures; root original TRX reviewf069
   accepts3 canonical refusal sites. Exit captureNULL, no nativeexit1claim. Exact compiler37012 was
@@ -63,9 +65,9 @@ integration. Reuse these agents; full history/large inventories need not be rere
 - **New autosave finding recorded before codeb1cadfdc:** failed/refused save consumes clock eligibility;
   notice alone does not retry an idle open document. This is implementation, NOT an owner ruling.
   Old **fd8a9058** actual selected1 fails intended landing304 plus downstream nilreload306(0credit),
-  all first failure/unblock premises pass; root1e8bd7a8 reconciles730/ID/device/joined. Vector authors
-  existing driver/clock/failure-channel correction, same timer/default intervals/weak followed-manager
-  identity. No new service/poll/duplicate dirty state. Bake authors separate cold public folder/one-
+  all first failure/unblock premises pass; root1e8bd7a8 reconciles730/ID/device/joined. First timer candidatef571 is HOLD: failed artist save still navigates away/stops retry.
+  Vector now makes the existing landed URL? the sole truthful completion, removes onSaveFailed whole,
+  and permits gallery navigation only after actual landing; same timer/default intervals/weak identity. No new service/poll/duplicate dirty state. Bake authors separate cold public folder/one-
   stroke failure/retry test with external owned-empty-folder fixture; valid FOREGROUND package must
   precede terminate/reopen so scene-phase save cannot mask failure. No new product hook/controller.
 
@@ -95,10 +97,10 @@ O(N) input storage. Do not reopen implemented findings from stale lower queue pr
 
 ### Next gates, in order
 
-1. Join Tap17, restore ALL730, root independently extract original issues and review causality.
+1. Tap17 is joined/root-causally accepted. Run independent cold square successor d7fa normal8.
    Public old-scalar/Clear and output-asserted benchmark control proposals need separate grants.
    Preserve **868's curve cap in StrokeGeometry's tail** when harvesting Tap upper hunks.
-2. Fresh grant gradient17f294 on56C after native idle/storage checks; inspect whole captures; qualify
+2. Resolve actual7e normal294 five RED outcomes without weakening checks; inspect whole captures; qualify
    3logic/public1 real-owner faults. No reuse of old0ab279 as an actual run. Then exact source harvest.
 3. Opacityfb87 held-thumb selected1 is UNRUN. Readiness893389b8 remains exact. Root ready ONLY4B33,
    BEFORE9072 inventory→once helper063a/native d018→joined/source730→AFTER6ff6 preservation/unique
@@ -129,7 +131,7 @@ O(N) input storage. Do not reopen implemented findings from stale lower queue pr
 ### Storage and bounded architecture review
 
 Cleanup complete:10.11GiB owned56C caches +20.72GiB immutable-result dedup +13.05GiB exact5 simulator
-DELETE-phase gain. About45GB recovered; free44.52GB before Tap17, owned generated caches979771392B.
+DELETE-phase gain. About45GB recovered; free40.79GB before warm resize2, owned generated caches3815358464B (<4GiB).
 All result paths/bytes/metadata, artwork, needed Products, protected/unlisted devices remain. Five
 archives820782758B independently verified before deletion. No whole DerivedData/global/personal purge.
 CLAUDE phase checks: aim≥10GiB free, pause new batches<5GiB; owned2caches>4GiB means join first,

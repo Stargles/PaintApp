@@ -108,8 +108,9 @@ or transport rewrite. Finite old proof/source proposal/native qualification rema
 Current integration730source/PBX1325/runnable5412fast6008full. Component-qualified Video11,
 curve94+6controls and Undo70/public4+logic3/public1 are harvested at their actual pins; final assembled
 source gates remain. Storage cleanup is COMPLETE (10.11GiB caches+20.72GiB result dedup+13.05GiB
-exact5 retired-device DELETE phase), artwork/results/protected devices preserved. Root gradient294
-owns the native lease now; Tap17 is closed and its public square test structure is being corrected.
+exact5 retired-device DELETE phase), artwork/results/protected devices preserved. Root unchanged warm resize2
+owns the native lease now; gradient294 joined289pass/5fail and is independently reconciled.
+Tap17 is closed; independent cold square d7fa and cold autosave386 are source-ready/unrun.
 Live authority: HANDOFF.md and `~/PaintWork/s54-final-qualification/root-next-gates.json`.
 Owner rulings remain point-only vector Liquify; vector batch mending includes attached strokes but
 protects uncertain joins/outside outline; saves keep newest clock-bucket versions. Deferred features
