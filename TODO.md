@@ -362,6 +362,13 @@ Inventory-only files are not reviewed code. New source is not called complete be
       corner ink outside that hit radius. Check the actual shipped tip/render and selection contract,
       then reuse existing authoritative brush geometry if confirmed; no new footprint/cache pipeline.
       Native reproduction, effect on other brush properties and cost remain unproved.
+      Root challenged an unnecessary rendered-alpha proposal: the existing policy selects geometric
+      object bodies (text boxes, picture quads and continuous stroke spans), with no texture-hole or
+      dab-gap miss contract. Prefer the smaller canonical geometric proposalc49baadd: reuse the
+      existing walk/shared circle-image primitive geometry and local swept support for hit/outline.
+      No raster probe, mask/cache/admission framework or copied modulation math. First add/drive a
+      production-rendered rotated-square witness in existing Tap tests on old hit code, with its
+      alpha/render premise distinct from behavioral hit/outline credit, before production edits.
 - [ ] Qualify source-integrated removalec62d712 of geometry repair and converter-only UI/tests/fixtures/PBX paths: Kevin
       confirmed current scenes “Looks right” after the preserved250-package export and signed6fb
       install/normal launch. Keep permanent startup maintenance scheduling, truthful gallery readiness
