@@ -13,42 +13,39 @@ without uninstall/reset. Fresh250-package backup is verified and preserved; Kevi
 **“Looks right”**. The erasing crash remains unresolved. New strict-text and layer-limit candidates
 below are NOT in this install. Final regression/performance/audit gates remain unfinished.
 
-Root source review additionally found that the Glare owner-size capture changes orientation and
-immediately screenshots, bypassing the existing rotateDevice layout wait. Before the next native
-run, reuse that helper in the same existing method and require its returned window to be landscape
-before capturing. No appearance/outcome tolerance changes; a no-rotation control must expose the new
-capture premise after the normal workflow passes. Prior clipped screenshot remains invalid evidence.
+Kevin reiterates delegated detail work/high-level orchestration and will be asleep until10a.m.
+October27. Continue independent tasks; no pending owner question or physical restart readiness.
 
-Current candidateec62d712 includes strict text, all three setup fixes, landscape capture waiting and
-the whole converter removal; it is not installed or native-qualified. Expected730source/PBX1325/
-fast5403/full5997. Next rebuilt132 includes permanent startup/recovery/gallery and affected editing
-classes. The capacity WIP remains separate and unqualified.
+Current candidatec2bbb291 is not installed. Actual normal132: **130passed/2failed/0skipped/0expected**.
+All101 logic checks pass, including strict saved-text44 and permanent maintenance/recovery57. Posed
+Duplicate/ToNewLayer/UndoRedo, graph6 and Mode1 4 pass. Root inspected the posed drawing; a batched
+image presentation error was resolved by ORIGINAL re-open, not a product fix. Two public gesture
+premises still block exact50% Blend and selected-word restyle/replacement outcomes. Glare's landscape
+picture remains transitional/invalid despite passing layout assertion; capture-only successor awaits
+review/application. The red aggregate is not a green fault baseline.
 
-**On resume, in queue order (items remain until merged):**
+**In queue order (items remain until merged):**
 
-- Retire the one-shot geometry converter and converter-only tests/fixtures/PBX/startup UI WHOLE now
-  that artwork confirmation is complete. Preserve permanent maintenance/readiness/current-format
-  validation. Retirement is source-integratedec62d712; permanent startup/recovery/gallery tests remain pending. Remove obsolete converter-only cold256 gates with it;
-  preserve originals and meaningful permanent current-format gallery/package tests.
-- Qualify integrated strict saved-textd97093dc from79538f17 (source peer accepted, compiler/whole44/fault/
-  damaged-package UI UNRUN), finish separately parked layer-input capacity WIP (not harvest-ready),
-  independently review and qualify. Reuse existing owners, no retained state/duplicate schema.
-- Fix three cold-test setup failures, preserving their product assertions. Actual6fb UI29+graph86:
-  **115 total/112passed/3failed/0skips/0expected**. Graph86 pass; Mode1 eraser4 pass with all4whole
-  pictures inspected. Blend opacity reached42% instead50%, Pose sampling includes toolbar, Text's
-  exterior-band containment uses narrow words ROI. Isolated Blend candidate3bbf8732 is reviewed,
-  UNRUN; now source-integratedc388c7ad. Root LOOKed both actual full tail pictures and accepted proposal32a1f68a/
-  patch71a203a2: toolbar-cleared shared Pose grid and Text visible-paper containment only;
-  both fixes are harvested from6ab1b118, with unchanged product outcomes/tolerances.
-  Rebuild normal whole affected UI, inspect stable owner-size captures (Glare landscape still invalid),
-  then meaningful graph/blend/selected-text/transfer/Mode1 controls from green baselines.
-- Repin historical UI47+13controls and mask6positives+11faults. Finish final fast Debug AND Release,
-  actual/static reconciliation, lints/PBX/graph, touched UI/full phase. Root6fb census5444fast/6038full,
-  729source/PBX1329; recompute after pending changes. Earlier qualified evidence stays at its exact pin.
+- Integrate independently reviewed shared layer-input capacity888cd4b9 (all51 preimages exact) and
+  establish normal111+strict44 green baseline, then finite meaningful controls. A failed video import
+  could undo a completed Move; corrected through existing settlement-before-capture ordering, with
+  no new state/rollback machinery. Runtime UNRUN; expected730source/PBX1325/fast5409/full6003 after harvest.
+- Finish strict damaged-package cold UI methodfb25cfc4 peer review and externally staged owned-copy
+  workflow. Runner-only opt-in means ordinary runs explicitly skip this method; report old whole2 plus
+  staged selected1 honestly. No product hook/schema/default. Meaningful strict-text controls remain.
+- Complete whole converter retirementec62d712 qualification: permanent maintenance/current-format
+  tests57 pass; finite controls and final gates remain. Temporary converter code/suite/fixture/PBX/UI
+  are removed WHOLE and obsolete converter-only cold256 gates retire with them. Originals protected.
+- Diagnose actual Blend/Text public gesture delivery; preserve exact opacity and drawn replacement
+  outcomes, then run whole affected UI and meaningful controls. Verify stable actual Glare screenshot;
+  AX layout alone was insufficient. Current graph/Mode1/transfer controls still pending.
+- Repin historical UI47+13controls and mask6positives+11faults. Final fast Debug AND Release per exact
+  CLAUDE command, actual/static reconciliation, lints/PBX/graph, touched UI/full phase. Three private
+  static testBrush factories are excluded from XCTest runnable census; no guessed subtraction/skips.
 - Fill16 paired Release ABBA/final sampler/count/cost/whole-RSS and remaining genuine file-level
-  architecture audit. Protected old071 benchmark product/real artwork/results must remain intact.
+  architecture audit. Protected old071 benchmark product/real artwork/results remain intact.
 - Physical Test1 erasing all-process capture only after fresh saved/unlocked readiness. Do not infer
-  crash cause from allocation fixes or simulator results. Finish qualified merge/release lifecycle.
+  crash cause from allocation fixes/simulator results. Finish qualified merge/release lifecycle.
 
 **Renewal risk:** current profile expires Oct29,8:18pm Toronto. Kevin approved this verified four-day
 artifact only. Auto-resign builds origin/main; resolve before renewal so old main cannot silently

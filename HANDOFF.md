@@ -10,44 +10,56 @@ and ONE Mac native lease. Preserve real artwork and record before acting.
 Usage authorization persists: delegate useful work, conserve usage, quality over speed. No owner
 question is pending. No physical restart is authorized by an old readiness answer.
 
-**Resume scope recorded before code:** retire the now-confirmed one-shot converter and exclusive
-UI/tests/fixtures/PBX entries while preserving permanent maintenance/current-format validation;
-continue the existing shared-capacity WIP scope without expansion; implement ONLY the reviewed
-Pose toolbar-cleared sampling basis and Text exterior-band visible-paper containment correction
-from proposal71a203a2. Root LOOKed both full final video-tail display images: Pose shows black toolbar
-above paper and a moved bar; Text shows a large W in its live hull with the keyboard open. These
-lossy video-derived frames establish visible setup context, not exact native RGB/coordinates or
-feature outcomes. All existing behavioral assertions/tolerances stay unchanged. Independent source
-review and actual normal rebuilt workflows precede fault controls. No native lease granted yet.
-Root additionally reviews/integrates strict-text79538f17 and reviewed Blend3bbf8732, preserving exact
-source/provenance and removing superseded code whole. Exact resumed branch audit and LOOK record:
-`~/PaintWork/s54-final-qualification/resume-20261026/`.
+## Current integration — October 26
 
-Root source review additionally found that the Glare owner-size capture changes orientation and
-immediately screenshots, bypassing the existing rotateDevice layout wait. Before the next native
-run, reuse that helper in the same existing method and require its returned window to be landscape
-before capturing. No appearance/outcome tolerance changes; a no-rotation control must expose the new
-capture premise after the normal workflow passes. Prior clipped screenshot remains invalid evidence.
+Kevin asks us to keep useful agents on detail work and root on integration/evidence coordination.
+He will be asleep until10a.m. October27; continue independent work without relying on replies.
+No owner question is pending and old device readiness does not authorize another physical restart.
 
-## Current integrated source — October 26
+Source **c2bbb291** includes strict saved-textd97093dc, setup correctionsc388c7ad, Glare waitbd000c9a
+and whole converter retirementec62d712. Actual normal132 at this exact source is **130passed/2failed,
+0skipped/0expected**. Root independently reconciled all132 method IDs/device/command and730 source
+entries before/after/current. All101 logic checks passed, including strict-text44 and permanent
+maintenance/recovery57. The aggregate is RED and is not an all-green fault baseline.
 
-Source **ec62d712** (plus this records-only commit) integrates strict saved-text d97093dc, setup
-corrections c388c7ad, Glare capture wait bd000c9a (independent e870265c) and converter retirement
-ec62d712 from c309be58. All are **native/compiler UNRUN** at this pin. The iPad remains installed6fb,
-already owner-confirmed. Converter production/suite/fixture/PBX entries and temporary repair UI are
-deleted WHOLE; existing ProjectBackupManager owns permanent detached once/readiness maintenance.
-Two permanent regressions retain maintenance gating and current damaged-payload backup recovery.
-Current expected census:730 source entries/PBX1325/fast5403/full5997 runnable; prepare must verify.
+The posed selection Duplicate/ToNewLayer/UndoRedo workflow now passes and its whole drawing was
+inspected. Three intended-equivalent final images are byte-identical. An initial batched display
+misrepresented two as black; isolated ORIGINAL re-open resolved this presentation error. No product
+change is indicated. All4 Mode1 and6 graph workflows pass. Two setup premises still block their
+specific new outcomes: Blend cannot deliver exact50% through the existing slider helper (actual33%);
+Text long press exposes no Select All menu. Restyling/replacement and later near-tie Blend outcomes
+remain unreached. Diagnose public gesture delivery before changing product code or tolerances.
 
-Root independently reviewed/harvested immutable source and retained all4 exact old-product text
-fixture files. Strict source peerceb62ce6 confirms no blocker; its initial fault map covers10of30new
-behavior statement identities (14case refs), not42 unique row identities. Twenty remain explicitly
-unqualified until the finite controls are completed. No copied/defaulted text repair is introduced.
+Glare's2 methods pass, but the owner-landscape picture is STILL rotated/clipped/transitional despite
+its landscape window assertion. AX layout is not framebuffer stability. A capture-only proposal now
+requires actual landscape screenshot dimensions and two stable sampled frames under a deadline,
+attaching the SAME accepted shot. Root has not yet applied or native-qualified it.
 
-Next: normal rebuilt132 = strict44 + affectedUI29 + Backup26 + Storage12 + Restore3 + VectorData16 +
-GalleryRecovery2, owned56C/no lifecycle/Debug, source held only once root grants execution. Preserve
-frozen older c388 normal73 prepare unchanged. Native tests, meaningful controls, whole picture LOOK,
-final fast/Release/performance/remaining audit are still pending. No physical iPad restart authorized.
+Next source harvest is reviewed shared layer-input capacity **888cd4b9**:8production+42test/support+
+1spec paths, all51 root preimages exact and patch dry-run clean. Independent peer6d45d906 accepted the
+actual producer/caller net counts and preserved old assertions. A concrete failed-video-import rollback
+bug is corrected through existing interactive settlement BEFORE structural capture; no new state,
+transaction or rollback layer. Root recorded scope before implementation. Runtime is UNRUN.
+Initial rebuilt normal155 =capacity111+strict44 will establish the required green baseline first.
+Expected post-harvest census730source/PBX1325/fast5409/full6003 runnable; prepare must verify.
+
+One strict damaged-text cold UI method **fb25cfc4** is isolated and under independent peer review.
+It uses a runner-only externally staged owned package; no product test flag/global hook. Ordinary
+runs explicitly skip this opt-in method, so old whole2 plus the selected staged method must be reported
+as an honest union3, not one whole3 green run. Three static testBrush factories explain raw/runnable
+census differences: TextHitTestLogicTests, VectorCanvasDataLogicTests, VectorTextPersistenceLogicTests.
+They are private static factories, not XCTest instance methods. No native staging has run.
+
+Native is idle, normal132 source hold released. Reuse owned booted56C without lifecycle changes for
+next logic155 after root verifies prepare and grants execution. Converter-only cold256 gates are
+retired with the feature; meaningful current-format maintenance/gallery/recovery controls remain.
+The installed iPad remains owner-confirmed6fb, not these source candidates.
+
+Evidence: `~/PaintWork/s54-final-qualification/native/strict-retirement-ui-normal132-c2bbb291-run01/`
+contains original captures, root-independent-outcomes.json (SHA476f6380), and root-five-capture-look.json
+(SHAd2650a9d). Preserve frozen older normal73 prepare unchanged. Capacity source/peer/controls:
+`graph-capacity-implementation-6fb979f4/` and `converter-retirement-20261026/capacity-source-review/`.
+All controls, final fast Debug/Release, remaining cold workflows/performance/audit gates remain open.
 
 ## Checkpoint — 2026-10-25
 
@@ -86,67 +98,29 @@ artwork protected. Never broaden cleanup or discard old071 benchmark products.
 
 ## Resume queue — actionable work stays unfinished
 
-1. **Retire the temporary point-geometry converter now that Kevin confirmed artwork.** Retirement is implemented at ec62d712 after recorded scope and root source review.
-   PointGeometryRepair and converter-only tests/fixtures/PBX references/temporary startup UI are gone.
-   Qualify the retained permanent maintenance/recovery/gallery owners before merge.
-   Preserve permanent startup maintenance scheduling/readiness and strict current-format validation;
-   relocate a converter-owned current-format constant to its existing permanent codec owner if needed,
-   without duplicate schema/state. Delete obsolete converter-only cold256 gates with the feature;
-   retain meaningful current-format startup/gallery/package tests. No compatibility decoder/default.
-2. **Finish the pending source changes, independently review, then integrate exact paths.**
-   - Strict saved-text source79538f17, `PaintApp-s54-text-current-decode`, clean/source-peer accepted
-     ba720df1. Temporary old-writer capture removed WHOLE0a6b4949 before strict code. Actual old-product
-     package4files/46680bytes is accepted42823789. Remove4 fallback decoders through synthesis; only
-     TextFrame required decoding/corner error remains.21 required/4 optional fields, no schema/new
-     repair/state. The actual4-file package is retained exactly;733source/PBX1331,
-     fast5441/full6035 runnable in that isolated tree. Whole44 and old-code expected-red4, compiler,
-     fault/cold-package/save-gate behavior are UNRUN. Candidate nine-case map is incomplete:42 forwarded
-     helper rows are ONE canonical assertion, not42 unique identities. Root reviewed and harvested exact10 paths at d97093dc; runtime/controls remain pending.
-   - Shared layer-input capacity: vector_mend_proof has saved a WIP checkpoint in
-     `PaintApp-s54-graph-grammar-admission`. Precode60e7c32e; parked WIP **c215b7a35df46df16b082336949d010520536376** (clean),
-     receipt56375ed2. Seven production+36test/support paths;205 explicit ID unwraps/568 mechanical
-     migrations. Six planned new regressions and API/throws/assertion/overfull/grouping/late-Mix review
-     are unfinished. Only diff-check ran; no compiler/native/UI/fault/fast. Final details in park receipt.
-     NOT harvest-ready/compiled/tested. Shared actual destination/net count via existing maxInputCount,
-     no retained state/cache/schema/renderer truncation/fakeUUID/reparent. Preserve grouping net count,
-     delete cycle-parent rules and existing Mix→Mix policy. Video must resolve the actual fresh layer
-     inside existing structural transaction BEFORE consuming staging; retryable media remains on
-     refusal. Frozen designc433b99b, delete/Mix addendumb9485e, video234f45f8 and peers exist under
-     `~/PaintWork/s54-final-qualification/graph-grammar-admission-9fee1fcd/` (discover exact path).
-3. **Repair three cold-test setup failures, then drive unchanged outcomes.** Actual6fb whole115:
-   **112pass/3fail/0skip/0expected** (UI29+graph86). Root aa3c9b02 independently reconciled source729,
-   native/device/counts and all issues. Graph86 pass within a red aggregate; not a whole115 green gate.
-   - Blend new method reaches exact solid inputs; synthetic slider stops42% rather than50%, so outcome
-     loop is unreached. Isolated test-only candidate3bbf8732 in `PaintApp-s54-blend-slider` uses existing
-     clamped0→midpoint helper; all outcomes/readout unchanged. Independent source reviewbfdc2ccf;
-     UNRUN; harvested c388c7ad.
-   - Pose grid samples toolbar; new transfer workflow fails a rest/middle separation premise before
-     transfers. Text selected-word exterior band lies outside narrow words ROI but inside visible paper;
-     fails premise before select/style. bake_cache_lifecycle has source-only proposals, NO edits:
-     `setup-failures115-6fb-readonly/`, receipt32a1f68a, patch71a203a2. Root LOOKed both full tail images and harvested exact reviewed setup fixes at c388c7ad. Reuse shared toolbar-cleared grid basis for Pose probe+mapping;
-     Text changes only containment to visible paper. Keep unchanged product outcome assertions.
-   - All30 reached named captures author-LOOKed, but Glare native-landscape capture is rotated/clipped/
-     transitional and NOT valid owner-landscape evidence. Root LOOKed all4 new Mode1 whole pictures
-     cd97179d: before black stroke, committed white textured punch, Undo restored, Redo repeated.
-     201×61 samples are not every pixel/live-field/disk/physical crash proof. Normal rebuild then whole
-     Text5/Graph6/Blend10/Pose2/Mode1 4/Glare2, stable whole owner-size LOOK, meaningful Graph3/Blend3/
-     text1/transfer/Mode1 controls remain. Normal all-green baseline required before fault driver.
-4. **Historical consumer gates/final qualification:** repin wholeUI47 +13 controls (15 unique IDs,
-   33case-bound refs), mask6 positive configs/5methods +11faults. Mask build must JOIN, restore ALL
-   source, then test-without-building. LOOK positives before faults. Compatibility-only packetc4dcc284
-   is not runtime evidence. Finish fast Debug AND Release using CLAUDE's verbatim filter/command,
-   reconcile actual/static counts, lints/PBX/graph, all touched UI and full phase. Recompute census after
-   retirement/strict/capacity; current expected730source/PBX1325/fast5403/full5997 runnable, pending prepare reconciliation.
-5. **Performance and remaining audit:** paired fill16 Release ABBA against protected old071 product;
-   final sampler/source/fence/cancel/budget counts and whole-RSS. Paired harness0a6436bb; no physical
-   timing extrapolation. Continue genuine unreviewed vector tools/undo/render/archive, graph evaluation,
-   typography/panels/import/platform/delivery coverage;19 clusters aren't all files. Prior accepted
-   clusters stay closed unless new evidence. VectorLayer8465lines was not whole-reviewed.
-6. **Erasing respring:** still unproved. After fresh saved/unlocked readiness, bounded physical Test1
-   all-process capture/real cuts may proceed under prepared plan; no new physical scenes or device
-   restarts now. Final merge must remove finished TODO items WHOLE, verify main SHA and obey deployment
-   safeguards above. Future interpolation/multi-cel/linear-light/audio/video/importer/stream-stage5 stay
-   deferred until their owner dependency/brief exists.
+1. Integrate reviewed capacity888, qualify normal111+strict44, then meaningful capacity19 controls
+   and strict-text controls. No retained state/duplicate schema/renderer truncation/fake IDs. Keep the
+   existing resource staging and Move/Undo ownership; failed media imports must preserve completed Move.
+2. Finish independently reviewed strict damaged-package cold UI; build/install/stage only the owned
+   copy and run the opt-in selected method. Verify preserved original bytes externally after recovery.
+   Add/drive capacity's public cold workflow after source scope review.
+3. Diagnose Blend exact50% and Text full-word public selection premises without weakening outcomes.
+   Rebuild/drive whole affected classes and inspect actual drawings. Apply reviewed Glare capture-only
+   correction, then verify its actual owner-size whole picture and a meaningful no-rotation control.
+4. Finish permanent startup/recovery controls after whole converter retirement, meaningful current
+   graph/blend/selected-text/transfer/Mode1 controls, historical UI47+13controls and mask6positive+
+   11faults. Mask build must JOIN, all source restore, then test-without-building; LOOK positives first.
+5. Final fast Debug AND Release using CLAUDE's verbatim filename filter/command; reconcile actual IDs,
+   factory exclusions and explicit skips; lints/PBX/graph/touched UI/full phase. Earlier accepted proof
+   stays at its actual source pin, without unnecessary blanket repeats.
+6. Fill16 paired Release ABBA against protected old071; final sampler/source/fence/cancel/budget counts
+   and whole-RSS. Continue genuine unreviewed vector tools/undo/render/archive, graph evaluation,
+   typography/panels/import/platform/delivery coverage.19clusters aren't all files. No speculative rewrite.
+7. Erasing respring remains unproved. Physical Test1 all-process capture/real cuts on a unique owned
+   copy require fresh saved/unlocked readiness; no physical restart while owner sleeps. Qualified
+   merge/push before Oct29 renewal or resolve silent downgrade lifecycle. Remove finished TODO items
+   WHOLE when merged. Future interpolation/multi-cel/linear-light/audio/video/importer/stream-stage5
+   remain deferred until their owner dependency/brief exists.
 
 ## Qualified evidence to preserve at its actual pin
 
