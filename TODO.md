@@ -59,6 +59,15 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
 - Physical Test1 only after fresh saved/unlocked readiness. Qualified merge/push before October29
   signing renewal, or resolve automatic old-main downgrade risk. Remove completed items WHOLE.
 
+**New source findings recorded before regression/fix — October26:** bounded Windows resource
+review42f684d2 found clipboard timestamp collisions can overwrite an earlier queued paste, and
+thread-bound keep-awake requirements are acquired/cleared across asynchronous continuations.
+Add a tiny deterministic clipboard regression through the existing timestamp argument, then fix
+exclusive destination ownership in Save after actual RED. Review a pipeline-owned power handle at
+the existing NativeMethods/Session seam; no new service/thread or changed sleep policy. Both need
+Windows runtime proof; host is currently unavailable. Nearby's unfenced post-stop publication is
+only a source gap: actual retained-owner/visible stale behavior is unproved, so do not invent a bug.
+
 Current integration730source/PBX1325/runnable5412fast6008full. Video67bd normal11/control1 are closed;
 numeric curve94 and6safecontrols are root-accepted; exact3-path fix harvested8682859f. Native
 tests are paused for root-owned retirement of five obsolete test simulators after verified app-data

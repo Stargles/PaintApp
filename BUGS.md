@@ -17,6 +17,26 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Colliding clipboard timestamps overwrite queued pictures — 2026-10-26
+
+Source review42f684d2: ClipboardImageStore.Save names PNGs to wall-clock milliseconds and
+File.WriteAllBytes replaces an existing path. MainWindow queues that path; FileOutbox can read it
+later after waiting for a connection. Two distinct valid pastes sharing a formatted timestamp can
+therefore both send the second picture. No observed owner loss/frequency claim. Existing optional
+timestamp permits a finite two-pixel regression without a hook. Reuse Save's destination owner;
+preserve the first timestamp basename and create later destinations exclusively. No outbox cache,
+new service or format change. Record precedes tests/fix; actual Windows RED and correction pending.
+
+## Keep-awake requirements outlive their asynchronous pipeline owner — 2026-10-26
+
+Source review42f684d2 and Microsoft's SetThreadExecutionState contract: persistent requirements
+belong to the calling OS thread. StreamerSession acquires after awaited pipeline start and clears
+after awaited disposal with ConfigureAwait(false); its transition semaphore does not preserve OS
+thread identity. Acquire on A/clear on B can leave A's requirement active. No observed sleep/stream
+failure or iPad crash attribution. Review a handle-scoped request owned by the existing pipeline
+lifetime, balanced through stop/dispose/failure, preserving system/display intent and user overrides.
+No new service/dedicated thread. Source proposal and bounded Windows proof remain pending.
+
 ## Oversized compressed discovery names evade the decoder's work bound — 2026-10-26
 
 Source-confirmed at72885a50 in Windows DnsName.Decode: buffer/pointer checks do not bound the
