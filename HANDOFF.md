@@ -29,6 +29,26 @@ run, reuse that helper in the same existing method and require its returned wind
 before capturing. No appearance/outcome tolerance changes; a no-rotation control must expose the new
 capture premise after the normal workflow passes. Prior clipped screenshot remains invalid evidence.
 
+## Current integrated source — October 26
+
+Source **ec62d712** (plus this records-only commit) integrates strict saved-text d97093dc, setup
+corrections c388c7ad, Glare capture wait bd000c9a (independent e870265c) and converter retirement
+ec62d712 from c309be58. All are **native/compiler UNRUN** at this pin. The iPad remains installed6fb,
+already owner-confirmed. Converter production/suite/fixture/PBX entries and temporary repair UI are
+deleted WHOLE; existing ProjectBackupManager owns permanent detached once/readiness maintenance.
+Two permanent regressions retain maintenance gating and current damaged-payload backup recovery.
+Current expected census:730 source entries/PBX1325/fast5403/full5997 runnable; prepare must verify.
+
+Root independently reviewed/harvested immutable source and retained all4 exact old-product text
+fixture files. Strict source peerceb62ce6 confirms no blocker; its initial fault map covers10of30new
+behavior statement identities (14case refs), not42 unique row identities. Twenty remain explicitly
+unqualified until the finite controls are completed. No copied/defaulted text repair is introduced.
+
+Next: normal rebuilt132 = strict44 + affectedUI29 + Backup26 + Storage12 + Restore3 + VectorData16 +
+GalleryRecovery2, owned56C/no lifecycle/Debug, source held only once root grants execution. Preserve
+frozen older c388 normal73 prepare unchanged. Native tests, meaningful controls, whole picture LOOK,
+final fast/Release/performance/remaining audit are still pending. No physical iPad restart authorized.
+
 ## Checkpoint — 2026-10-25
 
 Integration tree: `~/PaintWork/PaintApp-s54-mend-free-caps`, branch `tmp/s54-mend-free-caps`.
@@ -66,9 +86,9 @@ artwork protected. Never broaden cleanup or discard old071 benchmark products.
 
 ## Resume queue — actionable work stays unfinished
 
-1. **Retire the temporary point-geometry converter now that Kevin confirmed artwork.** No retirement
-   code has begun. Record/trace scope, then delegate startup_repair in a new task tree. Remove
-   PointGeometryRepair and converter-only tests/fixtures/PBX references/temporary startup UI WHOLE.
+1. **Retire the temporary point-geometry converter now that Kevin confirmed artwork.** Retirement is implemented at ec62d712 after recorded scope and root source review.
+   PointGeometryRepair and converter-only tests/fixtures/PBX references/temporary startup UI are gone.
+   Qualify the retained permanent maintenance/recovery/gallery owners before merge.
    Preserve permanent startup maintenance scheduling/readiness and strict current-format validation;
    relocate a converter-owned current-format constant to its existing permanent codec owner if needed,
    without duplicate schema/state. Delete obsolete converter-only cold256 gates with the feature;
@@ -81,7 +101,7 @@ artwork protected. Never broaden cleanup or discard old071 benchmark products.
      repair/state. The actual4-file package is retained exactly;733source/PBX1331,
      fast5441/full6035 runnable in that isolated tree. Whole44 and old-code expected-red4, compiler,
      fault/cold-package/save-gate behavior are UNRUN. Candidate nine-case map is incomplete:42 forwarded
-     helper rows are ONE canonical assertion, not42 unique identities. Review full packet before harvest.
+     helper rows are ONE canonical assertion, not42 unique identities. Root reviewed and harvested exact10 paths at d97093dc; runtime/controls remain pending.
    - Shared layer-input capacity: vector_mend_proof has saved a WIP checkpoint in
      `PaintApp-s54-graph-grammar-admission`. Precode60e7c32e; parked WIP **c215b7a35df46df16b082336949d010520536376** (clean),
      receipt56375ed2. Seven production+36test/support paths;205 explicit ID unwraps/568 mechanical
@@ -99,12 +119,11 @@ artwork protected. Never broaden cleanup or discard old071 benchmark products.
    - Blend new method reaches exact solid inputs; synthetic slider stops42% rather than50%, so outcome
      loop is unreached. Isolated test-only candidate3bbf8732 in `PaintApp-s54-blend-slider` uses existing
      clamped0→midpoint helper; all outcomes/readout unchanged. Independent source reviewbfdc2ccf;
-     UNRUN/unintegrated.
+     UNRUN; harvested c388c7ad.
    - Pose grid samples toolbar; new transfer workflow fails a rest/middle separation premise before
      transfers. Text selected-word exterior band lies outside narrow words ROI but inside visible paper;
      fails premise before select/style. bake_cache_lifecycle has source-only proposals, NO edits:
-     `setup-failures115-6fb-readonly/`, receipt32a1f68a, patch71a203a2. Root must LOOK actual pose/text
-     tail images before authorizing. Reuse shared toolbar-cleared grid basis for Pose probe+mapping;
+     `setup-failures115-6fb-readonly/`, receipt32a1f68a, patch71a203a2. Root LOOKed both full tail images and harvested exact reviewed setup fixes at c388c7ad. Reuse shared toolbar-cleared grid basis for Pose probe+mapping;
      Text changes only containment to visible paper. Keep unchanged product outcome assertions.
    - All30 reached named captures author-LOOKed, but Glare native-landscape capture is rotated/clipped/
      transitional and NOT valid owner-landscape evidence. Root LOOKed all4 new Mode1 whole pictures
@@ -117,7 +136,7 @@ artwork protected. Never broaden cleanup or discard old071 benchmark products.
    source, then test-without-building. LOOK positives before faults. Compatibility-only packetc4dcc284
    is not runtime evidence. Finish fast Debug AND Release using CLAUDE's verbatim filter/command,
    reconcile actual/static counts, lints/PBX/graph, all touched UI and full phase. Recompute census after
-   retirement/strict/capacity; root6fb currently729source/PBX1329/fast5444/full6038 runnable.
+   retirement/strict/capacity; current expected730source/PBX1325/fast5403/full5997 runnable, pending prepare reconciliation.
 5. **Performance and remaining audit:** paired fill16 Release ABBA against protected old071 product;
    final sampler/source/fence/cancel/budget counts and whole-RSS. Paired harness0a6436bb; no physical
    timing extrapolation. Continue genuine unreviewed vector tools/undo/render/archive, graph evaluation,

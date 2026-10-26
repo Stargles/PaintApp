@@ -19,22 +19,27 @@ run, reuse that helper in the same existing method and require its returned wind
 before capturing. No appearance/outcome tolerance changes; a no-rotation control must expose the new
 capture premise after the normal workflow passes. Prior clipped screenshot remains invalid evidence.
 
+Current candidateec62d712 includes strict text, all three setup fixes, landscape capture waiting and
+the whole converter removal; it is not installed or native-qualified. Expected730source/PBX1325/
+fast5403/full5997. Next rebuilt132 includes permanent startup/recovery/gallery and affected editing
+classes. The capacity WIP remains separate and unqualified.
+
 **On resume, in queue order (items remain until merged):**
 
 - Retire the one-shot geometry converter and converter-only tests/fixtures/PBX/startup UI WHOLE now
   that artwork confirmation is complete. Preserve permanent maintenance/readiness/current-format
-  validation. Retirement is delegated after this scope record. Remove obsolete converter-only cold256 gates with it;
+  validation. Retirement is source-integratedec62d712; permanent startup/recovery/gallery tests remain pending. Remove obsolete converter-only cold256 gates with it;
   preserve originals and meaningful permanent current-format gallery/package tests.
-- Review/integrate pending strict saved-text79538f17 (source peer accepted, compiler/whole44/fault/
+- Qualify integrated strict saved-textd97093dc from79538f17 (source peer accepted, compiler/whole44/fault/
   damaged-package UI UNRUN), finish separately parked layer-input capacity WIP (not harvest-ready),
   independently review and qualify. Reuse existing owners, no retained state/duplicate schema.
 - Fix three cold-test setup failures, preserving their product assertions. Actual6fb UI29+graph86:
   **115 total/112passed/3failed/0skips/0expected**. Graph86 pass; Mode1 eraser4 pass with all4whole
   pictures inspected. Blend opacity reached42% instead50%, Pose sampling includes toolbar, Text's
   exterior-band containment uses narrow words ROI. Isolated Blend candidate3bbf8732 is reviewed,
-  UNRUN. Root LOOKed both actual full tail pictures and accepts bounded setup proposal32a1f68a/
+  UNRUN; now source-integratedc388c7ad. Root LOOKed both actual full tail pictures and accepted proposal32a1f68a/
   patch71a203a2: toolbar-cleared shared Pose grid and Text visible-paper containment only;
-  implementation in an isolated tree is authorized, with unchanged product outcomes/tolerances.
+  both fixes are harvested from6ab1b118, with unchanged product outcomes/tolerances.
   Rebuild normal whole affected UI, inspect stable owner-size captures (Glare landscape still invalid),
   then meaningful graph/blend/selected-text/transfer/Mode1 controls from green baselines.
 - Repin historical UI47+13controls and mask6positives+11faults. Finish final fast Debug AND Release,
@@ -163,7 +168,7 @@ zero failures/expected, all method identities/255 classes reconcile. Corrected c
 723 bytes/modes restored, lints/plutil/PBX1317 unique clean. The corrections remove obsolete placement
 and oldest-plus3 expectations only; production and earlier338/17/UI proof remain exact.
 
-- [ ] Retire one-shot repair and converter-only UI/tests/fixtures whole: fresh250-package preservation,
+- [ ] Qualify whole one-shot repair removalec62d712 and retained permanent owners: fresh250-package preservation,
       signed6fb install/normal launch and owner “Looks right” confirmation are complete. Preserve
       permanent maintenance/readiness/current-format validation; finish final qualification/merge.
 
@@ -310,11 +315,11 @@ Inventory-only files are not reviewed code. New source is not called complete be
 
 - [ ] Data protection/background: finish final-source gates for strict migration/Trash ownership,
       export cancellation, serialized cleanup and close-owned thumbnails; retain the qualified controls.
-- [ ] Retire temporary geometry repair and converter-only UI/tests/fixtures/PBX paths WHOLE: Kevin
+- [ ] Qualify source-integrated removalec62d712 of geometry repair and converter-only UI/tests/fixtures/PBX paths: Kevin
       confirmed current scenes “Looks right” after the preserved250-package export and signed6fb
       install/normal launch. Keep permanent startup maintenance scheduling, truthful gallery readiness
       and strict current-model validation. Retire obsolete converter-specific cold-library gates;
-      retain current-format package/startup coverage. No retirement implementation has begun.
+      retain current-format package/startup coverage. Whole source removal and permanent-owner regressions are integrated; native qualification remains pending.
 - [ ] Bake recovery/close: existing baker/store/read demands share one authoritative source and checked
       admission; corrupt/missing/zero-byte derived files recover without permanent retry. Keep final
       headroom refusal and actual unlink failure coverage. Derived cache bytes are separate from source pixels.
