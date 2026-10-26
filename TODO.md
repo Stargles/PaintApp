@@ -32,28 +32,17 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   address changes, checking every prior recording's kind/mode/bytes/hash; UUID stability is not an
   install invariant. Old failed identity-check command remains immutable. No product recorder change.
   Retire diagnostics, drive whole affected colour/text classes and meaningful controls.
-- Effects5a normal63 passed63/63, source730 exact. Its13safe controls now qualify19 product/retained
-  contracts plus3 separate premises, rootb84a2549; exact730 restored. Finish2d normal116/13safe controls: huge finite
-  settings must not overflow sampling/apron conversion; ordinary edge pixels and saved values stay
-  unchanged. Confirm successful actual GPU output before performance timing; its existing benchmark
-  now checks real full-size results outside the clocks. Remaining CRT controls/performance are UNRUN.
-  Actual2d normal116 now115pass/1fail: four extreme finite CRT comparisons differ by64/32/64/32.
-  Keep its13controls blocked; trace and correct the actual centre-normalization precision seam,
-  preserving every original colour/coverage assertion and tolerance. One-line702 candidate also
-  failed115/116 with the SAME64/32/64/32 differences: precision division alone is not a qualified fix.
-  Before another product change, add only bounded case/max-difference-coordinate/pixel diagnostic
-  prints to the existing failing loop; preserve all oracles/inputs/tolerances/math and inspect actual
-  CPU/GPU output. No blanket parameter clamp. New public Chroma drawing test is integrated
-  at34921e73 with independent source review; actual selected/whole11/control remain UNRUN.
-  First actual integrated startup59 compile stopped before tests: new Chroma readRow closure
-  requires explicit self.onHost at1537/1538. Correct only those two references, retain every oracle/
-  input/action, then prepare a named normal59 successor; original0-test compiler-red stays immutable.
-  Actual3d2 print-only run reproduces centre/axis red-blue shifts with green/alpha unchanged.
-  Source proposal3e5cf0b5 and independent69efac5c accept moving exact centre cancellation before
-  division in the SAME CRT line: precise::divide(centre*2-frame,frame). Owner2048/1024 arithmetic is
-  bit-exact in the finite model; nonpower-of-two rounding differs. Implement only that line on a new
-  branch from702, with all original tests/CPU/flags unchanged and no diagnostic prints harvested.
-  Native116 must pass unchanged; no byte/cost/optimizer guarantee follows from the source model.
+- Effects5a normal63 and13 safe controls qualify19 product/retained contracts plus3 separate premises,
+  rootb84a2549, exact730 restored. Corrected Chroma/CRTec50 now passed116/116, root5eeb1ea0. One existing
+  coordinate line cancels the centre before division; CPU/oracles/tolerance/global flags remain exact.
+  Its13 safe controls, ordinary cold appearance and paired Release cost remain pending. Preserve
+  old2d/702/3d2 RED evidence; division precision alone was ineffective. No diagnostic prints in product.
+  The existing Lens benchmark now requires real full-size output; the matched ec50 ABBA packet is
+  prepared only. It measures that GPU path, not CRT-local or whole-process cost.
+  New Chroma public drawing test is integrated, with only two self.onHost compiler corrections60427;
+  unchanged selected/whole11/outcome control are UNRUN. Originalstartup59 at1a92 executed ZERO tests
+  due to those compiler errors; named60427 normal59/control10 successor is prepared only. No recovery
+  runtime qualification follows from a compile correction. All failed packets stay immutable.
 - Public two-input Mix refusal workflow6ef; cold damaged-text recovery/byte-exact original in Trash;
   actual stable Glare landscape picture; wrong-cel Undo thumbnail public repro4432 then minimal fix.
 - Permanent maintenance/recovery and remaining relevant UI/mask controls; final exact fast Debug AND

@@ -17,7 +17,7 @@ Root integration moved to `~/PaintWork/PaintApp-s54-qualified-integration`,
 `~/PaintWork/s54-final-qualification/root-next-gates.json`. Inspect actual completion receipts before
 assuming the native lease is idle. Do not copy stale agent HANDOFF/TODO files into integration.
 
-Product/test source **1a92cdf4** now harvests exact reviewed5a/2d effects,6ef public Mix refusal,
+Product/test source **ac72a0ee** now harvests exact reviewed5a/2d effects,6ef public Mix refusal,
 4432 Undo regression with established precreation orientation,67bd explicit picked-file comparisons,
 and9e286 output-verified Lens benchmark, the successful permanent Text interaction and one public
 Chroma drawing test. The failed slider controller and diagnostic prints are excluded.
@@ -65,25 +65,14 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   Duplicate periodic angles, apron-before-Int, and actual CPU/Metal transparent samplers
   bound positions before narrowing while preserving fractional outside-edge ink. Never run unsafe
   old casts with huge/NaN inputs as a crash-seeking control. Keep old5a packet/tree unchanged.
-- Chroma/CRT source **2d30185d**, net7 paths, independently reviewed c219071f. Shared clamped CPU/Metal sampler bounds floats before
-  narrowing; existing finite stored CRT Double narrows safely; existing apron planner caps before Int.
-  No saved-format/key/range/state/service change. Four clamps are not the complete added instruction
-  cost. Existing heavy GPU bench ignores nil: paired timings must first prove successful real output.
-  Actual2d normal116 CLOSED115pass/1fail, source730 exact:CRT fringe GPU/CPU comparison303 fails four
-  finite cases by64/32/64/32.13controls are BLOCKED. Vector/Converter trace fast Metal centre/frame
-  normalization: a finite FMA residual at the odd65 centre reproduces those deltas when multiplied
-  by huge fringe. This is a source witness, not actual lowering proof. Review existing
-  precise::divide(centre,frame) at the CRT seam. Exact one-line source7023573b is ready for independent
-  review and normal116; CPU math, all tests/tolerances and global flags are unchanged. Actual702 also
-  CLOSED115pass/1fail with the SAME64/32/64/32 differences, source730 exact. The candidate is NOT a fix.
-  Both app and test shaders freshly compiled/linked; actual n/w values remain unobserved. Next:
-  bounded test-only case/max-coordinate/pixel prints before any second product arithmetic change.
-  Preserve original2d/702 RED evidence;13controls stay blocked. Chroma needs no duplicate change.
-  Actual3d2 CLOSED1RED/source730 and prints show wrong centre/axis red-blue channels with green/
-  coverage intact. Proposal3e5cf0b5/independent69efac5c accept one-line centred-numerator formulation
-  precise::divide(centre*2-frame,frame), cancelling the exact centre BEFOREdivision. Precode scope:
-  new branch from702, only that source line; original CPU/tests/flags retained, no diagnostic prints.
-  Finite model2048/1024 is bit-exact; other dimensions can round differently. Actual116 remains binding.
+- Chroma/CRT corrected source **ec50c8a0** passed **116/116**, zero failure/skip/expected; all730
+  exact, root5eeb1ea0. One existing CRT line now cancels its centre before division, preserving exact
+  centre/axis colour at huge finite fringe. Original CPU/tests/tolerance/global flags remain exact;
+  no new state/pass/schema/helper. The13 safe controls are prepared09a61cbd, still UNRUN/ungranted.
+  Earlier2d/702 each115/116 RED and print-only3d2 RED remain immutable. Actual returned pixels showed
+  lost centre/axis red-blue values with green/coverage intact; no actual optimizer instruction was
+  measured. Division precision alone was ineffective. Current source has no diagnostic prints.
+  Root harvested the exact line atac72. Ordinary cold/Release/paired cost/final integration remain.
 - Video picked-file comparisons67bd passed11/11; one real source-cleanup fault reached both direct
   comparisons (four occurrences/two contracts), root causal30a0b97c; all730 restored. No throw/setup
   credit and no cel/version identity qualification. Normal rebuild follows any compiled mutant.
@@ -94,14 +83,16 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   Old AFTER export independently stopped on changed AUT container address. Its before inventory was
   empty, so no old recording is alleged lost. New read-only export must track bundle-owned current
   address explicitly and verify prior kind/mode/byte/hash preservation instead of stable UUID.
-- Sole native slot is now Vector's3d2 CRT pixel diagnostic1 on owned56C, grant e5c4b8ab. Root shutdown
-  only4B33 and booted56C;39E remains shut. No physical action. CRT controls stay blocked.
-- Chroma cold drawing testee983 is independently accepted and integrated34921e73: public controls
-  split colour onto previously white paper beside real black ink, preserving its dark core/far paper.
-  Actual selected/whole11/control are UNRUN.
-  Startup normal59 at1a92 first compile CLOSED0tests/compiler-red: Chroma readRow closure needs
-  self.onHost at1537/1538. Precode scope: only these two explicit instance references; no oracle/
-  input/action change. Keep old native output immutable, then new pinned preparation/run is required.
+- Sole native slot is Bake's **d700b8be** opacity observation1 on owned4B33, grant98390668.
+  It reuses existing bounded Settings scrolling and preserves all original slider attempts/outcomes.
+  Before/after public-flight inventory follows the bundle-owned current container, retaining address
+  changes and prior recording kind/mode/bytes/hash. Root lifecycle4947f57d shut only56C/booted4B33;
+  39E stays shut. No physical action. Check external lease/completion before any next native job.
+- Chroma public drawing testee983 is integrated with only two explicit self.onHost compile corrections
+  at60427b21; no outcome/input/action changed. Firststartup59 at1a92 compiled ZERO tests, root61eb736e;
+  preserve that failed run. New permanent startup59/control10 are frozen at60427:57 whole logic plus
+  two explicit old Gallery methods (whole class3); normal/control remain UNRUN. Chroma selected/whole11/
+  drawn effect-omission control also remain UNRUN. Do not count compilation as a drawing check.
 - Public capacity cold source **6ef391e4** extends an existing Sandwich workflow, one exact launch
   helper seam; no product hook/new test method. Real two-input Mix refusal/current row/history/drawing
   checks and notice ordering preserved. Source peer/root review then selected1/whole10/control remain.
@@ -110,10 +101,8 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   thumbnail before returningA. Only after actual reproduction, reuse captured cel/layer IDs and
   existing registerVectorElementsUndo, move its generic block whole from +Text to +Undo. No state/
   service/renderer or crash attribution. Predicted red/unreached Redo is not qualification.
-  Before native, harvest only its VectorEraser test delta into this integration and use the already
-  accepted gallery-before-canvas orientation seam.4432 still turns after creating the canvas, the
-  known9e setup cause. Remove prelaunch orientation assignment/late rotation; preserve defer, actual
-  landscape assertion and every drawing/tile/history outcome. Production Undo remains unchanged.
+  Root already harvested the regression at31e435de with accepted gallery-before-canvas orientation.
+  Drive CuttingModesUITests whole4; production Undo remains unchanged until actual reproduction.
 
 ### Other required gates, in queue order
 
