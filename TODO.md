@@ -13,6 +13,12 @@ without uninstall/reset. Fresh250-package backup is verified and preserved; Kevi
 **“Looks right”**. The erasing crash remains unresolved. New strict-text and layer-limit candidates
 below are NOT in this install. Final regression/performance/audit gates remain unfinished.
 
+Root source review additionally found that the Glare owner-size capture changes orientation and
+immediately screenshots, bypassing the existing rotateDevice layout wait. Before the next native
+run, reuse that helper in the same existing method and require its returned window to be landscape
+before capturing. No appearance/outcome tolerance changes; a no-rotation control must expose the new
+capture premise after the normal workflow passes. Prior clipped screenshot remains invalid evidence.
+
 **On resume, in queue order (items remain until merged):**
 
 - Retire the one-shot geometry converter and converter-only tests/fixtures/PBX/startup UI WHOLE now

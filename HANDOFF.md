@@ -23,6 +23,12 @@ Root additionally reviews/integrates strict-text79538f17 and reviewed Blend3bbf8
 source/provenance and removing superseded code whole. Exact resumed branch audit and LOOK record:
 `~/PaintWork/s54-final-qualification/resume-20261026/`.
 
+Root source review additionally found that the Glare owner-size capture changes orientation and
+immediately screenshots, bypassing the existing rotateDevice layout wait. Before the next native
+run, reuse that helper in the same existing method and require its returned window to be landscape
+before capturing. No appearance/outcome tolerance changes; a no-rotation control must expose the new
+capture premise after the normal workflow passes. Prior clipped screenshot remains invalid evidence.
+
 ## Checkpoint — 2026-10-25
 
 Integration tree: `~/PaintWork/PaintApp-s54-mend-free-caps`, branch `tmp/s54-mend-free-caps`.
