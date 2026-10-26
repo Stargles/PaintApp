@@ -30,9 +30,11 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   numeric curve cap and every drawn outcome.
 - Correct the now-reproduced affine-gradient defect in the existing two-point mapper. Old9dd ran
   1case/1intendedRGB failure (147 versus108), root independently reconciled/LOOKed2whole originals.
-  Minimal same-owner correction0ab plus cold public successor17f are source-accepted; whole294 now
-  runs under root grantf428e03d. Preserve generic projective/lattice behavior, ordinary transforms
-  and saved format; controls and actual whole-picture LOOK follow the joined normal run.
+  Minimal same-owner correction0ab plus cold public successor17f are source-accepted. First294
+  attempt stopped during compilation: ZERO tests; Swift cannot type-check the new nested extension-
+  probe expression at488. Split only that test expression into equivalent typed steps/loops;
+  preserve order/probes/predicates/tolerances and all product/logic. Old packet/run remain immutable.
+  Fresh normal294/control/whole-picture LOOK follow the corrected source; no runtime credit yet.
 - Finish the colour/text public interactions without weakening drawing checks. Successful Text route
   is integrated3e4a. Completed d700 public recording covers all6 slider drags/335 native notes; root
   receipt053369a5 verifies the native value is already wrong before model delivery, with no observed
