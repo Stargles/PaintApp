@@ -91,10 +91,11 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   sweep through the existing finger synthesizer. Temporaryfb87 is clean/source-prepared and exactdiff
   peer675d2f20 accepted; its one-selector experiment remains UNRUN/ungranted.
   Keep four attempts, original .005/50% and all drawing assertions; no product hook/controller state.
-- Sole native slot is Bake's one old-production Tap witness selected1 ata140 on56C, grant8ad75590.
-  Normal rebuilding is required after the now-closed public Undo mutant. Source-alpha/dimensions
-  premise must pass before crediting hit/outline/named-ID failures; conditional Clear is unreached
-  after a miss and receives0credit. 4B33 remains shut. Completed owned39E was archived and retired after the separate storage block;
+- Sole native slot is Converter's normal geometrywhole94 at8272 on56C, grantc40e1c6d.
+  Tap old-production selected1 closed with actualnative-alpha/dimensions premises and intended
+  failures253/268(1512inkcells)/270; Clear277 remains unreached0credit. Root54fb7d33 accepts the
+  reproduction, all730/source/current/children exact. Source implementation may now proceed
+  through the reviewed canonical geometry sink; actual public/cost/fullclass gates remain. 4B33 remains shut. Completed owned39E was archived and retired after the separate storage block;
   only56C is active. No physical/env operation is granted.
 
 - Permanent startup normal59 passed59/59 at60427 (57 whole logic +2 explicit old Gallery methods,
@@ -153,14 +154,18 @@ Tap audit found actual support outside the circular hit/outline (source-only rot
 Preferred c49baadd reuses canonical geometric object bodies and local swept primitive support.
 The stronger d046 raster-probe proposal is rejected: it changes hole/gap policy and needs unnecessary
 render/cache/refusal machinery. Bake committed tiny production-rendered witness a14038fc in an existing logic workflow on old
-hit code; no production changes. Native alpha/hit/outline reproduction is running separately; old production remains unchanged.
+hit code; no production changes. Native alpha/hit/outline reproduction is now closed/accepted54fb7d33 on old production;
+  exact native issues253/268/270 follow positive rendered-alpha premise. Clear277 remains unrun.
 The independent API peer accepts the small sink with cost/continuity conditions. A finite source
 counterexample shows scatter can reach an unmappable posed site despite valid sample-box corners.
 The minimal future correction is one default-noop DabTarget discontinuity event from the existing
 three pose-refusal arms (streaming circle/image and replay), resetting only the geometry sink
 predecessor; no extra owner/fields/flags/closures or copied pose math. Ordinary drawing targets remain
 no-op; successful sites pay no added call. Do not misuse begin/endStroke/group, which own real
-mutation/opacity settlement. Implement only after actual old-production corner witness succeeds.
+mutation/opacity settlement. That prerequisite is now satisfied. Root authorizes implementation of this bounded existing-owner
+geometry change plus c7b38c7c stream event (independent peer37bf2443); preserve ordinary rendering
+and root-specific correction boundaries. No actor annotations, renderer pipeline/cache/resource
+framework, stroke-math duplication or speculative API redesign.
 
 1. Finish above effects/control/public gesture slices, preserving immutable original packets and
    meaningful exact assertions. Before every native grant verify clean pin/source730/tool/argv,

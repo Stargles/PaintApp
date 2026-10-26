@@ -373,7 +373,11 @@ Inventory-only files are not reviewed code. New source is not called complete be
       pressure-one radius/outline for noncircular tips. A rotated100-point square dab has visible
       corner ink outside that hit radius. Check the actual shipped tip/render and selection contract,
       then reuse existing authoritative brush geometry if confirmed; no new footprint/cache pipeline.
-      Native reproduction, effect on other brush properties and cost remain unproved.
+      Old-production witness a140 now reproduced: actual256-square ink premise passes, but corner
+      hit253 and namedID270 miss; outline268 excludes1512 ink cells. Root54fb7d33 accepts this source-
+      linked reproduction, Clear277 remains unreached. Effect on other brush properties and cost
+      remain unproved. Implement the independently reviewed shared geometric sink; keep existing
+      body/gap policy, named IDs, margins and nonpaint handling; no raster probe/cache/state service.
       Root challenged an unnecessary rendered-alpha proposal: the existing policy selects geometric
       object bodies (text boxes, picture quads and continuous stroke spans), with no texture-hole or
       dab-gap miss contract. Prefer the smaller canonical geometric proposalc49baadd: reuse the
