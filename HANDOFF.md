@@ -17,7 +17,7 @@ Root integration moved to `~/PaintWork/PaintApp-s54-qualified-integration`,
 `~/PaintWork/s54-final-qualification/root-next-gates.json`. Inspect actual completion receipts before
 assuming the native lease is idle. Do not copy stale agent HANDOFF/TODO files into integration.
 
-Product/test source **34921e73** now harvests exact reviewed5a/2d effects,6ef public Mix refusal,
+Product/test source **1a92cdf4** now harvests exact reviewed5a/2d effects,6ef public Mix refusal,
 4432 Undo regression with established precreation orientation,67bd explicit picked-file comparisons,
 and9e286 output-verified Lens benchmark, the successful permanent Text interaction and one public
 Chroma drawing test. The failed slider controller and diagnostic prints are excluded.
@@ -74,10 +74,17 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   normalization: a finite FMA residual at the odd65 centre reproduces those deltas when multiplied
   by huge fringe. This is a source witness, not actual lowering proof. Review existing
   precise::divide(centre,frame) at the CRT seam. Exact one-line source7023573b is ready for independent
-  review and normal116; CPU math, all tests/tolerances and global flags are unchanged. Chroma has no
-  such normalization, so no duplicate precision change is indicated. Original2d RED stays immutable.
-- Video picked-file comparisons67bd hold the sole native slot for normal11 on owned56C, root grant
-  a63e184f. One real cleanup-ownership control needs a separate grant after actual green.
+  review and normal116; CPU math, all tests/tolerances and global flags are unchanged. Actual702 also
+  CLOSED115pass/1fail with the SAME64/32/64/32 differences, source730 exact. The candidate is NOT a fix.
+  Both app and test shaders freshly compiled/linked; actual n/w values remain unobserved. Next:
+  bounded test-only case/max-coordinate/pixel prints before any second product arithmetic change.
+  Preserve original2d/702 RED evidence;13controls stay blocked. Chroma needs no duplicate change.
+- Video picked-file comparisons67bd passed11/11; one real source-cleanup fault reached both direct
+  comparisons (four occurrences/two contracts), root causal30a0b97c; all730 restored. No throw/setup
+  credit and no cel/version identity qualification. Normal rebuild follows any compiled mutant.
+- Sole native slot is now Bake'scad2 opacity observation on owned4B33, grant8bcb9c50. Root shutdown
+  only56C and booted4B33;39E remains shut. Before/after inventory/export covers only a unique newly
+  saved public manual flight, preserving old Recordings and all source730. No physical action.
 - Chroma cold drawing testee983 is independently accepted and integrated34921e73: public controls
   split colour onto previously white paper beside real black ink, preserving its dark core/far paper.
   Actual selected/whole11/control are UNRUN.

@@ -32,8 +32,11 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   now checks real full-size results outside the clocks. Remaining CRT controls/performance are UNRUN.
   Actual2d normal116 now115pass/1fail: four extreme finite CRT comparisons differ by64/32/64/32.
   Keep its13controls blocked; trace and correct the actual centre-normalization precision seam,
-  preserving every original colour/coverage assertion and tolerance. One-line702 candidate is ready
-  for review and normal116. No blanket parameter clamp. New public Chroma drawing test is integrated
+  preserving every original colour/coverage assertion and tolerance. One-line702 candidate also
+  failed115/116 with the SAME64/32/64/32 differences: precision division alone is not a qualified fix.
+  Before another product change, add only bounded case/max-difference-coordinate/pixel diagnostic
+  prints to the existing failing loop; preserve all oracles/inputs/tolerances/math and inspect actual
+  CPU/GPU output. No blanket parameter clamp. New public Chroma drawing test is integrated
   at34921e73 with independent source review; actual selected/whole11/control remain UNRUN.
 - Public two-input Mix refusal workflow6ef; cold damaged-text recovery/byte-exact original in Trash;
   actual stable Glare landscape picture; wrong-cel Undo thumbnail public repro4432 then minimal fix.
@@ -324,6 +327,11 @@ Inventory-only files are not reviewed code. New source is not called complete be
 
 - [ ] Data protection/background: finish final-source gates for strict migration/Trash ownership,
       export cancellation, serialized cleanup and close-owned thumbnails; retain the qualified controls.
+- [ ] Triage current compiler warnings by ownership: distinguish pure-value isolation mismatches,
+      real background actor access, missing awaits and deliberately synchronous media reads. Actual
+      Video normal11 log has259 warning occurrences,182 distinct location/message rows; not182bugs.
+      Do not silence warnings with blanket unsafe annotations or change scheduling without tracing
+      callers. Unused locals may be pruned after confirming their initializer has no required effect.
 - [ ] Qualify source-integrated removalec62d712 of geometry repair and converter-only UI/tests/fixtures/PBX paths: Kevin
       confirmed current scenes “Looks right” after the preserved250-package export and signed6fb
       install/normal launch. Keep permanent startup maintenance scheduling, truthful gallery readiness
