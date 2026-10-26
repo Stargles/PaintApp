@@ -99,6 +99,9 @@ complete. Erasing respring cause, broad final regression/performance and remaini
 - Chroma cold drawing testee983 is independently accepted and integrated34921e73: public controls
   split colour onto previously white paper beside real black ink, preserving its dark core/far paper.
   Actual selected/whole11/control are UNRUN.
+  Startup normal59 at1a92 first compile CLOSED0tests/compiler-red: Chroma readRow closure needs
+  self.onHost at1537/1538. Precode scope: only these two explicit instance references; no oracle/
+  input/action change. Keep old native output immutable, then new pinned preparation/run is required.
 - Public capacity cold source **6ef391e4** extends an existing Sandwich workflow, one exact launch
   helper seam; no product hook/new test method. Real two-input Mix refusal/current row/history/drawing
   checks and notice ordering preserved. Source peer/root review then selected1/whole10/control remain.

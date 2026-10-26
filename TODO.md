@@ -45,6 +45,9 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   prints to the existing failing loop; preserve all oracles/inputs/tolerances/math and inspect actual
   CPU/GPU output. No blanket parameter clamp. New public Chroma drawing test is integrated
   at34921e73 with independent source review; actual selected/whole11/control remain UNRUN.
+  First actual integrated startup59 compile stopped before tests: new Chroma readRow closure
+  requires explicit self.onHost at1537/1538. Correct only those two references, retain every oracle/
+  input/action, then prepare a named normal59 successor; original0-test compiler-red stays immutable.
   Actual3d2 print-only run reproduces centre/axis red-blue shifts with green/alpha unchanged.
   Source proposal3e5cf0b5 and independent69efac5c accept moving exact centre cancellation before
   division in the SAME CRT line: precise::divide(centre*2-frame,frame). Owner2048/1024 arithmetic is
