@@ -143,6 +143,109 @@ final class GalleryRecoveryUITests: PaintUITestCase {
                        "The deleted project's stroke content should survive the trash/restore round trip")
     }
 
+    /// Requires the externally staged, uniquely identified copy of the actual previous-writer
+    /// 64-square package. Ordinary runs skip it; the staged runner selects this method alone because
+    /// the two resetGallery workflows above deliberately clear their own simulator library.
+    func testDamagedTextCancelKeepsNewInkInARestorableVersion() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["PAINTAPP_STRICT_TEXT_COLD_UI"] == "1",
+                          "Requires the explicit external damaged-text staging contract")
+        let sceneName = "Text Cancel 7F81"
+        let size = CGSize(width: 64, height: 64)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let app = XCUIApplication()
+        app.launch()
+        let window = rotateDevice(app, to: .landscapeLeft)
+        XCTAssertGreaterThan(window.width, window.height, "The artist's recovery route is landscape")
+        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 15))
+        let tileMenu = app.buttons["gallery.tileMenu.\(sceneName)"]
+        XCTAssertTrue(tileMenu.waitForExistence(timeout: 10), "The enabled staging contract must supply its unique scene")
+        XCTAssertEqual(app.buttons.matching(identifier: "gallery.tileMenu.\(sceneName)").count, 1)
+        XCTAssertFalse(app.staticTexts["Damaged — tap to recover"].exists,
+                       "An unreadable text entry leaves a structurally readable project")
+        let tile = app.staticTexts.matching(NSPredicate(format: "label == %@", sceneName)).firstMatch
+        XCTAssertTrue(tile.waitForExistence(timeout: 5))
+        tile.tap()
+        XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 15))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = paperRect(in: canvas, canvasSize: size)
+        let blueCores = [onHost(paper, 10.0 / 64, 10.0 / 64), onHost(paper, 32.0 / 64, 16.0 / 64)]
+        for core in blueCores {
+            XCTAssertTrue(waitUntil(canvas, core, isBlue), "Both separately drawn blue stroke cores survive the damaged text")
+        }
+        attachScreenshot(XCUIScreen.main, "strict-text-01-blue-survivors-native-landscape")
+
+        openBrushLibrary(app)
+        tapWhenHittable(app.buttons["brushPanel.group.Basics"], "The public Basics brush group")
+        let opaque = app.buttons["brushPanel.brush.Opaque Round"]
+        XCTAssertTrue(opaque.waitForExistence(timeout: 5))
+        if !opaque.isSelected { tapWhenHittable(opaque, "The ordinary opaque brush") }
+        XCTAssertTrue(opaque.isSelected)
+        setBrushSize(app, normalized: 4.0 / 199)
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5))
+        setBrushColor(app, hex: "FF0000")
+        waitForTheKeyboardToLeave(app)
+        let redStart = onHost(paper, 0.55, 0.42), redEnd = onHost(paper, 0.80, 0.42)
+        let visiblePaper = visiblePaperRect(app, in: canvas, canvasSize: size)
+        XCTAssertTrue(visiblePaper.contains(CGPoint(x: redStart.dx, y: redStart.dy))
+                      && visiblePaper.contains(CGPoint(x: redEnd.dx, y: redEnd.dy)),
+                      "The new stroke is on exposed paper away from both blue cores")
+        drawLine(on: canvas, from: redStart, to: redEnd)
+        let redCore = onHost(paper, 0.68, 0.42)
+        XCTAssertTrue(waitUntil(canvas, redCore, isRed), "The artist's new red ink actually draws")
+
+        // This is the artist save, not the helper that assumes every save can immediately leave.
+        app.buttons["toolbar.galleryButton"].tap()
+        let question = app.staticTexts["damagedSaveBanner"]
+        XCTAssertTrue(question.waitForExistence(timeout: 10))
+        XCTAssertEqual(question.value as? String, "1")
+        XCTAssertTrue(question.label.contains("text object") && question.label.contains("Ink"),
+                      "The persistent question names the unreadable text and its layer")
+        let cancel = app.buttons["damagedSaveBanner.cancel"]
+        let saveAnyway = app.buttons["damagedSaveBanner.saveAnyway"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5) && cancel.isHittable)
+        XCTAssertTrue(saveAnyway.exists && saveAnyway.isHittable)
+        XCTAssertTrue(isRed(rgbaPixel(of: canvas, at: redCore)), "The new work remains visible while the artist decides")
+        let visibleBlue = blueCores[1]
+        XCTAssertGreaterThan(canvas.frame.minY + visibleBlue.dy * canvas.frame.height, question.frame.maxY,
+                             "The surviving blue probe is below the question rather than underneath it")
+        XCTAssertTrue(isBlue(rgbaPixel(of: canvas, at: visibleBlue)))
+        attachScreenshot(XCUIScreen.main, "strict-text-02-save-question-native-landscape")
+        XCTAssertTrue(question.exists, "The save question remains until the artist answers")
+        cancel.tap()
+
+        // Cancel writes a recoverable version and runs the pending return-to-gallery completion.
+        XCTAssertTrue(tileMenu.waitForExistence(timeout: 15), "Cancel returns after the alternate save completes")
+        tileMenu.tap()
+        let versions = app.buttons["Versions…"]
+        XCTAssertTrue(versions.waitForExistence(timeout: 5))
+        versions.tap()
+        XCTAssertTrue(app.staticTexts["Unsaved changes"].firstMatch.waitForExistence(timeout: 10),
+                      "The new work is discoverable in the project's public version history")
+        let restore = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@",
+            "gallery.versionRestore.unsaved-")).firstMatch
+        XCTAssertTrue(restore.waitForExistence(timeout: 5) && restore.isEnabled)
+        attachScreenshot(XCUIScreen.main, "strict-text-03-unsaved-version-native-landscape")
+        restore.tap()
+        XCTAssertTrue(tileMenu.waitForExistence(timeout: 15))
+        XCTAssertTrue(tile.waitForExistence(timeout: 5))
+        tile.tap()
+        XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 15))
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let restoredPaper = paperRect(in: canvas, canvasSize: size)
+        for core in [onHost(restoredPaper, 10.0 / 64, 10.0 / 64), onHost(restoredPaper, 32.0 / 64, 16.0 / 64)] {
+            XCTAssertTrue(waitUntil(canvas, core, isBlue), "Restore retains both original blue strokes")
+        }
+        XCTAssertTrue(waitUntil(canvas, onHost(restoredPaper, 0.68, 0.42), isRed),
+                      "Restore brings back the red ink drawn after the damaged open")
+        attachScreenshot(XCUIScreen.main, "strict-text-04-restored-blue-and-red-native-landscape")
+        app.buttons["toolbar.galleryButton"].tap()
+        XCTAssertTrue(tileMenu.waitForExistence(timeout: 15), "The restored clean project saves normally")
+        XCTAssertFalse(question.exists, "A later ordinary save needs no damaged-save answer")
+    }
+
 }
 
 /// Vector-layer content tests: geometry recording, rasterize, palette persistence, and the

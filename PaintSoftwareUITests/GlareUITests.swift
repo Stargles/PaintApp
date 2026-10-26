@@ -213,6 +213,39 @@ final class GlareUITests: PaintUITestCase {
         let landscape = rotateDevice(app, to: .landscapeLeft)
         XCTAssertGreaterThan(landscape.width, landscape.height,
                              "The owner-size capture waits for the landscape layout")
-        attachScreenshot(app, "fog-glow-size-native-landscape")
+        // Accessibility layout can lead the rotation compositor. Retain the actual stable
+        // framebuffer instead of asking for a new app crop after the wait.
+        var acceptedScreenshot: XCUIScreenshot?
+        var previousFingerprint: [UInt8]?
+        let captureDeadline = Date().addingTimeInterval(8)
+        while Date() < captureDeadline {
+            let before = app.windows.firstMatch.frame
+            let screenshot = XCUIScreen.main.screenshot()
+            let after = app.windows.firstMatch.frame
+            if let pixels = ScreenshotPixels(screenshot.image), before == after,
+               before.width > before.height, pixels.width > pixels.height,
+               CGFloat(pixels.width) / pixels.scale == before.width,
+               CGFloat(pixels.height) / pixels.scale == before.height {
+                let fingerprint = (0..<12).flatMap { y in (0..<16).flatMap { x -> [UInt8] in
+                    let pixel = pixels.pixel(normalizedX: (Double(x) + 0.5) / 16,
+                                             normalizedY: (Double(y) + 0.5) / 12)
+                    return [pixel.r, pixel.g, pixel.b, pixel.a]
+                } }
+                if fingerprint == previousFingerprint {
+                    acceptedScreenshot = screenshot
+                    break
+                }
+                previousFingerprint = fingerprint
+            } else {
+                previousFingerprint = nil
+            }
+            Thread.sleep(forTimeInterval: 0.15)
+        }
+        let screenshot = try XCTUnwrap(acceptedScreenshot,
+            "The whole landscape framebuffer must settle before its picture is retained")
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.name = "fog-glow-size-native-landscape"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }

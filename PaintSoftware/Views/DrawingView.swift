@@ -810,7 +810,7 @@ struct DrawingView: View {
             for folder in canvasManager.ancestorFolders(ofLayer: index) where !folder.isVisible {
                 canvasManager.toggleFolderVisibility(folder.id)
             }
-        case .noDrawingSurface, .historyUndo, .historyRedo, .nothingToPick, .nothingPaintedThere, .nothingEnclosed,
+        case .noDrawingSurface, .nodeInputLimit, .historyUndo, .historyRedo, .nothingToPick, .nothingPaintedThere, .nothingEnclosed,
              .nothingWhollyInside, .nothingToSubtractFrom, .nothingTappedToSubtractFrom, .cannotMoveDerivedFrame, .editShownOnRelease,
              .onlyPartOfAnAnimationGroup,
              .animationGroupNotAlone, .saveFailed, .resizeRefused, .resizeResampled,
