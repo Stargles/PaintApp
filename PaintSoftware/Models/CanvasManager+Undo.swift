@@ -280,3 +280,106 @@ extension CanvasManager {
         pendingKeyframeCrop = nil
     }
 }
+
+// MARK: - Vector element undo
+
+extension CanvasManager {
+
+    /// One undo step that swaps a vector canvas's **whole `elements` array** between two snapshots.
+    ///
+    /// **The kind-filtered setters cannot express what these callers do.** Text is interleaved with
+    /// strokes by construction (`upsertText` appends a new object above whatever is already there) and
+    /// since 2026-08-21 so are fills (`addFill` appends — LASSO_FILL.md §2a). `splicing` preserves the
+    /// z-position of every element that still exists, but an undo *adds* or *removes* one, and there
+    /// is no position to preserve for an element that is not in the list yet: a bucket-shaped undo has
+    /// to guess, and it guessed "at the first one's index", which would drag a fill the artist had
+    /// just put on top back underneath the line art. The whole-array swap has nothing to reconstruct.
+    ///
+    /// Used by stroke gestures, the text commit, both fill commits (adjustable and Fill-on-selection)
+    /// and Clear-on-selection. Resolves the cel by ID (not a captured index) when the thumbnail regen
+    /// fires, since other structural edits may have shifted indices by then.
+    ///
+    /// **What a caller knows about the shape of its own edit** — the answer
+    /// `registerVectorElementsUndo` needs before it can put the swap through
+    /// `VectorCanvas.restoreElements(_:changedInk:rewriting:)` instead of `bumpVersion()`.
+    ///
+    /// There are two questions and they are separate, which is why this is one type rather than two
+    /// parameters: a rectangle is meaningless beside a set of rewritten ids, since the canvas derives
+    /// a rewrite's rectangle itself, and the pair `(rewritesInPlace: someIDs, ink: someRect)` should
+    /// not be expressible.
+    enum ElementSwap {
+        /// **At least one element in the new list carries the old list's id with different content**
+        /// — a recolour, an Apply Brush, a text object re-edited under the id it already had — and
+        /// these are the ids that may.
+        ///
+        /// `restoreElements` chooses the footprints it drops by *id difference*, so a rewritten
+        /// element it was not told about would keep a measured footprint that is no longer true of
+        /// it, and a later region edit could skip it on that footprint and draw the wrong picture.
+        /// Told, it forgets that element's footprint and bounds the swap by the union of where the
+        /// element was and where it will be — `restoreElements(_:changedInk:rewriting:)` carries the
+        /// argument. Until TODO (41)'s last box this case was `bumpVersion()`'s `.everything`, which
+        /// was the only safe answer while nothing said *which* ids.
+        ///
+        /// **Over-declare rather than under-declare**: an id here that did not change costs its own
+        /// footprint's worth of repair, an id left out that did change is a wrong picture. A
+        /// selection's whole membership is a correct answer and is what the two selection verbs pass.
+        case rewritesInPlace(Set<UUID>)
+        /// **The new list is the old one with elements added and removed, none rewritten.**
+        ///
+        /// - Parameter ink: a rectangle containing the ink of every element the *new* list carries
+        ///   that the old one does not, or nil when the caller cannot prove one. Nil is right — not
+        ///   merely permitted — when what arrives is a **stroke that has been in this canvas before**:
+        ///   `VectorCanvas.vacatedInk` kept what it painted on the way out and bounds it exactly,
+        ///   where a caller could only estimate.
+        ///
+        ///   **Since TODO (41) nil is also right for a fill, a placed image, a video and a text
+        ///   object**, whose extents are stored geometry rather than a dab walk:
+        ///   `VectorCanvas.derivedFootprint(of:lowestResolution:)` reads each off the element itself
+        ///   — a text object's by measuring the glyph outlines its recipe lays out — so a caller
+        ///   passing a rectangle for one of those is supplying an answer the canvas already has. A
+        ///   rectangle is still worth passing where the caller has one anyway —
+        ///   `addFill(canvasSpacePath:)` returns it — because it costs nothing and covers the arrival
+        ///   of an element the canvas has never seen.
+        case addsAndRemoves(ink: CGRect?)
+    }
+
+    /// Coarse-grained is what every other element kind already does; this adds no new undo machinery,
+    /// only a wider slice of the same one.
+    ///
+    /// **`swap` is what decides whether a press costs the rectangle or the cel**, and it has no
+    /// default on purpose: `bumpVersion()` declares `Damage.everything`, so before it was asked for,
+    /// undoing a fill on a 2,000-stroke cel re-stamped all 472,000 dabs — MEASURED at 1.1 s a press
+    /// (PERFORMANCE.md §11.11). Every call site answers, and since TODO (41)'s last box both answers
+    /// are bounded: a rewrite names its ids and `restoreElements(_:changedInk:rewriting:)` reads each
+    /// one's old footprint off the canvas at the press and derives its new one.
+    ///
+    /// **Neither closure captures a rectangle**, and for a rewrite that is load-bearing rather than
+    /// tidy: the departing half of a rewrite is the footprint the *last render* measured, which the
+    /// forward edit could not know, and a remembered rectangle would under-declare it wherever the
+    /// render had to widen. Both directions read the canvas as it stands.
+    func registerVectorElementsUndo(vectorCanvas: VectorCanvas,
+                                    oldElements: [VectorElement], newElements: [VectorElement],
+                                    layerID: UUID, celID: UUID, label: HistoryActionLabel,
+                                    swap: ElementSwap) {
+        // See `VectorUndoCost`: the flat 512 an element it replaces was a proxy for
+        // `MemoryLayout<VectorElement>.stride`, which is 576 today, and it charged the two lists
+        // where a run of steps holds one array apiece.
+        let cost = VectorUndoCost.bytes(from: oldElements, to: newElements)
+        let ink: CGRect?
+        let rewritten: Set<UUID>
+        switch swap {
+        case .addsAndRemoves(let rect): ink = rect; rewritten = []
+        case .rewritesInPlace(let ids): ink = nil; rewritten = ids
+        }
+        // One rectangle bounds every pixel where the two lists differ in either direction.
+        // The rewritten set reads the same way too — the ids are the same ids.
+        recordUndo(label: label, cost: cost, undo: { [weak self] in
+            vectorCanvas.restoreElements(oldElements, changedInk: ink, rewriting: rewritten)
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
+        }, redo: { [weak self] in
+            vectorCanvas.restoreElements(newElements, changedInk: ink, rewriting: rewritten)
+            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
+        })
+    }
+
+}

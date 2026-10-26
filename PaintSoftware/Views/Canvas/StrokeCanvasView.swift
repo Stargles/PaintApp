@@ -2859,27 +2859,15 @@ final class StrokeCanvasView: CanvasPlaneView {
         return false
     }
 
-    /// One undo entry for the whole gesture, and **it carries where the gesture happened**.
-    ///
-    /// The same rectangle serves both closures: it bounds every pixel where the two lists differ, and
-    /// that is a symmetric statement. What it is *for* differs by direction — on the way back it
-    /// bounds the ink coming in, on the way forward it bounds the pieces — but the rectangle is one.
-    /// See `VectorCanvas.restoreElements(_:changedInk:)` for what happens to the half it cannot
-    /// bound, which is measured there rather than declared here.
+    /// One gesture step, bound to the stored cel this canvas actually belongs to. The manager's
+    /// element-swap owner restores its pixels and invalidates that cel even after the view changes.
     private func registerVectorUndo(canvas: VectorCanvas, from: [VectorElement], to: [VectorElement]) {
+        guard let manager = canvasManager, let layerID, let celID = contentRevisions.celID,
+              let at = manager.celIndices(forCel: celID, inLayer: layerID),
+              manager.layers[at.layer].cels[at.cel].vector === canvas else { return }
         let label: HistoryActionLabel = strokeTool == .eraser ? .erase : .brushStroke
-        // `VectorUndoCost` rather than `(from.count + to.count) * 512`, which was 1.8x over on an
-        // ordinary stroke and 265x *under* on a long one — RENDER.md §5 stage 7 carries both figures.
-        let cost = VectorUndoCost.bytes(from: from, to: to)
-        let changedInk = vectorGestureDamage
-        canvasManager?.recordUndo(label: label, cost: cost, undo: { [weak self] in
-            canvas.restoreElements(from, changedInk: changedInk)
-            self?.refreshDisplay()
-            self?.onStrokeEnded?()
-        }, redo: { [weak self] in
-            canvas.restoreElements(to, changedInk: changedInk)
-            self?.refreshDisplay()
-            self?.onStrokeEnded?()
-        })
+        manager.registerVectorElementsUndo(vectorCanvas: canvas, oldElements: from, newElements: to,
+                                           layerID: layerID, celID: celID, label: label,
+                                           swap: .addsAndRemoves(ink: vectorGestureDamage))
     }
 }

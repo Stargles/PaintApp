@@ -1070,6 +1070,19 @@ final class ThumbnailRenderLogicTests: XCTestCase {
                           "the extra stroke did not change the tile, so this test cannot tell a "
                           + "repainted block from a frozen one")
 
+        // B is a different stored drawing. Keep it displayed while both history presses restore A,
+        // so resolving the thumbnail target from the playhead cannot accidentally be correct.
+        manager.layers[0].cels[0].frameCount = 6
+        manager.layers[0].cels.append(Cel(id: UUID(), startFrame: 6, frameCount: 6,
+                                         raster: .empty(size: Self.deferredCanvas),
+                                         vector: canvas(Self.deferredCanvas, strokes: 2)))
+        manager.scheduleThumbnailRegen(layerIndex: 0, celIndex: 1)
+        manager.flushPendingThumbnailRegens()
+        let otherBefore = try tile(manager, cel: 1)
+        XCTAssertNotEqual(otherBefore.pngData(), withStroke.pngData(),
+                          "PREMISE: B has a different drawn tile from A")
+        manager.currentFrame = 6
+
         manager.undo()
         manager.flushPendingThumbnailRegens()
 
@@ -1080,5 +1093,14 @@ final class ThumbnailRenderLogicTests: XCTestCase {
                        "the tile after the undo is not a picture of what the cel now holds")
         XCTAssertNotEqual(after.pngData(), withStroke.pngData(),
                           "the block is still showing the stroke the artist undid")
+        XCTAssertEqual(try tile(manager, cel: 1).pngData(), otherBefore.pngData(),
+                       "Undo of off-frame A leaves displayed B's drawing unchanged")
+
+        manager.redo()
+        manager.flushPendingThumbnailRegens()
+        XCTAssertEqual(manager.layers[0].cels[0].thumbnail?.pngData(), withStroke.pngData(),
+                       "Redo refreshes off-frame A's tile to the drawing with the stroke")
+        XCTAssertEqual(try tile(manager, cel: 1).pngData(), otherBefore.pngData(),
+                       "Redo of off-frame A leaves displayed B's drawing unchanged")
     }
 }
