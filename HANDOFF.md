@@ -92,9 +92,11 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   peer675d2f20 accepted; its one-selector experiment remains UNRUN/ungranted.
   Keep four attempts, original .005/50% and all drawing assertions; no product hook/controller state.
 - Native tests are idle after numeric94 and6 controls. Root owns the reviewed offline cleanup of
- 56C's two generated OS caches; all Containers are archived/hash-verified before removal, same
- device boots afterward. No erase/iPad operation. Read exact action receipts under
- resume-20261026/owned56C-offline-cache-cleanup before resuming tests. 4B33 remains shut.
+ 56C's two generated OS caches is complete:10.11GiB actual freed. All7941 Containers entries
+ were archived/hash-verified and exact before boot; all original PaintSoftware/Runner bundle/data
+ entries remain exact after same-device boot (OS added one launch snapshot). No erase/iPad operation.
+ Read exact action receipts under
+ resume-20261026/owned56C-offline-cache-cleanup before resuming tests; native slot is IDLE. 4B33 remains shut.
  Tap old-production selected1 is closed/root accepted54fb7d33; native-alpha premises passed,
  failures253/268(1512inkcells)/270 were intended; Clear277 remains unreached0credit. New canonical
  geometry source4788 is independently peer accepted but compiler/native/public/cost UNRUN.
