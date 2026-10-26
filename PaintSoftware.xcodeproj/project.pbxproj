@@ -657,6 +657,7 @@
 		786AF213DEAB41406ABC1783 /* LiquifyBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 786AF213DEAB41406ABC1782 /* LiquifyBench.swift */; };
 		5B74E61948504D11B601E202 /* RasterSamplingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B74E61948504D11B601E201 /* RasterSamplingLogicTests.swift */; };
 		83A52AB211004A949CCFB502 /* RasterSamplingBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83A52AB211004A949CCFB501 /* RasterSamplingBench.swift */; };
+		298D10B1B716D5A4AA91B7B6 /* PaintSoftwareUITests/Fixtures/text-old-product-75365af5.paintproj in Resources */ = {isa = PBXBuildFile; fileRef = A4DA995B352E329F0A543649 /* PaintSoftwareUITests/Fixtures/text-old-product-75365af5.paintproj */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1322,6 +1323,7 @@
 		786AF213DEAB41406ABC1782 /* LiquifyBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiquifyBench.swift; sourceTree = "<group>"; };
 		5B74E61948504D11B601E201 /* RasterSamplingLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RasterSamplingLogicTests.swift; sourceTree = "<group>"; };
 		83A52AB211004A949CCFB501 /* RasterSamplingBench.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RasterSamplingBench.swift; sourceTree = "<group>"; };
+		A4DA995B352E329F0A543649 /* PaintSoftwareUITests/Fixtures/text-old-product-75365af5.paintproj */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder; path = PaintSoftwareUITests/Fixtures/text-old-product-75365af5.paintproj; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -1782,6 +1784,7 @@
 				715836E826B12C054559E5FC /* PaintSoftwareUITests/Fixtures/owner-tuned-library-2026-09-05.json */,
 				A6C2D411EE8F4B4CAB530003 /* PaintSoftware/Services/PointGeometryRepair.swift */,
 				A6C2D411EE8F4B4CAB530007 /* PaintSoftwareUITests/Fixtures/point-geometry-previous-writer.json */,
+				A4DA995B352E329F0A543649 /* PaintSoftwareUITests/Fixtures/text-old-product-75365af5.paintproj */,
 				B1E1FC25DD8524A33038DCCD /* PaintSoftware/Resources/brushtip-square-bevel-wide.png */,
 				0F4D4F4AF15EFEE4CD3FF408 /* PaintSoftware/Resources/brushtip-flat-messy-ends-dirty.png */,
 				113E5012D241F2F87198201E /* PaintSoftware/Resources/brushtip-pencil-hard.png */,
@@ -2136,6 +2139,7 @@
 				156D4BD6599824D130604FBC /* PaintSoftware/Resources/brushtip-square.png in Resources */,
 				9731E4DA5B5DFE376F4370A4 /* PaintSoftwareUITests/Fixtures/owner-tuned-library-2026-09-05.json in Resources */,
 				A6C2D411EE8F4B4CAB530008 /* PaintSoftwareUITests/Fixtures/point-geometry-previous-writer.json in Resources */,
+				298D10B1B716D5A4AA91B7B6 /* PaintSoftwareUITests/Fixtures/text-old-product-75365af5.paintproj in Resources */,
 				608800FA8E0EEF2A9A6680DB /* PaintSoftwareUITests/Fixtures/stream-testsrc-640x360.h264 in Resources */,
 				A903366A8FF7893CAD8D4F92 /* PaintSoftware/Resources/brushtip-square-bevel-wide.png in Resources */,
 				9D6CE0CE88C71A19D09B6EFA /* PaintSoftware/Resources/brushtip-flat-messy-ends-dirty.png in Resources */,

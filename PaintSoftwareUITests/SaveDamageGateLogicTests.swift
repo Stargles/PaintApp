@@ -108,11 +108,11 @@ final class SaveDamageGateLogicTests: XCTestCase {
     }
 
     /// Rewrites the persisted display list, so a test states its damage in the file's own terms.
-    private func rewriteElements(at payloadURL: URL, _ mutate: (inout [[String: Any]]) -> Void) throws {
+    private func rewriteElements(at payloadURL: URL, _ mutate: (inout [[String: Any]]) throws -> Void) throws {
         let data = try Data(contentsOf: payloadURL)
         var object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         var elements = try XCTUnwrap(object["elements"] as? [[String: Any]])
-        mutate(&elements)
+        try mutate(&elements)
         object["elements"] = elements
         try JSONSerialization.data(withJSONObject: object).write(to: payloadURL)
     }
@@ -156,6 +156,16 @@ final class SaveDamageGateLogicTests: XCTestCase {
         return result
     }
 
+    /// Exact four-file output of the old product at75365af5, retained as a folder resource after
+    /// native capture/root reconstruction. Surgery always targets a temp copy, never the witness.
+    private func copiedOldTextProject() throws -> (fixture: URL, project: URL) {
+        let fixture = try XCTUnwrap(Bundle(for: Self.self)
+            .url(forResource: "text-old-product-75365af5", withExtension: "paintproj"))
+        let project = ProjectStore.createNewProjectURL(name: "Damaged")
+        try FileManager.default.copyItem(at: fixture, to: project)
+        return (fixture, project)
+    }
+
     // MARK: - The gate itself
 
     /// The whole ruling as a truth table, with no file system in the way. Every other test in this
@@ -194,6 +204,85 @@ final class SaveDamageGateLogicTests: XCTestCase {
         XCTAssertEqual(saveAndWait(reopened, to: url, intent: .artist), .write,
                        "An artist save on a clean project writes the project, with no question asked")
         XCTAssertTrue(ProjectBackupManager.validateProject(at: url))
+    }
+
+    func testTheActualOldProductTextPackageLoadsAndSavesItsCompleteRecipe() throws {
+        let (fixture, url) = try copiedOldTextProject()
+        let fixtureBefore = packageBytes(at: fixture)
+        let reopened = try XCTUnwrap(ProjectStore.load(from: url))
+        let expected = VectorTextElement(
+            id: try XCTUnwrap(UUID(uuidString: "6EA611B1-CA3C-4DF1-B8C0-E55C5C6237B2")),
+            recipe: TextRecipe(string: "Previous writer text",
+                font: FontDescriptor(familyName: "Helvetica", faceName: "Helvetica-Bold", isBold: true),
+                typography: Typography(pointSize: 24, tracking: 1, lineHeightMultiple: 1.25,
+                                       lineSpacing: 2, paragraphSpacing: 3, alignment: .center),
+                color: CodableColor(red: 0.25, green: 0.5, blue: 0.75, alpha: 0.8), opacity: 0.75),
+            frame: TextFrame(origin: CGPoint(x: 8, y: 12), size: CGSize(width: 45, height: 30), autoSize: false))
+        let vector = try XCTUnwrap(reopened.layers.first { $0.kind == .vector }?.cels.first?.vector)
+        XCTAssertEqual(vector.texts, [expected], "The complete actual old writer recipe/frame/identity survives")
+        XCTAssertFalse(reopened.loadDamage.isDamaged, "The real old writer is healthy, not a repaired/defaulted recipe")
+        XCTAssertEqual(saveAndWait(reopened, to: url), .write)
+        let saved = try XCTUnwrap(ProjectStore.load(from: url))
+        XCTAssertEqual(saved.layers.first { $0.kind == .vector }?.cels.first?.vector?.texts, [expected])
+        XCTAssertEqual(packageBytes(at: fixture), fixtureBefore, "Round-trip writes only the temp copy")
+    }
+
+    func testDamagedOldWriterTextPreservesInkAndOriginalWhileNewEditsSaveAside() throws {
+        for damage in ["missing string", "null id", "three corners"] {
+            let (fixture, url) = try copiedOldTextProject()
+            let fixtureBefore = packageBytes(at: fixture)
+            let healthy = try XCTUnwrap(ProjectStore.load(from: url))
+            let healthyVector = try XCTUnwrap(healthy.layers.first { $0.kind == .vector }?.cels.first?.vector)
+            let ink = VectorCanvas(size: try XCTUnwrap(healthy.canvasSize),
+                                   elements: healthyVector.elements.filter { $0.text == nil })
+            let expectedInk = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(ink.render()?.cgImage)))
+            try rewriteElements(at: vectorPayloadURL(in: url)) { elements in
+                var value = try XCTUnwrap(elements[2]["text"] as? [String: Any])
+                switch damage {
+                case "missing string":
+                    var recipe = try XCTUnwrap(value["recipe"] as? [String: Any])
+                    recipe.removeValue(forKey: "string")
+                    value["recipe"] = recipe
+                case "null id": value["id"] = NSNull()
+                default:
+                    var frame = try XCTUnwrap(value["frame"] as? [String: Any])
+                    frame["corners"] = [[8, 12], [53, 12], [53, 42]]
+                    value["frame"] = frame
+                }
+                elements[2]["text"] = value
+            }
+            let original = packageBytes(at: url)
+            let reopened = try XCTUnwrap(ProjectStore.load(from: url))
+            let vector = try XCTUnwrap(reopened.layers.first { $0.kind == .vector }?.cels.first?.vector)
+            XCTAssertEqual(reopened.loadDamage.layers.first?.texts, 1, damage)
+            XCTAssertEqual(reopened.loadDamage.itemCount, 1, "Only the damaged text is lost: \(damage)")
+            XCTAssertTrue(vector.texts.isEmpty, damage)
+            XCTAssertEqual(try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage))),
+                           expectedInk, "Both original strokes survive exactly: \(damage)")
+            var completionRan = false
+            XCTAssertEqual(ProjectStore.save(reopened, to: url, intent: .artist) { completionRan = true }, .ask, damage)
+            XCTAssertFalse(completionRan, "No save was dispatched while the artist must decide")
+            XCTAssertEqual(packageBytes(at: url), original, "The artist prompt preserves every original byte")
+
+            reopened.addVectorLayer(name: "Added after damaged open")
+            let existing = Set(ProjectBackupManager.listBackups(forProjectAt: url).map(\.url))
+            XCTAssertEqual(saveAndWait(reopened, to: url, intent: .automatic), .writeAside, damage)
+            XCTAssertEqual(packageBytes(at: url), original, "An automatic save also preserves every original byte")
+            XCTAssertFalse(reopened.damagedSaveAnswered, "An automatic save never answers for the artist")
+            let versions = ProjectBackupManager.listBackups(forProjectAt: url)
+                .filter { !existing.contains($0.url) && $0.label == "Unsaved changes" }
+            XCTAssertEqual(versions.count, 1, "Exactly one new recoverable version of these edits")
+            let aside = try XCTUnwrap(versions.first)
+            XCTAssertTrue(aside.isValid, "The alternate package passes the actual restore validation")
+            XCTAssertEqual(aside.url.deletingLastPathComponent(),
+                           ProjectBackupManager.backupsDirectory(projectID: reopened.projectID))
+            let recovered = try XCTUnwrap(ProjectStore.load(from: aside.url))
+            XCTAssertEqual(recovered.projectID, reopened.projectID, "The version belongs to this same actual project")
+            XCTAssertFalse(recovered.loadDamage.isDamaged, "Only the unreadable element is absent from the new version")
+            XCTAssertTrue(recovered.layers.contains { $0.name == "Added after damaged open" })
+            XCTAssertEqual(recovered.layers.first { $0.name == "Ink" }?.cels.first?.vector?.elements.count, 2)
+            XCTAssertEqual(packageBytes(at: fixture), fixtureBefore, "Every witness byte stays immutable")
+        }
     }
 
     // MARK: - What counts as unreadable

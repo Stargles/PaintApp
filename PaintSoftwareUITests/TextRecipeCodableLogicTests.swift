@@ -1,113 +1,84 @@
 import XCTest
 
-/// `TextRecipe` and its neighbours as a persistence contract — `ADD_TEXT.md` §1, "Persistence: one
-/// new case, no sidecar, no version number".
-///
-/// **The claim is one sentence: a blob missing every optional key decodes to defaults.** There is no
-/// `formatVersion` anywhere in this project and this feature does not add one, so compatibility is
-/// per-field `decodeIfPresent` and nothing else — which means every one of these types has to
-/// hand-write `init(from:)`, because synthesized `Decodable` ignores property defaults and throws on
-/// a missing key. `VectorStroke` already learned that (`VectorLayer.swift:29-31`); this file is what
-/// stops it being re-learned.
-///
-/// It is written to fail on *omission*, in `ToolLogicTests`' spirit: adding a field to `Typography`
-/// and forgetting its `decodeIfPresent` line makes `testAnEmptyObjectDecodesToEveryDefault` throw
-/// rather than quietly ship a build that cannot open yesterday's document.
-///
-/// Headless, and reaching `TextObject.swift` through the project file's "App sources shared with
-/// PaintSoftwareUITests" group — that file is Foundation and CoreGraphics only, which is exactly
-/// what makes it reachable here.
+/// Current saved-text requirements, with normal initializer defaults kept separate from decoding.
+/// Missing/null required fields must reach the existing element-loss/save-damage owner. Optional
+/// font/group references, explicit empty words and unknown extra keys remain legitimate values.
 final class TextRecipeCodableLogicTests: XCTestCase {
 
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
 
-    private func decode<T: Decodable>(_ type: T.Type, _ json: String,
-                                      file: StaticString = #filePath, line: UInt = #line) throws -> T {
-        try decoder.decode(type, from: Data(json.utf8))
+    /// Damage each real encoded type, not a copied model of its decoder. The same assertion is
+    /// exercised for omission and explicit null of every required field; optional references are
+    /// checked separately against a healthy complete value.
+    private func assertRequiredFields<T: Codable>(_ value: T, keys: [String],
+                                                  file: StaticString = #filePath, line: UInt = #line) throws {
+        let original = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(value))
+                                        as? [String: Any], file: file, line: line)
+        for key in keys {
+            for null in [false, true] {
+                var damaged = original
+                if null { damaged[key] = NSNull() }
+                else { damaged.removeValue(forKey: key) }
+                let bytes = try JSONSerialization.data(withJSONObject: damaged)
+                XCTAssertThrowsError(try decoder.decode(T.self, from: bytes),
+                                     "\(T.self).\(key) must reject \(null ? "null" : "omission")",
+                                     file: file, line: line)
+            }
+        }
     }
 
-    // MARK: - The whole claim
-
-    /// `{}` — every key absent — is a valid recipe, and every field is its default.
-    func testAnEmptyObjectDecodesToEveryDefault() throws {
-        let recipe = try decode(TextRecipe.self, "{}")
-        XCTAssertEqual(recipe, TextRecipe(),
-                       "An empty JSON object must decode to a default `TextRecipe`. A field that "
-                       + "throws or lands on a non-default value is a field whose `init(from:)` line "
-                       + "is missing — which means a document written before that field existed no "
-                       + "longer opens.")
+    func testEveryRequiredSavedTextFieldRejectsOmissionAndNull() throws {
+        let recipe = TextRecipe(string: "Keep these words")
+        let frame = TextFrame(origin: CGPoint(x: 8, y: 12), size: CGSize(width: 45, height: 30))
+        try assertRequiredFields(recipe.font, keys: ["familyName", "isBold", "isItalic"])
+        try assertRequiredFields(recipe.typography,
+                                 keys: ["pointSize", "tracking", "lineHeightMultiple", "lineSpacing",
+                                        "paragraphSpacing", "alignment"])
+        try assertRequiredFields(recipe, keys: ["string", "font", "typography", "color", "opacity"])
+        try assertRequiredFields(frame, keys: ["size", "corners", "mode", "autoSize"])
+        try assertRequiredFields(VectorTextElement(recipe: recipe, frame: frame), keys: ["id", "recipe", "frame"])
     }
 
-    func testAnEmptyTypographyDecodesToEveryDefault() throws {
-        XCTAssertEqual(try decode(Typography.self, "{}"), Typography())
+    func testExplicitEmptyWordsAndOptionalFontAndGroupReferencesRemainReadable() throws {
+        let original = VectorTextElement(recipe: TextRecipe(), frame: TextFrame(origin: .zero, size: .zero))
+        let bytes = try encoder.encode(original)
+        XCTAssertEqual(try decoder.decode(VectorTextElement.self, from: bytes), original,
+                       "Initializer defaults are legitimate saved values when explicitly encoded")
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        var recipe = try XCTUnwrap(json["recipe"] as? [String: Any])
+        var font = try XCTUnwrap(recipe["font"] as? [String: Any])
+        font["faceName"] = NSNull()
+        font["packID"] = NSNull()
+        recipe["font"] = font
+        json["recipe"] = recipe
+        json["motionGroupID"] = NSNull()
+        json["animationGroupID"] = NSNull()
+        XCTAssertEqual(try decoder.decode(VectorTextElement.self,
+                                         from: JSONSerialization.data(withJSONObject: json)), original,
+                       "Absent and explicit-null optional references both mean nil")
     }
 
-    func testAnEmptyFontDescriptorDecodesToTheSystemFont() throws {
-        let font = try decode(FontDescriptor.self, "{}")
-        XCTAssertEqual(font, FontDescriptor.system)
-        XCTAssertEqual(font.familyName, FontDescriptor.systemFamilyName)
-        XCTAssertNil(font.faceName)
-        XCTAssertNil(font.packID, "A descriptor with no pack is the system's, not a pack named \"\".")
-    }
-
-    func testAnEmptyFrameDecodesToADegenerateUprightBox() throws {
-        let frame = try decode(TextFrame.self, "{}")
-        XCTAssertEqual(frame.size, .zero)
-        XCTAssertEqual(frame.corners.count, 4,
-                       "A frame always carries four corners, even when the blob carried none — every "
-                       + "reader indexes them by `Corner`.")
-        XCTAssertEqual(frame.mode, .affine)
-        XCTAssertTrue(frame.autoSize, "A frame nobody has resized is auto-sizing; that is what "
-                      + "`autoSize` defaulting to true means.")
-    }
-
-    func testAnEmptyElementDecodesWithAFreshIdentity() throws {
-        let a = try decode(VectorTextElement.self, "{}")
-        let b = try decode(VectorTextElement.self, "{}")
-        XCTAssertNotEqual(a.id, b.id,
-                          "A missing `id` mints a fresh one. Defaulting to a *constant* UUID would "
-                          + "make two malformed elements the same element, and the display list is "
-                          + "keyed by identity.")
-        XCTAssertNil(a.motionGroupID)
-    }
-
-    // MARK: - Partial blobs
-
-    /// The realistic version of the claim: a document written by an older build carries the fields
-    /// that existed then and none of the ones added since.
-    func testAPartialTypographyKeepsWhatItStatesAndDefaultsTheRest() throws {
-        let typography = try decode(Typography.self, #"{"pointSize": 120, "alignment": "right"}"#)
-        XCTAssertEqual(typography.pointSize, 120)
-        XCTAssertEqual(typography.alignment, .right)
-        XCTAssertEqual(typography.tracking, 0)
-        XCTAssertEqual(typography.lineHeightMultiple, 1)
-        XCTAssertEqual(typography.lineSpacing, 0)
-        XCTAssertEqual(typography.paragraphSpacing, 0)
-    }
-
-    func testAPartialRecipeKeepsItsStringAndDefaultsItsType() throws {
-        let recipe = try decode(TextRecipe.self, #"{"string": "hello"}"#)
-        XCTAssertEqual(recipe.string, "hello")
-        XCTAssertEqual(recipe.typography, Typography())
-        XCTAssertEqual(recipe.font, .system)
-        XCTAssertEqual(recipe.opacity, 1)
-    }
-
-    /// A frame whose `corners` array is the wrong length is repaired to an upright box of the stated
-    /// size rather than thrown out. `TextFrame.init(from:)` argues why: the rotation is a bug in
-    /// whatever wrote it, and the words are the half worth keeping.
-    func testAFrameWithTheWrongNumberOfCornersIsRepairedRatherThanRejected() throws {
-        let frame = try decode(TextFrame.self, #"{"size": [200, 80], "corners": [[10, 10], [210, 10]]}"#)
-        XCTAssertEqual(frame.size, CGSize(width: 200, height: 80))
-        XCTAssertEqual(frame.corners, TextFrame.uprightCorners(origin: .zero,
-                                                               size: CGSize(width: 200, height: 80)))
+    func testSavedFramesRejectEveryNonFourCornerCount() throws {
+        let frame = TextFrame(origin: CGPoint(x: 8, y: 12), size: CGSize(width: 45, height: 30))
+        let original = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(frame))
+                                        as? [String: Any])
+        for count in [0, 1, 2, 3, 5] {
+            var damaged = original
+            damaged["corners"] = (0..<count).map { [$0, $0 + 1] }
+            XCTAssertThrowsError(try decoder.decode(TextFrame.self,
+                                                   from: JSONSerialization.data(withJSONObject: damaged)),
+                                 "A \(count)-corner saved frame is damage, not an invented upright box")
+        }
     }
 
     /// An unknown key is ignored, which is the other half of forward compatibility: today's build
     /// must open a document a *later* build wrote.
     func testAnUnrecognisedKeyIsIgnored() throws {
-        let recipe = try decode(TextRecipe.self, #"{"string": "x", "outline": {"width": 4}}"#)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(TextRecipe(string: "x")))
+                                    as? [String: Any])
+        json["outline"] = ["width": 4]
+        let recipe = try decoder.decode(TextRecipe.self, from: JSONSerialization.data(withJSONObject: json))
         XCTAssertEqual(recipe.string, "x")
     }
 
@@ -154,8 +125,8 @@ final class TextRecipeCodableLogicTests: XCTestCase {
     /// lays every line on top of the last. The clamp is applied where typography is *read*, not in
     /// the setters, so a decoded value survives untouched and only the layout is defended.
     func testTypographyOutsideItsRangesIsClampedOnUseButNotOnDecode() throws {
-        let wild = try decode(Typography.self,
-                              #"{"pointSize": 100000, "lineHeightMultiple": 0, "tracking": -9999}"#)
+        let bytes = try encoder.encode(Typography(pointSize: 100000, tracking: -9999, lineHeightMultiple: 0))
+        let wild = try decoder.decode(Typography.self, from: bytes)
         XCTAssertEqual(wild.pointSize, 100000, "Decode preserves what the document said.")
         let clamped = wild.clamped
         XCTAssertEqual(clamped.pointSize, Typography.pointSizeRange.upperBound)

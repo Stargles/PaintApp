@@ -16,7 +16,7 @@ Nothing derived is stored: not glyph positions, not measured bounds, not a warpe
 
 Storing `size` and `corners` separately is not "two transforms." They are the domain and the codomain of one map. Collapsing them into a bare quad forces an invented rule for what happens to the quad when the text grows — and "the quad grows along its top and bottom edges" is not a well-defined operation on a projected quad, since the whole point of perspective is that those edges are not parallel and do not scale alike.
 
-Fields are grouped into defaulted sub-structs from day one (`Typography`, and later `outline`/`shadow` as their own), which is the generalizable lesson [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md) extracts from `dynamics`: every flat scalar is a Codable-compatibility question later.
+Fields are grouped into sub-structs (`Typography`, and later `outline`/`shadow` as their own), like [BRUSH_ENGINE_EXTENSIBILITY.md](BRUSH_ENGINE_EXTENSIBILITY.md)'s `dynamics`. Their initializer defaults create new objects; saved required fields do not default when missing.
 
 `TextFrame.mode` is an enum (`.affine`, `.projective`) from the first commit even though only two cases exist, so a later `.mesh(Lattice)` — Photoshop's Warp Text, which a homography cannot express — is an additive case rather than a Codable migration. Nothing in this project builds it.
 
@@ -40,7 +40,9 @@ Exactly two `invalidate()` calls per session: one when the session opens, one wh
 
 `VectorTextElement` is the first vector element whose runtime and persisted forms are the same type — it holds no runtime resource, so it needs none of the `ImageRef` / `<project>/images/` machinery that `.image` forces on `ProjectStore`.
 
-There is no `formatVersion` in this project and this feature does not add one. Compatibility is per-field `decodeIfPresent` with defaults, which means `TextRecipe` and `TextRecipe.Typography` carry **hand-written `init(from:)` from the first commit**, for the reason `VectorStroke` already does (`VectorLayer.swift:329`): synthesized `Decodable` ignores property defaults and throws on a missing key.
+Saved text decodes the complete current object: 21 required fields across `VectorTextElement`, `TextRecipe`, `FontDescriptor`, `Typography` and `TextFrame`. Missing/null required values and non-four-corner frames are unreadable, not empty words, fresh identities or replacement geometry. Optional `faceName`, `packID`, `motionGroupID` and `animationGroupID` remain legitimately nil; explicit empty words and unknown extra keys remain readable. Numeric range handling on use is unchanged.
+
+These are ordinary decoding failures inside the existing `VectorCanvasData.LossySlot`: only the malformed text is dropped, surrounding ink survives, and `ProjectLoadDamage.texts` reaches `SaveDamageGate`. An artist save asks without writing; an automatic save writes edits aside and preserves the damaged original. The actual four-file package captured from old product75365af5 (the same TextObject bytes as origin afd2030c) supplies the previous-writer regression witness; it is synthetic writer output, not an artist export or an installed-release claim. The writer already emits all21 required fields, so this correction needs no new schema or repair that invents missing text. Future supported saved-format changes use the application's one-shot package repair rule, not permissive current decoders.
 
 **The backward-compatibility hazard, which is worse than it looks. It has since been fixed — see Stage 2 — and this section is kept because the reasoning is why the fix has to stay.** `ProjectStore.swift` decoded the vector file through `try?`:
 
@@ -191,7 +193,7 @@ and `ActivePanel.text` both exist, and the menu's "Add Text" row calls
 
 **Undo-per-keystroke.** `UndoHistory`'s `cost` accounting was never sized for 200 entries from one sentence. `UITextView` supplies within-session undo for free.
 
-**A `formatVersion` field.** There is none anywhere in this project; compatibility is per-field defaults, and adding one for this feature alone would be a second, inconsistent mechanism.
+**A text-only `formatVersion` field.** Current decoding and the existing package repair/damage owners define the boundary; adding a separate text version would duplicate it.
 
 **Claiming one shared `Homography` value makes the live preview and the bake identical.** The projective *map* is shared; the sampler, gamma handling and premultiplication are not, and Core Animation's filtering is unspecified and OS-version-dependent. This is a real divergence and it is recorded as an open risk in §4, not argued away.
 

@@ -53,9 +53,8 @@ final class VectorTextPersistenceLogicTests: XCTestCase {
                                 typography: typography,
                                 color: CodableColor(red: 0.25, green: 0.5, blue: 0.75, alpha: 0.5),
                                 opacity: 0.75)
-        // A rotated quad rather than an upright one, so the corners cannot round-trip "correctly" by
-        // being re-derived from `size` — `TextFrame.init(from:)` repairs a frame whose corner count is
-        // wrong by doing exactly that, and this is what tells a repair apart from a real decode.
+        // A rotated quad rather than an upright one, so deriving corners from `size` cannot pass
+        // for preserving the actual saved geometry.
         let frame = TextFrame(size: CGSize(width: 30, height: 10),
                               corners: [CGPoint(x: 20, y: 8), CGPoint(x: 44, y: 20),
                                         CGPoint(x: 39, y: 30), CGPoint(x: 15, y: 18)],
@@ -171,6 +170,38 @@ final class VectorTextPersistenceLogicTests: XCTestCase {
         XCTAssertEqual(decoded.decodeReport.malformedCount, 1)
         XCTAssertTrue(decoded.decodeReport.unknownKinds.isEmpty,
                       "`text` is a kind this build has; a broken payload under it is a defect, not a version gap.")
+
+        // Required text damage must stay inside LossySlot, including the frame's ordinary
+        // DecodingError: surrounding known ink is still the same complete rendered drawing.
+        let ink = VectorCanvas(size: Self.canvasSize, elements: [.stroke(stroke()), .fill(fill())])
+        let expected = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(ink.render()?.cgImage)))
+        for damage in ["missing string", "null id", "three corners"] {
+            var damaged = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(payload))
+                                           as? [String: Any])
+            var slots = try XCTUnwrap(damaged["elements"] as? [[String: Any]])
+            var value = try XCTUnwrap(slots[1]["text"] as? [String: Any])
+            switch damage {
+            case "missing string":
+                var recipe = try XCTUnwrap(value["recipe"] as? [String: Any])
+                recipe.removeValue(forKey: "string")
+                value["recipe"] = recipe
+            case "null id": value["id"] = NSNull()
+            default:
+                var frame = try XCTUnwrap(value["frame"] as? [String: Any])
+                frame["corners"] = [[20, 8], [44, 20], [39, 30]]
+                value["frame"] = frame
+            }
+            slots[1]["text"] = value
+            damaged["elements"] = slots
+            let result = try JSONDecoder().decode(VectorCanvasData.self,
+                                                  from: JSONSerialization.data(withJSONObject: damaged))
+            XCTAssertEqual(result.decodeReport.malformedKinds, ["text"], damage)
+            XCTAssertEqual(kinds(result.elements), ["stroke", "fill"], damage)
+            let surviving = VectorCanvas(size: Self.canvasSize,
+                elements: result.canvasSpaceElements(resolvingImages: { _ in nil }, resolvingVideos: { _ in nil }))
+            XCTAssertEqual(try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(surviving.render()?.cgImage))),
+                           expected, "\(damage) must not discard or alter surrounding ink")
+        }
     }
 
     // MARK: - Z-order

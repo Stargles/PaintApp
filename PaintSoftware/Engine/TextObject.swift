@@ -9,12 +9,11 @@ import Foundation
 // the glyphs re-lay-out into the same box and land in the same place, because the result was never
 // baked into anything. It is the derived-recipe discipline VECTOR_INTERPOLATION.md already uses.
 //
-// **Every type in this file hand-writes `init(from:)`.** Synthesized `Decodable` ignores property
-// defaults and throws on a missing key, so a document written by today's build would fail to decode
-// the moment a field is added — the reason `VectorStroke` already does this (`VectorLayer.swift:29`).
-// There is no `formatVersion` anywhere in this project and this feature does not add one;
-// compatibility is per-field `decodeIfPresent` with a default, and `TextRecipeCodableLogicTests`
-// pins that a blob missing *every* key still decodes.
+// Saved text requires the complete current recipe and frame. Initializer defaults create new
+// objects; they must not turn damaged saved words, identities or geometry into a different object.
+// Synthesized decoding enforces required fields while optional font/group references remain nil.
+// TextFrame additionally requires four corners, throwing an ordinary DecodingError so the existing
+// VectorCanvasData.LossySlot and save-damage gate preserve the surrounding drawing and original file.
 //
 // Foundation + CoreGraphics only, no UIKit — so it compiles into `PaintSoftwareUITests` alongside
 // the rest of the "App sources shared with" group and the layout tests can reach it headlessly.
@@ -62,25 +61,14 @@ struct FontDescriptor: Codable, Equatable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey { case familyName, faceName, packID, isBold, isItalic }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        familyName = try c.decodeIfPresent(String.self, forKey: .familyName) ?? FontDescriptor.systemFamilyName
-        faceName = try c.decodeIfPresent(String.self, forKey: .faceName)
-        packID = try c.decodeIfPresent(String.self, forKey: .packID)
-        isBold = try c.decodeIfPresent(Bool.self, forKey: .isBold) ?? false
-        isItalic = try c.decodeIfPresent(Bool.self, forKey: .isItalic) ?? false
-    }
 }
 
 // MARK: - How it is set
 
 /// Every knob the settings panel exposes that is about *type*, in one defaulted sub-struct.
 ///
-/// Grouped from day one rather than flattened onto `TextRecipe`, which is the generalizable lesson
-/// BRUSH_ENGINE_EXTENSIBILITY.md extracts from `Brush`'s `dynamics`: every flat scalar is a
-/// Codable-compatibility question later, and a sub-struct answers it once for the whole group.
-/// `outline` and `shadow`, when they arrive, are their own structs beside this one.
+/// Grouped rather than flattened onto `TextRecipe`, like `Brush`'s `dynamics`. These initializer
+/// defaults describe a new object; every stored typography field is required when decoding one.
 struct Typography: Codable, Equatable {
 
     /// Where each line sits inside the box's width. A segmented `Picker` in the panel
@@ -146,16 +134,6 @@ struct Typography: Codable, Equatable {
         case pointSize, tracking, lineHeightMultiple, lineSpacing, paragraphSpacing, alignment
     }
 
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        pointSize = try c.decodeIfPresent(CGFloat.self, forKey: .pointSize) ?? Typography.defaultPointSize
-        tracking = try c.decodeIfPresent(CGFloat.self, forKey: .tracking) ?? 0
-        lineHeightMultiple = try c.decodeIfPresent(CGFloat.self, forKey: .lineHeightMultiple) ?? 1
-        lineSpacing = try c.decodeIfPresent(CGFloat.self, forKey: .lineSpacing) ?? 0
-        paragraphSpacing = try c.decodeIfPresent(CGFloat.self, forKey: .paragraphSpacing) ?? 0
-        alignment = try c.decodeIfPresent(Alignment.self, forKey: .alignment) ?? .left
-    }
-
     /// Every scalar forced back inside its panel range. Applied at decode-adjacent boundaries
     /// rather than in the setters: a hand-edited or future-written document can carry anything, and
     /// a `lineHeightMultiple` of 0 makes CoreText lay every line on top of the last.
@@ -210,15 +188,6 @@ struct TextRecipe: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey { case string, font, typography, color, opacity }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        string = try c.decodeIfPresent(String.self, forKey: .string) ?? ""
-        font = try c.decodeIfPresent(FontDescriptor.self, forKey: .font) ?? .system
-        typography = try c.decodeIfPresent(Typography.self, forKey: .typography) ?? Typography()
-        color = try c.decodeIfPresent(CodableColor.self, forKey: .color) ?? TextRecipe.defaultColor
-        opacity = try c.decodeIfPresent(Double.self, forKey: .opacity) ?? 1
-    }
 }
 
 // MARK: - Where it sits
@@ -251,7 +220,7 @@ struct TextFrame: Codable, Equatable {
     /// wraps into.
     var size: CGSize
     /// Where the box's four corners land in canvas space, in `Corner` order. Always four entries;
-    /// a decoded frame that says otherwise is repaired to an upright box (see `init(from:)`).
+    /// a saved frame with any other count is unreadable (see `init(from:)`).
     var corners: [CGPoint]
     var mode: Mode
     /// **A stored bit, not an inference.** While true — a fresh box nobody has resized — `size`
@@ -368,16 +337,14 @@ struct TextFrame: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        size = try c.decodeIfPresent(CGSize.self, forKey: .size) ?? .zero
-        let decoded = try c.decodeIfPresent([CGPoint].self, forKey: .corners)
-        // Repaired rather than thrown for the reason ADD_TEXT.md §1 gives for the whole per-field
-        // scheme: this file is read by a decoder that already tells a malformed element from an
-        // unknown one and logs them differently (`VectorCanvasData.LossySlot`). A frame with three
-        // corners is a bug in whatever wrote it; degrading it to an upright box of the right size
-        // loses the rotation and keeps the words, which is the better half to keep.
-        corners = (decoded?.count == 4 ? decoded! : TextFrame.uprightCorners(origin: .zero, size: size))
-        mode = try c.decodeIfPresent(Mode.self, forKey: .mode) ?? .affine
-        autoSize = try c.decodeIfPresent(Bool.self, forKey: .autoSize) ?? true
+        size = try c.decode(CGSize.self, forKey: .size)
+        corners = try c.decode([CGPoint].self, forKey: .corners)
+        guard corners.count == 4 else {
+            throw DecodingError.dataCorruptedError(forKey: .corners, in: c,
+                                                   debugDescription: "A saved text frame requires four corners")
+        }
+        mode = try c.decode(Mode.self, forKey: .mode)
+        autoSize = try c.decode(Bool.self, forKey: .autoSize)
     }
 }
 
@@ -1179,14 +1146,5 @@ struct VectorTextElement: Codable, Equatable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, recipe, frame, motionGroupID, animationGroupID
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        recipe = try c.decodeIfPresent(TextRecipe.self, forKey: .recipe) ?? TextRecipe()
-        frame = try c.decodeIfPresent(TextFrame.self, forKey: .frame) ?? TextFrame(origin: .zero, size: .zero)
-        motionGroupID = try c.decodeIfPresent(UUID.self, forKey: .motionGroupID)
-        animationGroupID = try c.decodeIfPresent(UUID.self, forKey: .animationGroupID)
     }
 }
