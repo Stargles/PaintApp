@@ -17,9 +17,10 @@ Root integration moved to `~/PaintWork/PaintApp-s54-qualified-integration`,
 `~/PaintWork/s54-final-qualification/root-next-gates.json`. Inspect actual completion receipts before
 assuming the native lease is idle. Do not copy stale agent HANDOFF/TODO files into integration.
 
-Product/test source **c9b36d30** now harvests exact reviewed5a/2d effects,6ef public Mix refusal,
+Product/test source **34921e73** now harvests exact reviewed5a/2d effects,6ef public Mix refusal,
 4432 Undo regression with established precreation orientation,67bd explicit picked-file comparisons,
-and9e286 output-verified Lens benchmark. Later documentation commits do not change those bytes.
+and9e286 output-verified Lens benchmark, the successful permanent Text interaction and one public
+Chroma drawing test. The failed slider controller and diagnostic prints are excluded.
 The integrated source has not run; all original task pins/packets remain intact for qualification.
 
 **What Kevin has:** installed, signed Release **6fb979f442f4d3da1299785de2a077a2058a4dfe** contains
@@ -55,14 +56,16 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   plus57% readout (rootLOOK3ffea7b6). Harvest ONLY the successful Text route without its diagnostic
   print/past-longpress comment; preserve every drawn colour/keyboard/selection/replacement outcome.
   The failed integral slider helper is NOT integrated. Observe actual native slider events before
-  another gesture correction; current sole native lease is Vector's2dnormal116 on56C.
+  another gesture correction. Temporary observercad2 is source-reviewed/prepared through the existing
+  bounded flight recorder, already armed by normal editor launch. Native observation is pending.
 - D1 effects source **5a067c9d** independently accepted; actual normal63 **63/63**, zero fail/skip,
-  exact IDs/device/source730 and root receiptea7824b4.13 safe controls remain **UNRUN**.
+  exact IDs/device/source730 and root receiptea7824b4. All13 safe controls closed assertion-red with
+  all730 restored. Rootb84a2549 qualifies19 product/retained statements;3 picture/geometry premises
+  are separate. Four unmapped issues and all setup prerequisites receive ZERO credit.
   Duplicate periodic angles, apron-before-Int, and actual CPU/Metal transparent samplers
   bound positions before narrowing while preserving fractional outside-edge ink. Never run unsafe
   old casts with huge/NaN inputs as a crash-seeking control. Keep old5a packet/tree unchanged.
-- Chroma/CRT source **2d30185d**, net7 paths, independently reviewed c219071f. Normal116 and13 safe
-  controls being prepared, **UNCOMPILED/UNRUN**. Shared clamped CPU/Metal sampler bounds floats before
+- Chroma/CRT source **2d30185d**, net7 paths, independently reviewed c219071f. Shared clamped CPU/Metal sampler bounds floats before
   narrowing; existing finite stored CRT Double narrows safely; existing apron planner caps before Int.
   No saved-format/key/range/state/service change. Four clamps are not the complete added instruction
   cost. Existing heavy GPU bench ignores nil: paired timings must first prove successful real output.
@@ -70,8 +73,14 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   finite cases by64/32/64/32.13controls are BLOCKED. Vector/Converter trace fast Metal centre/frame
   normalization: a finite FMA residual at the odd65 centre reproduces those deltas when multiplied
   by huge fringe. This is a source witness, not actual lowering proof. Review existing
-  precise::divide(centre,frame) at the CRT seam, preserving CPU order/math/tests/tolerance and global
-  fast-math policy. Chroma has no such normalization, so no duplicate precision change is indicated.
+  precise::divide(centre,frame) at the CRT seam. Exact one-line source7023573b is ready for independent
+  review and normal116; CPU math, all tests/tolerances and global flags are unchanged. Chroma has no
+  such normalization, so no duplicate precision change is indicated. Original2d RED stays immutable.
+- Video picked-file comparisons67bd hold the sole native slot for normal11 on owned56C, root grant
+  a63e184f. One real cleanup-ownership control needs a separate grant after actual green.
+- Chroma cold drawing testee983 is independently accepted and integrated34921e73: public controls
+  split colour onto previously white paper beside real black ink, preserving its dark core/far paper.
+  Actual selected/whole11/control are UNRUN.
 - Public capacity cold source **6ef391e4** extends an existing Sandwich workflow, one exact launch
   helper seam; no product hook/new test method. Real two-input Mix refusal/current row/history/drawing
   checks and notice ordering preserved. Source peer/root review then selected1/whole10/control remain.
@@ -101,8 +110,9 @@ complete. Erasing respring cause, broad final regression/performance and remaini
 4. Repin relevant historicalUI47/8classes+13controls and mask6positive/11faults. Mask build must JOIN,
    ALL source restore, then test-without-building; inspect positive whole pictures first.
 5. Final fast **Debug AND Release**, CLAUDE verbatim filename filter, actual/static method IDs, known
-   explicit skips, lints/PBX/graph/touched whole UI and full phase gate. Atadf:730source/PBX1325,
-   runnable5409fast/6004full; raw5412/6007 differs by exactly3 private static testBrush factories.
+   explicit skips, lints/PBX/graph/touched whole UI and full phase gate. Integration:730source/PBX1325,
+   runnable5412fast/6008full; raw5415/6011 differs by exactly3 private static testBrush factories.
+   These are static counts, not native qualification.
 6. Fill16 paired Release ABBA against protected old071 products, actual sampler/source/fence/cancel/
    budget counts and whole RSS. Other genuine audit gaps: remaining vector internals, graph evaluation/
    gestures, math/platform and aggregate memory.19 reviewed clusters are not all314 production files.

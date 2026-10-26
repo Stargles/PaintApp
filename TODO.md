@@ -22,15 +22,19 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   initial pictures, then opacity33% versus50%; text really selects the word, then targets a control in
   the panel it closed. AA6 closed with unchanged original tolerances/outcomes:Text passed all drawn outcomes and root red-word→single-red-letter LOOK;Blend opacity
   setup still failed. Retire Text's temporary print/past-action comment and reuse its successful
-  public word selection/toolbar read. Keep failed slider compensation out; trace actual events next.
+  public word selection/toolbar read (integrated3e4a). Keep failed slider compensation out; prepared
+  cad2 observes actual native events through the existing bounded recorder. Native trace is pending.
   Retire diagnostics, drive whole affected colour/text classes and meaningful controls.
-- Effects5a normal63 passed63/63, source730 exact. Qualify its13safe controls and2d normal116/13safe controls: huge finite
+- Effects5a normal63 passed63/63, source730 exact. Its13safe controls now qualify19 product/retained
+  contracts plus3 separate premises, rootb84a2549; exact730 restored. Finish2d normal116/13safe controls: huge finite
   settings must not overflow sampling/apron conversion; ordinary edge pixels and saved values stay
   unchanged. Confirm successful actual GPU output before performance timing; its existing benchmark
-  now checks real full-size results outside the clocks. Remaining controls/2d/performance are UNRUN.
+  now checks real full-size results outside the clocks. Remaining CRT controls/performance are UNRUN.
   Actual2d normal116 now115pass/1fail: four extreme finite CRT comparisons differ by64/32/64/32.
   Keep its13controls blocked; trace and correct the actual centre-normalization precision seam,
-  preserving every original colour/coverage assertion and tolerance. No blanket parameter clamp.
+  preserving every original colour/coverage assertion and tolerance. One-line702 candidate is ready
+  for review and normal116. No blanket parameter clamp. New public Chroma drawing test is integrated
+  at34921e73 with independent source review; actual selected/whole11/control remain UNRUN.
 - Public two-input Mix refusal workflow6ef; cold damaged-text recovery/byte-exact original in Trash;
   actual stable Glare landscape picture; wrong-cel Undo thumbnail public repro4432 then minimal fix.
 - Permanent maintenance/recovery and remaining relevant UI/mask controls; final exact fast Debug AND
@@ -39,7 +43,8 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
 - Physical Test1 only after fresh saved/unlocked readiness. Qualified merge/push before October29
   signing renewal, or resolve automatic old-main downgrade risk. Remove completed items WHOLE.
 
-Currentadf730source/PBX1325/runnable5409fast6004full; effects5a adds3methods. Exact evidence/current
+Current integration730source/PBX1325/runnable5412fast6008full. Video comparison67bd normal11 holds
+the sole native slot; cleanup control1 needs actual green plus a separate grant. Exact evidence/current
 lease live in HANDOFF.md and `~/PaintWork/s54-final-qualification/root-next-gates.json`.
 Owner rulings remain point-only vector Liquify; vector batch mending includes attached strokes but
 protects uncertain joins/outside outline; saves keep newest clock-bucket versions. Deferred features
