@@ -6,9 +6,22 @@ this integration branch. Kevin authorizes useful agents; quality and usage conse
 than speed. Delegate implementation and independent review; root owns integration, evidence review
 and ONE Mac native lease. Preserve real artwork and record before acting.
 
-**PARKED at the owner's explicit request on 2026-10-25: “checkpoint here and park”.**
-Do not resume implementation, tests or device operations until Kevin resumes. This overrides earlier
-instructions to keep working. No further question or approval is pending.
+**ACTIVE: Kevin resumed on 2026-10-26 (“continue”).** The October25 checkpoint remains preserved.
+Usage authorization persists: delegate useful work, conserve usage, quality over speed. No owner
+question is pending. No physical restart is authorized by an old readiness answer.
+
+**Resume scope recorded before code:** retire the now-confirmed one-shot converter and exclusive
+UI/tests/fixtures/PBX entries while preserving permanent maintenance/current-format validation;
+continue the existing shared-capacity WIP scope without expansion; implement ONLY the reviewed
+Pose toolbar-cleared sampling basis and Text exterior-band visible-paper containment correction
+from proposal71a203a2. Root LOOKed both full final video-tail display images: Pose shows black toolbar
+above paper and a moved bar; Text shows a large W in its live hull with the keyboard open. These
+lossy video-derived frames establish visible setup context, not exact native RGB/coordinates or
+feature outcomes. All existing behavioral assertions/tolerances stay unchanged. Independent source
+review and actual normal rebuilt workflows precede fault controls. No native lease granted yet.
+Root additionally reviews/integrates strict-text79538f17 and reviewed Blend3bbf8732, preserving exact
+source/provenance and removing superseded code whole. Exact resumed branch audit and LOOK record:
+`~/PaintWork/s54-final-qualification/resume-20261026/`.
 
 ## Checkpoint — 2026-10-25
 

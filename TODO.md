@@ -1,9 +1,9 @@
 # TODO
 
-## Parked checkpoint — 2026-10-25
+## Active continuation — 2026-10-26
 
-Owner explicitly requests “checkpoint here and park”. Work is paused until resumed; no implementation,
-test or device operation is running. HANDOFF.md and `~/PaintWork/s54-final-qualification/park-20261025/`
+Kevin resumes with “continue”. Proceed with the recorded queue and useful delegated work. The
+October25 parked state is preserved in HANDOFF.md and `~/PaintWork/s54-final-qualification/park-20261025/`
 carry the exact checkpoint/evidence/agent state. Integration is `tmp/s54-mend-free-caps`; installed
 product source **6fb979f4**, unmerged/unpushed; main/origin **afd2030c**. This checkpoint changes docs only.
 
@@ -17,7 +17,7 @@ below are NOT in this install. Final regression/performance/audit gates remain u
 
 - Retire the one-shot geometry converter and converter-only tests/fixtures/PBX/startup UI WHOLE now
   that artwork confirmation is complete. Preserve permanent maintenance/readiness/current-format
-  validation. No retirement code has begun. Remove obsolete converter-only cold256 gates with it;
+  validation. Retirement is delegated after this scope record. Remove obsolete converter-only cold256 gates with it;
   preserve originals and meaningful permanent current-format gallery/package tests.
 - Review/integrate pending strict saved-text79538f17 (source peer accepted, compiler/whole44/fault/
   damaged-package UI UNRUN), finish separately parked layer-input capacity WIP (not harvest-ready),
@@ -26,7 +26,9 @@ below are NOT in this install. Final regression/performance/audit gates remain u
   **115 total/112passed/3failed/0skips/0expected**. Graph86 pass; Mode1 eraser4 pass with all4whole
   pictures inspected. Blend opacity reached42% instead50%, Pose sampling includes toolbar, Text's
   exterior-band containment uses narrow words ROI. Isolated Blend candidate3bbf8732 is reviewed,
-  UNRUN. Two other setup proposals32a1f68a have no edits authorized; root must LOOK actual tail images.
+  UNRUN. Root LOOKed both actual full tail pictures and accepts bounded setup proposal32a1f68a/
+  patch71a203a2: toolbar-cleared shared Pose grid and Text visible-paper containment only;
+  implementation in an isolated tree is authorized, with unchanged product outcomes/tolerances.
   Rebuild normal whole affected UI, inspect stable owner-size captures (Glare landscape still invalid),
   then meaningful graph/blend/selected-text/transfer/Mode1 controls from green baselines.
 - Repin historical UI47+13controls and mask6positives+11faults. Finish final fast Debug AND Release,
