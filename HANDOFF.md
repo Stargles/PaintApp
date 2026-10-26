@@ -42,8 +42,10 @@ integration. Reuse these agents; full history/large inventories need not be rere
   **0ab96d96** uses same2points/API/schema to transport level lines; ordinary/singular/coincident
   behavior retained, generic projective/lattice approximation unchanged. Clean UI-only successor
   **17f8d53b** adds1 cold public Freeform/Done/Undo/Redo method; old14/helpers exact. Root source
-  acceptance6f72b7b6; combined279logic+15UI=294 now RUNNING under root grantf428e03d/supervisor61661.
-  All other Mac native HOLD. Logic3/public1 controls PREPARED_UNRUN.
+  acceptance6f72b7b6. First17f normal294 compiled ZERO tests: new nested probe expression exceeded
+  Swift type-checking; root closure13d0fe85. Expression-only successor **7e50cf4a** preserves all81
+  candidates/order/predicates/assertions; root acceptance0f6edba0. Whole279logic+15UI=294 now RUNNING
+  under grant88219d52/supervisor54451. All other Mac native HOLD. Logic3/public1 PREPARED_UNRUN.
   Actual off-axis committed pictures discriminate; whole-cel Freeform reaches mapper after END/Done.
 - **Windows DNS:** old36c actual19 gave15pass/4intended refusal failures; root original TRX reviewf069
   accepts3 canonical refusal sites. Exit captureNULL, no nativeexit1claim. Exact compiler37012 was
@@ -52,13 +54,20 @@ integration. Reuse these agents; full history/large inventories need not be rere
   Fixed171D/R+8controls UNRUN; source not harvested. Future grant captures immediate LASTEXITCODE.
 - **New Windows findings recorded before code0cecd476:** wall-clock filename collision can overwrite
   an earlier queued clipboard paste; asynchronous pipeline start/stop cannot balance thread-bound
-  execution-state requests. Converter authors a tiny clipboard regression and a source-only power
-  lifetime proposal. No production fix/native yet. Nearby post-stop publication is a lower-claim
+  execution-state requests. Clipboard old-regression **0dd5032b** and power thread witness
+  **05e68a7d** are committed/source-only (each isolated whole167, not combined). Handle lifetime
+  direction independently accepted; exact native-failure seam remains proposal-only. No production
+  fix/native yet. Fresh one SSH probe16:34UTC also timed out5ed2faf4; no remote work/retry.
+  Nearby post-stop publication is a lower-claim
   source gap; visible retained-owner/restart behavior unproved, no speculative fix.
 - **New autosave finding recorded before codeb1cadfdc:** failed/refused save consumes clock eligibility;
   notice alone does not retry an idle open document. This is implementation, NOT an owner ruling.
-  Vector proposes existing driver/clock/save-completion correction, same timer/bounded deferral,
-  preserving edits during save and document identity. No new service/poll/duplicate dirty state.
+  Old **fd8a9058** actual selected1 fails intended landing304 plus downstream nilreload306(0credit),
+  all first failure/unblock premises pass; root1e8bd7a8 reconciles730/ID/device/joined. Vector authors
+  existing driver/clock/failure-channel correction, same timer/default intervals/weak followed-manager
+  identity. No new service/poll/duplicate dirty state. Bake authors separate cold public folder/one-
+  stroke failure/retry test with external owned-empty-folder fixture; valid FOREGROUND package must
+  precede terminate/reopen so scene-phase save cannot mask failure. No new product hook/controller.
 
 ### Component qualification already accepted
 
