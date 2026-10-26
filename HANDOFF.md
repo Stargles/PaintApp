@@ -126,6 +126,16 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   Logic70/public4/4faults are prepared only; no production fix is
   yet harvested or qualified. Earlier4432 and all baseline pictures/results remain immutable.
 
+### Newly recorded bounded numeric audit lead
+
+Converter source report flattening-domain-62b0df17 finds one unsafe narrowing in the existing
+StrokeGeometry.flatteningSteps: min64 follows Int(length), so finite huge current-format fill
+controls can cross Int range before the cap. Actual fill nonlinear mapping/Liquify calls it before
+later region/map guards. Root recorded TODO/BUGS before code. Use existing bound/malformed owner,
+retain ordinary rounding/coordinates; real archive/current consumer premise and safe capped controls
+are required. No old unsafe cast execution, schema change or Test1 attribution. Broader selection
+index/error arithmetic is not certified by fixing this one cast.
+
 ### Other required gates, in queue order
 
 Warning core6 is clean bf5741b4: explicit existing serializer/lock/pure-owner declarations and two

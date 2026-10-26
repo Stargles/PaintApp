@@ -17,6 +17,17 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Curve flattening caps after an unbounded integer conversion — 2026-10-26
+
+Source62b0df17: StrokeGeometry.flatteningSteps narrows ceil(control-polygon length) before min64.
+Finite off-canvas curve controls near1e20 exceed Int range without NaN. Current fill path archives
+have no coordinate bound; actual nonlinear fill mapping flattens before region/map rejection.
+Native archive reachability and corrected consumer tests remain pending. Saturate in CGFloat
+before narrowing; preserve coordinates/ordinary rounding, and never execute the unsafe old cast
+as a crash-seeking control. This is independent of the reported Test1 respring.
+
+
+
 ## Extreme finite CRT fringe exposes a GPU/CPU centre-normalization mismatch (2026-10-26)
 
 At2d30185d, actual normal116 passes115 and fails the retained CRT fringe comparison at303 four

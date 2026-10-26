@@ -126,6 +126,22 @@ drawn/cold-render assertions; existing public repro retains all Redo/B checks. C
 
 ---
 
+## Bound curve flattening before integer conversion — 2026-10-26
+
+The audit found that StrokeGeometry.flatteningSteps converts an unbounded control-polygon length
+before applying its documented64-chord cap. A finite current-format curved fill can carry controls
+above Int range; actual fill posing/Liquify mapping flattens before its later region/map checks.
+Source finding62b0df17; no native archive round-trip, unsafe cast or Test1 attribution is claimed.
+Fix the existing bound before conversion, preserving ordinary rounding and coordinates. Use the
+existing malformed/nil channel for invalid input if needed, no new schema or parallel validator.
+
+- [ ] Verify a finite current-writer/read witness, implement the minimal existing-owner correction,
+      test ordinary/capped geometry and the real consumer. Never run the old unsafe cast on huge input.
+- [ ] Qualify safe bounded mutants, touched whole classes, cold drawn behavior and final fast gates;
+      review any newly reached downstream arithmetic separately, without claiming global bounds.
+
+---
+
 ## Protect library relocation and Trash backup ownership — 2026-10-24
 
 Implemented and included in normal847/847/base49 qualification, unmerged. Strict shared file-tree
