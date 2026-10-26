@@ -91,12 +91,14 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   sweep through the existing finger synthesizer. Temporaryfb87 is clean/source-prepared and exactdiff
   peer675d2f20 accepted; its one-selector experiment remains UNRUN/ungranted.
   Keep four attempts, original .005/50% and all drawing assertions; no product hook/controller state.
-- Sole native slot is Converter's normal geometrywhole94 at8272 on56C, grantc40e1c6d.
-  Tap old-production selected1 closed with actualnative-alpha/dimensions premises and intended
-  failures253/268(1512inkcells)/270; Clear277 remains unreached0credit. Root54fb7d33 accepts the
-  reproduction, all730/source/current/children exact. Source implementation may now proceed
-  through the reviewed canonical geometry sink; actual public/cost/fullclass gates remain. 4B33 remains shut. Completed owned39E was archived and retired after the separate storage block;
-  only56C is active. No physical/env operation is granted.
+- Native tests are idle after numeric94 and6 controls. Root owns the reviewed offline cleanup of
+ 56C's two generated OS caches; all Containers are archived/hash-verified before removal, same
+ device boots afterward. No erase/iPad operation. Read exact action receipts under
+ resume-20261026/owned56C-offline-cache-cleanup before resuming tests. 4B33 remains shut.
+ Tap old-production selected1 is closed/root accepted54fb7d33; native-alpha premises passed,
+ failures253/268(1512inkcells)/270 were intended; Clear277 remains unreached0credit. New canonical
+ geometry source4788 is independently peer accepted but compiler/native/public/cost UNRUN.
+ Author is making only the agreed new-test y48→47 FALSE-probe strengthening before controls.
 
 - Permanent startup normal59 passed59/59 at60427 (57 whole logic +2 explicit old Gallery methods,
   whole class3), root5283dbb2. Four original controls are assertion-red/root partially accepted;
@@ -128,15 +130,16 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   A separate fresh-equivalent-B fixture control is prepared only and supplies0 application credit;
   final integrated Debug/Release/UI remain open. Original c34 cached-B test source remains superseded.
 
-### Newly recorded bounded numeric audit lead
+### Bounded curve narrowing fix — component-qualified and harvested8682859f
 
-Converter source report flattening-domain-62b0df17 finds one unsafe narrowing in the existing
-StrokeGeometry.flatteningSteps: min64 follows Int(length), so finite huge current-format fill
-controls can cross Int range before the cap. Actual fill nonlinear mapping/Liquify calls it before
-later region/map guards. Root recorded TODO/BUGS before code. Use existing bound/malformed owner,
-retain ordinary rounding/coordinates; real archive/current consumer premise and safe capped controls
-are required. No old unsafe cast execution, schema change or Test1 attribution. Broader selection
-index/error arithmetic is not certified by fixing this one cast.
+Source8272 saturates subdivision length in CGFloat BEFORE Int; coordinates and ordinary rounding
+stay unchanged. Actual current-format archive/reopen/nonlinear fill mapping passes with finite1e20
+controls. Whole Liquify60+InkDistort34 passed94/94, zero skips/failures. Six safe real-owner faults
+reached all7 canonical new application statements;67 other issues get ZERO credit. Root independent
+normal/causal acceptance10a287a8, all730 restored/children joined. Exact3-source net patch18c29091
+is harvested8682859f. No unsafe old cast was executed. Existing broad selection indexing/error
+arithmetic and Test1 respring are not certified by this one cast fix. Next native needs normal rebuild
+because compiled mutant objects remain; final assembled Debug/Release/UI/performance are open.
 
 ### Other required gates, in queue order
 

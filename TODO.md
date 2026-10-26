@@ -49,7 +49,9 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   signing renewal, or resolve automatic old-main downgrade risk. Remove completed items WHOLE.
 
 Current integration730source/PBX1325/runnable5412fast6008full. Video67bd normal11/control1 are closed;
-the old-production Tap native corner witness holds the sole native slot. Undo normal70/public4
+numeric curve94 and6safecontrols are root-accepted; exact3-path fix harvested8682859f. Native
+tests are idle for root-owned offline56C cache cleanup, preserving all Containers. New canonical Tap
+source is peer-accepted/compiler/native UNRUN. Undo normal70/public4
 and logic3/public1 controls are closed at their actual pins; exact4-path fix is harvested d7090060. Exact evidence/current
 lease live in HANDOFF.md and `~/PaintWork/s54-final-qualification/root-next-gates.json`.
 Owner rulings remain point-only vector Liquify; vector batch mending includes attached strokes but
@@ -112,8 +114,12 @@ caches and repeated evidence blobs. Keep real artwork/exports, required benchmar
 needed source/evidence; prefer exact deduplication and verified archives. Delete only confirmed
 obsolete owned outputs/devices; do not touch unrelated personal files or other sessions' work.
 
-- [ ] Report actual largest consumers/ownership, then reclaim confirmed disposable or duplicated
-      data. Verify preservation and actual free space; establish bounded housekeeping for future runs.
+- [ ] Inventory complete: PaintWork~76GiB attributed, results~60GiB;56C OS caches~10GiB.
+      Reclaim exact verified closed-result duplicate blobs and reviewed offline56C caches; retain
+      evidence paths/artwork/baselines. Verify actual free space and bounded phase-boundary cleanup.
+      External detailed plans/identity manifests live in resume-20261026/storage-inventory-20261026-vector.
+- [ ] Review conditional obsolete owned simulators/build caches only after ownership, verified
+      app-data archives and outstanding Products dependencies. No broad personal/global deletion.
 
 ---
 

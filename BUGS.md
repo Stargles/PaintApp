@@ -22,9 +22,10 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 Source62b0df17: StrokeGeometry.flatteningSteps narrows ceil(control-polygon length) before min64.
 Finite off-canvas curve controls near1e20 exceed Int range without NaN. Current fill path archives
 have no coordinate bound; actual nonlinear fill mapping flattens before region/map rejection.
-Native archive reachability and corrected consumer tests remain pending. Saturate in CGFloat
-before narrowing; preserve coordinates/ordinary rounding, and never execute the unsafe old cast
-as a crash-seeking control. This is independent of the reported Test1 respring.
+Source8272 now saturates in CGFloat before narrowing, preserving coordinates/ordinary rounding.
+Actual current-format archive/reopen/nonlinear consumer and whole94 passed;6 safe owner controls
+qualify7 new application statements, root10a287a8. Exact3-path fix harvested8682859f; final assembled
+checks remain open. The unsafe old cast was never executed. No Test1 respring attribution.
 
 
 
