@@ -17,6 +17,17 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Older export destinations can publish into a replacement export — 2026-10-26
+
+Source: Export Something Else remains enabled during destination work. FrameExportSession resets
+Photos/send state; Photos checks only saving on return and send callbacks publish unconditionally.
+A new saving/sending state can receive the older attempt's result. Reused stem-based output URLs also
+permit a new same-frame/movie export to replace bytes named by older pending consumers. No owner
+loss or Photos framework read timing is claimed. Prove finite old cases through existing session
+seams, then correct actual product/publication ownership without another service or unbounded temp
+files. Existing export-loop Task cancellation checks are healthy and are not this finding.
+
+
 ## Canvas transform safety and visible progress are conflated — 2026-10-26
 
 Root actual gradient whole294 and unchanged warm resize2 expose the older raster-resize test's

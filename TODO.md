@@ -84,8 +84,22 @@ busy assumptions. Actual worker path added in4dbffaea always holds the shared lo
 are prepared, so the old same-turn test premise is obsolete. Do not restore synchronous PNG work or
 merely flip that test: verify the artist's no-flash contract and separate operation safety from visible
 announcement if needed, reusing existing owner/worker. Announced500-yield completion was warm-green;
-that finite-spin wait does not guarantee an off-main queue has finished. Preserve actual size/history
+that finite-spin wait does not guarantee an off-main queue has finished. Root accepts one published operation phase (idle/preparing(id)/announced(id)),
+with existing isResizing derived for safety and existing overlay drawn only when announced; use existing
+view task cancellation/deadline and actual operation identity, no second Boolean/timer/service. Existing
+worker owns atomic completion, and slow main geometry/landing still announces before blocking.
+Preserve actual size/history
 and gating outcomes with completion-based bounded waits. Source design review and public proof owed.
+
+**Export destination ownership finding — October26:** current public Export Something Else stays
+enabled while Photos/send is pending. Photos completion only checks saving; send progress/completion
+have no export identity guard. Reset followed by another destination attempt can therefore accept an
+older result. Output URLs also reuse project/frame stems, so exporting the same frame/movie again
+can replace bytes still named by an older asynchronous destination/share. This is source ordering,
+not an observed owner export loss. Establish bounded old regressions through existing session/FakePhotos
+and current send consumer before a fix; solve publication and immutable product lifetime together.
+No extra transfer service/parallel scheduler or unbounded pile of unique export files. Source design
+must preserve clean artist filenames and account for temp storage/ShareLink lifetime.
 
 **Current-format cleanup review — October26:** whole MotionGroup body still explicitly decodes
 missing name/colour/mode using old-field defaults. Verify its current writer and previous-build
