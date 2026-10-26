@@ -21,7 +21,7 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
 - Finish canonical Tap selection controls before harvesting. Actual756 logic37, publicUI6+
   benchmark1 and Release1 passed; root independently reconciled each and LOOKed3 square stages.
   Matched120-stroke image-manager miss improved120.1→29.2ms on the simulator. Minimal existing-Quad
-  admission adds no cache/state/schema. Logic17 deliberate-failure batch is granted04f2dc13;
+  admission adds no cache/state/schema. Logic17 closed/root-causally accepted78117db7 all23contracts;
   separate public/benchmark controls remain pending. No iPad/RSS or four-sample timing claim.
   Keep the new square-corner regression as its own cold public test, preserving all old round-workflow
   assertions. The generic Clear reversal currently fails at the earlier round step, leaving the new
@@ -30,8 +30,9 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   numeric curve cap and every drawn outcome.
 - Correct the now-reproduced affine-gradient defect in the existing two-point mapper. Old9dd ran
   1case/1intendedRGB failure (147 versus108), root independently reconciled/LOOKed2whole originals.
-  Preserve generic projective/lattice behavior, ordinary transforms and saved format; normal/control/
-  cold UI gates follow the minimal existing-owner correction.
+  Minimal same-owner correction0ab plus cold public successor17f are source-accepted; whole294 now
+  runs under root grantf428e03d. Preserve generic projective/lattice behavior, ordinary transforms
+  and saved format; controls and actual whole-picture LOOK follow the joined normal run.
 - Finish the colour/text public interactions without weakening drawing checks. Successful Text route
   is integrated3e4a. Completed d700 public recording covers all6 slider drags/335 native notes; root
   receipt053369a5 verifies the native value is already wrong before model delivery, with no observed
@@ -79,15 +80,12 @@ save-result seam, preserving edits made during an in-flight save and ignoring st
 completions. Reuse one timer with a bounded delay; no retry service, polling loop or duplicate dirty
 state. Establish finite failure→recovery proof and meaningful controls before calling it fixed.
 
-Current integration730source/PBX1325/runnable5412fast6008full. Video67bd normal11/control1 are closed;
-numeric curve94 and6safecontrols are root-accepted; exact3-path fix harvested8682859f. Native
-tests are paused for root-owned retirement of five obsolete test simulators after verified app-data
-archives. Offline56C cache cleanup recovered10.11GiB and exact result dedup20.72GiB; original
-app/runner data and result paths are preserved. Isolated canonical Tap sourcee2 passed logic37/37
-and publicUI6+benchmark1=7/7; root inspected its three square-selection stages. Release cost and
-controls remain open; the source is not harvested. Undo normal70/public4
-and logic3/public1 controls are closed at their actual pins; exact4-path fix is harvested d7090060. Exact evidence/current
-lease live in HANDOFF.md and `~/PaintWork/s54-final-qualification/root-next-gates.json`.
+Current integration730source/PBX1325/runnable5412fast6008full. Component-qualified Video11,
+curve94+6controls and Undo70/public4+logic3/public1 are harvested at their actual pins; final assembled
+source gates remain. Storage cleanup is COMPLETE (10.11GiB caches+20.72GiB result dedup+13.05GiB
+exact5 retired-device DELETE phase), artwork/results/protected devices preserved. Root gradient294
+owns the native lease now; Tap17 is closed and its public square test structure is being corrected.
+Live authority: HANDOFF.md and `~/PaintWork/s54-final-qualification/root-next-gates.json`.
 Owner rulings remain point-only vector Liquify; vector batch mending includes attached strokes but
 protects uncertain joins/outside outline; saves keep newest clock-bucket versions. Deferred features
 stay deferred; no overnight physical restart. No further installation exception is implied.

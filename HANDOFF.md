@@ -33,15 +33,17 @@ integration. Reuse these agents; full history/large inventories need not be rere
   independently reconciled. Root actually LOOKed3 whole square stages, d95110cc. Matched simulator
   Release manager miss120.1→29.2ms on120strokes/24kknots/165480dabs; no iPad/RSS/cache-virgin or
   four-sample timing-gate claim. Same Quad/predicates, conservative inclusive local admission before
-  hull allocation; no persistent cache/state/schema. Exact17 logic controls are RUNNING under grant
-  **04f2dc13**, all other Mac native HOLD. Wrong-seed LAST is conditional; no tuning. Root extraction
-  adapter6744bc05 retains exact28refs/23IDs. Public/benchmark controls remain separate. No harvest.
+  hull allocation; no persistent cache/state/schema. All17 logic controls actually assertion-red,
+  root causal78117db7 qualifies23/23canonical statements; extras get0credit. All730 restored/children
+  joined. Public/benchmark controls remain separate; Bake extracts square workflow into its own cold
+  UI method so Clear can reach that regression independently. No production/logic change or harvest.
 - **Gradient:** actual old9dd selected1 failed only intended RGB comparison39>2 (147 vs108), all
   premises passed; root reconciled and LOOKed both whole64² originals,9da827ff. Affine correction
   **0ab96d96** uses same2points/API/schema to transport level lines; ordinary/singular/coincident
   behavior retained, generic projective/lattice approximation unchanged. Clean UI-only successor
   **17f8d53b** adds1 cold public Freeform/Done/Undo/Redo method; old14/helpers exact. Root source
-  acceptance6f72b7b6; combined279logic+15UI=294 and logic3/public1 controls PREPARED_UNRUN.
+  acceptance6f72b7b6; combined279logic+15UI=294 now RUNNING under root grantf428e03d/supervisor61661.
+  All other Mac native HOLD. Logic3/public1 controls PREPARED_UNRUN.
   Actual off-axis committed pictures discriminate; whole-cel Freeform reaches mapper after END/Done.
 - **Windows DNS:** old36c actual19 gave15pass/4intended refusal failures; root original TRX reviewf069
   accepts3 canonical refusal sites. Exit captureNULL, no nativeexit1claim. Exact compiler37012 was
