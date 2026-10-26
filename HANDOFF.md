@@ -28,116 +28,75 @@ Use the three existing agents; all source work stays in separate trees. No physi
 
 ### Current native and source work
 
-- **Native now:** none. Permanent gradient2e selected1 JOINED GREEN1; root reconciled actual730/IDs/device/argv. Whole-picture inspection and component249 remain. Autosave837 staged1 grant a5030732/supervisor74677 JOINEDnative65/coord1;
-  original1RED only at119(blank paper afterGallery). Source730/IDs/device/argv root-reconciled.
-  Coordinator restored exact same empty-directory inode/mode in finally; no held path remains.
-  No failure-seen/foreground/cold ACK was reached and no foreground save proof is claimed.
-  Autosave837 normal154 JOINED151pass/3fail, root reconciled730/IDs/device/argv.
-  Three old encode/reuse-count assertions need actual durable-source tracing before any change.
-  Original grant misspelled SaveDamage class in counts only; extraction-only5e557691 fixes it BEFORE
-  results were read; actual native argv always selected correct SaveDamageGateLogicTests.
-  Public fixture0c selected2 JOINED GREEN2; root reconciled actual730/IDs/device/argv and LOOKed all5
-  whole originals (3gradient landscape,2rectangle portrait). No Undo-picture LOOK claim; no logic pass.
-- **Tap closed/harvested:**756 logic37/public6+bench1/Release1 GREEN. Independent cold square d7fa
-  normal8 GREEN and ROOTLOOK3 whole originals.17logic controls23statements accepted78117db7;
-  public2/benchmark5 controls7 accepteda8206a35 for11statements,4extras0credit, missing-selection
-  geometry limit explicit. Root3219 harvests exactly9paths fda→d7fa with868safe cap and bothcurve
-  tests preserved; other721source exact. Static730/PBX1325/fast5412/full6009, no final-source runtime.
-- **Gradient:** old9dd actual selected1 gave39>2; 7e294 gave289pass/5fail. Matched-format test-only508
-  actualselected1 STILL104vs108,4>2; both8bpc32bppSRGB. Format hypothesis REFUTED; no tolerance
-  relaxation. Root LOOKed both original64² PNGs and extracted rows showing different stepping,
-  `affine-gradient-reference-normal1-50873701-run01/root-attachments/root-whole-look-and-pixels.json`.
-  Bake traces renderer/affine/flatten. Original scalar mapper failure and corrected current API must
-  get truthful causal proof; no matched-target attribution from earlier unequal-format assumptions.
-  UI0c fixes only measured toolbar/dock obstruction (portrait leak refuted), same gestures/probes/
-  outcomes, and its selected2 now pass. Temporary diagnostic274 JOINED1RED original4>2; source730
-  exact, root LOOK5 whole64² originals. Three finite fractions agree <=3.34e-16; all image sizes and
-  byte counts match. Flatten/direct, direct/rawMapped, reference/rawNative each byte-exact; ONE raw
-  CGGradient under different CTMs differs max8. Original image-to-image<=2 premise is invalid even
-  with identical analytic fields; no CoreGraphics internal algorithm claim. Root permits test-only
-  replacement: unchanged original probe, compare EACH image to independent neutral Oklab grey106
-  (t67/128) with2byte tolerance; add3noncollinear finite field checks<=1e-12. Product stays0ab. Remove
-  temporary observer WHOLE, compose UI0c, qualify whole294 and actual controls; no harvest yet.
-  Permanent test-only successor2e34a5ec implements that oracle and exact UI0c with all runtime/45old
-  Resize methods unchanged; selected1/249/294 and renewed controls are being prepared, not run.
-- **Resize:** unchanged warm2 gave1pass/1fail: old raster same-turn/no-busy assumptions obsolete;
-  announced500-yield wait warm-passed but is not reliable queue completion. Root recorded0bc then
-  accepted source designc78. Converter source381→safe test-onlye3fd uses ONE published phase,
-  derived existingisResizing, existing LatestWins atomic landing, whole-editor hit-test block,
-  captured-ID existingviewtask. Current546 adds the actual painted public resize/Undo workflow;
-  normal47 GREEN47; public2of14 actual1pass/1fail at busy exposure344 (all earlier premises healthy),
-  downstream landing/Undo unreached. Whole recording5d198e15 is45.9MB, exact recorder70357 SIGINT
-  joined0, helper/source730 joined; current busy/no-flash interpretation pending actual frame review.
-  Root LOOKed actual before2048 stroke picture only.11finite controls still source-only.
-  Do not execute unsafe derived-safety mutant on381's stale second-resize fixture; e3fd attemptsFlip.
-  Bake independent peer found no scoped blocker; no no-flash/visible-progress claim without video.
-- **Saving:** oldfd8 selected1 actual landing304 RED plus downstream unwrap306(0credit), root1e8bd7a8.
-  f571 and87 stay immutable HOLD: first still navigated after failure, second retained early false
-  success and could discard newer edits. Source **d1515a32** carries existing landedURL? in sole
-  completion, deletes onSaveFailed whole, balances refusal once/ask none, keeps failed editor open,
-  preserves newer owed edits/live gestures through existing clock and a shared computed predicate.
-  No service/per-attempt flag/retained exit request. Normal154 prepared (14+52+17+40+31);16conditional
-  controls/21targets source-only. Cold UI **51f027fb** adds actual public Gallery failure to386's
-  ONE-stroke external-empty-folder obstruction/retry protocol. All existing foreground-valid-package
-  BEFORE terminate/cold-pixels checks remain. Product/test compose, external guarded staging and
-  native controls UNRUN; do not claim private ContentView proof from headless driver alone.
-  Exact composition837c8d2b is frozen: product/other729 exactd151, wholeUIfile exact51f; source730,
-  static fast5414/full6011. Normal154 actual151pass/3fail in old PNG encode/reuse profiles:
-  reopened2clones, missing-live-file2clones, version-slot2clones. Do not weaken counts before tracing
-  actual immutable backing sources and proving resulting bytes/ledger. Triage8b009ea9 plus root
-  actual Store705–710/Source181–199 and same-run Residency947–967 refutes old encode-only premises:
-  unchanged protected sources clone on reopen/missing-live-file/version-slot. Root authorizes a
-  TEST-ONLY named successor with truthful0/2 profiles PLUS independent exact saved/reopened pixels/
-  bytes, backing/package isolation and live/version-ledger preservation; rename false old test names.
-  No product change. New retry/driver/store cases passed but aggregate remains RED. Test-only69909080
-  (85+/12−,3truthful renamed methods) prepared154/focused3; other729/UI/product exact837. New6data
-  controls separate from existing16/21recalculated controls; all UNRUN. OrdinaryUI2 actual1pass/
-  1explicitskip root reconciled730/IDs/device/argv (not zero-skipGREEN). CurrentgeometryVersion is1,
-  confirmed in source; prepared external coordinator's version1 witness is correct.
-  Staged837 failed after actual failed-Gallery editor/ink assertions passed: original bare row.13
-  maps102.7pt, inside refreshed notice capsule/shadow (AXtext75..92pt); root LOOKed whole original
-  79FE153B. No pixel-loss/product cause. Root permits a TEST-ONLY successor from699 using SAME.12
-  distance below core (.37=292.3pt), measured paper/toolbar/dock/notice clearance. All actual checks,
-  tolerances, existing fresh-nonce/empty-inode/sentinel/foreground-copy coordinator/deadlines stay.
-- **Windows:** DNSold36c actual19=15pass/4refusalRED; rootf069 accepts3sites, nativeexitcaptureNULL.
-  Fix77e81aa1 four lines +tests, whole171D/R and8controls UNRUN. Last one readiness probe16:34UTC
-  timeout5ed2faf4, no commands/staging/lifecycle or repeat. Clipboard old0dd and power old05e are
-  source-only; pipeline-owned handle direction accepted, exact failure seam still proposal. Quit
-  source8b605940: await existing teardown BEFORE WPFShutdown; async-voidOnExit cannot own joins.
-  No orphan/owner clipboard-loss/sleep-failure claim. Host availability needs a fresh bounded grant.
-- **Export finding:** sourcec78 recorded current Photos .saving-only and unguarded send callbacks
-  plus reused mutable output URLs. Actual ExportSomethingElse is enabled during those requests.
-  Vector proposal `export-product-lifetime-c78d37fc/receipt.json`56e2c168: one immutable finished-file
-  owner asphasepayload, unique private parent/unchanged artistfilename, retained consumers/current
-  product publication and owned Share handoff. Need verify Share framework lifetime contract and
-  bounded cleanup; no implementation/oldnative yet, no extra service or unbounded completed-file pile.
-  Existing export run/offMain cancellation fences are healthy; do not re-fix them. Old regressions
-  f270d7e7 are source-only (selected2/whole26), preserving24 old methods and all production bytes.
-  Apple copy-only transfer semantics do not prove source-owner lifetime through the system copy.
-  Primary-contract review53481e07 accepts a local UIActivityViewController adapter in ExportSheet:
-  already-finished URL, completion block retaining the immutable product through documented activity
-  completion/cancel. No existing app wrapper exists; no ItemSource/provider subclass is needed.
-  Do not release on SwiftUI dismantle/reset; no controller back-capture cycle. Producer+Photos+Send
-  and Share share ONE product owner in Phase, unique exclusive parent, unchanged filename; startup
-  cleanup only abandoned export namespace. App termination/remote upload completion remain unproved.
-  Old f270 selected2 JOINED2RED: original issues1007–1008/1011–1012/1060–1061 hit exactly3 intended
-  targets, no premise/unwrap/refusal failures. Root reconciled730/IDs/device/nativeargv and LOOKed4
-  whole real48/64PNGs. Older Photos result marked B saved and suppressed B's own refusal; handed A
-  URL later returned B's333bytes rather than A's278. Root accepts source implementation of the ONE
-  immutable-product/activity-completion design above, preserving healthy producer cancellation.
-  Source e4b3548d is frozen, normal81/public13/controls18 prepared only;3runtime paths, one test,
-  RENDER/STREAM docs. One immutable Sendable file/phase payload, compact UIKitfactory/localpopover;
-  no registry/service/extra generation. Root production/new5 review caught0c pre-gate blocking bake
-  read before PNG; e4b TEST-ONLY first-writing subscription fixes that setup, production exact0c.
-  Independent Converter peer32faec1b found no scoped production blocker, but old phases test still expects a flat outputs parent at667–668. Root authorizes TEST-ONLY migration to exclusive UUID child under outputs, preserving file/name/content checks, plus removal of obsolete PhotoLibraryDestination comment naming tmp/PaintAppExports. Keep production otherwise exacte4b; regenerate affected control spans. No compiler/runtime/Share-dispatch claim yet.
-- **Group legacy cleanup:** root8a/c6 recorded unsupported nested MotionGroup defaults. Bake report
-  2f0ecdec: all4fields existed/emitted since firstcbdae859, installed6fb file exactcurrent; parent
-  omission for empty registry LEGAL and remains. All250 protected manifests omitgroups, none is a
-  nonempty witness, and they predategeometryVersion so no currentdecoder baseline claim. Old writer
-  source **28c08b26** fromactual6fb is source729/PBX1329, selected3/wholeclass28 prepared ONLY;
-  all3modes/realpackage save/reload precede missing/null predicted6issues at2statements. Runner-only
-  UUID/owned externalcopy proposal requires build→join→copyxctestrun→test→rootexport grant. No stricter
-  decoder/repair authored. Legal schema unchanged; if legal older omittedfields emerge, repair first.
+- **Native lease:** extracted OLD fill ownerbc2 selected1, root grant under
+  `layer-fill-owner-extracted-old-6b55a431`, supervisor session39409. All agents are source-only.
+  Earlier Export8ded normal87 joined86pass/1fail and all4c native work joined; no other native job.
+- **Tap:** qualification and exact9-path harvest3219 closed (logic37, independent public/bench8,
+  controls17+7). Preserve868 safe curve cap and both curve tests. Final combined gates remain.
+- **Gradient:** permanent2e34a5ec productexact0ab/508, UIexact0c, TEMP observer removed whole.
+  Selected1 and six-whole-class249 GREEN/root730/device/argv/methods reconciled. Actual analytic
+  scalar/per-render grey oracle preserves original probe/tolerance2; raw diagnostic274 disproved
+  old picture-to-picture premise despite equal fields. ROOTLOOK2 tiny images +3public originals;
+  orientation reportcb0e18c5 proves EXIF8/display2160x1620/2x = owner1080x810 landscape (rawIHDR
+  portrait is not orientation evidence). Controls3logic+1public UNRUN. OldResize45 explicitly
+  separate; currentResize47 composition needs joint296, not silent filtering. No harvest yet.
+- **Saving:** productd151 sole landedURL? completion deletes old failure callback; failed saves keep
+  editor and owed edits, reuse existing timer, shared unsettled-state predicate protects newer work.
+  f571/87 remain held. Current test-only4c846050 fixes obsolete clone-count expectations with exact
+  data/ledger/source isolation and explicit non-encoding observers; warning-clear UI02a unchanged.
+  Normal154 GREEN154. Staged run02 GREEN1/coordinator0: actual failed Gallery retains editor/ink,
+  exact empty parent restored, valid nonempty foreground package copied BEFOREterminate, cold drawing
+  bytes match; ROOTLOOK4 original captures. Native/error/fixture history stays in actual run01/837
+  receipts: 837 blank probe under notice;4c run01 queried AUT before launch finished (no obstruction
+  occurred). Run02 binds runner ready token BEFOREone AUT query; no deadline/tolerance/product change.
+  Consumed noncesE682/FA828/3AB3; never reuse. OrdinaryUI2 at837 is1pass+1explicitoptin skip, ROOTLOOK1.
+  Exact scripts85310/88727 unchanged; geometryVersion is1. Current controls16+6 and public controls
+  remain UNRUN; final source and ordinaryUI2 at4c still owed.
+- **Resize:** product381 ONE published operation phase derives safety/progress, existing LatestWins
+  and delayed captured-ID view task; safe e3 fixture avoids unsafe stale second-resize mutant.
+  Whole47 at546 GREEN47. Public2 had blankPASS/paintedRED only invalid one-cel busy premise; actual
+  video/root3frameLOOK shows centred landed stroke, no Undo action. Source-onlyac69699c removes
+  that false transient premise, keeps all painted dimensions/pixels/Undo and waits real terminal row;
+  corrects Settings stale cannot-undo sentence. Selected1/whole14/47 and11controls prepared/unrun.
+  Separate fixed300 real-count busy gate15265 proposal only; no delay/grow/retry or busy credit.
+- **Export:** OLDf270 selected2 proved stale destination answers and reused A URL returning B pixels;
+  ROOTLOOK4. Current8dedfb40 ONE immutable finished-file owner, private exclusive UUID parent,
+  unchanged artist filename, captured consumer identity and same activity completion. No registry or
+  extra generation. Source peers32fa/1f370 scoped accepted. Cross-module `.popover` conflict removed
+  through persistent-root modal sheet; unchanged scanner6 passed in actual normal87. Result86/87:
+  only factory Share cleanup assertion1273 failed twice; all Photos/Send/queued writer/namespace
+  cases pass. Bake authoring TEST-ONLY explicit autoreleasepool +weak controller-retirement premise,
+  original file/content/callback assertions intact; no product change/delay/poll. Actual system
+  Share adaptation, Cancel/Close identity and return-to-drawing/gesture remain unrun. UIKit direct
+  iPad contract is a compatibility gate, not source-certified. Existing18controls +new supporting
+  UUID constructor control37b795 prepared/proposed only; no inherited credit.
+- **Contained package addresses:** OLD497 selected2 actual2RED at validator384/load399, ROOTLOOK5
+  Ared/Bblue/loadedAblue, Bbytes unchanged. Root accepts ONE checked throwing ProjectPackageLayout
+  authority reusing ProjectFileTree; direct table/texture/nested media/write/clone/tidy joins must
+  not bypass it or turn invalid refs into empty content. Preserve legal old spellings until separate
+  repair. Extensioneeddc56c adds5methods194lines/all730production exact; sourceblocked by SourceTime
+  extra rotation arg at515, sole minimal test-only successor authorized after Converter safety peer.
+  No actual extension run or central fix yet. Report97b21355/addendum6617; no owner package touched.
+- **Fill owner duplication:** root/peer532bf2d1 found per-size WindowSurfaceView replacement duplicates
+  existing old-front/size/LatestWins ownership. Small LayerFillView extraction398c preserves OLD
+  branch and complete host stack/pose/mask/layout by inverse reconstruction, no StrokeCanvas target
+  cascade; ordinary immutable queue init. Currentbc2e55fd adds one finite owner test/source731/PBX1327,
+  old18 exact, peer9a671743. A actually presents before queue-held B then C; three preguard targets
+  eligible, later C pixels/placement uncredited on OLD guard. No reuse fix yet; native above.
+- **Saved metadata cleanup:** MotionGroup old previous-writer28c08b26 from actual6fb is729/PBX1329,
+  selected3 prepared ONLY; B2BAF nonce unconsumed. Need build→join→runner-onlycopy→OLD→external
+  real package capture before strict4field decode; omission of empty parent registry stays legal.
+  VectorStroke report06149016: current/6fb writers emit composite+UInt64 seed; protected256 has95350
+  explicit pairs/zero omissions/nulls, all optional group omissions legal. Missing seed is stable ID
+  hash, not random. Historic sample/BrushRef changes mean no whole preseed writer acceptance proved.
+  Conservative combined one-shot materialization preserving currently accepted defaults before
+  strict decode is a SOURCE PROPOSAL ONLY; never blindly require keys or revive old geometry/brush.
+- **Windows:** last single readiness probe16:34UTC timed out5ed2; no remote commands/stage/lifecycle
+  or polling. DNS77 four-line fix171D/R+8controls UNRUN; actualold19 refusal evidence accepted.
+  Clipboard0dd/power05e OLD witnesses source-only; pipeline-owned PowerRequest handle direction
+  accepted, exact failure seam pending. Quit8b605940 awaits existing teardown BEFOREWPFShutdown,
+  not async-voidOnExit. No observed orphan/clipboardloss/sleepfailure claim. Fresh host availability
+  grant required. Historical transport stays qualified at its own pin.
 
 ### Component qualification already accepted
 
@@ -167,8 +126,9 @@ O(N) input storage. Do not reopen implemented findings from stale lower queue pr
 
 1. Tap d7fa qualification and exact harvest are closed, including actual7 public/benchmark controls.
    Preserve3219source and **868's curve cap in StrokeGeometry's tail**.
-2. Resolve actual7e normal294 five RED outcomes without weakening checks; inspect whole captures; qualify
-   3logic/public1 real-owner faults. No reuse of old0ab279 as an actual run. Then exact source harvest.
+2. Finish gradient2e controls3logic/public1 after actual249GREEN; finish resizeac functional workflow,
+   separate real-count progress and controls, then joint296/current composition and exact harvest.
+   Finish saving4c current ordinaryUI/controls and Export cleanup/public/controls.
 3. Opacityfb87 held-thumb selected1 is UNRUN. Readiness893389b8 remains exact. Root ready ONLY4B33,
    BEFORE9072 inventory→once helper063a/native d018→joined/source730→AFTER6ff6 preservation/unique
    NEW manual flight. Output paths absent. Passing workflow may have no failure-only flight; do not
@@ -224,11 +184,9 @@ Bake package/target reviewb431481b/cba09da0 reads2456runtime lines, wholeLayout9
 plus exact callers. Source-demonstrated sibling `..` resource acceptance and permanent legacy-layout
 fallback are recorded in TODO/BUGS. Containment must refuse through ONE resolver; legal old-address
 retirement needs separate previous-writer/data inventory and one-shot Projects/Backups/Trash repair.
-No package mutation/test/fix yet. Keyed Rotate frame-distance loop is only an unmeasured cost boundary.
-Root authorizes source-only OLD containment regressions: two independent existing-class methods
-through actual raster validator and loader, paired valid sibling packages with different real PNGs.
-Only their fresh test fixtures may be edited; production and protected owner packages stay exact.
-Actual OLD intended refusal failures are required before implementing central path validation.
+OLD497 actual required-raster refusal failures now accepted; extension/central fix status above.
+Keyed Rotate frame-distance loop is only an unmeasured cost boundary. Root additional4whole canvas
+owners711lines/532bf2d1 found duplicate fill surface owner and Export presentation conflict above.
 Do not promote filenames/hashes/test names into review depth or claim whole-codebase certainty.
 
 ## Preserved evidence and safety boundaries
@@ -282,50 +240,3 @@ artwork retained. Exact receipts/reconstruction under resume-20261026. Owned39E 
 staging;4B33opacity stays protected. Fetch/worktrees/all110tmp logs previously verified; recheck before
 merge. Root records current work here; earlier narratives live in Git history and immutable receipts.
 
-### Current test observers — October26
-
-Autosave paper-probe successor02a25ec0 is source-only; measured same-distance lower probe and notice/paper/toolbar/dock guards, all protocol/deadlines unchanged. Root is checking a test observer: prepareForSave can itself encode. Any use for backing inspection must prove the returned existing Checkpoint.encoded is false before reading it; no product hook or weakened pixel/byte/ledger checks. Agent authoring only if concern is confirmed.
-
-### Export presentation integration finding — October26
-
-Independent Converter whole presentation review found e4b ExportSheet150 declares `.popover`, contradicting the active whole-app CanvasPresentationLogicTests.testNoPopoverIsDeclaredAnywhereInTheApp. Current integrated runtime has no new popover; no new actual freeze is demonstrated. MENU_PRESENTATION_CENSUS permits modal sheets (canvas blocked) and stock system sharing. Root authorizes source successor using the SAME activity controller/completion/file owner through a nested modal `.sheet(item:)` on the persistent ExportSheet root, no forced UIKit style and no scanner exemption. This is a candidate only: Apple direct UIKit iPad popover requirement remains a presentation-compatibility boundary; actual owner-size system Share/cancel/return-to-drawing/gesture evidence is required before acceptance. If that native integration fails, stop that design and use a local UIKit activity presenter from the modal; do not weaken the freeze invariant or add a service. Include whole CanvasPresentationLogicTests in Export normal selection.
-
-### Resize functional/progress separation — October26
-
-Root LOOKed3 whole decoded transition frames (root-three-frame-look.json), confirms painted stroke lands centred with4096 label; no Undo action/native assertion yet. One-cel unconditional busy exposure is an invalid fixture premise. Root authorizes a permanent TEST-ONLY functional successor from546: rename painted method to ink/extent/Undo, preserve every drawn/dimension/history assertion, wait on actual terminal dimensions; optional observed busy may be captured but is not required/credited. No TEMP always-RED diagnostic or artificial delay/grow/retry. Long-job busy exposure remains a separate explicit gate; fixed300 scene writer/staging proposal can be prepared source-only, no generation until root grant. Root also observed obsolete Settings Resize Canvas detail says cannot be undone; actual resize modal/implementation supports Undo. Correct that existing sentence in place, with no extra control or state.
-
-### Qualified slices and source successors — October26
-
-Permanent gradient2e component249 JOINED GREEN249, root independently reconciled original methods/device/argv/source730; six whole classes, oldResize45 separate. Selected1 wholePNG2 rootLOOK done. Controls3+1 and final joint296 remain. Current native is containment OLD2 at497 (root-old-selected2 grant), not a fix.
-
-Saving test-only successor4c846050 preserves productd151; root read three non-encoding checkpoint-observer guards and warning-clear UI02a delta. Normal154/UI/staged/controls remain to run at4c. Resize successorac69699c preserves every ink/extent/Undo outcome and waits actual terminal dimensions, not assumed busy exposure; one Settings copy correction. Export8dedfb40 keeps one file owner/activity completion, uses root modal sheet and preserves scanner6; independent Bake peer1f370e80 found no new scoped lifetime/cancel blocker. Its normal87/public13 still unrun. New validUUID supporting assertion has no existing18-case fault: root authorizes one additional finite constructor mutant preserving unique owned output directory and all real phases/files, targeting UUID predicate alone, zero inherited credit.
-
-### Fill preview duplicate owner — October26
-
-Converter bounded report532bf2d1: LayerHostView.showFill replaces whole WindowSurfaceView on each working-size change, duplicating existing old-front-retention and LatestWins size ownership in WindowSurfaceView. This can mint B/C pairs independently behind one serial queue during finite grown-window updates. No unlimited leak/RSS/respring claim. Root authorizes source-only host regression/seam proposal using existing owners/probes; avoid new product test hooks, service, cache, or a large dependency cascade merely for tests. Actual root change/OLD regression required before removal.
-
-### Actual package path refusal regression — October26
-
-OLD497 selected2 JOINED2RED, root actual730/device/argv/methods reconciled. Only failures are validator384 accepting sibling requiredPNG and loader399 returning manager. Root LOOK5 originals: originalAred/originalBblue; loadedA is blue. All setup and Bwhole-byte preservation assertions passed. root-causal-acceptance.json records scope. This proves shared containment defect, not external sandbox escape/artwork loss/writer clobber. Vector proposing ONE resolver/failure contract and checking bypassing manifest fields before root authorizes fix; no old-address retirement or format repair yet. Native next is Autosave4c normal154.
-
-### Central package-address scope — October26
-
-Root read Vector proposal97b21355/029426ac plus tidy addendum6617b7ad. Use ONE checked throwing ProjectPackageLayout address contract reusing ProjectFileTree actual-entry classification, preserve legal current/old probes and ordinary missing-content policy. Existing raw brush-table/texture/nested media/write/clone/tidy joins must not bypass it or swallow invalid-address as empty content. Before implementation root authorizes a finite OLD source-only regression extension from497 using existing Layout/Storage/Brush/Video fixtures: direct table/texture refs, nested known media, link parent/leaf, and a real writer route only if a unique test-owned containment premise can be proved. Do not manufacture arbitrary writes or broaden to hostile filesystem races. Original2 tests/product remain exact; commit actual new assertions before native/control work. Report any writer premise refuted by current generated names. No protected scene/library mutation, actual fixture generation or native until root grant.
-
-### Fill-plane module boundary — October26
-
-Root accepts seam proposalae1f5fc1: no existing host-level deterministic test without a large StrokeCanvas dependency cascade. Author a mechanical extraction of EXISTING fillPlane/showFill/shownFill/surface/sharedqueue responsibilities to small LayerFillView, leaving the old replacement branch intact initially. Host keeps unchanged stack/pose/mask/layout and delegates; no new service/cache/state/test hook. Use ordinary immutable queue initialization like existing WindowSurfaceView. Commit extraction separately before finite OLD owner tests; compile the small real owner only in the existing standalone target. A visible→blocked B size→C size regression must prove owner identity/front/placement and scheduling/lifetime; source under that test is mechanically extracted old behavior, not unchanged old binary. Root native OLD and review required before deleting duplicate per-size owner.
-
-### Autosave4c actual gate and setup refusal — October26
-
-Normal154 JOINED GREEN154 and root source730/method/device/argv reconciled. Current4c build-for-testing joined0/source730, fresh descriptor copied runner-only nonceFA828822. Staged4c run01 JOINED1RED at103 obstruction setup; supervisor queried AUT too early after method start, before app.launch completed. MCM retired that exact queried directory before coordinator startup; coordinator refused nonexistent path atcontainer36 BEFORE output.mkdir/exchange/ACK. No filesystem obstruction ran, no held directory or coordinator output exists, zero retry/product credit. Source730/method/argv/device independently reconciled.
-
-Root authorizes one SAME4c run02 with a fresh nonce and exact unchanged coordinator/UI/tolerances/deadlines, fixing operator binding at the actual protocol boundary: resolve runner after selected method start, wait its exact fresh ready token (which is announced only after app launch/public empty-folder/new-canvas setup), THEN resolve AUT once and start coordinator. No arbitrary sleep/repeated AUT-address polling or product/test changes. Prior run01/nonce immutable. Current compiled4c Products/BFT remain unchanged; no rebuild needed for runner-only descriptor copy.
-
-### Autosave public recovery accepted / Export normal triage — October26
-
-Same4c staged run02 JOINED GREEN1 +coordinator0: exact fresh ready bound before one AUT query, real failed Gallery keeps editor/ink, identical untouched parent restored, actual valid nonempty package copied in foreground BEFOREterminate, cold reopened drawing hashes match. Root independently reconciled730/actual method/device/argv and LOOK4 original captures (EXIF8; use detailoriginal for correct picture delivery); failedGallery/foreground fullRGBA identical864e52e1. No retry-deadline/tolerance/product change. Normal154 also GREEN154. Controls/final composition still owed.
-
-Export8ded normal87 JOINED86pass/1fail; root reconciled730/methods/device/argv. Only two failures are Share factory wiring method1273 file-retirement assertion, one per completed/cancelled row. All stale Photos/Send/producer cleanup/namespace/source scanner cases pass. Current test sets controller=nil and assumes ObjC autoreleased controller/callback already released; actual retirement boundary is unproved. Root authorizes TEST-ONLY successor wrapping synchronous controller creation/reset/completion/release in an explicit autoreleasepool, retaining original content/callback/file-retirement assertions and adding weak-controller retirement premise after the pool. No product fix, delay/poll or weakened assertion; if controller retires but file remains, investigate actual remaining owner. Same Share public behavior remains unrun.
-
-Package OLD extensioneedd has deterministic test API blocker: SourceTime(value,timescale,rotation) at515, actual init has onlyvalue/timescale. Root permits minimal TEST-ONLY successor removing that extra argument after independent remainder safety review; oldeedd immutable. No compiler run/product failure is claimed from it.
