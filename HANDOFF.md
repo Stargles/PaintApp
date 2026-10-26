@@ -20,68 +20,60 @@ immutable0-test evidence. Cold/Glare and all feature behavior remain runtime-unq
 
 ## Current integration — October 26
 
-Kevin asks us to keep useful agents on detail work and root on integration/evidence coordination.
-He will be asleep until10a.m. October27; continue independent work without relying on replies.
-No owner question is pending and old device readiness does not authorize another physical restart.
+ACTIVE. Kevin asks for useful agents/high-level root coordination and independent work while asleep
+until10a.m. October27. No owner question pending; old device readiness is consumed. Installed iPad
+remains owner-confirmed6fb; no physical restart overnight. Main/originafd remains unmerged/unpushed.
 
-Source **c2bbb291** includes strict saved-textd97093dc, setup correctionsc388c7ad, Glare waitbd000c9a
-and whole converter retirementec62d712. Actual normal132 at this exact source is **130passed/2failed,
-0skipped/0expected**. Root independently reconciled all132 method IDs/device/command and730 source
-entries before/after/current. All101 logic checks passed, including strict-text44 and permanent
-maintenance/recovery57. The aggregate is RED and is not an all-green fault baseline.
+Current clean source **cbb16f90** includes strict textd970, converter retirementec62, shared capacity8e80,
+reviewed cold damaged-text UI7cb and actual stable same-shot Glare capture7cb. Capacity's two missing
+explicit UI enum consumers were completed at7cb/cbb after separate0-test compile failures; root read
+all2view+3model switches. Failed builds are preserved and never counted as runtime qualification.
 
-The posed selection Duplicate/ToNewLayer/UndoRedo workflow now passes and its whole drawing was
-inspected. Three intended-equivalent final images are byte-identical. An initial batched display
-misrepresented two as black; isolated ORIGINAL re-open resolved this presentation error. No product
-change is indicated. All4 Mode1 and6 graph workflows pass. Two setup premises still block their
-specific new outcomes: Blend cannot deliver exact50% through the existing slider helper (actual33%);
-Text long press exposes no Select All menu. Restyling/replacement and later near-tie Blend outcomes
-remain unreached. Diagnose public gesture delivery before changing product code or tolerances.
+Actual rebuilt normal155 atcbb: **154passed/1failed/0skip/0expected**, exact155 method IDs/7classes,
+owned56C, all730 source entries before/after/current exact and no native children. Root independent
+receipt **c7329292**. Strict44 and VideoImport11 pass, including the completed-Move/failed-import
+regression. Sole failure is the new constructor/refusal test's prior-undo premise: setFolderOpacity
+is explicitly a bare stored-value setter; caller must bracket it. Test wrongly expected one history
+entry from the unbracketed call. Before code, scope is ONLY existing beginStructureGesture + existing
+commitStructureGesture(label:.opacity) around that setup call. Preserve every behavioral assertion,
+expected50%/100%, count, refusal/IDs/pixels and all production bytes. Then new-pin normal155 prepare/
+separate grant. Do not use this RED run as a green fault baseline or silently retag earlier packets.
 
-Glare's2 methods pass, but the owner-landscape picture is STILL rotated/clipped/transitional despite
-its landscape window assertion. AX layout is not framebuffer stability. A capture-only proposal now
-requires actual landscape screenshot dimensions and two stable sampled frames under a deadline,
-attaching the SAME accepted shot. Root has not yet applied or native-qualified it.
+Earlier actual132 atc2: all101logic pass, Gallery2/graph6/Mode1 4/Pose2 pass. Root inspected the posed
+Duplicate/ToNewLayer/UndoRedo drawing. Three equivalent final images hash identically; an initial
+batched display error was resolved by isolated ORIGINAL re-open, no product defect. Blend exact50%
+and Text selected-word restyle/replacement outcomes remain blocked by their public gesture delivery.
+A source-only two-selector diagnostic **aa808ad9** preserves exact opacity/outcome assertions, adds
+bounded trace pictures and tries public word doubleTap. Immutable prepare9c8edcc0, nativeUNRUN;
+root grants it separately after native idle. Diagnostic timing is not normal qualification.
 
-Next source harvest is reviewed shared layer-input capacity **888cd4b9**:8production+42test/support+
-1spec paths, all51 root preimages exact and patch dry-run clean. Independent peer6d45d906 accepted the
-actual producer/caller net counts and preserved old assertions. A concrete failed-video-import rollback
-bug is corrected through existing interactive settlement BEFORE structural capture; no new state,
-transaction or rollback layer. Root recorded scope before implementation. Runtime is UNRUN.
-Initial rebuilt normal155 =capacity111+strict44 will establish the required green baseline first.
-Expected post-harvest census730source/PBX1325/fast5409/full6003 runnable; prepare must verify.
+Old Glare landscape image remains INVALID (rotated/clipped/transitional despite landscape AX).
+Reviewed stable actual framebuffer/same-shot capture is source-integrated but native/LOOK UNRUN.
+Cold damaged-text Gallery methodfb25 is integrated and peer-accepted8aaff832; source/runner script
+receipt a328319d, no native staging yet. Runner-only opt-in makes one explicit ordinary skip: report
+old whole2 plus stagedselected1 honestly, not singlewhole3green. External check must prove displaced
+original full bytes in Trash; UI recovered-red alone is insufficient. Accepted4-file old writer
+witness46680B and all original libraries remain protected.
 
-One strict damaged-text cold UI method **fb25cfc4** is isolated and under independent peer review.
-It uses a runner-only externally staged owned package; no product test flag/global hook. Ordinary
-runs explicitly skip this opt-in method, so old whole2 plus the selected staged method must be reported
-as an honest union3, not one whole3 green run. Three static testBrush factories explain raw/runnable
-census differences: TextHitTestLogicTests, VectorCanvasDataLogicTests, VectorTextPersistenceLogicTests.
-They are private static factories, not XCTest instance methods. No native staging has run.
+New bounded read-only undo audit **b5870f72** identifies one target mismatch: a completed Mode2 cut's
+undo restores canvasA but invokes current view.onStrokeEnded, which can queue current playheadB's
+tile. Root read actual chain and recorded TODO/BUGS before code. Bake independently reviews existing
+contentRevisions.celID→registerVectorElementsUndo(.addsAndRemoves) remedy and moving that generic
+block+Text→+Undo. Converter agent may implement ONLY a public thumbnail/drawing regression on OLD
+production first; source-only, no native until grant. No new state/service/renderer or crash claim.
 
-Normal155 at8e80ba71 stopped at compilation before any test: DrawingView.performNoticeAction's
-explicit no-action switch lacks the new nodeInputLimit case. Native65/helper1 joined; root verified
-all completion hashes and exact730 restoration. Preserve failed run01; it is not runtime evidence.
-Next source scope, recorded before edits: add ONLY that existing no-action case (actionTitle already
-nil); harvest exact reviewed cold methodfb25cfc4 and Glare capture5c7566e3 paths. All existing outcomes
-remain. Rebuild a new-pin normal155 under a separate grant. No retry/retag of the failed run.
-Cold method peer8aaff832 accepts source+runner preparation, native still UNRUN. Glare capture is the
-exact reviewed same-shot/stable-framebuffer patch, native/whole-picture LOOK still UNRUN.
+Census verified730source/PBX1325/runnable5409fast6004full (raw5412/6007). Exactly3 private static
+testBrush factories, not XCTest instance methods, explain raw/runnable difference. The new runner
+opt-in Gallery skip is separate. Native idle after run03; no source hold remains until next prepare.
+Next queue: test-only successful-history setup correction→normal155green→meaningful capacity19/
+strict controls; public Blend/Text diagnostic, cold text recovery/stable Glare actual pictures;
+public wrong-tile Undo repro/fix; permanent maintenance/recovery controls; historicalUI/mask; final
+Debug/Release fast+affectedUI/full/counts/lints/PBX/graph; paired fill performance and genuine remaining
+audit; physical Test1 only after fresh readiness. Merge/push or resolve renewal downgrade beforeOct29.
 
-A new bounded Mode2 undo audit reports a possible stale thumbnail after CutA→scrubB→Undo: gesture
-history restores captured canvasA but current view completion queues thumbnailB. Agent is tracing
-the existing captured-cel registration/invalidation seam; source report/root review pending before
-implementation. No Test1 crash attribution or allocation rewrite.
-
-Native is idle, normal132 source hold released. Reuse owned booted56C without lifecycle changes for
-next logic155 after root verifies prepare and grants execution. Converter-only cold256 gates are
-retired with the feature; meaningful current-format maintenance/gallery/recovery controls remain.
-The installed iPad remains owner-confirmed6fb, not these source candidates.
-
-Evidence: `~/PaintWork/s54-final-qualification/native/strict-retirement-ui-normal132-c2bbb291-run01/`
-contains original captures, root-independent-outcomes.json (SHA476f6380), and root-five-capture-look.json
-(SHAd2650a9d). Preserve frozen older normal73 prepare unchanged. Capacity source/peer/controls:
-`graph-capacity-implementation-6fb979f4/` and `converter-retirement-20261026/capacity-source-review/`.
-All controls, final fast Debug/Release, remaining cold workflows/performance/audit gates remain open.
+Evidence authority: `~/PaintWork/s54-final-qualification/root-next-gates.json`, native/capacity-strict-
+normal155-cbb16f90-run03/, earlier strict-retirement-ui-normal132-c2bbb291-run01/ and immutable named
+source/peer/prepare packets. Earlier component proof stays at its actual pin; no blanket reruns.
 
 ## Checkpoint — 2026-10-25
 

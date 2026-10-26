@@ -10,63 +10,52 @@ immutable0-test evidence. Cold/Glare and all feature behavior remain runtime-unq
 
 ## Active continuation — 2026-10-26
 
-Kevin resumes with “continue”. Proceed with the recorded queue and useful delegated work. The
-October25 parked state is preserved in HANDOFF.md and `~/PaintWork/s54-final-qualification/park-20261025/`
-carry the exact checkpoint/evidence/agent state. Integration is `tmp/s54-mend-free-caps`; installed
-product source **6fb979f4**, unmerged/unpushed; main/origin **afd2030c**. This checkpoint changes docs only.
+Kevin resumes and asks us to continue independent work with useful delegated agents. He will be
+asleep until10a.m. October27; no pending owner question or fresh physical restart readiness.
 
-**What Kevin has now:** point-only vector Liquify, interior fill mending and vector Mend All Fills,
-newest father–grandfather saves, and integrated audit fixes. Release6fb installed/launched normally
-without uninstall/reset. Fresh250-package backup is verified and preserved; Kevin confirms usual scenes
-**“Looks right”**. The erasing crash remains unresolved. New strict-text and layer-limit candidates
-below are NOT in this install. Final regression/performance/audit gates remain unfinished.
+**What Kevin has now:** point-only vector Liquify, interior fill mending/Mend All Fills, newest
+father–grandfather saves and integrated audit fixes in installed Release6fb. Normal install/launch,
+fresh250-package protected backup and usual-scene “Looks right” confirmation are complete. The
+erasing respring remains unresolved; final performance/regression/audit gates remain unfinished.
 
-Kevin reiterates delegated detail work/high-level orchestration and will be asleep until10a.m.
-October27. Continue independent tasks; no pending owner question or physical restart readiness.
-
-Current candidatec2bbb291 is not installed. Actual normal132: **130passed/2failed/0skipped/0expected**.
-All101 logic checks pass, including strict saved-text44 and permanent maintenance/recovery57. Posed
-Duplicate/ToNewLayer/UndoRedo, graph6 and Mode1 4 pass. Root inspected the posed drawing; a batched
-image presentation error was resolved by ORIGINAL re-open, not a product fix. Two public gesture
-premises still block exact50% Blend and selected-word restyle/replacement outcomes. Glare's landscape
-picture remains transitional/invalid despite passing layout assertion; capture-only successor awaits
-review/application. The red aggregate is not a green fault baseline.
-
-Normal155 build at8e80ba71 failed before tests: the new layer-limit notice was missing from an
-explicit DrawingView no-action switch. Root verified exact730 closure/no retry. Next code scope is
-that one existing switch case plus exact independently reviewed cold recoveryfb25 and stable Glare
-capture5c7566e3 test paths; then separately granted new-pin normal155. All runtime gates remain open.
+**Current source:** cbb16f90 includes strict saved text, whole temporary converter removal, shared
+layer admission and reviewed cold recovery/stable capture tests. Normal155:154pass/1fail/0skip;
+root independently reconciled actual IDs/device/all730. Sole failure is test setup: bare folder
+opacity writes no history; bracket the prior successful edit with existing begin/commit gesture,
+keeping every outcome/count/pixel assertion. Record precedes this test-only correction. All44 strict
+text and11 video checks pass within the red aggregate; no all-green baseline yet.
 
 **In queue order (items remain until merged):**
 
-- Integrate independently reviewed shared layer-input capacity888cd4b9 (all51 preimages exact) and
-  establish normal111+strict44 green baseline, then finite meaningful controls. A failed video import
-  could undo a completed Move; corrected through existing settlement-before-capture ordering, with
-  no new state/rollback machinery. Runtime UNRUN; expected730source/PBX1325/fast5409/full6003 after harvest.
-- Finish strict damaged-package cold UI methodfb25cfc4 peer review and externally staged owned-copy
-  workflow. Runner-only opt-in means ordinary runs explicitly skip this method; report old whole2 plus
-  staged selected1 honestly. No product hook/schema/default. Meaningful strict-text controls remain.
-- Complete whole converter retirementec62d712 qualification: permanent maintenance/current-format
-  tests57 pass; finite controls and final gates remain. Temporary converter code/suite/fixture/PBX/UI
-  are removed WHOLE and obsolete converter-only cold256 gates retire with them. Originals protected.
-- Diagnose actual Blend/Text public gesture delivery; preserve exact opacity and drawn replacement
-  outcomes, then run whole affected UI and meaningful controls. Verify stable actual Glare screenshot;
-  AX layout alone was insufficient. Current graph/Mode1/transfer controls still pending.
-- Repin historical UI47+13controls and mask6positives+11faults. Final fast Debug AND Release per exact
-  CLAUDE command, actual/static reconciliation, lints/PBX/graph, touched UI/full phase. Three private
-  static testBrush factories are excluded from XCTest runnable census; no guessed subtraction/skips.
-- Fill16 paired Release ABBA/final sampler/count/cost/whole-RSS and remaining genuine file-level
-  architecture audit. Protected old071 benchmark product/real artwork/results remain intact.
-- Physical Test1 erasing all-process capture only after fresh saved/unlocked readiness. Do not infer
-  crash cause from allocation fixes/simulator results. Finish qualified merge/release lifecycle.
+- Correct only that history setup, rebuild normal155green, then finite capacity19 and strict-text
+  controls. Layer refusal uses existing net child count/notice owners; completed Move settles before
+  failed video import structural capture. No new state/schema/rollback/renderer truncation.
+- Finish blocked Blend exact50% and selected-word text outcomes through public gesture diagnosis;
+  preserved-outcome two-selector diagnostic aa808ad9 is source/prepared, nativeUNRUN. Then whole
+  affected workflows and meaningful controls. Graph6/Mode1 4/Pose2 passed earlier132; posed drawing LOOKed.
+- Drive integrated cold damaged-text Cancel→version→Restore with an externally staged owned copy,
+  recovered blue/red drawing and byte-exact original retained in Trash. One runner-only opt-in skip
+  in ordinary runs is explicit; union oldwhole2+staged1 is not singlewhole3green. Drive stable actual
+  owner-size Glare screenshot; old transitional picture is invalid, AX layout alone insufficient.
+- Complete permanent maintenance/recovery controls after converter code/suite/fixture/PBX/UI removal
+  WHOLE. Earlier permanent57logic+Gallery2 pass; obsolete converter-only cold256 gates retire with it.
+- Reproduce/fix the newly audited wrong-cel thumbnail notification after CutA→scrubB→Undo using the
+  existing captured-ID/generic history owner; public drawing/tile checks first, no crash attribution.
+- Historical UI47+13controls, mask6positives+11faults; final fast Debug AND Release per CLAUDE exact
+  filter, actual/static reconciliation, lints/PBX/graph/touched UI/full phase. Current730/PBX1325,
+  runnable5409fast/6004full; raw5412/6007 excludes exactly3 private static testBrush factories.
+- Fill16 paired Release ABBA/final sampler/count/cost/whole-RSS and genuine remaining architecture
+  audit. Protected old071 products, real artwork, original exports and results remain intact.
+- Physical Test1 erasing all-process capture only after fresh saved/unlocked readiness. Root cause
+  remains unproved. Finish qualified merge/release lifecycle; remove finished items WHOLE when merged.
 
-**Renewal risk:** current profile expires Oct29,8:18pm Toronto. Kevin approved this verified four-day
-artifact only. Auto-resign builds origin/main; resolve before renewal so old main cannot silently
-replace the repaired-format install. No main/daemon/policy change has been made.
+**Renewal risk:** profile expires Oct29,8:18pm Toronto. Kevin approved installed6fb's four-day artifact
+only; normal five-day rule remains. Auto-resign builds old origin/main; qualify/merge/push or resolve
+before renewal so no silent repaired-format downgrade. No main/daemon/policy change has been made.
 
-Owner rulings are settled: vector-only batch mending includes attached marks/protects uncertain joins
-and outline; vector Liquify edits point positions only; saves keep newest clock-bucket versions.
-Future interpolation and other explicitly deferred features stay deferred. No owner question pending.
+Owner rulings remain: vector-only batch mending includes attached marks/protects uncertain joins and
+outline; vector Liquify edits positions only; saves keep newest clock-bucket versions. Future
+interpolation/multi-cel/linear-light/audio/video/importer/stream-stage5 remain explicitly deferred.
 
 ## How to read and keep this file
 

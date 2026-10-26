@@ -39,7 +39,8 @@ admission. A two-input Mix can receive a third child, which both renderers fold.
 preflight of ACTUAL final destination/net child count across producers; preserve current effect setter
 behavior. Raster Duplicate goes to root while other transfers may keep their parent, and grouping/
 folder promotion/Stack→Mix need their actual final deltas. No renderer truncation, invented ID or
-silent reparenting. Capacity source implementation is not yet authorized; proposal pending.
+silent reparenting. Capacity source8e80 integrated; actual155 atcbb154pass/1test-history-setupfailure.
+Existing no-action/icon enum consumers completed; meaningful controls/final gates remain open.
 
 ## Missing saved text fields bypass the existing damage gate — 2026-10-25
 
