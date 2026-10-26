@@ -1534,8 +1534,8 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
         // wait compare a row without adding an image reader or relying on tuple-array Equatable.
         let readRow = { () throws -> [Int] in
             let pixels = try XCTUnwrap(ScreenshotPixels(canvas.screenshot().image))
-            let first = Int(ceil(Double(onHost(paper, 0.20, 0.25).dx) * Double(pixels.width)))
-            let last = Int(floor(Double(onHost(paper, 0.90, 0.25).dx) * Double(pixels.width))) - 1
+            let first = Int(ceil(Double(self.onHost(paper, 0.20, 0.25).dx) * Double(pixels.width)))
+            let last = Int(floor(Double(self.onHost(paper, 0.90, 0.25).dx) * Double(pixels.width))) - 1
             let y = Int(floor(row * Double(pixels.height)))
             var bytes = [pixels.width, pixels.height, first, last, y]
             for x in first...last {
