@@ -110,6 +110,12 @@ than add a per-attempt flag: carry existing landed URL? through the sole complet
 parallel onSaveFailed channel whole, and navigate only on actual landing. Nil completion on refusal
 must balance once; .ask stays unanswered. Preserve data/drawing/refusal outcomes while explicitly
 adapting internal callback tests. No compatibility overload/new result enum/service is needed.
+Further root caller review holds87's successor too: the ScenePhaseSaveGate false arm still invokes
+navigation completion without landing. Trace and remove that false success. The responsive editor
+also permits newer edits/gestures during the background exit write; check that an older landed
+snapshot cannot close their only live document. Reuse existing clock/document/gesture owners;
+no per-attempt success flag or parallel save controller. Record design before further source edits.
+
 
 **Windows Quit finding recorded before code — October26:** source review8b605940 shows async-void
 OnExit can yield at outbox shutdown after Quit already called Application.Shutdown; WPF does not
