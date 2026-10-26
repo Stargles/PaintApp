@@ -39,6 +39,11 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   new public stretch-room premise fails before feature assertions; one old rectangle paper probe
   and two old resize busy-state tests also fail. Trace each separately; no tolerance/oracle tuning,
   no green/appearance claim or controls before corrected baseline. All730 restored/children joined.
+  Whole-video/source/event review refutes orientation leakage: portrait reset occurs. Old rectangle's
+  exact lower paper probe lies behind timeline; public collapse must expose that same row before any
+  unchanged probes. New gradient's actual band top23pt crosses toolbar56pt; existing toolbarBottom
+  trims available visible interval before midpoint centering. Reuse that helper, preserve45° deltas,
+  rail/stretch/probe/tolerance/outcomes; no guessed colour/coordinate fix or global helper rewrite.
 - Finish the colour/text public interactions without weakening drawing checks. Successful Text route
   is integrated3e4a. Completed d700 public recording covers all6 slider drags/335 native notes; root
   receipt053369a5 verifies the native value is already wrong before model delivery, with no observed
