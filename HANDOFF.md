@@ -28,7 +28,7 @@ Use the three existing agents; all source work stays in separate trees. No physi
 
 ### Current native and source work
 
-- **Native now:** none. Autosave837 staged1 grant a5030732/supervisor74677 JOINEDnative65/coord1;
+- **Native now:** none. Permanent gradient2e selected1 JOINED GREEN1; root reconciled actual730/IDs/device/argv. Whole-picture inspection and component249 remain. Autosave837 staged1 grant a5030732/supervisor74677 JOINEDnative65/coord1;
   original1RED only at119(blank paper afterGallery). Source730/IDs/device/argv root-reconciled.
   Coordinator restored exact same empty-directory inode/mode in finally; no held path remains.
   No failure-seen/foreground/cold ACK was reached and no foreground save proof is claimed.
@@ -129,7 +129,7 @@ Use the three existing agents; all source work stays in separate trees. No physi
   RENDER/STREAM docs. One immutable Sendable file/phase payload, compact UIKitfactory/localpopover;
   no registry/service/extra generation. Root production/new5 review caught0c pre-gate blocking bake
   read before PNG; e4b TEST-ONLY first-writing subscription fixes that setup, production exact0c.
-  Independent Converter peer reviewing before native. No compiler/runtime/Share-dispatch claim yet.
+  Independent Converter peer32faec1b found no scoped production blocker, but old phases test still expects a flat outputs parent at667–668. Root authorizes TEST-ONLY migration to exclusive UUID child under outputs, preserving file/name/content checks, plus removal of obsolete PhotoLibraryDestination comment naming tmp/PaintAppExports. Keep production otherwise exacte4b; regenerate affected control spans. No compiler/runtime/Share-dispatch claim yet.
 - **Group legacy cleanup:** root8a/c6 recorded unsupported nested MotionGroup defaults. Bake report
   2f0ecdec: all4fields existed/emitted since firstcbdae859, installed6fb file exactcurrent; parent
   omission for empty registry LEGAL and remains. All250 protected manifests omitgroups, none is a
@@ -281,3 +281,7 @@ artwork retained. Exact receipts/reconstruction under resume-20261026. Owned39E 
 65707034bytes verified before retirement; old39E plans are historical. New gates use56C/freshowned
 staging;4B33opacity stays protected. Fetch/worktrees/all110tmp logs previously verified; recheck before
 merge. Root records current work here; earlier narratives live in Git history and immutable receipts.
+
+### Current test observers — October26
+
+Autosave paper-probe successor02a25ec0 is source-only; measured same-distance lower probe and notice/paper/toolbar/dock guards, all protocol/deadlines unchanged. Root is checking a test observer: prepareForSave can itself encode. Any use for backing inspection must prove the returned existing Checkpoint.encoded is false before reading it; no product hook or weakened pixel/byte/ledger checks. Agent authoring only if concern is confirmed.

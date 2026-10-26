@@ -64,6 +64,8 @@ that the final combined audit build has passed.
    Use the documented activity-completion boundary to retain the same file owner through Share,
    without a separate transfer service. Old selected2 proved both defects (3actual assertion sites,
    all premises healthy); root inspected actual A/B pictures and authorized the shared-owner fix.
+   Independent source review found no scoped product blocker; migrate one obsolete flat-output test
+   expectation to the owned UUID subdirectory before normal tests. Real Share behavior remains unrun.
 6. Saved group metadata: remove unsupported nested legacy defaults only after old rejection proof
    and a real nonempty previous-writer roundtrip. Legal omission of an empty registry stays. Old6fb
    witness28c is source-only; no source/artwork repair has run and no interpolation redesign is in scope.
