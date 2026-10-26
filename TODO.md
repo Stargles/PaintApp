@@ -35,6 +35,10 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   probe expression at488. Split only that test expression into equivalent typed steps/loops;
   preserve order/probes/predicates/tolerances and all product/logic. Old packet/run remain immutable.
   Fresh normal294/control/whole-picture LOOK follow the corrected source; no runtime credit yet.
+  Corrected7e actually ran294:289passed/5failed. Gradient interior is104vs108 (4>unchanged2);
+  new public stretch-room premise fails before feature assertions; one old rectangle paper probe
+  and two old resize busy-state tests also fail. Trace each separately; no tolerance/oracle tuning,
+  no green/appearance claim or controls before corrected baseline. All730 restored/children joined.
 - Finish the colour/text public interactions without weakening drawing checks. Successful Text route
   is integrated3e4a. Completed d700 public recording covers all6 slider drags/335 native notes; root
   receipt053369a5 verifies the native value is already wrong before model delivery, with no observed
@@ -87,6 +91,19 @@ Add a cold public callback check through a unique EMPTY gallery folder and test-
 markers only: preserve/swap/restore that exact directory, observe real saveFailed, then prove a
 valid package while the app is STILL FOREGROUND before cold reopening its pixels. A scene-phase
 save must not mask a missing automatic retry. No new app hook/controller or real-library mutation.
+The first source correctionf571 is HOLD/unrun: artist write failure still invokes attempt-over
+gallery navigation, closing the only live document and stopping its retry. Fix the boundary rather
+than add a per-attempt flag: carry existing landed URL? through the sole completion, remove the
+parallel onSaveFailed channel whole, and navigate only on actual landing. Nil completion on refusal
+must balance once; .ask stays unanswered. Preserve data/drawing/refusal outcomes while explicitly
+adapting internal callback tests. No compatibility overload/new result enum/service is needed.
+
+**Windows Quit finding recorded before code — October26:** source review8b605940 shows async-void
+OnExit can yield at outbox shutdown after Quit already called Application.Shutdown; WPF does not
+await that continuation before stopping its dispatcher/process. Later existing server/session/
+child-process joins are therefore not guaranteed. No orphan observed. Await existing teardown at
+the existing Quit boundary before final Shutdown, with synchronous OnExit fallback; no new service
+or transport rewrite. Finite old proof/source proposal/native qualification remain pending offline.
 
 Current integration730source/PBX1325/runnable5412fast6008full. Component-qualified Video11,
 curve94+6controls and Undo70/public4+logic3/public1 are harvested at their actual pins; final assembled

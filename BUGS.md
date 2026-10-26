@@ -17,6 +17,25 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Failed artist saves still leave the unsaved document — 2026-10-26
+
+Actual caller trace after the failed-autosave witness: ProjectStore completion only means attempt
+over; ContentView.returnToGallery still closes the baker/streams and changes screen after a failed
+write. Autosave.stop drops re-owed work, and opening another scene replaces the live manager.
+No owner ruling permits this; returnToGallery explicitly promises actual disk landing. Candidate
+f571's timer correction is HOLD/unrun because it leaves this hole. Use existing landed URL? as one
+truthful completion signal; remove parallel failure callback, preserve refusal/ask ownership, keep
+failed drawing open and schedule through the same driver. No per-attempt dirty flag/new service.
+
+## Streamer Quit can exit before asynchronous teardown is joined — 2026-10-26
+
+Source review8b605940: tray Quit calls WPF Shutdown; async-void OnExit first awaits outbox disposal.
+When its pump is pending, WPF's synchronous shutdown continues without awaiting the continuation,
+so later qualified server/session/process cleanup need not run. Official WPF8/Windows lifetime
+contracts support this source ordering; no actual orphan/infinite child capture is claimed. Move
+awaited existing teardown to the Quit boundary before final Shutdown; retain an appropriate
+synchronous exit fallback. Proposal/regression/native proof pending; no transport rewrite.
+
 ## A failed autosave forgets that the open drawing still needs saving — 2026-10-26
 
 Current AutosaveClock.fire/saveStarted clear pending timestamps before the write, intentionally
