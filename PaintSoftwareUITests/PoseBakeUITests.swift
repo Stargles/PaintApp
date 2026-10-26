@@ -46,6 +46,14 @@ final class PoseBakeUITests: PaintUITestCase {
         return band.value as? String
     }
 
+    /// One measured grid basis for both pixel sampling and the loop derived from those samples.
+    private func inkSamplingRect(_ app: XCUIApplication, _ canvas: XCUIElement) -> CGRect {
+        let paper = visiblePaperRect(app, in: canvas)
+        let top = max(paper.minY, CGFloat(toolbarBottom(app, canvas)))
+        return CGRect(x: paper.minX + 0.04, y: top + 0.04,
+                      width: paper.width - 0.08, height: paper.maxY - top - 0.08)
+    }
+
     /// **The picture on the canvas as a grid of ink samples inside the visible paper**, taken once
     /// the canvas has stopped changing *and is showing a drawing*: two consecutive grids that agree,
     /// with paper under most of the samples and ink under some.
@@ -59,9 +67,9 @@ final class PoseBakeUITests: PaintUITestCase {
     /// between two of them.
     private func settledInk(_ app: XCUIApplication, _ canvas: XCUIElement,
                             timeout: TimeInterval = 12) throws -> [Bool] {
-        let paper = visiblePaperRect(app, in: canvas)
-        let x0 = paper.minX + 0.04, x1 = paper.maxX - 0.04
-        let y0 = paper.minY + 0.04, y1 = paper.maxY - 0.04
+        let sample = inkSamplingRect(app, canvas)
+        let x0 = sample.minX, x1 = sample.maxX
+        let y0 = sample.minY, y1 = sample.maxY
         func grid(_ probe: (Double, Double) -> Bool) -> [Bool] {
             (0..<300).flatMap { yi in (0..<60).map { xi in
                 probe(x0 + (x1 - x0) * Double(xi) / 59, y0 + (y1 - y0) * Double(yi) / 299)
@@ -318,8 +326,9 @@ final class PoseBakeUITests: PaintUITestCase {
         let animated = try settledInk(app, canvas)
         assertDifferentDrawing(animated, resting, "PREMISE: the middle pose is visibly away from rest")
         let extent = try XCTUnwrap(inkExtent(animated), "PREMISE: actual middle-frame ink defines the loop")
-        let x0 = paper.minX + 0.04, x1 = paper.maxX - 0.04
-        let y0 = paper.minY + 0.04, y1 = paper.maxY - 0.04
+        let sample = inkSamplingRect(app, canvas)
+        let x0 = sample.minX, x1 = sample.maxX
+        let y0 = sample.minY, y1 = sample.maxY
         let loopMin = CGVector(dx: x0 + (x1 - x0) * CGFloat(extent.cols.lowerBound) / 59 - 0.03,
                                dy: y0 + (y1 - y0) * CGFloat(extent.rows.lowerBound) / 299 - 0.03)
         let loopMax = CGVector(dx: x0 + (x1 - x0) * CGFloat(extent.cols.upperBound) / 59 + 0.03,

@@ -251,7 +251,7 @@ final class TextSessionUITests: PaintUITestCase {
                               width: glyphWidth, height: words.height)
         XCTAssertTrue(words.contains(far.insetBy(dx: -glyphWidth, dy: 0)),
                       "PREMISE: the far band and another glyph of trailing room fit on visible paper")
-        XCTAssertTrue(words.contains(exterior), "PREMISE: untouched paper beside the word is visible")
+        XCTAssertTrue(visible.contains(exterior), "PREMISE: untouched paper beside the word is visible")
 
         // Reuse the shared displayed-orientation pixel probe, not a second screenshot reader.
         func count(in rect: CGRect, matching predicate: (RGBA) -> Bool) throws -> Int {

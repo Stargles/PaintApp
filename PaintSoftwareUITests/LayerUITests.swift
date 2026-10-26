@@ -1869,7 +1869,8 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
         openLayerPanel(app)
         let opacity = app.sliders["layerPanel.row.2.opacity"]
         XCTAssertTrue(opacity.waitForExistence(timeout: 5))
-        opacity.adjust(toNormalizedSliderPosition: 0.5)
+        adjustSlider(opacity, to: 0, tolerance: 0)
+        adjustSlider(opacity, to: 0.5, tolerance: 0.005)
         let readout = app.staticTexts["layerPanel.row.2.opacityReadout"]
         XCTAssertEqual(readout.value as? String, "50%",
                        "PREMISE: read the actual slider immediately; 50% means [0.495, 0.505), not exact 0.5")
