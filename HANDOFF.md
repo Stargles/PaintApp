@@ -103,16 +103,15 @@ and all requiredProducts remain protected. Read external lease before any native
   sweep through the existing finger synthesizer. Temporaryfb87 is clean/source-prepared and exactdiff
   peer675d2f20 accepted; its one-selector experiment remains UNRUN/ungranted.
   Keep four attempts, original .005/50% and all drawing assertions; no product hook/controller state.
-- Native tests are idle after numeric94 and6 controls. Root owns the reviewed offline cleanup of
- 56C's two generated OS caches is complete:10.11GiB actual freed. All7941 Containers entries
- were archived/hash-verified and exact before boot; all original PaintSoftware/Runner bundle/data
- entries remain exact after same-device boot (OS added one launch snapshot). No erase/iPad operation.
- Read exact action receipts under
- resume-20261026/owned56C-offline-cache-cleanup before resuming tests; native slot is IDLE. 4B33 remains shut.
- Tap old-production selected1 is closed/root accepted54fb7d33; native-alpha premises passed,
- failures253/268(1512inkcells)/270 were intended; Clear277 remains unreached0credit. New canonical
- geometry source4788 is independently peer accepted but compiler/native/public/cost UNRUN.
- Author is making only the agreed new-test y48→47 FALSE-probe strengthening before controls.
+- Native tests are paused during root-owned exact-five obsolete simulator retirement. PRESERVE
+  completed with verified archives; DELETE is running separately. Consult the external lease and
+  completion receipts before resuming. Offline56C cleanup recovered10.11GiB; all7941 Containers
+  entries were archived/verified, and all original PaintSoftware/Runner bundle/data entries remain
+  exact after boot. OS added one launch snapshot. Closed-result dedup recovered20.72GiB while
+  retaining every result path. 4B33 remains shut; all requiredProducts stay protected.
+  Tap old-production witness is root-accepted54fb7d33. Isolated currente2 logic37 and publicUI6+
+  benchmark1 are green, rootLOOK3 completed. Debug image-manager cold miss1484.8ms is unresolved;
+  Release baseline is prepared only, and performance/15controls precede harvesting.
 
 - Permanent startup normal59 passed59/59 at60427 (57 whole logic +2 explicit old Gallery methods,
   whole class3), root5283dbb2. Four original controls are assertion-red/root partially accepted;

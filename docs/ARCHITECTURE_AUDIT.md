@@ -59,9 +59,11 @@ original component directories. Historical results are not retagged to current c
   remain unqualified: stale decoder-error arrangement, two topology checks, packed header metadata,
   and shared slot-array comparisons. They are not five demonstrated unfixed product defects.
 - Finish the independently reproduced Tap corner correction through canonical geometry. It is still
-  isolated from root: logic37 passed; first public6+benchmark run was6pass/1fail because the new
-  landscape test tapped under its card. Root inspected the actual full frames. Preserve every outcome,
-  fix that fixture position, and measure image/manager cost before claiming smooth selection.
+  isolated from root: e2 logic37 and publicUI6+benchmark1 passed, and root inspected the three whole
+  square-selection pictures. The earlier6pass/1fail was actual card occlusion; the existing exposed-row
+  helper corrected only fixture positioning, preserving every outcome. Debug image-manager cold miss
+  costs1484.8ms for120strokes/165480dabs. Measure Release, then qualify any minimal local-geometry
+  admission and the pending15controls before harvesting or claiming smooth selection.
 - Finish the native opacity-gesture experiment and subsequent colour workflows without loosening
   outcomes. Existing observations establish a native slider setup miss, not a blend-product defect.
 - Finish current-format damaged-text cold recovery, consumer UI and final integration. Qualified

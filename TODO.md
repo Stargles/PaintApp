@@ -50,9 +50,11 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
 
 Current integration730source/PBX1325/runnable5412fast6008full. Video67bd normal11/control1 are closed;
 numeric curve94 and6safecontrols are root-accepted; exact3-path fix harvested8682859f. Native
-tests are idle after root-owned offline56C cache cleanup recovered10.11GiB; all original app/runner
-container entries are preserved after same-device boot. New canonical Tap
-source is peer-accepted/compiler/native UNRUN. Undo normal70/public4
+tests are paused for root-owned retirement of five obsolete test simulators after verified app-data
+archives. Offline56C cache cleanup recovered10.11GiB and exact result dedup20.72GiB; original
+app/runner data and result paths are preserved. Isolated canonical Tap sourcee2 passed logic37/37
+and publicUI6+benchmark1=7/7; root inspected its three square-selection stages. Release cost and
+controls remain open; the source is not harvested. Undo normal70/public4
 and logic3/public1 controls are closed at their actual pins; exact4-path fix is harvested d7090060. Exact evidence/current
 lease live in HANDOFF.md and `~/PaintWork/s54-final-qualification/root-next-gates.json`.
 Owner rulings remain point-only vector Liquify; vector batch mending includes attached strokes but
