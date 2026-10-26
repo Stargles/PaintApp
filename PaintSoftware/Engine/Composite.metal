@@ -960,7 +960,7 @@ static inline float4 crtScreen(texture2d<float, access::read> source, constant E
     float k = params.curvature;
     // 1.
     float2 centre = float2(gid) + origin + 0.5f;
-    float2 n = centre / frame * 2.0f - 1.0f;
+    float2 n = precise::divide(centre, frame) * 2.0f - 1.0f;
     // 2.
     float2 w = n * (1.0f + k * float2(n.y * n.y, n.x * n.x));
     if (fabs(w.x) > 1.0f || fabs(w.y) > 1.0f) { return float4(0.0f); }
