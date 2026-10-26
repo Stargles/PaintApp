@@ -17,7 +17,7 @@ Root integration moved to `~/PaintWork/PaintApp-s54-qualified-integration`,
 `~/PaintWork/s54-final-qualification/root-next-gates.json`. Inspect actual completion receipts before
 assuming the native lease is idle. Do not copy stale agent HANDOFF/TODO files into integration.
 
-Product/test source **ac72a0ee** now harvests exact reviewed5a/2d effects,6ef public Mix refusal,
+Product source **ac72a0ee** now harvests exact reviewed5a/2d effects,6ef public Mix refusal,
 4432 Undo regression with established precreation orientation,67bd explicit picked-file comparisons,
 and9e286 output-verified Lens benchmark, the successful permanent Text interaction and one public
 Chroma drawing test. The failed slider controller and diagnostic prints are excluded.
@@ -90,50 +90,53 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   sweep through the existing finger synthesizer. Temporaryfb87 is clean/source-prepared and exactdiff
   peer675d2f20 accepted; its one-selector experiment remains UNRUN/ungranted.
   Keep four attempts, original .005/50% and all drawing assertions; no product hook/controller state.
-- Sole native slot is Vector's **bf5741b4** core6 Debug app+UITests build-for-testing on56C,
-  grant18dee72e, NO test execution. No concurrent compiler/lifecycle/environment operations.
-  4B33/39E remain shut; no physical action. Check actual completion before granting the next job.
-- Chroma public drawing testee983 is integrated with only two explicit self.onHost compile corrections
-  at60427b21; no outcome/input/action changed. Firststartup59 at1a92 compiled ZERO tests, root61eb736e;
-  preserve that failed run. New permanent startup59/control10 are frozen at60427:57 whole logic plus
-  two explicit old Gallery methods (whole class3); normal59 passed59/59, zero failures/skips/expected,
-  root5283dbb2 independently reconciled every ID/device/source730. Control10 STOPPED after four
-  assertion-red cases and S5's expectation-overfulfillment exception/crash (ZERO credit); five later
-  cases remain UNRUN. All730 restored and children joined; root extraction records the actual issues.
-  Before code, root accepted a test-only first-entry latch: count every callback using the existing
-  lock, fulfill/wait only for the first call. Keep all original assertions/overfulfillment setting,
-  production and real fault unchanged. New positive/S5 gate plus five original unrun cases stay
-  separate; do not rerun all10 or call the exception an assertion failure.
-  The actual Gallery activities retain ZERO screenshots; root claims no LOOK. Chroma selected/whole11/
-  drawn effect-omission control also remain UNRUN. Do not count compilation as a drawing check.
+- Sole native slot is Converter's exact five original UNRUN startup controls at60427 on56C,
+  grant4f338b56; operator88992/driver88993/session50865 started once. 4B33/39E remain shut. No
+  physical action, overlapping compiler/lifecycle/environment operations or old-case replay.
+- Permanent startup normal59 passed59/59 at60427 (57 whole logic +2 explicit old Gallery methods,
+  whole class3), root5283dbb2. Four original controls are assertion-red/root partially accepted;
+  old S5 expectation exception/crash stays ZERO credit and its packet is immutable. The test-only
+  first-entry latch b55 preserves all104 old assertions. New selected1 passed1/1, then exact S5
+  guard-omission reached BOTH original counts119/125 (2 and3 versus1), without an exception;
+  root8ebff7b7 accepts2 contracts, extra readiness120 is ZERO credit. Root harvested ONLY that test
+  change at537bc70f; all730 entries match b55 exactly, receipt root-harvest-first-entry-537bc70f.
+  The five other original cases are running separately; do not retag this as one current10-case run.
+  Gallery activities retain ZERO screenshots, so no LOOK is claimed for those old two methods.
+- Public Chroma test is integrated with only two self.onHost compile corrections60427; selected/
+  whole11/outcome control remain UNRUN. Original1a92 startup compiler failure executed ZERO tests and
+  stays immutable. Do not count compilation as a drawing check.
 - Public capacity cold source **6ef391e4** extends an existing Sandwich workflow, one exact launch
   helper seam; no product hook/new test method. Real two-input Mix refusal/current row/history/drawing
   checks and notice ordering preserved. Source peer/root review then selected1/whole10/control remain.
-- Wrong-cel Undo public repro atb60 reached the actual intended526 assertion failure after all
-  earlier premises; first two other methods have passed, final method is still running. Do not call
-  the whole4 result closed yet. Root accepted the existing captured-identity/registerVectorElementsUndo
-  seam before implementation: same label/cost/changed-ink damage, remove duplicate view callback
-  closures whole and move generic ElementSwap/registration from +Text to +Undo. Extend existing
-  thumbnail logic workflow across frames and retain the public Redo/B oracles. No new state/service/
-  renderer or crash attribution. Earlier4432 remains immutable;31e precreation setup is preserved.
+- Wrong-cel Undo public repro b60 CLOSED4=3pass/1intended526 failure,0skip/expected; root exact
+  IDs/device/source730 plus LOOK e287c84a. Actual whole beforeUndo and late-video UndidErase toast
+  show B whole while off-frame A's thumbnail stays gapped. ReturnA/Redo/B outcomes were UNREACHED.
+  Fix source1c99512c is committed/prepared/UNRUN: observed stored cel ID plus existing celIndices
+  and actual vector identity reuse registerVectorElementsUndo; old view callback closures removed
+  whole, generic ElementSwap/registration moved +Text to +Undo. Same cost/damage/labels; no new
+  state/service/renderer. Existing thumbnail logic test keeps all old expressions and checks A/B
+  across Undo/Redo with real cold B renders. Author c34's cached-B operands are superseded unrun.
+  Harvest only4 source/test paths, exclude3 author precode docs; packet69fca5cc/addendum21e44119.
+  Independent source peer pending. Logic70/public4/4faults are prepared only; no production fix is
+  yet harvested or qualified. Earlier4432 and all baseline pictures/results remain immutable.
 
 ### Other required gates, in queue order
 
-Warning cleanup source direction and concrete six-file patchbb437dce were independently/root
-reviewed before code: explicit existing serializer/lock/pure-owner boundaries and two whole unused
-local deletions only. No bodies/locks/policies/protocols change. Brush preview stays separate because
-its renderer/conformance dependencies need actual compiler evidence; no blanket unsafe annotations.
-The exact six-file patch is committed clean atbf5741b4 on PaintApp-s54-warning-owner-core;
-source730/724unchanged, no compiler run. First later app+UITests Debug compilation stops at any
-unreviewed dependency scope. No preview annotations are bundled.
+Warning core6 is clean bf5741b4: explicit existing serializer/lock/pure-owner declarations and two
+whole unused-local deletions. App+UITests Debug build-for-testing succeeds (NO tests), closure2f739.
+Seven original named warning rows disappear; preview stays unchanged and two new candidate-protocol
+warnings were reviewed before further code. Exact three-prefix successor07a78454 (author26ad/peerf9d7/
+root accepted) is source-prepared, compiler UNRUN: candidate protocol and existing lock-owned
+RasterSource/RasterLayerTexture opt out of accidental isolation. No bodies/state/locks/budgets/
+Sendable/conformance/policies changed. Stop/review each new Surface/Backing/DabTarget/cache/checkpoint
+warning; no automatic cascade or actor hops. Busy refusal is immediate, but successful checkpoints
+may block and pinned providers may retain bytes despite callback true. Preview remains separate.
 
-Actualbf core6 compilation now succeeds for app+UITests (no tests), closure2f739223. Seven original
-named warnings disappear; preview is unchanged and two candidate-protocol requirements are newly
-exposed. Author26ad/peerf9d7/root accepted exact three-line patchef3803 before code: existing weak
-candidate protocol and two lock-owning RasterSource/RasterLayerTexture classes opt out of accidental
-default isolation. No body/state/lock/budget/Sendable/conformance changes. Stop/review every newly
-exposed dependency; no actor hops. Busy refusal is immediate; successful checkpoints may block and
-pinned providers may retain bytes despite callback true. This is source direction, not runtime proof.
+Tap audit found actual support outside the circular hit/outline (source-only rotated-square witness).
+Preferred c49baadd reuses canonical geometric object bodies and local swept primitive support.
+The stronger d046 raster-probe proposal is rejected: it changes hole/gap policy and needs unnecessary
+render/cache/refusal machinery. Bake is adding a tiny production-rendered witness to existing logic
+on old hit code before any production fix. Native alpha/hit/outline reproduction remains UNRUN.
 
 1. Finish above effects/control/public gesture slices, preserving immutable original packets and
    meaningful exact assertions. Before every native grant verify clean pin/source730/tool/argv,

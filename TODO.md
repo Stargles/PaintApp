@@ -33,24 +33,22 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
   remain pending. Preserve original2d/702/3d2 RED. Matched Lens ABBA packet is prepared only.
   New public Chroma drawing test with two self.onHost compiler corrections60427 is integrated;
   selected/whole11/outcome control UNRUN. Corrected permanent startup59 passed59/59; its10
-  controls are running separately. Actual Gallery screenshots are unavailable, so no LOOK is claimed. First1a92 compiler failure executed ZERO tests and stays immutable.
+  first four controls are accepted, S5 is accepted separately after its test-only latch correction,
+  and five original cases are running. No single-current10-case claim. Gallery screenshots are
+  unavailable; no LOOK. First1a92 compiler failure executed ZERO tests and stays immutable.
 - Public two-input Mix refusal workflow6ef; cold damaged-text recovery/byte-exact original in Trash;
   actual stable Glare landscape picture; wrong-cel Undo thumbnail public repro4432 then minimal fix.
 - Permanent maintenance/recovery and remaining relevant UI/mask controls; final exact fast Debug AND
   Release, counts/skips/lints/PBX/graph/touched whole UI/full phase. Paired fill cost/whole RSS and
   genuine remaining architecture review. Earlier qualification stays at its actual pin.
-  Startup control10 stopped correctly: four intended assertion failures, then S5 crashed the test's
-  one-shot entry expectation before either once-only count assertion. S5 gets ZERO credit; five
-  later cases are UNRUN. Root reviewed a test-only correction before code: count every maintenance
-  callback under the existing lock, but only the first callback fulfills/waits on the existing latch.
-  Preserve Thread/readiness/count assertions and production unchanged; no overfulfillment setting
-  relaxation. Run a new positive then the exact once-guard fault separately. Continue the five
-  unrun original cases on frozen60427 with a separately granted bounded plan; never rerun/retag all10.
+  Startup test correction537bc70f is harvested byte-exact from b55: selected1 passed, the real once-
+  guard fault reaches original count119/125 without an exception. Old S5 crash is ZERO credit. Five
+  original unrun cases retain old60427 source/normal59 and run separately; no replay or retagging.
 - Physical Test1 only after fresh saved/unlocked readiness. Qualified merge/push before October29
   signing renewal, or resolve automatic old-main downgrade risk. Remove completed items WHOLE.
 
 Current integration730source/PBX1325/runnable5412fast6008full. Video67bd normal11/control1 are closed;
-corrected60427 startupcontrols10 holds the sole native slot. Exact evidence/current
+the five original unrun60427 startup controls hold the sole native slot. Exact evidence/current
 lease live in HANDOFF.md and `~/PaintWork/s54-final-qualification/root-next-gates.json`.
 Owner rulings remain point-only vector Liquify; vector batch mending includes attached strokes but
 protects uncertain joins/outside outline; saves keep newest clock-bucket versions. Deferred features
