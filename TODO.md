@@ -87,6 +87,13 @@ announcement if needed, reusing existing owner/worker. Announced500-yield comple
 that finite-spin wait does not guarantee an off-main queue has finished. Preserve actual size/history
 and gating outcomes with completion-based bounded waits. Source design review and public proof owed.
 
+**Current-format cleanup review — October26:** whole MotionGroup body still explicitly decodes
+missing name/colour/mode using old-field defaults. Verify its current writer and previous-build
+packages before deciding whether these are legal omissions or retired compatibility. No speculative
+interpolation redesign: this is only the saved-data/legacy-code rule. Any stricter saved format must
+first repair Projects/Backups/Trash once and round-trip actual previous-writer data; no source or
+artwork mutation is authorized by the finding alone.
+
 **New source findings recorded before regression/fix — October26:** bounded Windows resource
 review42f684d2 found clipboard timestamp collisions can overwrite an earlier queued paste, and
 thread-bound keep-awake requirements are acquired/cleared across asynchronous continuations.
