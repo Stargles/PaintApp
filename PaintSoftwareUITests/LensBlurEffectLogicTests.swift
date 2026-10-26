@@ -448,10 +448,11 @@ final class LensBlurEffectLogicTests: XCTestCase {
         try XCTSkipIf(MetalEffectEngine.shared == nil, "No Metal device in this test bundle")
         guard let engine = MetalEffectEngine.shared else { return }
 
-        func seconds(_ body: () -> Void) -> Double {
+        func seconds(_ body: () -> [UInt8]?) -> (elapsed: Double, output: [UInt8]?) {
             let start = CFAbsoluteTimeGetCurrent()
-            body()
-            return CFAbsoluteTimeGetCurrent() - start
+            let output = body()
+            let elapsed = CFAbsoluteTimeGetCurrent() - start
+            return (elapsed, output)
         }
         let width = 2048, height = 1024
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
@@ -463,10 +464,39 @@ final class LensBlurEffectLogicTests: XCTestCase {
         let identity = Effect.lensBlur(Effect.LensBlur(radius: 0))
         let gaussian = Effect.blur(Effect.Blur(radius: 16))
 
-        _ = engine.apply(lens, to: bytes, width: width, height: height)   // warm the pipeline and the pool
-        let lensSeconds = (0..<3).map { _ in seconds { _ = engine.apply(lens, to: bytes, width: width, height: height) } }
-        let identitySeconds = seconds { _ = engine.apply(identity, to: bytes, width: width, height: height) }
-        let gaussianSeconds = seconds { _ = engine.apply(gaussian, to: bytes, width: width, height: height) }
+        // Warm and prove actual owner-size work before timing; a refused/no-op render is not fast.
+        do {
+            let output = try XCTUnwrap(engine.apply(lens, to: bytes, width: width, height: height),
+                                      "The GPU must admit the owner-size Lens Blur before it is timed")
+            XCTAssertEqual(output.count, bytes.count, "The warm Lens Blur returns the whole 2048×1024 RGBA picture")
+            XCTAssertNotEqual(output, bytes, "The warm Lens Blur actually changes this nonuniform picture")
+        }
+        // apply's intrinsic upload/readback stays inside each clock. Checks and output comparisons
+        // run after it stops; each scope retires its one returned picture before the next call.
+        var lensSeconds: [Double] = []
+        for _ in 0..<3 {
+            let timed = seconds { engine.apply(lens, to: bytes, width: width, height: height) }
+            let output = try XCTUnwrap(timed.output, "Every timed Lens Blur must return an actual picture")
+            XCTAssertEqual(output.count, bytes.count, "Every timed Lens Blur returns the whole owner-size picture")
+            XCTAssertNotEqual(output, bytes, "A timed Lens Blur cannot count an identity as the gather's cost")
+            lensSeconds.append(timed.elapsed)
+        }
+        let identitySeconds: Double
+        do {
+            let timed = seconds { engine.apply(identity, to: bytes, width: width, height: height) }
+            let output = try XCTUnwrap(timed.output, "The timed radius-zero round trip must return a picture")
+            XCTAssertEqual(output.count, bytes.count, "The round trip returns the whole owner-size picture")
+            XCTAssertEqual(output, bytes, "Radius zero is the exact upload/readback identity at owner size")
+            identitySeconds = timed.elapsed
+        }
+        let gaussianSeconds: Double
+        do {
+            let timed = seconds { engine.apply(gaussian, to: bytes, width: width, height: height) }
+            let output = try XCTUnwrap(timed.output, "The timed Gaussian must return an actual picture")
+            XCTAssertEqual(output.count, bytes.count, "The Gaussian returns the whole owner-size picture")
+            XCTAssertNotEqual(output, bytes, "The Gaussian cost also requires a nonidentity gather")
+            gaussianSeconds = timed.elapsed
+        }
 
         #if DEBUG
         let configuration = "DEBUG (-Onone)"
