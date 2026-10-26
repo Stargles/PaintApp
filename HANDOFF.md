@@ -46,6 +46,12 @@ Use the three existing agents; all source work stays in separate trees. No physi
   portrait is not orientation evidence). Controls3logic actualRED/sixcanonical targets accepted;
   four old translation extras0credit. Public1 actualRED at prior extension witness, intended517
   colour assertionunreached0credit; Vector tracing whether witness couples to wrong paint colour.
+  Report97c5bc77 +ROOTLOOK2 whole original before/video frame show delivered stretched geometry;
+  first right extension can turn near-white under the deliberately bad mapper. Inferred local
+  coordinates/video colours are diagnostic only. Root authorizes ONE test-only successor selecting
+  a fixed LEFT extension from BEFORE pixels (same20...220 source range and2px margin), preserving
+  all probe/RGB6/geometry/Undo/Redo assertions and deadlines. Product/other729 exact2e; prepare
+  wholeFillObjectUI15 and same public fault against a fresh actual15positive, no inherited target hit.
   All730source restored. Original normal249/ROOTLOOK remain separate. OldResize45 explicitly
   separate; currentResize47 composition needs joint296, not silent filtering. No harvest yet.
 - **Saving:** productd151 sole landedURL? completion deletes old failure callback; failed saves keep
