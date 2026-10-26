@@ -1,315 +1,134 @@
 # Handoff
 
 Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md.
-Verify origin, worktrees and every tmp branch before trusting this file. Main's handoff is behind
-this integration branch. Kevin authorizes useful agents; quality and usage conservation matter more
-than speed. Delegate implementation and independent review; root owns integration, evidence review
-and ONE Mac native lease. Preserve real artwork and record before acting.
+Verify origin, worktrees and every tmp branch. Main's handoff is behind. Kevin permits useful agents;
+conserve usage and prioritize quality. Root coordinates integration, independent evidence review and
+ONE native lease. Continue autonomously; do not park. Preserve real artwork and record before code.
 
-**ACTIVE: Kevin resumed on 2026-10-26 (“continue”).** The October25 checkpoint remains preserved.
-Usage authorization persists: delegate useful work, conserve usage, quality over speed. No owner
-question is pending. No physical restart is authorized by an old readiness answer.
+## Active continuation — October 26
 
-Successor normal155 run02 at7cb2dba3 also stopped before tests: CanvasNoticeBanner.icon lacked the
-same new case. Root independently verified de416e09 closure/all730 source and no native children.
-Before next code, the complete named-consumer census was read: two view switches (DrawingView now
-handled; banner pending) and three CanvasNotice message/actionTitle/code switches (all handled).
-Add nodeInputLimit ONLY to existing noDrawingSurface/nosign icon arm; keep exhaustive switches,
-no default/new flag/state. A new-pin run03 needs separate prepare/grant; both failed builds remain
-immutable0-test evidence. Cold/Glare and all feature behavior remain runtime-unqualified.
+Kevin is asleep until10a.m. tomorrow; no response is expected and no question is pending. Old physical
+readiness answers are consumed. No iPad restart/install overnight without fresh readiness.
 
-## Current integration — October 26
+Root integration moved to `~/PaintWork/PaintApp-s54-qualified-integration`,
+`tmp/s54-qualified-integration`, starting at **adf0e453**. The old tree
+`~/PaintWork/PaintApp-s54-mend-free-caps` stays clean atadf for frozen controls. Main/origin remain
+**afd2030c831db7a746271fe306e8b5a5b9b02df6**; nothing new is merged/pushed. Current external authority:
+`~/PaintWork/s54-final-qualification/root-next-gates.json`. Inspect actual completion receipts before
+assuming the native lease is idle. Do not copy stale agent HANDOFF/TODO files into integration.
 
-ACTIVE. Kevin asks for useful agents/high-level root coordination and independent work while asleep
-until10a.m. October27. No owner question pending; old device readiness is consumed. Installed iPad
-remains owner-confirmed6fb; no physical restart overnight. Main/originafd remains unmerged/unpushed.
+**What Kevin has:** installed, signed Release **6fb979f442f4d3da1299785de2a077a2058a4dfe** contains
+point-only vector Liquify, interior vector fill mending/Mend All Fills, newest clock-bucket backups
+and earlier audit fixes. Normal install/launch and usual-scene **“Looks right”** confirmation are
+complete. Erasing respring cause, broad final regression/performance and remaining audit are open.
 
-Current clean source **cbb16f90** includes strict textd970, converter retirementec62, shared capacity8e80,
-reviewed cold damaged-text UI7cb and actual stable same-shot Glare capture7cb. Capacity's two missing
-explicit UI enum consumers were completed at7cb/cbb after separate0-test compile failures; root read
-all2view+3model switches. Failed builds are preserved and never counted as runtime qualification.
+### Current qualification and immediate queue
 
-Actual rebuilt normal155 atcbb: **154passed/1failed/0skip/0expected**, exact155 method IDs/7classes,
-owned56C, all730 source entries before/after/current exact and no native children. Root independent
-receipt **c7329292**. Strict44 and VideoImport11 pass, including the completed-Move/failed-import
-regression. Sole failure is the new constructor/refusal test's prior-undo premise: setFolderOpacity
-is explicitly a bare stored-value setter; caller must bracket it. Test wrongly expected one history
-entry from the unbracketed call. Before code, scope is ONLY existing beginStructureGesture + existing
-commitStructureGesture(label:.opacity) around that setup call. Preserve every behavioral assertion,
-expected50%/100%, count, refusal/IDs/pixels and all production bytes. Then new-pin normal155 prepare/
-separate grant. Do not use this RED run as a green fault baseline or silently retag earlier packets.
+- Atadf, rebuilt **155/155**, zero failure/skip/expected across LayerTree59, MoveToNewLayer12,
+  FillObject29, VideoImport11, TextRecipe13, VectorTextPersistence14 and SaveDamageGate17. All730
+  source/test/PBX entries match; root receipt15cb7fb5. Earlier cbb154/1 was a setup error: bare opacity
+  setter needs existing begin/commit history bracketing. Only the fixture changed, all outcomes kept.
+- Capacity original19 controls plus one real failed-history follow-on qualify all42 original
+  canonical statements. Strict text26 actual cases qualify28 application statements plus2 fixture
+  witnesses (ZERO application credit). Exact native assertion failures, restoration and independent
+  causal review are preserved. Repeated loop/log occurrences do not inflate canonical counts.
+- **Capacity24 is currently granted to Vector on owned56C**, exact prepared plan at
+  `native/capacity-support24-adf0e453-driver-prepared/`.41 additional IDs targeted; no runtime credit
+  until closure/root extraction. Four outcomes stay separate: Fill103 is arrangement-only; Video274/
+  319 currently throw during missing-file reads; cel/version identity280 is a distinct contract with
+  no eligible narrow real-owner fault found. Never fake an ID or delete a fixture to turn it red.
+  Video335 is a cumulative method guard, never proof attributable to the last blocked stage alone.
+- Public Blend/Text diagnostic **9e066893** closed **0pass/2fail**, all730 exact/native joined.
+  Landscape/paper/initial drawing premises now pass: rotate the actual gallery BEFORE creating the
+  canvas through the existing launch helper seam. Root inspected actual whole1080x810 images.
+  Opacity drag stopped at0.329955548 versus0.5; blend final outcomes unreached. Text really selected
+  the whole word, then read a swatch in a closed panel. Existing toolbar.colorButton exposes the same
+  activeEditColor and is the accepted replacement target, preserving every colour/drawing/typing
+  assertion. Bake diagnoses opacity source/gesture before further changes; no blind retry/tolerance.
+  Retire ALL temporary delivery logs/pictures before permanent normal qualification.
+- D1 effects source **5a067c9d** independently accepted; normal63 and13 safe controls prepared,
+  **UNRUN**. Duplicate periodic angles, apron-before-Int, and actual CPU/Metal transparent samplers
+  bound positions before narrowing while preserving fractional outside-edge ink. Never run unsafe
+  old casts with huge/NaN inputs as a crash-seeking control. Keep old5a packet/tree unchanged.
+- Chroma/CRT source **2d30185d**, net7 paths, independently reviewed c219071f. Normal116 and13 safe
+  controls being prepared, **UNCOMPILED/UNRUN**. Shared clamped CPU/Metal sampler bounds floats before
+  narrowing; existing finite stored CRT Double narrows safely; existing apron planner caps before Int.
+  No saved-format/key/range/state/service change. Four clamps are not the complete added instruction
+  cost. Existing heavy GPU bench ignores nil: paired timings must first prove successful real output.
+- Public capacity cold source **6ef391e4** extends an existing Sandwich workflow, one exact launch
+  helper seam; no product hook/new test method. Real two-input Mix refusal/current row/history/drawing
+  checks and notice ordering preserved. Source peer/root review then selected1/whole10/control remain.
+- Wrong-cel Undo thumbnail audit is independently source-accepted; old-production public repro
+  **4432f846** is source-ready/UNRUN. Drive CutA→waitAtilecut→scrubB→Undo; intended red is A's off-frame
+  thumbnail before returningA. Only after actual reproduction, reuse captured cel/layer IDs and
+  existing registerVectorElementsUndo, move its generic block whole from +Text to +Undo. No state/
+  service/renderer or crash attribution. Predicted red/unreached Redo is not qualification.
 
-Earlier actual132 atc2: all101logic pass, Gallery2/graph6/Mode1 4/Pose2 pass. Root inspected the posed
-Duplicate/ToNewLayer/UndoRedo drawing. Three equivalent final images hash identically; an initial
-batched display error was resolved by isolated ORIGINAL re-open, no product defect. Blend exact50%
-and Text selected-word restyle/replacement outcomes remain blocked by their public gesture delivery.
-A source-only two-selector diagnostic **aa808ad9** preserves exact opacity/outcome assertions, adds
-bounded trace pictures and tries public word doubleTap. Immutable prepare9c8edcc0, nativeUNRUN;
-root grants it separately after native idle. Diagnostic timing is not normal qualification.
+### Other required gates, in queue order
 
-Old Glare landscape image remains INVALID (rotated/clipped/transitional despite landscape AX).
-Reviewed stable actual framebuffer/same-shot capture is source-integrated but native/LOOK UNRUN.
-Cold damaged-text Gallery methodfb25 is integrated and peer-accepted8aaff832; source/runner script
-receipt a328319d, no native staging yet. Runner-only opt-in makes one explicit ordinary skip: report
-old whole2 plus stagedselected1 honestly, not singlewhole3green. External check must prove displaced
-original full bytes in Trash; UI recovered-red alone is insufficient. Accepted4-file old writer
-witness46680B and all original libraries remain protected.
+1. Finish above effects/control/public gesture slices, preserving immutable original packets and
+   meaningful exact assertions. Before every native grant verify clean pin/source730/tool/argv,
+   selected IDs/actual device/positive baseline/output absence/native idle. No overlapping compilers.
+2. Cold damaged-text UI is integrated: actual previous-writer4-file46680B witness, copy-only external
+   staging, runner-only PAINTAPP_STRICT_TEXT_COLD_UI opt-in. Drive Cancel→Versions→UnsavedRestore and
+   original blue+new red. Externally prove displaced original whole bytes in Trash. Ordinary whole3
+   is2pass+1explicit skip; stagedselected1 is separate, not singlewhole3green. No product staging hook.
+3. Glare same-shot framebuffer stability correction is integrated; whole2/actual whole landscape LOOK
+   and meaningful no-rotation control remain. Old transitional/clipped portrait image is INVALID;
+   AX landscape alone is insufficient. Complete permanent maintenance/recovery controls after whole
+   temporary converter retirement; obsolete converter-only cold-library gates are retired with it.
+4. Repin relevant historicalUI47/8classes+13controls and mask6positive/11faults. Mask build must JOIN,
+   ALL source restore, then test-without-building; inspect positive whole pictures first.
+5. Final fast **Debug AND Release**, CLAUDE verbatim filename filter, actual/static method IDs, known
+   explicit skips, lints/PBX/graph/touched whole UI and full phase gate. Atadf:730source/PBX1325,
+   runnable5409fast/6004full; raw5412/6007 differs by exactly3 private static testBrush factories.
+6. Fill16 paired Release ABBA against protected old071 products, actual sampler/source/fence/cancel/
+   budget counts and whole RSS. Other genuine audit gaps: remaining vector internals, graph evaluation/
+   gestures, math/platform and aggregate memory.19 reviewed clusters are not all314 production files.
+   Font pipeline bounded follow-up7535f61c found no new defect; font packs are unshipped/deferred.
+7. Physical Test1 all-process capture needs fresh saved/unlocked readiness. No cause inferred from
+   simulator memory, no Liquify applied in that scene. Finish qualified merge/push or resolve renewal
+   lifecycle BEFORE October29; remove completed TODO items WHOLE in the same merge.
 
-New bounded read-only undo audit **b5870f72** identifies one target mismatch: a completed Mode2 cut's
-undo restores canvasA but invokes current view.onStrokeEnded, which can queue current playheadB's
-tile. Root read actual chain and recorded TODO/BUGS before code. Bake independently reviews existing
-contentRevisions.celID→registerVectorElementsUndo(.addsAndRemoves) remedy and moving that generic
-block+Text→+Undo. Converter agent may implement ONLY a public thumbnail/drawing regression on OLD
-production first; source-only, no native until grant. No new state/service/renderer or crash claim.
+## Preserved evidence and safety boundaries
 
-Census verified730source/PBX1325/runnable5409fast6004full (raw5412/6007). Exactly3 private static
-testBrush factories, not XCTest instance methods, explain raw/runnable difference. The new runner
-opt-in Gallery skip is separate. Native idle after run03; no source hold remains until next prepare.
-Next queue: test-only successful-history setup correction→normal155green→meaningful capacity19/
-strict controls; public Blend/Text diagnostic, cold text recovery/stable Glare actual pictures;
-public wrong-tile Undo repro/fix; permanent maintenance/recovery controls; historicalUI/mask; final
-Debug/Release fast+affectedUI/full/counts/lints/PBX/graph; paired fill performance and genuine remaining
-audit; physical Test1 only after fresh readiness. Merge/push or resolve renewal downgrade beforeOct29.
+Earlier accepted qualification remains at its actual pin; don't retag it as final-source proof or
+rerun everything blindly. Evidence under `~/PaintWork/s54-final-qualification/` and
+`~/PaintWork/s54-architecture-audit/`; external root-next-gates.json links exact receipts.
 
-Evidence authority: `~/PaintWork/s54-final-qualification/root-next-gates.json`, native/capacity-strict-
-normal155-cbb16f90-run03/, earlier strict-retirement-ui-normal132-c2bbb291-run01/ and immutable named
-source/peer/prepare packets. Earlier component proof stays at its actual pin; no blanket reruns.
+- Point-only Liquify338/17controls/UI9 and Debug/Release5259 at47d; complex vector material path
+  removed WHOLE. Ordinary Distort/rest-walk, raster all-pixels and linked in-betweens remain.
+- Vector270/13controls at9fee; logic492/26controls at0e215;260/selection-seed5 atbddb; effects121/
+  13controls at8dcb. These are bounded actual owners, not whole math/RSS or Test1-cause proof.
+- Fill126/wholeFillMendUI4/all29controls at83380; root inspected6 whole1080x810 pictures: attached/
+  detached marks, full caps, batch Undo/Redo; outline and uncertain joins protected. Paired cost open.
+- Backups keep newest in44 slots3/6/24/7/4 with pre-save/update protection and4GB logical cap.
+  Copy-only APFS week workload qualified; it is not real iPad historical storage or1000-cel extrapolation.
+- Current-format converter removed WHOLE atec62 after Kevin confirmed repaired usual scenes. Preserve
+  permanent maintenance/readiness/current-format validation, never resurrect old decoder/defaults.
+- Windows7c177 normal Debug/Release166each,16targets15recipes4arrangements. Real network stage5 deferred.
+- Erasing: two old-build backboardd1850MiB resprings, app730/922 and768/1248MiB; owner cannot time-match.
+  Actual source Test1 4096²7cels/1088strokes/21images. Frame2:527strokes12973samples/max118; no materials.
+  Eraser7.962 CANVAS POINTS,3cuts3SEPARATE64MiB image handoffs, not3 simultaneous allocations. No cause
+  proven. Oct16–18 freeze logs predate Liquify; owner only saw repair messages. Keep recognizer repair.
 
-## Checkpoint — 2026-10-25
+**Protected libraries:** current pre-conversion backup
+`device-install-current-20261025/library-backup/package-export`:250packages=10Projects221Backups19Trash,
+3127files544516496B. Older original `~/PaintWork/s51-cleanup/current-library/Export`:256packages.
+Neither is silently a current-format decoder baseline. Preserve actual old-writer text witness,
+old071 benchmarks, original exports and every native result/attachment. No automated gallery cleanup;
+Kevin already manually removed his test scenes.
 
-Integration tree: `~/PaintWork/PaintApp-s54-mend-free-caps`, branch `tmp/s54-mend-free-caps`.
-Installed product source is **6fb979f442f4d3da1299785de2a077a2058a4dfe**; this checkpoint changes docs
-only. Main/origin remain **afd2030c831db7a746271fe306e8b5a5b9b02df6**, unmerged/unpushed.
-Latest branch-audit/checkpoint details live under `~/PaintWork/s54-final-qualification/park-20261025/`;
-`root-next-gates.json` is the compact external queue. Review both before granting native work.
+**Installed binary:**6fb UUIDAE3F2323-9760-3783-BB5A-0756F9828CCA, normal launch args[], no reset/uninstall.
+Profile expires **2026-10-30T00:18:54Z = October29,8:18pm Toronto**. Owner's four-day “Install now”
+exception applied ONLY to that artifact; ordinary five-day rule remains. `~/PaintApp/deploy/resign.sh`
+fetches/builds old origin/main; prevent silent repaired-format downgrade before renewal. No daemon/
+main/policy change yet. Physical deviceE3B83820-DF74-5042-B52B-0D5BA17E4877.
 
-**Installed and confirmed:** Release6fb installed without uninstall/reset, normal launch with no
-arguments succeeded, PID83736 remained alive after20s. Signature/entitlements/binary+dSYM UUID verify:
-AE3F2323-9760-3783-BB5A-0756F9828CCA; executable SHA81c96ba6f87063bf5fd845f7c0af2b7e433fb673eeefdbaa0b66a0b428ad4346.
-Install receipt5107bd94 is under `device-install-current-20261025/installation/`. Kevin answered
-**“Looks right”** to opening his usual scenes in this build. Record is authoritative: artwork
-confirmation is complete; don't ask again. This does not establish the erasing crash's cause.
+**Machine:** own simulator56CC563F logic booted for capacity24; fresh4B33D581 UI shutdown;39E/ACcold
+shutdown. DD `~/PaintWork/s54-architecture-audit/DerivedData`. Recheck disk before large work. Only
+specifically inventoried inactive compiler/owned shutdown derived system caches reclaimed; all app
+containers/artwork/products/results preserved. No global shutdown, erase or broad cleanup.
 
-Fresh protected PRE-conversion backup: `device-install-current-20261025/library-backup/package-export`,
-250 packages=10Projects+221Backups+19Trash,3127 package files/544516496bytes; receipt3638741c.
-Index/path/size recheck and all copied file hashes verify. Only disposable device Export copies were
-cleared. Ordinary existing startup maintenance could run during export; no whole-library before/after
-immutability claim. Preserve this and original256 export (`~/PaintWork/s51-cleanup/current-library/Export`).
-Neither PRE-conversion export is silently a current-format decoder baseline.
-
-**Signing renewal risk:** Apple reused profile6e35f262, expires2026-10-30T00:18:54Z (Oct29,8:18pm Toronto).
-Kevin explicitly approved “Install now” for this verified four-day artifact only. The ordinary five-day
-rule remains. `~/PaintApp/deploy/resign.sh` fetches/builds origin/main, which is older than the repaired
-format build. Before the Oct29 renewal window, qualify+merge current source or resolve the deployment
-lifecycle so renewal cannot silently downgrade it. No daemon/main/policy change was made.
-
-**Native is idle; all owned children joined.** No source hold remains. iPad9 simulator56CC563F is booted;
-M5 logic39E84984 and cold iPad9 AC8049AC are shutdown. No physical restart/export is authorized by the
-old readiness answer: owner is now using PaintApp. Ask fresh saved-scene readiness only when needed.
-About3.37GiB was free after the Release build; recheck before native. Nine specifically inventoried
-inactive compiler caches (860938240bytes) were reclaimed with receiptcd8797ee; all products/evidence/
-artwork protected. Never broaden cleanup or discard old071 benchmark products.
-
-## Resume queue — actionable work stays unfinished
-
-1. Integrate reviewed capacity888, qualify normal111+strict44, then meaningful capacity19 controls
-   and strict-text controls. No retained state/duplicate schema/renderer truncation/fake IDs. Keep the
-   existing resource staging and Move/Undo ownership; failed media imports must preserve completed Move.
-2. Finish independently reviewed strict damaged-package cold UI; build/install/stage only the owned
-   copy and run the opt-in selected method. Verify preserved original bytes externally after recovery.
-   Add/drive capacity's public cold workflow after source scope review.
-3. Diagnose Blend exact50% and Text full-word public selection premises without weakening outcomes.
-   Rebuild/drive whole affected classes and inspect actual drawings. Apply reviewed Glare capture-only
-   correction, then verify its actual owner-size whole picture and a meaningful no-rotation control.
-4. Finish permanent startup/recovery controls after whole converter retirement, meaningful current
-   graph/blend/selected-text/transfer/Mode1 controls, historical UI47+13controls and mask6positive+
-   11faults. Mask build must JOIN, all source restore, then test-without-building; LOOK positives first.
-5. Final fast Debug AND Release using CLAUDE's verbatim filename filter/command; reconcile actual IDs,
-   factory exclusions and explicit skips; lints/PBX/graph/touched UI/full phase. Earlier accepted proof
-   stays at its actual source pin, without unnecessary blanket repeats.
-6. Fill16 paired Release ABBA against protected old071; final sampler/source/fence/cancel/budget counts
-   and whole-RSS. Continue genuine unreviewed vector tools/undo/render/archive, graph evaluation,
-   typography/panels/import/platform/delivery coverage.19clusters aren't all files. No speculative rewrite.
-7. Erasing respring remains unproved. Physical Test1 all-process capture/real cuts on a unique owned
-   copy require fresh saved/unlocked readiness; no physical restart while owner sleeps. Qualified
-   merge/push before Oct29 renewal or resolve silent downgrade lifecycle. Remove finished TODO items
-   WHOLE when merged. Future interpolation/multi-cel/linear-light/audio/video/importer/stream-stage5
-   remain deferred until their owner dependency/brief exists.
-
-## Qualified evidence to preserve at its actual pin
-
-- Vector270/270 across9whole classes at9fee, root5b44b113.13 deliberate controls qualify29unique
-  product statements/40case-bound refs:58mapped issues/6consequences excluded; e26e4fc4. All729 restored.
-- Debug492/492 at0e215: Fill126, Text135, Graph148, Blend69, VectorTextPersistence14,17classes, zero
-  failure/skip/expected. Logic26/24recipes qualifies36IDs:80mapped/6excluded, rootb70b095a.
-- Debug260/260 atbddb includes TextBake31/Hybrid23/Commit17 and affected brush/liquify/repair/undo.
-  Selection+seed5 qualifies10IDs:15mapped/4excluded, root038b6bd7. Existing seed/UTF16 owners reused.
-- Effects121/121 at8dcb, rootd15c6f15;13controls/12recipes qualify31product+4premise IDs,53mapped/
-  11excluded, ab2ff6db. Cap beforeInt, shared periodic angles/aprons and actual GPU owner admission;
-  no new retained counters/cache/schema; no whole-RSS/crash cause inferred.
-- Fill126/wholeFillMendUI4/all29controls at83380, root5318d0cb:26product+2premise IDs; root LOOKed
-  6unique whole1080×810 pictures. Attached/detached/freecaps mend, outline/uncertain joins protected,
-  batch Undo/Redo visible. Cost/RSS remain open.
-- Root6fb old playback/pan2/2 selected tests passed, root e027eb8a; root LOOK85867188. Actual115 also
-  drove stroke, old Move-box drag/release and graph-node drag/release. These satisfy preinstall five
-  SIMULATOR workflows, not physical gestures. Source729 exact; no full-class8/4 claim for selected2.
-- Actual old-text writer1 at75365af5 is accepted42823789; old TextObjectafd/c615 exact, package produced
-  by real writer/load/resave/validation. It is not an installed-build artist export claim. Strict new44
-  is UNRUN. Whole capture test delta removed. Original256 export has no editable text.
-- Self-parent fix6fb is one existing resolver guard parent!=folderID plus one extended characterization
-  method; no state/schema/traversal. Normal RenderTree30/LayerTree56 pass in actual115. Guard-specific
-  five-statement reversal/cold exposure remains pending. Do not call red115 a normal fault baseline.
-
-All logs, hashes, original/display pictures and receipts remain under `~/PaintWork/s54-final-qualification/`.
-Named historical pins never inherit newer source coverage. No final fast/full/performance/physical
-crash qualification is claimed. Prior failed attempts remain immutable evidence.
-
-## Earlier qualification ledger — historical pins, not current status
-
-- Earlier normalf475 passed847/847 and base49 plus all52 mask/video/vector assertion-target cases
-  qualify at their named pins, with ineffective/inconclusive attempts excluded. Ledger:
-  `~/PaintWork/s54-final-qualification/qualified-52-ledger.json`. Raster79a passed32/32; all32 also
-  passed in normal422. These are earlier slices, not blanket final-source proof.
-- Windows7c177be0 is complete: Debug AND Release166/166, zero skips/failures,16 assertion targets
-  (15 distinct recipes),4 arrangement controls, all63 source/fixture hashes restored. Root verified
-  all63 bytes identical in676. Evidence: `windows-16-qualified-7c177be0.json` under s54-stream-ownership
-  and `s54-final-qualification/windows63-current-676-identity.json`. Real-link stage5 remains owner work.
-- The original107 Swift targets were split into first29 plus remaining78. Use the current ledger
-  above: first29 assertions are qualified;41 earlier original78 cases and the final35 specific cases
-  qualify at their named receipts. Assertion gaps remain. Do not rerun the obsolete107 plan
-  or infer assertion coverage from case counts. Separate UI consumer faults remain unrun.
-- Mask6 controls+11 faults /5 selectors are OFFLINE PREPARED ONLY at676. External two-phase executor
-  SHA70527efe has independent acceptance: build child finishes, all728 source entries restored before
-  test-without-building, meaningful source-located assertions required. Repin final source; root must
-  LOOK at positive pictures before granting faults. It is not a natural in-flight timing proof.
-- Historical676 static census: fast5420/full6009, PBX1329 unique. Earlier UI lints/PBX checks passed676.
-  Final fast Debug/Release, graph, actual full/class UI and required old workflows remain pending.
-- Paired fill16 Release ABBA and whole256-package previous-writer cold UI are prepared, not run.
-  Read-only current API readiness found no blocker; explicitly repin NEW path/SHA/DD at final source.
-  Preserve old071 Release products, benchmark fixture/order/control and untouched original export.
-- Historical676 still lacked device preservation/signature/install; the current checkpoint above closes
-  installation/artwork confirmation. Actual erasing all-process measurement remains open. Raster allocation corrections do not establish the respring's cause.
-
-Owned iPad9 simulator56CC563F-06D0-42FC-9C18-A2B230DE2D38 is booted after the owner UI run;
-owned M5 39E84984-3C6F-4A6A-8DC8-D1098F6B623E and cold iPad9 AC8049AC remain shutdown. Only39E synthetic data was reset;
-all results, originals and device binaries were preserved. Root reclaimed only inactive s49 Build
-and retired cap-diagnostic Build/Index scratch, with receipts under s54-final-qualification. Disk was
-8.75GiB before the fresh ABBA grant; never delete artwork/exports, evidence or active jobs. Rebuild
-clean normal source after compiled fault/temporary benchmark probes before ordinary UI/install.
-
-## Architecture and refusal boundaries to preserve
-
-One app-wide RasterResidency charges provider-owned native RGBA allocations and configured working/
-checkpoint reservations. CGContext/data-provider lifetime keeps every escaped CGImage/UIImage alias
-charged; immutable read leases pin before image resolution and explicit COW precedes writes. Source
-handles hold stable version/backing ownership across raster/baked tiers, frozen recipes, undo/save.
-Current-document compressed protection uses existing APFS clone/bounded copy; dirty old versions use
-the existing ProjectStore PNG serializer/queue. No1000FD lifetime, eager all-cel decode, parallel cache/
-writer, new schema, compatibility decoder or backup-policy change. Owned startup temp cleanup removes
-only stale UUID real directories, preserving live handles, originals, unknown paths and packages.
-
-prepareCanvasEdit stages only affected cels in Liquify→fill→shape→text order. Refusal preserves all
-live pixels/drafts/undo, including queued final text and focus. Liquify keeps its existing finish owner/
-window on refusal, completes no-ops and fences cancelled generations. Stroke prepareStroke(frame)
-returns `(settle: () -> Bool, begin: () -> Void, rasterBackdrop: UIImage?)?`: host/mask use identical
-staged overrides at the planned playback-entry frame; settle precedes recording baseline, timing/
-playback precedes begin/cel spawn. Hosts bind actual live vector owners after settlement. External
-mask/recording/Liquify UI controls must use this tuple, not obsolete Bool/begin-only callbacks.
-
-Patch/whole-cel undo use existing Action preflight before moving either stack; successful blank is
-separate from failed admission, and immediate apply releases prepared native pins. Structural undo
-uses existing atomic visible-window presentation rather than hydrating every cel. Resize/flip freeze
-owning-actor inputs, prepare/checkpoint one output at a time, fence project/version/close, then install
-all cels atomically. Stable owner UUID+version keys include interpolation references and preserve
-original identity through private freeze copies. Canonical tag04 changes disposable .pbk digests only;
-existing cache maintenance reclaims unreferenced files. Projects/Backups/Trash formats are unchanged.
-
-Mask source planning prices transitive indivisible dependency closure and retained mix slots in the
-existing chunk/strip budget; minimum-one-row exception remains. One MaskResolver checks metadata
-before dependency pixels. A failed read never means absent mask; onion failure cancels/drops/hides
-wrong-frame ghost and clip. Video uses per-manager clients on the existing shared source, pressure
-trims ring/reader LRU, last close retires reads. Native held sample buffers/private AVFoundation pools
-remain separate. Vector undo visits actual retained payload identity with no unpack/copy/cache, uses
-saturated arithmetic through existing UndoBudget and releases unused closure captures.
-
-Brush previews use an8MiB actual-image LRU and a keyed row result. Proof2 vs2.25 stays in one old
-rounded bucket and checks requested600×120 pixels. PaletteColor strictly refuses malformed saved
-hex without altering normal bytes. Temporary old-format repair inserts the SAME geometryVersion bytes
-before metadata/payload work and routes only strict DecodingError to existing backup recovery; source
-I/O/drawing/conversion/ownership failures stay hard. Damaged originals remain intact/visible. Permanent
-startup maintenance and truthful gallery refresh must survive eventual temporary-converter retirement.
-
-Stationary fit skips only exactly redundant chord scans; LiveWalk drains a settled prefix once.
-Every sample/channel and floating-point timing addition order remains; naive coalescing had a1ULP
-counterexample. O(N) input storage remains, and no performance/RSS/device claim follows from source.
-Stream ownership uses one completion-paced writer/run, existing64MiB/256KiB limits before allocation/
-write, bounded controls/files and joined retirement. Old callbacks carry final queue admission validity.
-Destructive test hooks use existing compile-time simulator fact even in Release; stale runner is gone.
-
-## Earlier qualified work and owner rulings
-
-Point-only vector Liquify is authoritative: move points through the normal renderer, preserving
-brush properties/seed. Native material transport/archives/renderer/obsolete tests were removed whole;
-genuine Distort/exact-bake placement, raster inverse flow, linked following/local edit/undo remain.
-At47d7079c or proven identical production: runtime338/338 and17 actual assertion-red faults (16auto,
-one manually source-verified); corrected classes33/33 before/after2 faults; UI9/9 and old workflows10/10.
-Old control widens a round dot1.918×, current keeps it round; root inspected images. Debug AND Release
-5259=5255passed+4known skips, all identities/255 classes reconcile. Independent source review found no
-concrete defect. These are earlier exact gates, not final integration qualification.
-
-Newest clock-bucket retention preserves3/6/24/7/4 tiers, pre-save/update protection and4GB cap.
-Standalone14/14, reverse-order fault8/14red/restored14; integrated retention14+backup21 passed. The
-copy-only declared week workload (28 saves/7 reopens) kept9 versions,182encodes/462reuse. Matched APFS
-no-op forks16,207,872 allocated bytes versus deletion treatment3,645,440: delta12,562,432 bytes,
-including APFS/delete metadata. All24 stable RO readings/control/library hashes match; images detached.
-Initial8192-byte bad remount control remains recorded. This is not historical iPad storage or300–1000-cel
-extrapolation. Evidence `~/PaintWork/s52-saving-audit/week-cost/storage-forks-47d7079c/review.md`.
-
-Fill265e588e focused206/206 before/after22 assertion-red continuation faults; earlier overlapping work
-brings35 distinct qualified recipes, not40. Debug AND Release5278=5274passed+4known skips, exact identities.
-Six old/new fixtures×five widths preserve filled masks;12 Reach cases and fragmented archive gate pass.
-Same Mend Gaps covers detached AND outline-attached interior strokes while preserving outer edge and
-uncertain joins. Mend All Fills is vector-only over owned cels; generated linked cels remain derived.
-Serial bounded shared preparation/contours, atomic batch/one undo/version guards, no raster provenance
-redesign. Final FillMend UI4/4 at071c7eb2, then visibility assertion-red and normal4/4;723 exact files,
-five whole-screen owner1080×810 pictures inspected. Ten old workflows pass. Shared full-visibility
-scrolling/native endpoint fixes were test-driver defects, not product layout changes. Paired lazy-fill
-Release ABBA remains;16 earlier paired trials passed, inside median delta+5.1ms, no device claim.
-
-Repair75/75 and13 repair mutants qualify. Actual previous-writer fixtures cover material/Distort/bake/
-linked/plain ink. Copy-only original256packages/3180files/567855190bytes produced266 conversions including
-10 untouched update snapshots; retention pruned24 backups,242survivors strictly validate AND load
-(2034cels/1459vectors), second run0, originals exact.11.013s was the converter on owned M5, not iPad
-watchdog/startup time. Scheduling is now implemented; genuine cold whole-library UI still must prove
-responsive first screen at that historical pin. Kevin has now confirmed current artwork; retire temporary converter/UI WHOLE on resume.
-
-## Artwork, crash evidence and physical release
-
-Installed current normal Release is6fb979f4, UUID AE3F2323-9760-3783-BB5A-0756F9828CCA;
-owner artwork confirmation is complete. See current checkpoint for verified250-package preservation,
-normal launch, signing exception and renewal downgrade risk. A further physical restart/install needs
-fresh saved-scene readiness. Never use resetGallery, uninstall or normal scene deletion. Secrets
-~/.config/paintapp/.env must never print.
-Device UDID00008030-000151492EC3C02E; CoreDevice E3B83820-DF74-5042-B52B-0D5BA17E4877; verify inventory.
-
-Preserved `~/PaintWork/s51-cleanup/current-library/Export/`:10Projects+228Backups+18Trash,
-567855190 logical bytes, hashes frozen. Keep recovery copies. Owner manually removed old physical test
-scenes; no gallery cleanup needed. File Provider root requires read-only export, not Tailscale access.
-
-Test1 eraser respring remains unresolved. Two Oct23 matching-build reports18:47/23:03 Toronto kill
-backboardd at1850MiB; Paint active with no app kill reason, current/peak730.4/922.6 and768/1248.6MiB,
-same UUID/different lifetimes. Owner recalls one incident with no exact time; neither is confirmed.
-Disk diagnostic57/69 captured stack samples on bake atomic writes is not byte share/cause. No speculative
-production fix. Test1 is4096²,7cels/6vector; Vector3/frame2 has527strokes/12973samples/max118, no Liquify/
-material. Eraser7.962 is canvas points, not7.96%/326px. Mode3 capture1 counted3 cuts/3 full4096RGBA
-assignments, simulator854–985MiB;2pictures inspected. Later captures do not establish exact counts.
-Next physical plan is bounded60s normal Activity Monitor, verified fields, successful cuts+same-run
-flight on UNIQUE owned Test1 copy, then cleanup/fresh export. No privileged privacy bypass. Evidence:
-`~/PaintWork/s52-erase-crash/device-diagnostics/resume-2026-10-24/` and next-device-memory-capture.md.
-Raster managed-buffer arithmetic is architectural risk reduction, not proven backboardd causation.
-
-Deferred/waiting: Stream27stage5 needs owner/laptop; multi-cel22 and linear-light10 owner-deprioritized;
-brush importer37 dropped for now; future audio28/video30/interpolation need owner briefs. Preserve
-raster Move undo and freeform-text minimum exemptions as deliberately carried. Older recognizer freeze
-logs predate Liquify f813346; owner saw repair message only, so no speculative UIKit repair. Auto-resign
-renewal evidence remains docs/bug-evidence/auto-resign-2026-10-22.md. Full UI suite is not run per item.
+Deferred, written not researched: future interpolation overhaul, multi-cel22, linear-light10,
+audio28/video30, dropped brush importers37, real-link streaming27stage5 owner/laptop.

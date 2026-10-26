@@ -1,61 +1,43 @@
 # TODO
 
-Successor normal155 run02 at7cb2dba3 also stopped before tests: CanvasNoticeBanner.icon lacked the
-same new case. Root independently verified de416e09 closure/all730 source and no native children.
-Before next code, the complete named-consumer census was read: two view switches (DrawingView now
-handled; banner pending) and three CanvasNotice message/actionTitle/code switches (all handled).
-Add nodeInputLimit ONLY to existing noDrawingSurface/nosign icon arm; keep exhaustive switches,
-no default/new flag/state. A new-pin run03 needs separate prepare/grant; both failed builds remain
-immutable0-test evidence. Cold/Glare and all feature behavior remain runtime-unqualified.
-
 ## Active continuation — 2026-10-26
 
-Kevin resumes and asks us to continue independent work with useful delegated agents. He will be
-asleep until10a.m. October27; no pending owner question or fresh physical restart readiness.
+Kevin asks us to continue, delegate substantive work and conserve usage; quality and architecture
+matter more than speed. He is asleep until10a.m. tomorrow. No owner question is pending. Old physical
+readiness is consumed. Items remain here until merged, even when installed or component-qualified.
 
-**What Kevin has now:** point-only vector Liquify, interior fill mending/Mend All Fills, newest
-father–grandfather saves and integrated audit fixes in installed Release6fb. Normal install/launch,
-fresh250-package protected backup and usual-scene “Looks right” confirmation are complete. The
-erasing respring remains unresolved; final performance/regression/audit gates remain unfinished.
+**Installed and owner-confirmed:** Release6fb has point-only vector Liquify, interior vector mending/
+Mend All Fills, newest father–grandfather backups and earlier audit fixes. Normal launch and usual
+scene “Looks right” are complete. The erasing respring cause remains unresolved.
 
-**Current source:** cbb16f90 includes strict saved text, whole temporary converter removal, shared
-layer admission and reviewed cold recovery/stable capture tests. Normal155:154pass/1fail/0skip;
-root independently reconciled actual IDs/device/all730. Sole failure is test setup: bare folder
-opacity writes no history; bracket the prior successful edit with existing begin/commit gesture,
-keeping every outcome/count/pixel assertion. Record precedes this test-only correction. All44 strict
-text and11 video checks pass within the red aggregate; no all-green baseline yet.
+**Current work:** final integration `PaintApp-s54-qualified-integration` starts atadf; oldadf tree is
+frozen for controls. Normal155 is155/155. Original capacity42 assertions and strict text28 application
+assertions have actual deliberate-failure/root causal proof;2 fixture witnesses have ZERO application
+credit. Capacity24 follow-on is granted/running, targeting41 further contracts, not yet qualified.
+Four remaining outcomes stay separate; no fake IDs, weakened expectations or fixture deletion.
 
-**In queue order (items remain until merged):**
+**Next, in order:**
 
-- Correct only that history setup, rebuild normal155green, then finite capacity19 and strict-text
-  controls. Layer refusal uses existing net child count/notice owners; completed Move settles before
-  failed video import structural capture. No new state/schema/rollback/renderer truncation.
-- Finish blocked Blend exact50% and selected-word text outcomes through public gesture diagnosis;
-  preserved-outcome two-selector diagnostic aa808ad9 is source/prepared, nativeUNRUN. Then whole
-  affected workflows and meaningful controls. Graph6/Mode1 4/Pose2 passed earlier132; posed drawing LOOKed.
-- Drive integrated cold damaged-text Cancel→version→Restore with an externally staged owned copy,
-  recovered blue/red drawing and byte-exact original retained in Trash. One runner-only opt-in skip
-  in ordinary runs is explicit; union oldwhole2+staged1 is not singlewhole3green. Drive stable actual
-  owner-size Glare screenshot; old transitional picture is invalid, AX layout alone insufficient.
-- Complete permanent maintenance/recovery controls after converter code/suite/fixture/PBX/UI removal
-  WHOLE. Earlier permanent57logic+Gallery2 pass; obsolete converter-only cold256 gates retire with it.
-- Reproduce/fix the newly audited wrong-cel thumbnail notification after CutA→scrubB→Undo using the
-  existing captured-ID/generic history owner; public drawing/tile checks first, no crash attribution.
-- Historical UI47+13controls, mask6positives+11faults; final fast Debug AND Release per CLAUDE exact
-  filter, actual/static reconciliation, lints/PBX/graph/touched UI/full phase. Current730/PBX1325,
-  runnable5409fast/6004full; raw5412/6007 excludes exactly3 private static testBrush factories.
-- Fill16 paired Release ABBA/final sampler/count/cost/whole-RSS and genuine remaining architecture
-  audit. Protected old071 products, real artwork, original exports and results remain intact.
-- Physical Test1 erasing all-process capture only after fresh saved/unlocked readiness. Root cause
-  remains unproved. Finish qualified merge/release lifecycle; remove finished items WHOLE when merged.
+- Fix two test interactions while preserving actual drawing checks. Diagnostic9e reaches landscape/
+  initial pictures, then opacity33% versus50%; text really selects the word, then targets a control in
+  the panel it closed. Use the existing toolbar's same-colour value; trace opacity before correction.
+  Retire diagnostics, drive whole affected colour/text classes and meaningful controls.
+- Qualify reviewed effects5a normal63/13safe controls and2d normal116/13safe controls: huge finite
+  settings must not overflow sampling/apron conversion; ordinary edge pixels and saved values stay
+  unchanged. Confirm successful actual GPU output before performance timing. These fixes are UNRUN.
+- Public two-input Mix refusal workflow6ef; cold damaged-text recovery/byte-exact original in Trash;
+  actual stable Glare landscape picture; wrong-cel Undo thumbnail public repro4432 then minimal fix.
+- Permanent maintenance/recovery and remaining relevant UI/mask controls; final exact fast Debug AND
+  Release, counts/skips/lints/PBX/graph/touched whole UI/full phase. Paired fill cost/whole RSS and
+  genuine remaining architecture review. Earlier qualification stays at its actual pin.
+- Physical Test1 only after fresh saved/unlocked readiness. Qualified merge/push before October29
+  signing renewal, or resolve automatic old-main downgrade risk. Remove completed items WHOLE.
 
-**Renewal risk:** profile expires Oct29,8:18pm Toronto. Kevin approved installed6fb's four-day artifact
-only; normal five-day rule remains. Auto-resign builds old origin/main; qualify/merge/push or resolve
-before renewal so no silent repaired-format downgrade. No main/daemon/policy change has been made.
-
-Owner rulings remain: vector-only batch mending includes attached marks/protects uncertain joins and
-outline; vector Liquify edits positions only; saves keep newest clock-bucket versions. Future
-interpolation/multi-cel/linear-light/audio/video/importer/stream-stage5 remain explicitly deferred.
+Currentadf730source/PBX1325/runnable5409fast6004full; effects5a adds3methods. Exact evidence/current
+lease live in HANDOFF.md and `~/PaintWork/s54-final-qualification/root-next-gates.json`.
+Owner rulings remain point-only vector Liquify; vector batch mending includes attached strokes but
+protects uncertain joins/outside outline; saves keep newest clock-bucket versions. Deferred features
+stay deferred; no overnight physical restart. No further installation exception is implied.
 
 ## How to read and keep this file
 
@@ -264,12 +246,10 @@ to continue while he sleeps. Use current vector brush geometry for interior mend
 joins and keep fast feedback; unknown flattened content remains conservative. Preserve the existing
 neighbor seam. Do not ask this capability question again.
 
-**Core integrated; final fresh-raster/cold UI correction in progress.** The earlier tiny-cap path
-was replaced whole by the canonical shared-renderer support seam. Current2da Debug86 passes whole
-straight/curved/Rough caps and useful4096 factory/GPU output. Actual owner UI4 at4e2 still failed2/4
-with whole interior gaps, now traced to the fresh clear raster reference proof. Finish the shared
-worker proof, final cold-backed safety classification and unchanged wholeUI4/undo/redo before claiming
-this behavior complete. Owner reports: “when I fill
+**Implemented and installed; final performance/merge gates remain.** Shared brush-renderer support
+replaces the tiny-cap path whole. At83380, Fill126, wholeFillMendUI4 and29 deliberate controls qualify;
+root inspected6 actual whole owner-size pictures, including attached/detached/full caps and batch
+Undo/Redo. Outer outline/uncertain joins remain protected. No new raster storage is introduced. Owner reports: “when I fill
 stuff, the fill leaves white in places where brushstrokes were.” An enclosed filled region can contain
 an internal brushstroke whose footprint stays unfilled. Extend the **same Mend Gaps setting** to cover
 those interior stroke-shaped gaps as well as its current behavior. Preserve the actual original outer
@@ -299,7 +279,7 @@ an actual visibility assertion-red control, then restored normal4/4;723 files+mo
 owner-size whole-screen pictures inspected by root. The old driver failures are resolved, not product
 layout defects. Worktree `~/PaintWork/PaintApp-s53-fill-mend` retains the exact earlier evidence.
 
-- [ ] Requalify affected fill UI in final source and inspect current owner-size pictures.
+- [ ] Final integrated regression/performance gates; preserve qualified83380 drawn/control evidence.
 - [ ] Resolve the uncertain inside-press timing difference with paired baseline runs; no device extrapolation.
       Targeted follow-up `tmp/s54-fill-demand-map` now defers unused exact open-feature work until
       enabled Reach, retains one map per Structure and invalidates before independent mend writes.
@@ -400,11 +380,14 @@ Inventory-only files are not reviewed code. New source is not called complete be
       Actual old-product writer capture1 at75365af5 must provide typed package provenance before strict
       source edits; temporary capture delta is then removed whole. Original export has no text.
       Real-package/mutation/cold qualification remains required.
-- [ ] Graph self-parent: harvest reviewed cc51444d TWO-path guard/test extension after recorded scope;
-      keep existing proper-descendant semantics, recover leaf/panel/pixels through one resolver. Normal
-      whole86, five-statement guard control and cold exposure remain unrun. Graph capacity remains
-      DESIGN ONLY: shared actual destination/net-child admission for every producer and Stack→Mix,
-      preserving existing effect setter behavior; no renderer truncation/fake ID/reparent/state.
+- [ ] Graph/capacity: shared resolved-destination/net-child admission is integrated at8e80; actual155
+      normal and original42 deliberately broken contracts qualify. Capacity24follow-on/public cold6ef
+      remain open; four further outcome limits are recorded. Keep proper-descendant semantics and
+      one resolver; no renderer truncation, fake IDs, duplicate state or new rollback service.
+- [ ] Effects numeric domains: source5a and2d are independently reviewed, UNRUN. Existing angle/apron/
+      CPU+Metal sampler owners prevent unsafe conversions while preserving fractional edges and saved
+      Double settings. Normal63/116,13safe controls each, public workflows and paired output-verified
+      performance remain. No ordinary-slider/Test1-cause claim.
 - [ ] Finish file-level/independent review, new affected zero-skip baseline, actual assertion mutants,
       exact final fast Debug/Release, lints/PBX/graph, cold workflows/pictures and paired performance.
       Then fresh owner save/unlock/export, signed clean Release/device checks and actual eraser cause.
