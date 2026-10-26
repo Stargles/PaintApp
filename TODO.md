@@ -461,7 +461,11 @@ Inventory-only files are not reviewed code. New source is not called complete be
       amplify work despite physical packet checks. Record finite255/256 and compression/Consumed
       regression before a minimal guard; preserve valid discovery/QU and the existing20jump limit.
       No giant exhaustion attempt, protocol service/cache/rate limiter or unrelated socket rewrite.
-      Actual attack/latency/RSS is unmeasured; root report02599089 is source evidence only.
+      Windows old19 completed15pass/4intended refusal failures; root originalTRX reviewf069c555
+      accepts3canonical refusal sites and exactsource/IDs. Native exit capture remains unknown;
+      no green/exit1 claim. Minimal existing Decode correction is source-authorized; normal whole
+      Debug/Release/meaningful controls and exact-child closure remain. Actual attack/latency/RSS
+      is unmeasured; no giant resource test or live malformed packet is needed.
 - [ ] Brush/editor: bounded8MiB actual-image preview LRU and keyed row result replace unbounded/unkeyed
       retention. Final823e proof distinguishes exact2 vs2.25 scale within one old rounded bucket and
       checks actual requested600×120 pixels. Shared PaletteColor rejects malformed persisted hex rather

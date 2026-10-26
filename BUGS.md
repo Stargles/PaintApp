@@ -27,8 +27,16 @@ RFC1035 limits each label to63octets and the expanded wire name to255including l
 The existing decoder should refuse before allocating an overlong label result, preserving physical
 Consumed/pointer accounting and the existing query refusal. No socket/rate/cache framework or
 UDP512-byte cap. Source report dns-mdns-bounded-72885a50/receipt-v2.json02599089; native regression
-and correction remain pending. Actual one-start/serial-reply/dispose callers showed no further
-proven lifecycle defect; real-link tests remain separate.
+and correction were pending at that source record. Actual Windows old-production whole19 now
+completed15pass/4intended FormatException-assertion failures at165/202/214×2, zero skips; root read
+the original TRX and verified all identities/source730+63. Positive255/Consumed and compressed QU
+passed. This qualifies3canonical refusal sites; other new positive contracts still need controls.
+Native ExitCode capture was null despite completed WaitForExit; do not claim exit1 or a green run.
+The owned VBCS compiler server has a separate exact-identity close grant. Root now authorizes only
+expanded-name/reserved-prefix refusal inside the existing Decode before label allocation, preserving
+Consumed/pointer guards and valid names. Normal/control/whole Debug+Release gates remain.
+Actual one-start/serial-reply/dispose callers showed no further proven lifecycle defect; real-link
+checks remain separate. Evidence: windows-old19-run01/root-trx-causal-review.jsonf069c555.
 
 
 ## Affine gradient stretch changes interior colours — reproduced2026-10-26
