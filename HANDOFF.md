@@ -50,10 +50,7 @@ complete. Erasing respring cause, broad final regression/performance and remaini
   Opacity drag stopped at0.329955548 versus0.5; blend final outcomes unreached. Text really selected
   the whole word, then read a swatch in a closed panel. Existing toolbar.colorButton exposes the same
   activeEditColor and is the accepted replacement target, preserving every colour/drawing/typing
-  assertion. Successor **aa06e07f diagnostic2 is RUNNING under Bake's sole native lease on4B33**:
-  existing four attempts accumulate measured remaining endpoint error, exact tolerances/outcomes
-  unchanged. No product change. Retire ALL temporary delivery logs/pictures before permanent normal.
-  AA6 has now CLOSED:Text passed all drawn replacement outcomes;Blend still failed its opacity
+  assertion. **AA6 diagnostic2 closed** with unchanged exact tolerances/outcomes:Text passed all drawn replacement outcomes;Blend still failed its opacity
   setup at.565466642. Root independently reconciled2 IDs/source730 and inspected red word→one red W
   plus57% readout (rootLOOK3ffea7b6). Harvest ONLY the successful Text route without its diagnostic
   print/past-longpress comment; preserve every drawn colour/keyboard/selection/replacement outcome.

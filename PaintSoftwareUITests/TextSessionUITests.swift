@@ -202,9 +202,8 @@ final class TextSessionUITests: PaintUITestCase {
     /// A public selection survives a live colour change: the next key replaces the word, rather
     /// than inserting before it. Measure while editing; ending the session may undo its follow pan.
     func testRestylingASelectedWordKeepsTheSelectionForTheNextTypedReplacement() throws {
-        XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft), "setup: a brand-new document")
         XCTAssertGreaterThan(app.windows.firstMatch.frame.width, app.windows.firstMatch.frame.height,
                              "PREMISE: the selection workflow is actually landscape")
         let canvas = app.otherElements["canvas.host"]
@@ -315,23 +314,22 @@ final class TextSessionUITests: PaintUITestCase {
         }
         XCTAssertGreaterThan(clearance, requiredClearance,
                              "PREMISE: actual word ink has a point outside every text-grip target")
-        let pressPoint = try XCTUnwrap(selectionPoint, "PREMISE: a measured glyph-interior longpress point")
-        assertAboveTheDock(app, canvas, dy: (pressPoint.y - host.minY) / host.height, "the selection longpress")
-        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: pressPoint.x, dy: pressPoint.y)).press(forDuration: 1.0)
+        let pressPoint = try XCTUnwrap(selectionPoint, "PREMISE: a measured glyph-interior selection point")
+        assertAboveTheDock(app, canvas, dy: (pressPoint.y - host.minY) / host.height, "the selection taps")
+        // A public double-tap selects this single contiguous four-glyph word
+        // through the native UITextView.
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: pressPoint.x, dy: pressPoint.y)).doubleTap()
         attachScreenshot(XCUIScreen.main, "text-selection-public-edit-menu")
-        let selectAll = app.menuItems["Select All"]
-        XCTAssertTrue(selectAll.waitForExistence(timeout: 5), "PREMISE: the public edit menu offers Select All")
-        XCTAssertTrue(tapWhenHittable(selectAll, "Select All"), "PREMISE: Select All was delivered")
         XCTAssertTrue(app.menuItems["Cut"].waitForExistence(timeout: 5),
                       "PREMISE: the public edit menu exposes a nonempty selection")
-        attachScreenshot(XCUIScreen.main, "text-selection-select-all")
+        attachScreenshot(XCUIScreen.main, "text-selection-selected-word")
 
         // DrawingView binds this toolbar picker to activeEditColor, which restyles the live text.
         openColorPanel(app)
         let square = app.otherElements["colorPanel.svSquare"]
         dragWithinElement(square, from: CGVector(dx: 0.5, dy: 0.5), to: CGVector(dx: 0.98, dy: 0.02))
         closeColorPanel(app)
-        let swatch = app.buttons["textPanel.colorSwatch"]
+        let swatch = app.buttons["toolbar.colorButton"]
         let value = try XCTUnwrap(swatch.value as? String, "PREMISE: the live text exposes its picked colour")
         XCTAssertEqual(value.count, 6, "PREMISE: the text colour has three actual channels")
         let channels = stride(from: 0, to: 6, by: 2).map { i -> Int in

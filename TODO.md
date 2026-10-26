@@ -20,9 +20,7 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
 
 - Fix two test interactions while preserving actual drawing checks. Diagnostic9e reaches landscape/
   initial pictures, then opacity33% versus50%; text really selects the word, then targets a control in
-  the panel it closed. Successoraa06 diagnostic2 is now running with measured slider-endpoint residual
-  correction and the toolbar's same-colour value; original tolerances/outcomes remain unchanged.
-  AA6 closed:Text passed all drawn outcomes and root red-word→single-red-letter LOOK;Blend opacity
+  the panel it closed. AA6 closed with unchanged original tolerances/outcomes:Text passed all drawn outcomes and root red-word→single-red-letter LOOK;Blend opacity
   setup still failed. Retire Text's temporary print/past-action comment and reuse its successful
   public word selection/toolbar read. Keep failed slider compensation out; trace actual events next.
   Retire diagnostics, drive whole affected colour/text classes and meaningful controls.
