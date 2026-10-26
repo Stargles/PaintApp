@@ -6641,3 +6641,19 @@ Evidence: `~/PaintWork/s54-final-qualification/native/tap-ui6-benchmark1-e2e20c9
 (actual benchmark output, root independent7, all14 named captures and root LOOK3). The earlierf786
 run was6/7 because its newly landscaped fixture tapped under the card; it is not a product miss or
 an accepted fast run. Root inspected actual whole before/after frames before changing only that row.
+
+Release follow-up MEASURED once on the same owned56C/sourcee2/fixture, after storage I/O joined:
+normal selected1 passed1/1, zero skips/failures, all730 source entries exact and children joined.
+Round miss/hit/outline19.0/0.2/0.2ms; image direct115.0/0.5/0.1ms; actual manager miss/hit120.1/1.9ms.
+This is a once-run simulator result; fixture setup/counting touches sample/tip data before clocks,
+so do not call it a virgin/cache-cold first tap or extrapolate to the iPad. The retained old Move
+refit print is0.000ms in Release with discarded output; give that print no timing/saving credit.
+The new Tap outputs are used by actual assertions. Root independently reconciled selected1/IDs/
+device/source/command. Evidence: native/tap-benchmark-release1-e2e20c9a-run01.
+
+The image miss still builds a local eight-vertex hull for every emitted stamp even for distant
+queries. Authorize only an inclusive/slop-aware conservative admission using the EXISTING current+
+previous Quad support before allocating points/hull, retaining that predecessor on rejection and
+falling through when a bound is not finite. Keep the current Support.image(Quad), shared hull/body
+predicates, discontinuity and bounds-only behavior. No new cached index/state or global Quad rewrite.
+Measure the same output-verified Release cases after the change; correctness controls remain required.

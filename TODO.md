@@ -20,7 +20,9 @@ Four remaining outcomes stay separate; no fake IDs, weakened expectations or fix
 
 - Finish canonical Tap selection cost/controls before harvesting. Isolated logic37 and publicUI6+
   benchmark1 passed; root inspected the square-selection stages. Release benchmark is running after
-  storage cleanup; a local image-support admission proposal is unimplemented. Preserve current
+  storage cleanup and passed1/1. Actual120-stroke image-manager miss120.1ms/hit1.9ms on the
+  simulator; minimal existing-Quad admission is now source-authorized, with cost/controls pending.
+  Preserve current
   numeric curve cap and every drawn outcome.
 - Run the committed affine-gradient reproduction against original production before any fix. The
   proposed correction stays in the existing two-point affine mapper; generic projective/lattice
