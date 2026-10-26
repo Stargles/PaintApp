@@ -1,5 +1,13 @@
 # TODO
 
+Successor normal155 run02 at7cb2dba3 also stopped before tests: CanvasNoticeBanner.icon lacked the
+same new case. Root independently verified de416e09 closure/all730 source and no native children.
+Before next code, the complete named-consumer census was read: two view switches (DrawingView now
+handled; banner pending) and three CanvasNotice message/actionTitle/code switches (all handled).
+Add nodeInputLimit ONLY to existing noDrawingSurface/nosign icon arm; keep exhaustive switches,
+no default/new flag/state. A new-pin run03 needs separate prepare/grant; both failed builds remain
+immutable0-test evidence. Cold/Glare and all feature behavior remain runtime-unqualified.
+
 ## Active continuation — 2026-10-26
 
 Kevin resumes with “continue”. Proceed with the recorded queue and useful delegated work. The

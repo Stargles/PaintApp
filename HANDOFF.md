@@ -10,6 +10,14 @@ and ONE Mac native lease. Preserve real artwork and record before acting.
 Usage authorization persists: delegate useful work, conserve usage, quality over speed. No owner
 question is pending. No physical restart is authorized by an old readiness answer.
 
+Successor normal155 run02 at7cb2dba3 also stopped before tests: CanvasNoticeBanner.icon lacked the
+same new case. Root independently verified de416e09 closure/all730 source and no native children.
+Before next code, the complete named-consumer census was read: two view switches (DrawingView now
+handled; banner pending) and three CanvasNotice message/actionTitle/code switches (all handled).
+Add nodeInputLimit ONLY to existing noDrawingSurface/nosign icon arm; keep exhaustive switches,
+no default/new flag/state. A new-pin run03 needs separate prepare/grant; both failed builds remain
+immutable0-test evidence. Cold/Glare and all feature behavior remain runtime-unqualified.
+
 ## Current integration — October 26
 
 Kevin asks us to keep useful agents on detail work and root on integration/evidence coordination.
