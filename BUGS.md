@@ -17,6 +17,18 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Owner reports severe drawing/erasing latency and another drawing crash — 2026-10-26
+
+Owner sees major latency on some brushstrokes, also erasing, and reports one further crash while
+drawing. Treat this as a possible installed-build regression; cause and relationship to earlier
+refactors are unproved. User requested recording retrieval ONLY, then park because usage is low.
+Retrieved unchanged original `recording-20261026-213750.jsonl`,55,035B/SHA94e42359, from the app's
+Documents/Recordings. Header: Test1,4096², v1.0.43(1), build2026-10-25T22:03:42Z; source git unavailable.
+Evidence: `~/PaintWork/s54-final-qualification/owner-latency-recording-20261026-214541/`.
+No event analysis, replay, new crash-log investigation or fix performed. On resume, establish the
+affected build and causal path using this recording and existing Test1 evidence; repair the shared
+owner/algorithm as warranted, with clean architecture and drawing/erasing regression verification.
+
 ## Reduced fill-window preview test produces no preview — 2026-10-26
 
 Actual fill-reuse116 three-class47 run:46pass/1fail. All19 WindowSurfaceView checks, including the

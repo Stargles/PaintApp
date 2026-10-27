@@ -8,6 +8,21 @@ artwork and record findings/rulings before code. One Mac native lease; source wo
 
 ## Parked checkpoint — October26
 
+Latest limited request: retrieve the owner's new iPad recording of severe drawing/erasing latency
+and another drawing crash, then park again. No debugging/fix/refactor/build/replay/install now.
+Preserve original evidence, verify build provenance if available without app restart, and record
+the transfer outcome. Later work must establish the root cause, not add a performance workaround.
+
+**Recording retrieved, parked again:** `~/PaintWork/s54-final-qualification/owner-latency-recording-20261026-214541/recording-20261026-213750.jsonl`,
+55,035B, SHA256 `94e4235942a352802dd08a95689cf4ff1750ff6aa64aae97acfd7353368b212e`.
+Copied read-only through devicectl; original file entry/size/modification metadata unchanged after
+transfer. Header only: Test1,4096×4096, owner1080×810 landscape, v1.0.43(1), build2026-10-25T22:03:42Z,
+iPad12,1/iOS26.6.2, started2026-10-27T01:37:50Z. Git identity is unavailable in the header; do not
+infer exact installed source from the earlier receipt alone. No event analysis or cause attribution.
+No app restart, install, build, replay, fix or agent resumed. On a later owner resume, prioritize
+this drawing/erasing latency and new drawing crash together with the existing Test1 crash evidence;
+verify the actual affected build and root cause before claiming regression safety.
+
 Kevin explicitly requested **checkpoint and park**. All three agents stopped with clean trees;
 all root native supervisors joined and no compiler/test process remains. No new merge, push or
 iPad install. Latest installed Release remains6fb, owner-confirmed. Last integration product3219;

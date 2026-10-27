@@ -2,6 +2,16 @@
 
 ## Current owner-facing status — October 26
 
+New owner report while parked: major drawing latency, also during erasing, plus another crash while
+drawing. Owner saved an iPad recording; installed version is not yet freshly verified. Immediate
+scope is **copy the recording only, then park again** because usage is low. On later resume,
+investigate the actual installed build and root cause; clean architecture and regression prevention
+remain mandatory. No fix/refactor, build, replay or install is requested now.
+Recording retrieval completed: `recording-20261026-213750.jsonl` (55,035B), preserved under
+`~/PaintWork/s54-final-qualification/owner-latency-recording-20261026-214541/`. Header identifies
+Test1/4096², v1.0.43(1), buildOctober25; exact source unverified. Latency/crash analysis remains
+outstanding and takes priority when the owner resumes. Parked again; original left on the iPad.
+
 **Parked at Kevin's explicit request. Resume only when he asks.** Kevin is asleep until10a.m.
 tomorrow. Conserve usage and use
 agents for independent work. Architecture, correctness and performance take priority over speed.
