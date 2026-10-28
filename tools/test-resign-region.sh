@@ -64,18 +64,39 @@ checkout_build_source "$GIT_FIXTURE" "$INSTALLED_SHA" || { echo 'FAIL selected s
 [[ "$(git -C "$GIT_FIXTURE" rev-parse HEAD)" == "$INSTALLED_SHA" && -f "$GIT_FIXTURE/untracked-deploy-fixture" ]] || { echo 'FAIL checkout did not preserve exact source/untracked fixture'; exit 1; }
 echo 'PASS checkout-selected-immutable-source-preserves-untracked'
 STATE_FIXTURE="$WORK/success-state"
+printf 'LAST_APP_PATH=/old/Paint.app\nLAST_SOURCE_SHA=%s\nLAST_PROFILE_EXPIRATION=2026-10-25T00:00:00Z\nLAST_PROFILE_CREATION=2026-10-18T00:00:00Z\n' "$OLD_SHA" > "$STATE_FIXTURE"
+cp "$STATE_FIXTURE" "$WORK/state-before-success"
 write_success_state "$STATE_FIXTURE" '/fixture/Paint.app' "$INSTALLED_SHA" '2026-10-30T00:18:54Z' '2026-10-23T00:18:54Z'
-grep -Fxq "LAST_SOURCE_SHA=$INSTALLED_SHA" "$STATE_FIXTURE" || { echo 'FAIL state omitted installed source SHA'; exit 1; }
-cp "$STATE_FIXTURE" "$WORK/state-before-invalid-write"
+printf 'LAST_APP_PATH=/fixture/Paint.app\nLAST_SOURCE_SHA=%s\nLAST_PROFILE_EXPIRATION=2026-10-30T00:18:54Z\nLAST_PROFILE_CREATION=2026-10-23T00:18:54Z\n' "$INSTALLED_SHA" > "$WORK/expected-success-state"
+cmp -s "$STATE_FIXTURE" "$WORK/expected-success-state" || { echo 'FAIL successful state did not advance all four fields'; exit 1; }
+cp "$WORK/state-before-success" "$STATE_FIXTURE"
 if write_success_state "$STATE_FIXTURE" '/fixture/Paint.app' invalid expiry creation; then
     echo 'FAIL invalid source SHA was persisted'; exit 1
 fi
-cmp -s "$STATE_FIXTURE" "$WORK/state-before-invalid-write" || { echo 'FAIL invalid source write changed state'; exit 1; }
-echo 'PASS source-state-persists-valid-sha-rejects-invalid'
+cmp -s "$STATE_FIXTURE" "$WORK/state-before-success" || { echo 'FAIL invalid source write changed state'; exit 1; }
+printf() { return 73; }
+if write_success_state "$STATE_FIXTURE" '/fixture/Paint.app' "$INSTALLED_SHA" expiry creation; then
+    unset -f printf
+    echo 'FAIL mocked state write failure was accepted'; exit 1
+fi
+unset -f printf
+cmp -s "$STATE_FIXTURE" "$WORK/state-before-success" || { echo 'FAIL failed state write changed prior state'; exit 1; }
+if compgen -G "$STATE_FIXTURE.tmp.*" >/dev/null; then echo 'FAIL failed state write left a temp file'; exit 1; fi
+mv() { return 74; }
+if write_success_state "$STATE_FIXTURE" '/fixture/Paint.app' "$INSTALLED_SHA" expiry creation; then
+    unset -f mv
+    echo 'FAIL mocked atomic rename failure was accepted'; exit 1
+fi
+unset -f mv
+cmp -s "$STATE_FIXTURE" "$WORK/state-before-success" || { echo 'FAIL failed atomic rename changed prior state'; exit 1; }
+if compgen -G "$STATE_FIXTURE.tmp.*" >/dev/null; then echo 'FAIL failed atomic rename left a temp file'; exit 1; fi
+echo 'PASS state-atomic-success-invalid-write-and-failure-preservation'
 INSTALL_LINE=$(grep -n 'xcrun devicectl device install app' "$CANDIDATE" | tail -1 | cut -d: -f1)
 STATE_LINE=$(grep -n 'write_success_state "\$STATE_FILE"' "$CANDIDATE" | tail -1 | cut -d: -f1)
 [[ -n "$INSTALL_LINE" && -n "$STATE_LINE" && "$STATE_LINE" -gt "$INSTALL_LINE" ]] || { echo 'FAIL source state write is not after install'; exit 1; }
 echo 'PASS provenance-write-follows-successful-install'
+grep -Fq 'verdict "OK" "source @ ${SOURCE_SHA:0:8}' "$CANDIDATE" || { echo 'FAIL final verdict does not report selected source'; exit 1; }
+echo 'PASS final-verdict-identifies-selected-source'
 
 run_case() {
     local name=$1 clean_rc=${2:-0} build_rc=${3:-0} mode=${4:-advanced} tamper=${5:-no}
@@ -88,6 +109,9 @@ NAME=$1 CLEAN_RC=$2 BUILD_RC=$3 MINT_MODE=$4 TAMPER=$5
 PROJECT_DIR="$WORK/$NAME/project" PROJECT_FILE=Paint.xcodeproj SCHEME=PaintTest CONFIGURATION=Release
 DEVICE_UUID=fixture-device RUN_USER=$(id -un) BUILD_LOG_DIR="$PROJECT_DIR/../logs" NOW=$(date +%s)
 STATE_FILE="$PROJECT_DIR/../state" SOURCE_SHA=0123456789abcdef0123456789abcdef01234567
+OLD_STATE_SOURCE_SHA=abcdef0123456789abcdef0123456789abcdef01
+printf 'LAST_APP_PATH=/previous/Paint.app\nLAST_SOURCE_SHA=%s\nLAST_PROFILE_EXPIRATION=2026-10-25T00:00:00Z\nLAST_PROFILE_CREATION=2026-10-18T00:00:00Z\n' "$OLD_STATE_SOURCE_SHA" > "$STATE_FILE"
+cp "$STATE_FILE" "$STATE_FILE.before"
 [[ "$MINT_MODE" == aged ]] && NOW=$((NOW - 15))
 PROFILE_DUE_WINDOW=3600 PROFILE_RENEW_DELAY=120
 FIXTURE_FAIL_EPOCH=no
@@ -142,6 +166,7 @@ run_as_user(){
 SEED_APP=$SEED_APP
 . "$REGION"
 if [[ -f "$BUILD_LOG_DIR/actions.log" ]] && grep -q '^INSTALL$' "$BUILD_LOG_DIR/actions.log"; then
+  printf 'LAST_APP_PATH=%s\nLAST_SOURCE_SHA=%s\nLAST_PROFILE_EXPIRATION=%s\nLAST_PROFILE_CREATION=%s\n' "$APP_PATH" "$SOURCE_SHA" "$PROFILE_EXPIRATION_ISO" "$PROFILE_CREATION_ISO" > "$PROJECT_DIR/../expected-state"
   write_success_state "$STATE_FILE" "$APP_PATH" "$SOURCE_SHA" "$PROFILE_EXPIRATION_ISO" "$PROFILE_CREATION_ISO"
 fi
 CASE
@@ -169,13 +194,13 @@ valid_result=$(run_case valid-new-profile 0 0 advanced no)
 [[ "$valid_result" == 'valid-new-profile 0 no-verdict' ]] || { echo "valid install failed: $valid_result"; exit 1; }
 echo 'PASS valid-new-profile'
 [[ -f "$WORK/valid-new-profile/logs/actions.log" ]] || { echo 'valid profile was not installed'; exit 1; }
-grep -Fxq 'LAST_SOURCE_SHA=0123456789abcdef0123456789abcdef01234567' "$WORK/valid-new-profile/state" || { echo 'successful fixture install did not persist source SHA'; exit 1; }
+cmp -s "$WORK/valid-new-profile/state" "$WORK/valid-new-profile/expected-state" || { echo 'successful fixture install did not advance all four state fields'; exit 1; }
 expect too-early SKIP 0 0 0 early no
 [[ ! -f "$WORK/too-early/logs/actions.log" ]] || { echo 'too-early profile installed'; exit 1; }
 expect stale-profile FAIL 1 0 0 stale no
 for rejected in clean-failure build-failure changed-profile short-profile aged-start clock-failure too-early stale-profile; do
   [[ ! -f "$WORK/$rejected/logs/actions.log" ]] || { echo "$rejected unexpectedly called device install"; exit 1; }
-  [[ ! -f "$WORK/$rejected/state" ]] || { echo "$rejected unexpectedly persisted successful-install state"; exit 1; }
+  cmp -s "$WORK/$rejected/state" "$WORK/$rejected/state.before" || { echo "$rejected changed state without a successful install"; exit 1; }
 done
 for case_name in valid-new-profile short-profile changed-profile build-failure; do
   args="$WORK/$case_name/logs/args.log"
