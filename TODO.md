@@ -119,6 +119,9 @@ that the final combined audit build has passed.
     Renewal source correction is now scoped: reuse existing managed checkout and successful-install
     state to retain the verified installed SHA until main contains it. Prepare/test a candidate
     before changing the live script; preserve signing, profile-life, retry and user/root boundaries.
+    Candidate and root's actual-success-call/install-failure harness now pass, including deliberate
+    downgrade/partial-write/stale-source failures. Activate only after verifying the installed6fb
+    artifact and unchanged live inputs; this changes future renewal source, not the current build.
 
 Future interpolation overhaul, multi-cel selection, linear-light blending, audio/video editing and
 other explicitly deferred features stay written down. Dropped brush importers are not reopened.

@@ -110,6 +110,14 @@ is its ancestor; fail on unrelated/unverifiable history. Reuse the existing clea
 build paths/signature/lifetime/mint/user gates; no disposable build service/worktree machinery.
 Prepare a candidate copy and hermetic Git source-choice tests first. No live script/state/daemon
 mutation until root review/tests. Seed only from verified6fb receipt when applying, not guessed main.
+Candidate655acf67 now passes root-reviewed ancestry/atomic-state tests and all original signing/
+mint gates. Root found the harness manually invoked state persistence; successor db0048bf now runs
+the ACTUAL candidate post-install call and adds install-failure preservation. Root baseline passes;
+forcing that call to persist the previous SHA fails the exact successful-install state assertion.
+Authorize activation of this exact candidate after verifying live original626a485d unchanged,
+verified6fb binary/signature/profile and state freshness. Import its missing commit locally into
+the managed clone without checkout, seed source + verified artifact path atomically, then replace
+script atomically and verify read-only source choice/dry run. No new build/install/daemon change.
 
 ## Previous parked checkpoint — October26–27
 
