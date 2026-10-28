@@ -896,6 +896,14 @@ session.) The script is `~/PaintApp/deploy/resign.sh`, outside git; `--dry-run` 
 `RESIGN_FAKE_NOW`, `RESIGN_STATE_FILE` and `RESIGN_FIXTURE_OLD_EXPIRATION`/`_NEW_EXPIRATION` proves
 the decision logic with no build. Log: `~/.config/paintapp/resign.log`.
 
+**October28 source protection:** renewal records the full installed source SHA beside the profile
+fields. It selects main only when main contains that source; while main is older it renews the exact
+installed commit. Missing/unrelated history refuses the build. After every successful manual install,
+atomically update `resign_state` with that verified source SHA, artifact path, profile expiry and
+creation; import private branch objects into the managed clone if needed. Never advance it before
+install succeeds. Source patch, activation and actual-boundary tests:
+[auto-resign-source-2026-10-28.md](docs/bug-evidence/auto-resign-source-2026-10-28.md).
+
 Simulator testing runs locally too — the Tailscale/SSH `deploy/mac/*` scripts are for the Windows
 machine, not this Mac.
 

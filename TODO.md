@@ -66,7 +66,8 @@ that the final combined audit build has passed.
 | Simplify vector Liquify and remove the complex version | Point-only version is installed and owner-confirmed; old vector material path removed | Final combined checks and performance boundaries |
 | Mend inside/attached vector strokes and Mend All Fills | Installed; public workflows and deliberate-failure checks passed | Current Release cost/memory comparison; preserve outside edges and uncertain joins |
 | Smart father–grandfather saving | Newest clock-bucket versions implemented and installed | Finish newly found failed-save retry and safe-exit correction |
-| Erasing crash in Test1 | Source/data/log investigation complete so far; cause unproved | Fresh physical capture when Kevin is awake and the iPad is ready |
+| Erasing crash in Test1 | Logs preserved; app/system allocation cause remains unproved | Finish window-renderer checks and fresh physical evidence |
+| Drawing/erasing lag and Move regression | Move and ordinary drawing-wait corrections integrated; 85 focused checks pass | Eraser window source and device confirmation remain |
 | Architecture, cleanup and bug audit | In progress; several corrections separately tested and integrated | Remaining source review, findings below, combined checks and performance |
 | Development disk cleanup | About50GB reclaimed across cleanup passes; about15GB currently free | Continue bounded cache housekeeping between test batches |
 | Undo on an edited cel | Correction integrated; model/public/fault checks passed | Final combined checks |
@@ -115,7 +116,8 @@ that the final combined audit build has passed.
     its drawing and fault checks. Investigate the existing reduced-budget fill preview check that
     failed while all19surface checks passed; no retry or enlarged wait. The Test1 erasing respring
     still needs fresh physical evidence.
-    Remove finished items whole at merge. Resolve the October29 automatic build's old-main risk.
+    Remove finished items whole at merge. October29 automatic build's old-main risk is corrected:
+    live renewal retains verified installed6fb while main is older, with atomic source/profile state.
     Renewal source correction is now scoped: reuse existing managed checkout and successful-install
     state to retain the verified installed SHA until main contains it. Prepare/test a candidate
     before changing the live script; preserve signing, profile-life, retry and user/root boundaries.

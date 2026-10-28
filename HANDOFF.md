@@ -8,6 +8,31 @@ artwork and record findings/rulings before code. One Mac native lease; source wo
 
 ## Resumed — October28
 
+**Current afternoon boundary:** integration product4cce1817 + fixture8ea6a254; all730 native source
+files byte/mode exact to qualifiedc634. Original ten whole classes85 GREEN85, root reconciled source,
+methods/device/argv and LOOKed complete filled/Undo pictures: four retained edges, frame1, above dock.
+Move source/controls77 remain qualified. Root harvested only runtimeb9 and permanent fixtures; TEMP
+recorder code never entered integration. Main/originafd unchanged; no merge/push/new iPad install.
+
+Live renewal source fix is ACTIVATED, SHA655acf67, strict verified installed6fb seeded atomically
+with its artifact/profile dates. Real managed-clone selector retains6fb; dry run passed. Old clone
+origin/main wasdf459377, checkout17b438c9 unchanged. No daemon/env/device/build change. Root harness
+now executes actual post-install state call and install failure; stale-source mutation hits actual
+state assertion. Commits51b/dd1/db004 harvested, durable exact patch/evidence in docs/bug-evidence.
+After EVERY future manual install atomically update source/artifact/profile state (CLAUDE.md).
+
+Sole native lease: FillWindow12 + WindowSurfaceView19 + LatestWins16 on fixture995, session81197
+has joinedGREEN47; root independent extraction pending. Earlier1400²/400² fixtures could not fit
+the existing705600B cap;256x255/120x119 fixture retains all output assertions/budget/wait.
+Eraser candidatecaf32295 + heldUI915 compositionf9be08f1 is SOURCE ONLY, no native yet. Existing
+CelContentPicture backs only scratch-sized contexts; no new source service/cache. Cross-file Frozen
+access and optional-image constructor mistakes corrected before compile; held UI uses owner landscape,
+existing rasterizes counter and outside-ink pixels. Whole logic/UI, controls and measurements pending.
+OLD tidy9d test ran1 but failed setup934/935 (overlapping cel), ZERO tidy credit; successor6feeb8cc
+uses firstcel.endFrame, source-only/native unrun. Package owner lift2c8 remains unrun. Export694,
+Autosave4c, Gradient8e/Resizeac and other earlier queue remain. Autosave prepared inventory is
+s55/autosave-next-native.md. Fresh saved/unlocked export question has no answer; no physical restart.
+
 Kevin says the problem seems limited to one canvas and authorizes starting. Investigate both
 preserved recordings first: selection→Move in Test/2048² and drawing/erasing latency/new crash in
 Test1/4096². Do not conflate the scenes or assume which report the new canvas-specific observation
