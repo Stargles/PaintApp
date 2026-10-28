@@ -16,9 +16,9 @@ all earlier queue tasks. Recorded in TODO/BUGS before source work.
 ## Current integration and device boundary
 
 - Integration tree: `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`,
-  branch `tmp/s54-qualified-integration`, recorded HEAD `63e871d3`. Product source remains runtime
-  `4cce1817` plus fixture `8ea6a254`; all 730 native source entries byte/mode exact to qualified
-  source `c63497f1`.
+  branch `tmp/s54-qualified-integration`. Current product includes runtime4cce1817/fixture8ea6a254
+  plus package harveste4f9c8fa. Frozen inventory730; staticfast5424/full6023 at e4f9c8fa. This new
+  assembled source is not natively qualified. The older sourcec63497f1's85green scope remains historical.
 - At recorded HEAD `63e871d3`, `main`/`origin/main` remain at `afd2030c`; no merge or push had occurred.
   A qualified merge is authorized once the remaining gates pass. Do not treat the separately
   qualified component pins as a qualified assembled integration.
@@ -82,13 +82,15 @@ preview/commit share canonical ordered vector geometry and one admitted native w
 review: no concrete source blocker, but posed backing/held-picture, geometric growth and latency
 coverage gaps remain. Report `s55-recorded-regressions/eraser-window-source-review-535a0adf.md`.
 
-First535 native selected2 compiled and ran: both RED, no skips. Root reconciled all730 immutable
-source entries, methods/device/argv. Mode1 still loses outside/partly covered reference pixels;
-Mode2/4 fails a committed red-pixel premise91>220. Agent owns source correction and broader meaningful
-replacement tests; no native while it edits. Packet `eraser-native-preview-new2-535a0adf` preserves
-originals. Never weaken committed-model pixel parity to pass. Rebuild normal then meaningful new
-controls and all affected public classes. No harvest or physical latency/crash claim. Mode3 remains
-asynchronous/unchanged from6fb; its source/evidence limits are in `mode3-current-source-map.md`.
+First535 native selected2 compiled/ran2RED, root730/method/device/argvexact. Review traced those
+failures to stale test construction (Mode1 still used reference-free backdrop) and incorrect reference
+probe/z-order premises. Source1a corrects fixtures while retaining exact committed-model parity and
+adds growth/pose/held/opacity/performance coverage. Cleanup649's broad291 attempt built0tests: new
+benchmark freezeDisplay arguments were out of declaration order; source-only d034036f corrects that
+call, no oracle/runtimechange. Next normal291 atd034 still unrun. No eraserharvest/physicalclaim.
+The 291 includes280logic (Perf59) plus11actualUI classes; class selectors neveruse sourcefilename.
+Eraser tree canedit onlyoutside its actual lease; new10control machine map pinned d034 is being
+prepared and needs a matching positivebaseline first. Oldbfd proofs do not qualify newarchitecture.
 
 Root authorized source-only package2905 harvest using reviewed17-file patch SHA3443facc. All17
 allowlisted integration paths are unchanged since common19e; no intervening integration fix to
@@ -121,11 +123,13 @@ all Bhashes. No stagingreceipt/path edit or assumedrelocationcause. Packet
 `package-address-cold-ui-2905abd5` retains all results. Same device now shutdown with data retained;
 no reset or physicalinstall. Finalcombined/fast/old-format-retirement gates remain.
 
-**Next native:** newstreamMove selected2 at sourcebe82618f, packet `stream-move-old2-be82618f`;
-owned56 reboot in progress, root will start only after join. Source product unchanged fromintegration,
-only publictestfixture/helper additions. Eraser source1a4937a7 ready for normal reference/geometry
-checks; broad manifest291 (not native-tested), peerreview/faultplan active. 730 means tracked native
-source file entries, never test count. Native selectors use actual classes, not sourcefilename.
+**Current native:** newstreamMove selected2 atsource0a9461e4, root operator86087, packet
+`stream-move-old2-0a9461e4`. Earlierbe compile0: nestedgrid typecheck; corrected1d cachesAXframe once
+and builds same41²grid in typedloops. Actual1d2RED beforedrag, both onlyinitialbottom mismatch
+0.64375vs0.725; rootreconciled730/method/device/argv. Fixture couldbeoccludedbydock;7146 collapses
+publictimeline andchecksmeasureddockclear;0a placeswholeframescreenshots BEFORE visibilitypremises.
+No productstreamchange or sourcebugattribution. Eraser d034normal291 next afterjoin. New source
+harveste4f's finalcombined checks remain; no mainmerge/push/install.
 
 Stream Move owner report source map is `stream-move-owner-bug-map.md`: relevant placement/frame
 code unchanged6fb→integration; default OnTop shares floatView, InPlace composite is asynchronous.

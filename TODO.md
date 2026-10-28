@@ -26,9 +26,10 @@ Test package is still unanswered; continue simulator/source work without restart
   recorder/delay changes were retired whole. Integrated; no physical latency/crash claim.
 - Erasing: earlier176 checks and11 public workflows passed, but stronger reference-picture
   comparisons then found gaps. Candidate535 removes the flat cut/restamp preview and shares the
-  committed ordered vector geometry in one bounded window. Its first native2 compiled but both
-  failed: Mode1 reference parity, plus a Mode2/4 committed-picture premise. Source correction and
-  replacement coverage for posed backing, held pictures, growth/refusal and latency are active.
+  committed ordered vector geometry in one bounded window. First2 native failures traced to stale
+  test construction and incorrect probe/z-order premises;1a corrects those while retaining exact
+  committed parity and adds posed backing/held/growth/performance coverage. Broad649 attempt built
+  0tests on a new benchmark call-label error; corrected d034 awaits normal291.
   Independent review found no concrete source blocker; that is not a test pass or physical proof.
   Mode3 remains asynchronous/unchanged from6fb; iPad crash cause remains unproved.
 - Fill-window fixture47 is independently green; actual source count731 includes the extracted
@@ -43,7 +44,7 @@ Test package is still unanswered; continue simulator/source work without restart
   Layout38 plus whole Gallery5:40pass/3expected opt-in skips. Both separate cold Gallery cases pass:
   damaged A refused; B's complete files unchanged before B opens and visibly draws its own blue.
   Root inspected both landscape pictures. Final combined gates and old-format retirement remain.
-- Integrate the independently checked package2905 source through the reviewed17-file patch,
+- The independently checked package2905 source is harvested atintegratione4f9c8fa through the reviewed17-file patch,
   including permanent Gallery tests and stronger existing saving witnesses. All17 paths are unchanged
   in integration since their common ancestor; no unrelated fix is overwritten. Temporary capture
   hooks and source-branch notes are excluded. Final assembled tests remain required before merge.
@@ -55,9 +56,11 @@ The cold Gallery pair is captured/verified7files and temporary capture code is r
 changed the disposable simulator's app-container UUID; the original path-strict verifier refused.
 Root retained that result and separately verified the actual freshly queried app container and all
 B bytes against staging/capture before opening B. Protected artwork was never used.
-The streamed-screen/Move-box report is recorded separately; source mapping found unchanged stream
-placement since installed6fb. Test both On Top and In Place across drag/release/Set Down before
-attributing a cause or changing coordinates. Owner timing answer is optional and still pending.
+The streamed-screen/Move-box report is recorded separately; placement source is unchanged since6fb.
+First actual2 tests stopped beforedrag at the same bottom-edge mismatch, plausibly dock occlusion.
+Corrected fixture collapses the timeline and verifies both picture/box clear the dock, with whole
+screenshots before premises; selected2 now running at0a9461e4. No product change or cause claim.
+Owner timing answer is optional and still pending.
 
 Simulator cache cleanup reclaimed4.33GB at a joined native boundary, preserving and verifying all
 containers and existing Paint/Runner data. Only two exact generated cache paths were removed. Full
