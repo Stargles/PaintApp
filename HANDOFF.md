@@ -100,12 +100,35 @@ checked-write change left a local ProjectStore.write wrapper missing `throws` al
 already propagate it. Bounded signature correction7eafe7d9 committed in source branch; rerun38 before
 wider package/fault/UI gates. No migration qualification yet.
 
-**Current native boundary:** packageff62580e BUILD-FOR-TESTING ONLY, no test credit yet; temporary
-current-writer A/B export hook plus2 permanent opt-in GalleryRecovery methods. Capture on owned56,
-copy/hashverify artifact, then retire TEMP WHOLE. Stage public A-refusal/B-blue jobs on a fresh owned
-simulator without resetGallery; hashBafterrefusal BEFOREopeningB. e36wholeLayout38 is independently
-GREEN; current14-class inventory293 and controls17 source packets are prepared, not native-run.
-MotionGroup previous-writer3 remains unconsumed separately. New source changes require refreshedpins.
+**Current native boundary:** package remaining-controls8 native running, operator session35632,
+packet `s55-recorded-regressions/package-address-controls8-legal-read-2905abd5/native-run01`.
+Package source2905abd5: whole14classes293 GREEN/root730exact after reusing the already-qualified4c
+protected-source/pixel fixtures for3obsolete PNG-encode counts. Original17 controls stopped at10:
+first9 accepted/10 actual assertion sites;10 threw insetup, ZEROcredit;11–17unrun. New8 retains11–17
+and narrows10 to existingURL's missing-read fallback. Corrected original mapv2 for actual wrong-leaf
+kind assertions641/642; originals/extractions preserved. Literal-percent control credit only filename
+identity606 before secondaryIOfallout608. Allsource restored before this successor. Root must extract
+new outcomes and rebuildNORMAL before UI/install after mutants.
+
+Eraser29-caseHybrid sourcebb9db5dc: actualnewselected2 both RED/referenceparity (Mode1 six rows and
+Mode2/4 eight rows), healthypremises, root730exact. Source agent currently owns runtime refactor in
+eraser tree (uncommitted until handback); no eraser native may run during edits. Approved: canonical
+ordered post-edit elements shared with cut commit, one bounded geometry-only scratch window/no
+unused raster buffer, existing memo invalidated on content update, atomicrefusal retains prior
+picture; Mode1uses captured complete display source matching real punch semantics. Remove flat
+applyPreview/CutPreviewEdit/obsolete image replacement behavior/tests/docs; keep replacement role
+only for the real native preview. Reference streams can be punched by Mode1 when actually touched;
+do not invent immutable-reference behavior. Wait for sourcecommit/peerreview, run logic/pixel then
+wholeaffectedUI/meaningfulcontrols; no harvest yet despite olderbfd176 proof.
+
+Cold Gallery pair writerff selected1 GREEN/root730exact; copied7files byte/hash exact (IDs/index/
+A's one required raster ref toB verified), artifact `package-cold-writer-ff62580e/captured-pair-`
+`9D151F05-6036-4457-8D63-0E87F8F25F59`. TEMPcapture completelyretired2c921; Layouttest byteexacte36.
+Permanent GalleryRecovery class5 has2 new opt-in methods; neither run yet. Scopedstage/runnercopy/
+B-after-Averify scripts reviewed in writerpacket. Create fresh owned iPad9sim AFTER native lease,
+normalbuild then stage without resetGallery; must freshlookup app container AFTER A refusal before
+B-hash verification, BEFORE opening B. Stagegrant/schema in coordinatorproposal. No freshsim yet.
+MotionGroup previous-writer3 remains unconsumed separately.
 
 Owned56 cache housekeeping completed:4.33GBactualfreed, whole9446Container entries unchanged across
 clean, archive60012349Bverified. After boot2840existingPaint/Runner entries exact; onlyone584B new
@@ -162,3 +185,7 @@ packets:
 Keep reports short and artist-facing: root cause; changed/deleted files and symbols; exact merged SHA;
 Debug/Release fast counts; UI classes added/run; what was driven and seen; what Kevin does next; any
 refuted premise; and anything not run. Ask only a concrete owner decision when a ruling is required.
+
+Windows refreshed once October28: SSHPC@100.104.85.111 timedout, DesktopCommanderoffline; no further
+probe/runtime/build/deploy. Queuemap `s55-recorded-regressions/windows-next-native-map.md`. Artist UI
+remaining map `artist-ui-gates-map-20261028.md`, autosave map `autosave-next-native-packet-map.md`.

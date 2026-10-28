@@ -32,12 +32,15 @@ Test package is still unanswered; continue simulator/source work without restart
   older instead of downgrading it. Existing successful-install state is atomic and records the source;
   no current device/build/daemon change. Future manual installs update that state only after success.
 
-Packagee36wholeLayout38 passes; wider293, conditional17 controls and cold public Gallery proof remain.
-TEMP test-only writer captureff62580e is authorized to export a fresh private A/B pair, followed by
-complete retirement after root verifies the copy. Two permanent opt-in Gallery tests drive A's
-existing No Backup Available route and separately open B's blue raster. Stage on a fresh owned
-simulator without library reset; verify B's bytes after refusal before opening it. No protected
-artwork mutation. Current packageBFT is compilation only, not a passed test.
+Package's current14-class293 gate passes at2905abd5, with three stale PNG-encoding checks replaced
+by the stronger existing protected-source/byte/pixel witnesses. First9 deliberate controls accepted;
+old10 stopped insetup and earns zero. A narrower8-case successor is running. Cold Gallery pair is
+captured/verified7files and TEMPcapturecode fullyretired; the two permanent coldUIcases await a fresh
+owned simulator. Verify Bbytes afterArefusal and beforeBopen with freshpost-testcontainer lookup.
+Eraser reference matrices now reproduce defects inModes1/2/4; implement shared canonical native-list
+preview and retire the flat erase/restamp path, keeping one bounded window and existing state/memo.
+No new persistent flags/services/cache, no runtimeforked reference redraw. Current implementation
+is agent-owned until committed/reviewed/tested. Prior176green slice is not fullreferencequalification.
 
 Simulator cache cleanup reclaimed4.33GB at a joined native boundary, preserving and verifying all
 containers and existing Paint/Runner data. Only two exact generated cache paths were removed. Full
