@@ -52,6 +52,8 @@ class and inspect captures; no current-stroke correction qualification/harvest y
 The actual capture shows the test's lower gestures hitting the timeline, leaving the left boundary
 undrawn. Confirm against OLD first, then correct fixture placement through existing visible-paper
 geometry; retain every output/Undo assertion and add premises so missing strokes cannot pass.
+OLD441 confirms the same one failure in5. Correct only the three closed-box test fixtures; the
+application wait correction remains unchanged while the strengthened tests are qualified.
 Eraser source work is scoped to replacing its full-canvas backdrop with the existing immutable
 cel-picture renderer drawn into the existing stroke window. Preserve reference exclusion, pose,
 backing and held strokes outside that window; new logic/public checks required. No new app service.

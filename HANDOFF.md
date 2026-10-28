@@ -86,6 +86,12 @@ Root LOOKed whole failure-video final frame: only top/right outline exists, bott
 timeline, left absent, and frame4 is selected. Candidate fixture problem: normalized0.7 gestures
 start on timeline on this iPad9 portrait, unlike13-inch assumptions. OLD441 whole5 now running;
 keep all source/assertions unchanged for that comparison before correcting fixture geometry.
+OLD441 same whole FillUndo5 joined4pass/1same503fail, independently reconciled730. This confirms
+the iPad9 fixture's lower strokes are misplaced independently of b9. Author test-only geometry
+correction in separate s55-fill-undo-geometry: three closed-box workflows use visiblePaperRect/onHost,
+reuse existing helpers, keep every original fill/Undo/Redo/count/tolerance/deadline assertion mapped
+to actual ink points. Add pre-fill visible boundary/frame premises; one private class fixture is
+appropriate for three uses, no global test service. Original85 then must pass on composed source.
 
 Eraser window-source implementation authorized separately from stroke wait qualification. Reuse
 existing CelContentPicture as subtractive/replacing Role backdrop instead of UIImage; draw into
