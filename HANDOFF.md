@@ -72,6 +72,13 @@ must exercise actual subtractive coverage (normal coverage stamps), positive win
 no-allocation commit, not old replacing/destinationOut path. Preserve final blank/empty assertions,
 no budget increases. Counter de481 is source-only ready. NEW package preflightbf1c has38 tests,
 source-only/compiler unrun. Current renderer0fe not harvested, no crash/device claim.
+Current2f343024 normal165 nowGREEN165, exact730/method/device/argv reconciled. Root LOOK found
+the small target mark apparently still visible immediately after erase and gone after12s; the new
+test checks only exterior ink/model, not target pixels. App.screenshot also has malformed landscape
+framing (raw2160x1620 withExif8 versus known-correct screen capture1620x2160/Exif8). HOLD visual/
+pending-source qualification despite GREEN165. Add actual target blank-before/ink-before/white-after
+checks without waits, keep exterior/rasterize assertions, measure paper after configuration, capture
+via existing XCUIScreen.main. No runtime fix until the stronger guard establishes what is drawn.
 
 Kevin says the problem seems limited to one canvas and authorizes starting. Investigate both
 preserved recordings first: selection→Move in Test/2048² and drawing/erasing latency/new crash in
