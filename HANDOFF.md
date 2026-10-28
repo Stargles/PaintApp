@@ -181,3 +181,7 @@ were archived/hash-verified and stayed exact through deletion and boot (zero add
 free. Only the two validated generated cache targets were deleted; iPad/library copies untouched.
 Run reusable off-repo qualification-input preflight before future grants/maps to catch selector/hash/
 incomplete-assertion errors before native work. Exact receipts remain in root-next-gates.json.
+
+Owner reports repeated macOS OneDrive/app-data approval prompts. Explicit worktree/PaintWork/owned
+simulator scope is enforced; cause is unassigned. No privacy settings changed. Saved logical cache
+manifests and bounded logs can be audited without traversing cloud folders; continue app tasks.

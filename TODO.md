@@ -2,6 +2,11 @@
 
 ## Current owner-facing status — October 28
 
+**Operational report:** Kevin sees repeated macOS prompts asking ChatGPT to access OneDrive or
+other app/cloud data. Keep work scoped to explicit repository, PaintWork and owned-simulator paths;
+audit process/path attribution without traversing cloud folders or changing privacy settings. Cause
+is not established; continue the app tasks.
+
 **New owner report/ruling — Move Set Down gap:** selecting/moving an object, then switching to Brush
 or Eraser (exiting Move), briefly makes the moved drawing disappear before its baked/composited
 picture arrives. Owner suspects the preview is retired before the compositor finishes and explicitly

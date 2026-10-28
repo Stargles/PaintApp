@@ -1,5 +1,12 @@
 # Known Issues
 
+## macOS cloud-access prompts during agent work — October 28
+
+Owner reports repeated ChatGPT prompts for OneDrive access. No agent reports intentionally reading
+cloud paths; that alone does not establish the initiating process. Audit bounded saved inventories
+and relevant OS logs, avoid broad home/cloud scans, and leave TCC/privacy settings unchanged. This
+is an operational investigation, not an identified PaintApp defect; app work continues.
+
 ## Move exit briefly hides the placed drawing — October 28
 
 Owner reports a visible gap when a selected/moved object is placed down by changing to Brush or
