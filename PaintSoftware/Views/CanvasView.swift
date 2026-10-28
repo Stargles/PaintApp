@@ -828,6 +828,7 @@ struct CanvasView: UIViewRepresentable {
                     guard let self, let host, let layerID = host.strokeView.layerID,
                           let index = self.canvasManager.layers.firstIndex(where: { $0.id == layerID })
                     else { return nil }
+                    let waitingForTheRender = self.canvasManager.hasInteractiveStatePending
                     guard let settlement = self.canvasManager.prepareCanvasEdit() else { return nil }
                     let tree = self.canvasManager.renderTree(atFrame: frame)
                     var exposed = Set(self.canvasManager.layers.filter {
@@ -853,7 +854,7 @@ struct CanvasView: UIViewRepresentable {
                     let settle: () -> Bool = { [weak self] in
                         guard let self, settlement.commit() else { return false }
                         self.installHostPictures(pictures)
-                        self.refreshAfterPreparedCanvasEdit()
+                        self.refreshAfterPreparedCanvasEdit(waitingForTheRender: waitingForTheRender)
                         return true
                     }
                     let begin: () -> Void = { [weak self, weak host] in
@@ -3458,9 +3459,9 @@ struct CanvasView: UIViewRepresentable {
 
         /// The prepared hosts are installed before the transient overlay comes off. Source
         /// admission and settlement share the same inputs, so this phase only updates the views.
-        private func refreshAfterPreparedCanvasEdit() {
+        private func refreshAfterPreparedCanvasEdit(waitingForTheRender: Bool) {
             for host in layerHosts.values where !host.strokeView.hostIsBlanked {
-                host.strokeView.refreshDisplayIfStale(waitingForTheRender: true)
+                host.strokeView.refreshDisplayIfStale(waitingForTheRender: waitingForTheRender)
             }
             updateShapeOverlay()
             if !canvasManager.shapeGestureActive {
