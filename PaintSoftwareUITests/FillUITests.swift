@@ -475,6 +475,49 @@ final class FillLiveAdjustUITests: PaintUITestCase {
 
 final class FillUndoRedoUITests: PaintUITestCase {
 
+    /// Draw and prove a closed box on the visible paper, away from the toolbar and dock.
+    /// The returned points share the same host mapping as the gestures and later pixel probes.
+    private func drawClosedSquareFixture(on app: XCUIApplication, canvas: XCUIElement) throws
+        -> (inside: CGVector, leftEdge: CGVector) {
+        let paper = visiblePaperRect(app, in: canvas)
+        func at(_ x: Double, _ y: Double) -> CGVector { onHost(paper, x, y) }
+
+        let left = 0.32, right = 0.68, top = 0.34, bottom = 0.66
+        let topLeft = at(left, top), topRight = at(right, top)
+        let bottomRight = at(right, bottom), bottomLeft = at(left, bottom)
+        let inside = at(0.5, 0.5)
+        let leftEdge = at(left, 0.5)
+        let edgeSamples = [
+            (name: "top", point: at(0.5, top)),
+            (name: "right", point: at(right, 0.5)),
+            (name: "bottom", point: at(0.5, bottom)),
+            (name: "left", point: leftEdge),
+        ]
+
+        assertBelowTheToolbar(app, canvas, dy: topLeft.dy, "The square's top edge")
+        assertAboveTheDock(app, canvas, dy: bottomLeft.dy, "The square's bottom edge")
+        let frameBeforeDrawing = try XCTUnwrap(readFrameLabel(app), "The frame label should be readable before drawing")
+
+        drawLine(on: canvas, from: topLeft, to: topRight) // top
+        drawLine(on: canvas, from: topRight, to: bottomRight) // right
+        drawLine(on: canvas, from: bottomRight, to: bottomLeft) // bottom
+        drawLine(on: canvas, from: bottomLeft, to: topLeft) // left
+
+        let frameAfterDrawing = try XCTUnwrap(readFrameLabel(app), "The frame label should be readable after drawing")
+        XCTAssertEqual(frameAfterDrawing.current, frameBeforeDrawing.current,
+                       "Drawing the box must leave the current frame unchanged")
+        XCTAssertEqual(frameAfterDrawing.total, frameBeforeDrawing.total,
+                       "Drawing the box must leave the frame count unchanged")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: inside.dx, dy: inside.dy)),
+                      "The box interior should still be blank before filling")
+        for sample in edgeSamples {
+            XCTAssertNotNil(waitForPixel(canvas, at: sample.point, matches: { !isWhitish($0) }),
+                             "The pre-fill \(sample.name) edge must be visibly drawn")
+        }
+        attachScreenshot(app, "closed square edges before fill")
+        return (inside, leftEdge)
+    }
+
     /// Undoing right after a fill must remove exactly the fill — not the strokes underneath it, and not
     /// nothing. (The fill is applied but, in the post-lift adjustable state, isn't yet a committed undo
     /// step; undo has to finalize + revert it.)
@@ -485,22 +528,21 @@ final class FillUndoRedoUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.3)) // top
-        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.7)) // right
-        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.7)) // bottom
-        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.3)) // left
+        let square = try drawClosedSquareFixture(on: app, canvas: canvas)
 
         app.buttons["toolbar.fillButton"].tap()
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Fill should color the interior")
+        canvas.coordinate(withNormalizedOffset: square.inside).tap()
+        XCTAssertTrue(waitUntilFilled(canvas, dx: square.inside.dx, dy: square.inside.dy), "Fill should color the interior")
+        attachScreenshot(app, "closed square fill before undo")
 
         let undo = app.buttons["sideToolbar.undoButton"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
         XCTAssertTrue(undo.isEnabled, "Undo should be available immediately after a fill")
         undo.tap()
 
-        XCTAssertTrue(waitUntilBlank(canvas, dx: 0.5, dy: 0.5), "Undo should remove the fill from the interior")
-        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.3, dy: 0.5)),
+        XCTAssertTrue(waitUntilBlank(canvas, dx: square.inside.dx, dy: square.inside.dy), "Undo should remove the fill from the interior")
+        attachScreenshot(app, "closed square after undo")
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: square.leftEdge.dx, dy: square.leftEdge.dy)),
                        "Undoing the fill must NOT also remove the square's strokes (the left edge should still be drawn)")
     }
 
@@ -511,22 +553,22 @@ final class FillUndoRedoUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.3))
-        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.7))
-        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.7))
-        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.3))
+        let square = try drawClosedSquareFixture(on: app, canvas: canvas)
 
         app.buttons["toolbar.fillButton"].tap()
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Fill should color the interior")
+        canvas.coordinate(withNormalizedOffset: square.inside).tap()
+        XCTAssertTrue(waitUntilFilled(canvas, dx: square.inside.dx, dy: square.inside.dy), "Fill should color the interior")
+        attachScreenshot(app, "closed square fill before undo and redo")
 
         app.buttons["sideToolbar.undoButton"].tap()
-        XCTAssertTrue(waitUntilBlank(canvas, dx: 0.5, dy: 0.5), "Undo should remove the fill")
+        XCTAssertTrue(waitUntilBlank(canvas, dx: square.inside.dx, dy: square.inside.dy), "Undo should remove the fill")
+        attachScreenshot(app, "closed square after undo before redo")
 
         let redo = app.buttons["sideToolbar.redoButton"]
         XCTAssertTrue(redo.isEnabled, "Redo should be available after undoing a fill")
         redo.tap()
-        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Redo should restore the fill")
+        XCTAssertTrue(waitUntilFilled(canvas, dx: square.inside.dx, dy: square.inside.dy), "Redo should restore the fill")
+        attachScreenshot(app, "closed square after redo")
     }
 
     /// On a blank canvas a fill has no earlier action behind it, so this isolates that the fill itself is
@@ -587,29 +629,40 @@ final class FillUndoRedoUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.3))
-        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.7))
-        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.7))
-        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.3))
+        let square = try drawClosedSquareFixture(on: app, canvas: canvas)
 
         app.buttons["toolbar.fillButton"].tap()
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Fill should color the interior")
+        canvas.coordinate(withNormalizedOffset: square.inside).tap()
+        XCTAssertTrue(waitUntilFilled(canvas, dx: square.inside.dx, dy: square.inside.dy), "Fill should color the interior")
+        attachScreenshot(app, "closed square fill before drawing outside stroke")
 
         // Switch to the brush and draw a separate stroke on blank paper away from the square. Beginning
         // the stroke commits the fill; ending it registers the stroke on top.
         app.buttons["toolbar.brushButton"].tap()
-        let p = safeOutsideCornerPoint(canvas)
-        drawLine(on: canvas, from: p, to: CGVector(dx: p.dx + 0.12, dy: p.dy))
+        let visiblePaper = visiblePaperRect(app, in: canvas)
+        let p = onHost(visiblePaper, 0.12, 0.12)
+        let squareTopLeft = onHost(visiblePaper, 0.32, 0.34)
+        let squareBottomRight = onHost(visiblePaper, 0.68, 0.66)
+        let squareRect = CGRect(x: CGFloat(squareTopLeft.dx), y: CGFloat(squareTopLeft.dy),
+                                width: CGFloat(squareBottomRight.dx - squareTopLeft.dx),
+                                height: CGFloat(squareBottomRight.dy - squareTopLeft.dy))
+        XCTAssertFalse(squareRect.contains(CGPoint(x: CGFloat(p.dx), y: CGFloat(p.dy))),
+                       "The outside stroke probe must remain on visible paper and outside the closed square")
+        let strokeEnd = CGVector(dx: p.dx + 0.12, dy: p.dy)
+        XCTAssertLessThan(strokeEnd.dx, squareTopLeft.dx,
+                          "The complete outside stroke must remain left of the square")
+        drawLine(on: canvas, from: p, to: strokeEnd)
 
         let undo = app.buttons["sideToolbar.undoButton"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
         undo.tap()
-        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)),
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: square.inside.dx, dy: square.inside.dy)),
                        "First undo should remove the stroke drawn last, leaving the fill in place")
+        attachScreenshot(app, "closed square after outside-stroke undo")
         undo.tap()
-        XCTAssertTrue(waitUntilBlank(canvas, dx: 0.5, dy: 0.5),
+        XCTAssertTrue(waitUntilBlank(canvas, dx: square.inside.dx, dy: square.inside.dy),
                       "Second undo should then remove the fill")
+        attachScreenshot(app, "closed square after fill undo")
     }
 
 }
