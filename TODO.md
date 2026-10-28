@@ -3,8 +3,9 @@
 ## Current owner-facing status — October 28
 
 **Resumed October28. Priority now:** investigate the owner-recorded drawing/erasing latency and new
-crash, and selection→Move requiring repeated taps. Owner says it seems limited to one canvas;
-clarification of which report/scene is pending. Preserve the separate Test1/4096² and Test/2048²
+crash, and selection→Move requiring repeated taps. Owner clarified: **Move-button problem in Test
+is the canvas-specific one**; no such scope established for drawing/erasing latency. Preserve the
+separate Test1/4096² and Test/2048²
 evidence. Establish affected build and cause before changing code; use agents and keep all earlier
 unfinished tasks queued. No fresh authorization to restart an unsaved physical scene.
 

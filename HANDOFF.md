@@ -11,7 +11,8 @@ artwork and record findings/rulings before code. One Mac native lease; source wo
 Kevin says the problem seems limited to one canvas and authorizes starting. Investigate both
 preserved recordings first: selection→Move in Test/2048² and drawing/erasing latency/new crash in
 Test1/4096². Do not conflate the scenes or assume which report the new canvas-specific observation
-qualifies; clarification is pending while independent evidence work proceeds. Root-cause changes,
+qualifies. Kevin clarified: **only the Move-button problem in Test is canvas-specific**; do not
+apply that observation to Test1 drawing/erasing latency. Root-cause changes,
 clean shared ownership and no regression/band-aid workaround remain the priorities. Use source/
 recording agents; root owns native work. No fresh physical restart readiness has been given.
 Old park notes below are historical; they do not block this explicit resume.
