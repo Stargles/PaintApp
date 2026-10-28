@@ -50,6 +50,18 @@ UI passed its replacement role and unchanged rasterizes count BEFORE frames asse
 pixel/model assertions unexecuted. No renderer harvest. Compare OLD6b blank2+same clip witness
 and inspect preview counter placement (refreshDisplay early async wait may skip counting shown
 overlay). No weakening assertions/budgets/delays; fix shared root only after evidence. Native free.
+OLD tidy6fee now reaches intended refusal/manifest/source-location failures after all setup passes;
+root reconciled730. Later external-byte assertions stop at missing moved source and earn no credit.
+Authorize NEW2c shared global preflight of all generated targets BEFORE rename/moves, reuse checked
+resolver and CAS, preserve spellings/no decoder change. Existing occupied regular-target skip does
+not rewrite that cel but permits mixed partial migration; choose non-destructive whole-plan refusal,
+remove old per-item skip path, strengthen its existing test and later-directory test. No new service.
+Authorize eraser counter fix at existing showOverlays publication seam: async base paths really
+present scratch but return before old refreshDisplay increment. Move existing counter, count nonnil
+changed ordinary vector image and delivered timing trail, keep raster/Mode3 excluded, no new state.
+Clip remains unchanged until OLD scratch3 runs. Source9b adds exact new clip test using OLD UIImage
+backdrop; blank2 original. Native selected3 next. Empty-read trace refutes early-empty-allocation
+theory: first blank test then stamps1GiB tier; second uses old replacement rather than actual coverage.
 
 Kevin says the problem seems limited to one canvas and authorizes starting. Investigate both
 preserved recordings first: selection→Move in Test/2048² and drawing/erasing latency/new crash in
