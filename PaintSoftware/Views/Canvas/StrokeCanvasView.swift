@@ -1055,7 +1055,9 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// - Returns: whether a current base was installed or was already available.
     @discardableResult
     func refreshDisplay(waitingForTheRender: Bool = false) -> Bool {
-        guard !hostIsBlanked else { return false }
+        // A Move needs the vector hole even while the composite still covers this host.
+        // Ordinary hidden-host refreshes and unadmitted raster reads remain suppressed.
+        guard !hostIsBlanked || (waitingForTheRender && vectorCanvas != nil) else { return false }
         // While the Move tool is dragging a lifted piece, Core Animation is already showing every
         // delta (see `beginVectorFloat`) and a rasterize here would be the redundant work
         // [PERFORMANCE.md](PERFORMANCE.md) item 11 removed from the stroke path: the moved ids are

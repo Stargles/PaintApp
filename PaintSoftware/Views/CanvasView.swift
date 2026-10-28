@@ -3459,7 +3459,7 @@ struct CanvasView: UIViewRepresentable {
         /// The prepared hosts are installed before the transient overlay comes off. Source
         /// admission and settlement share the same inputs, so this phase only updates the views.
         private func refreshAfterPreparedCanvasEdit() {
-            for host in layerHosts.values {
+            for host in layerHosts.values where !host.isBlanked {
                 host.strokeView.refreshDisplayIfStale(waitingForTheRender: true)
             }
             updateShapeOverlay()
