@@ -83,8 +83,12 @@ ink-before premises pass; root reconciled730/method/device/argv and LOOKed the w
 frame: both marks remain. Packet `s55-recorded-regressions/eraser-direct-target1-44c2bbdd/`.
 Later count/trace/exterior/model assertions were not executed on this failing method. Exact method:
 `Mode1UITests/testMode1KeepsDisjointPendingInkVisibleThroughEraseAndRenderWait`.
-Direct screen pixels now confirm delayed erasure; source trace/correction through existing live→held
-picture ownership is authorized. Preserve the guard and waits; no new state/cache/retry workaround. Whole affected UI/fault controls, final gates and device evidence
+OLDeee focused logic isolates the same defect: transparent replacement hole had alpha255. Shared
+correctionbfd95b4e explicitly skips original ink when outside-patch path is empty; no new state,
+cache, service or wait. **Current166 GREEN**, root730/method/device/argv exact. Root LOOKed both
+whole owner-landscape screen captures: upper target absent immediately and after12s; lower ink
+intact. `s55-recorded-regressions/eraser-corrected-picture166-bfd95b4e/native-run01` has source/outcome/
+picture receipts. Controls8 and whole Mode1/Cutting/Picker11 remain before harvest. No device claim. Whole affected UI/fault controls, final gates and device evidence
 remain. No crash-cause or physical latency claim.
 
 ### Package migration / tidy

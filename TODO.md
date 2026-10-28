@@ -16,15 +16,14 @@ Test package is still unanswered; continue simulator/source work without restart
   Existing85 checks pass after correcting three test drawings that previously hit the timeline.
   All source entries reconcile and root inspected filled/Undo pictures (portrait). Temporary
   recorder/delay changes were retired whole. Integrated; no physical latency/crash claim.
-- Erasing uses the existing cel-picture renderer inside the admitted stroke window rather than
-  rendering the entire canvas at gesture start. Candidate2f passed165 checks, but the original UI
-  case did not assert the erased pixel. The strengthened44c2bbdd public1 now fails **only** its
-  immediate white-target assertion after both white-paper and drawn-ink premises pass. Root
-  reconciled730 source entries and inspected the complete failure-video frame: both marks remain.
-  This confirms a delayed-erasure presentation defect, not malformed capture alone. Hold harvest;
-  trace live→held source ownership through existing picture/scratch seams and correct the shared
-  cause. Preserve exterior ink, original waits/delays/counts and direct pixel guard; no new state,
-  cache, service or wait workaround. No physical latency/crash-cause claim.
+- Erasing reuses the existing cel-picture renderer in the admitted stroke window. The stronger
+  public44c test reproduced a stale erased target; focusedeee logic isolated an empty outside-patch
+  clip that let frozen ink reappear through transparent pixels. Shared correctionbfd95b4e skips that
+  source draw when nothing remains outside the replacement. Its166 checks pass, including immediate
+  erased-target, exterior ink, rasterization/preview counts, model and crop/refusal/memory contracts.
+  Root reconciled730 entries and inspected both whole owner-landscape pictures: target gone at lift,
+  lower stroke intact through12s. No new stored state/cache/service. Deliberate controls, whole
+  affected UI and final composition/device checks remain; no iPad crash-cause claim.
 - Fill-window fixture47 is independently green; actual source count731 includes the extracted
   existing LayerFillView. Public growth/fault and final integration checks remain.
 - Saved-file tidy's old code reproduces partial migration on a blocked later destination. Candidate
