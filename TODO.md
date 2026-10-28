@@ -44,6 +44,9 @@ OLD both-worker fixture57aa now explicitly records one main-thread vector render
 two-stroke drawing/landing checks pass. Implement the shared stroke-preparation wait correction:
 only pending interactive edits require synchronous landing. Keep Move's required picture and all
 source/mask admission. No stored flag/cache/new service; eraser's separate full backdrop remains.
+The correction passes the two-stroke picture/landing check; recorder explicitly captures a worker
+render. Early top8 summaries remain incomplete, so no whole-run zero-main-render claim. Retire the
+TEMP measurement wrapper whole and qualify original drawing, Move and pending-fill workflows.
 
 Items leave this file only in the qualified merge. “Installed” and “tested separately” do not mean
 that the final combined audit build has passed.

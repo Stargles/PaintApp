@@ -69,6 +69,13 @@ pass captured Bool through refreshAfterPreparedCanvasEdit(waitingForTheRender:).
 commit, hidden-host filter, overlay/timer cleanup and direct Move wait unchanged. No stored state or
 new policy helper. Same TEMP witness must pass pixels AND show explicit worker rendering; compare
 OLD/new metrics, never treat a missing top8 phase aszero. Mode1's separate full render still queued.
+NEWb9 public witness1GREEN/exact730; both stroke pictures survive landing. Fresh recording105731
+SHAd886882016d47805696e167c53f145bd8a3cbfa0eaea752e470b7a6d8040d5b6 explicitly shows worker
+vectorRasterize n1/main0 at10.01s; early full top8 windows omit that phase, so they do not prove
+global zero-main-render count. Source removes the ordinary explicit wait, retaining true pending
+settlement. Retire TEMP recorder wrap/delays WHOLE back to441 original test before final product
+qualification; run original Unlanded3, Guide2, pending-fill whole class and existing related logic.
+No device install/physical latency/crash completion claim. Only runtime CanvasView diff is retained.
 
 ## Previous parked checkpoint — October26–27
 
