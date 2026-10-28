@@ -17,6 +17,16 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## Selection-to-Move sometimes requires repeated taps — 2026-10-27
+
+Owner circles a selection, taps Move and sees no response until repeated taps register. Reported
+as an iPad regression; root cause is uninvestigated. Per request, copied only the latest recording
+and parked: `recording-20261027-205207.jsonl`,47,404B/SHA c5f892fe, in
+`~/PaintWork/s54-final-qualification/owner-selection-move-recording-20261028-005920Z/`.
+Header: scene Test,2048²,v1.0.43(1), build2026-10-25T22:03:42Z; exact source unavailable. No event
+analysis, replay, restart, fix or installation. On resume establish the input/presentation owner
+and actual causal path; do not compensate with repeated taps, arbitrary delays or duplicated state.
+
 ## Owner reports severe drawing/erasing latency and another drawing crash — 2026-10-26
 
 Owner sees major latency on some brushstrokes, also erasing, and reports one further crash while

@@ -2,6 +2,13 @@
 
 ## Current owner-facing status — October 26
 
+October27 limited request: owner circles a selection, then Move sometimes does nothing until
+repeated taps. Latest iPad recording contains this reported regression. Copy that recording and
+park; no investigation, replay, build, install or fix now. Keep root-cause/architecture requirements.
+Retrieval complete: `recording-20261027-205207.jsonl` (47,404B), scene Test/2048², preserved under
+`~/PaintWork/s54-final-qualification/owner-selection-move-recording-20261028-005920Z/`. Original
+unchanged on iPad; investigation remains queued. Parked again.
+
 New owner report while parked: major drawing latency, also during erasing, plus another crash while
 drawing. Owner saved an iPad recording; installed version is not yet freshly verified. Immediate
 scope is **copy the recording only, then park again** because usage is low. On later resume,

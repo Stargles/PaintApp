@@ -8,6 +8,15 @@ artwork and record findings/rulings before code. One Mac native lease; source wo
 
 ## Parked checkpoint — October26
 
+October27 limited request: retrieve latest iPad recording of selection→Move requiring repeated
+taps, then park again. Record the evidence; do not start diagnosis, replay, build, install or fix.
+Retrieved `recording-20261027-205207.jsonl`,47,404B,
+SHA256 `c5f892fef7c6857cc506ca71faa9d37a8e2ace74be6d65f179cfddd1d91f8adc`, under
+`~/PaintWork/s54-final-qualification/owner-selection-move-recording-20261028-005920Z/` (UTC folder).
+Header only: scene Test,2048², v1.0.43(1), build2026-10-25T22:03:42Z,1080×810 landscape;
+startedOctober27,8:52p.m.Toronto. Exact source unavailable. All three remote recording-directory
+entries unchanged after copy. Original retained; no analysis or app change. Parked again.
+
 Latest limited request: retrieve the owner's new iPad recording of severe drawing/erasing latency
 and another drawing crash, then park again. No debugging/fix/refactor/build/replay/install now.
 Preserve original evidence, verify build provenance if available without app restart, and record
