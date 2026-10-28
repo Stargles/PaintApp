@@ -17,17 +17,19 @@ Test package is still unanswered; continue simulator/source work without restart
   All source entries reconcile and root inspected filled/Undo pictures (portrait). Temporary
   recorder/delay changes were retired whole. Integrated; no physical latency/crash claim.
 - Erasing uses the existing cel-picture renderer inside the admitted stroke window rather than
-  rendering the entire canvas at gesture start. Candidate2f343024 passes165 checks, but root's picture
-  review found the erased target apparently retained until the background picture landed. The UI
-  test only checked untouched ink. **Hold qualification:** add blank-before, ink-before and immediate
-  erased-target pixel checks, measure paper after configuration and capture the whole screen through
-  the existing helper. Preserve outside ink, counts, delays and all assertions; no runtime change
-  until this distinguishes a drawing defect from a fixture/capture defect. Source-only, unharvested.
+  rendering the entire canvas at gesture start. Candidate2f passed165 checks, but the original UI
+  case did not assert the erased pixel. The strengthened44c2bbdd public1 now fails **only** its
+  immediate white-target assertion after both white-paper and drawn-ink premises pass. Root
+  reconciled730 source entries and inspected the complete failure-video frame: both marks remain.
+  This confirms a delayed-erasure presentation defect, not malformed capture alone. Hold harvest;
+  trace live→held source ownership through existing picture/scratch seams and correct the shared
+  cause. Preserve exterior ink, original waits/delays/counts and direct pixel guard; no new state,
+  cache, service or wait workaround. No physical latency/crash-cause claim.
 - Fill-window fixture47 is independently green; actual source count731 includes the extracted
   existing LayerFillView. Public growth/fault and final integration checks remain.
 - Saved-file tidy's old code reproduces partial migration on a blocked later destination. Candidate
   bf1c9113 preflights all generated destinations through the existing checked resolver before any
-  rename/move, refusing the whole plan. Whole Layout38 is now running; wider package/fault/UI checks
+  rename/move, refusing the whole plan. Its first build ran0 tests (local writer missing `throws`); corrected7eafe7d9 will rerun38; wider package/fault/UI checks
   remain. No format or old-spelling change is part of this correction.
 - Automatic renewal source protection is activated and verified: renew installed6fb while main is
   older instead of downgrading it. Existing successful-install state is atomic and records the source;

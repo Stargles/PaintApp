@@ -78,11 +78,13 @@ found the short erased target apparently visible in the first app picture and go
 original public test checked exterior ink/model but not the erased pixel. **HOLD qualification**.
 `44c2bbdd` adds only direct white-before/ink-before/white-immediately-after guards and whole-screen
 captures, measures paper after configuration, retaining original delays/wait/counts/exterior checks.
-Selected public1 is running in `s55-recorded-regressions/eraser-direct-target1-44c2bbdd/` (check live
-lease; never infer completion here). Exact method:
+Selected public1 **fails only immediate white-target assertion245**, after white-before and both
+ink-before premises pass; root reconciled730/method/device/argv and LOOKed the whole final-video
+frame: both marks remain. Packet `s55-recorded-regressions/eraser-direct-target1-44c2bbdd/`.
+Later count/trace/exterior/model assertions were not executed on this failing method. Exact method:
 `Mode1UITests/testMode1KeepsDisjointPendingInkVisibleThroughEraseAndRenderWait`.
-Malformed app screenshot framing may explain the apparent target; no runtime change until direct
-guard establishes actual pixels. Whole affected UI/fault controls, final gates and device evidence
+Direct screen pixels now confirm delayed erasure; source trace/correction through existing live→held
+picture ownership is authorized. Preserve the guard and waits; no new state/cache/retry workaround. Whole affected UI/fault controls, final gates and device evidence
 remain. No crash-cause or physical latency claim.
 
 ### Package migration / tidy
@@ -95,7 +97,7 @@ is authoritative. Candidate NEW `bf1c9113` in `PaintApp-s54-package-address` has
 reuse checked resolver/CAS, preserve spellings and decoder, and refuse whole plan if any target is
 occupied; remove old per-item skip. Its first whole38 native attempt built **0 tests**: the earlier
 checked-write change left a local ProjectStore.write wrapper missing `throws` although its callers
-already propagate it. Bounded signature correction authorized in the source branch; rerun38 before
+already propagate it. Bounded signature correction7eafe7d9 committed in source branch; rerun38 before
 wider package/fault/UI gates. No migration qualification yet.
 
 ## Other prepared work and still-open owner asks
