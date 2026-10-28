@@ -8,25 +8,35 @@ Compare installed6fb and current stream-window/float placement ownership. OLD se
 failed both intended new-frame comparisons after healthy visibility/dock premises. Root inspected the
 whole videos: On Top showed the green stream displaced from its red Move box; In Place image aligned,
 with a green rotation handle causing a false-positive pixel probe. This is evidence for an On Top
-discrepancy in that witness, not a confirmed source cause. Source6c6ff97 changes the new frame to blue,
-checks no blue pixels before arrival, and captures whole-frame/pixel parity; it is unrun. Root traced a
-post-GESTURE-END model-write versus canonical shown/written-map boundary before a fix. Continue through
-the existing owners and distinguish held, released, and Set Down. No speculative offset, retry, or
-duplicate transform state. Timing answer remains pending; no device restart authorized.
+discrepancy in that witness, not a confirmed source cause. Source `d8d5be82` contains the proposed post-gesture pose correction and blue-frame witness, but its
+`stream-move-normal146-d8d5be82` packet is not a result: `summary.json` reports unknown/zero tests and
+the build log has a missing `try` at `StreamPlacementUITests.swift:147`. No assertion ran. Repair and
+rerun before crediting the correction. Root has a plausible post-GESTURE-END model-write versus
+shown/written-map trace, but source behavior remains unqualified. Continue distinguishing held,
+released, and Set Down; no speculative offset, retry, or duplicate transform state. Timing remains
+pending; no device restart authorized.
+
+## Vector eraser preview window — October 28
+
+The older `bfd95b4e` slice (normal176 and nine controls) does not qualify the newer bounded preview.
+The `d034036f` normal291 run is RED (286 passed, 3 failed, 2 named opt-in skips): preview coverage
+expected24/got0, cache-hit premise expected1/got0, and Mode1 committed-coverage comparison differed
+by8/16384 pixels. The source successor `6af` changes tests only: repairs cache/brush premises, restores
+the intended hard opaque brush, and adds growth protection. It has not been rerun; the twelve-control
+map still needs a positive baseline. A Mode1 live In-Place public workflow is being added to cover the
+production binding. No assembled qualification or physical Mode3-crash cause is established.
 
 ## Adjustable fill can cache a preview that never drew — October 28
 
 Read-only source audit found a conditional owner gap in extracted LayerFillView candidate995677c5:
 showFill records render/clip identity before presentation; a surface-mint refusal returns without
-completion, so a later identical request is skipped. Source `393c10ef` adds a default-equivalent
-allocator seam and selected OLD packet `fill-owner-refusal-old3-393c10ef`, PREPARED but not run: same
-render/clip retry (intended RED), zero-area refusal completion (intended RED), and partial second
-allocation followed by Set Down (expected GREEN on OLD). No behavior fix is authorized before root
-reviews these OLD outcomes. Peer review identified the lifecycle trap: clearing shownFill on refusal
-can make the existing identity-before-nil check reject Set Down and retain the child/surface. The
-reduced-budget manager test failure is separate; it does not instantiate LayerFillView. No arbitrary
-retry/cache/service or increased wait. Reports: s55-recorded-regressions/layerhost-fill-preview-
-retry-review-cd393bf.md, followup995, and fill-owner-refusal-old3-393c10ef/.
+completion, so a later identical request is skipped. The latest OLD run, `fill-owner-refusal-old4-57073ba1`,
+is RED (1 pass, 3 failures, source731): callback and retry hit intended RED assertions, ABA passed,
+and partial-release failed at a combined assertion, leaving the lifetime premise unresolved. Test-only
+pool fix `c056` is committed but unrun; no fill behavior change is established. Run corrected selected
+controls and review exact assertion reach before a behavior fix. The separate reduced-budget manager
+failure does not instantiate LayerFillView. No arbitrary retry/cache/service or increased wait. Earlier
+source/packet history remains in Git and the recorded-regressions directory.
 
 ## Brush response-curve drag loses its selected key on clamped ticks — 2026-10-24
 

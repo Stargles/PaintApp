@@ -24,19 +24,17 @@ Test package is still unanswered; continue simulator/source work without restart
   Existing85 checks pass after correcting three test drawings that previously hit the timeline.
   All source entries reconcile and root inspected filled/Undo pictures (portrait). Temporary
   recorder/delay changes were retired whole. Integrated; no physical latency/crash claim.
-- Erasing: earlier176 checks and11 public workflows qualify only the old preview slice. Candidate535
-  shares committed ordered vector geometry in one bounded window. First2 native failures traced to
-  stale test/probe premises;1a corrects those and adds posed backing/held/growth/performance coverage.
-  The broad649 run built0tests on an argument-label error; corrected d034 has a root-reported normal291
-  run in progress/awaiting result. Check the live packet and lease. No new-architecture qualification
-  or physical Mode3 crash cause is established.
+- Erasing: earlier176 checks and11 public workflows qualify only the old preview slice. The d034
+  normal291 result is RED (286 passed, 3 failed, 2 named opt-in skips). Test-only successor6af fixes
+  identified brush/cache fixture premises and adds a growth safeguard; it has not been rerun. Twelve
+  controls await positive-baseline review, and a Mode1 live In-Place public witness is being added.
+  No new-architecture qualification or physical Mode3 crash cause is established.
 - Fill-window fixture995 is independently47/47 green (source731 with extracted LayerFillView; current
-  integration e4f9 remains source730). Staged source393c adds a default-equivalent surface-factory
-  seam and three selected OLD controls, class21: same render/clip retry RED; refusal completion RED;
-  partial second-allocation Set Down lifecycle GREEN. Packet
-  `fill-owner-refusal-old3-393c10ef` is PREPARED, not run. No behavior fix is authorized until root
-  reviews OLD. Peer review found a nil-teardown trap if refusal clears shownFill before Set Down.
-  Public growth/fault and final integration checks remain.
+  integration e4f9 remains source730). Latest OLD packet `fill-owner-refusal-old4-57073ba1` is RED
+  (1 pass, 3 failures): callback/retry reached intended RED, ABA passed, and partial-release failed at
+  a combined assertion. Test-only pool fix c056 is committed but unrun; no behavior fix or partial
+  lifetime proof is established. Corrected selected controls, public growth/fault and final integration
+  checks remain.
 - Saved-file tidy now preflights every generated destination before any rename/move and rejects
   escaping resource addresses through one checked owner. Whole14classes293 pass at2905abd5;
   deliberate controls expose all17 mutated contracts (one observed sidecar target was classified

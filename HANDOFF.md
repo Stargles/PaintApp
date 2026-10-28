@@ -8,8 +8,8 @@ Historical technical detail and raw results remain in Git and the external packe
 ## Integration, install, and protected data
 
 - Integration worktree: `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch
-  `tmp/s54-qualified-integration`, documentation HEAD `e4f6a15a`. Current package harvest is
-  `e4f9c8fa`, with 730 source entries, fast static count 5,424 and full count 6,023. These are
+  `tmp/s54-qualified-integration`, documentation HEAD `f9faf3e8` before this reconciliation. Current
+  package harvest is `e4f9c8fa`, with 730 source entries, fast static count 5,424 and full count 6,023. These are
   static counts only: this assembled source has **not** passed its final native gates.
 - Main/origin remain `afd2030c`; no merge or push. A qualified merge is authorized after remaining
   gates pass. Component qualification and harvested source do not qualify the assembled integration.
@@ -34,12 +34,8 @@ owner-landscape. This is integrated component evidence, not installed or final a
 ## Current gates and exact next boundaries
 
 Before native/compiler work, re-read `/Users/juliapark/PaintWork/s54-final-qualification/root-next-gates.json`
-and the live lease/status files. Do not infer or reuse a PID. The latest reported native assignment is
-eraser normal291 at source `d034036f` in packet
-`/Users/juliapark/PaintWork/s55-recorded-regressions/eraser-native-preview-normal291-d034036f/`;
-root owns that lease. The preceding `649c1dd6` attempt built zero tests because a benchmark call had
-out-of-order argument labels; `d034036f` corrects that call. Check the live state before any action.
-No one else should build, compile, or use the simulator concurrently.
+and the live lease/status files. Do not infer or reuse a PID. Current joined results are RED or unrun;
+root owns native execution. No one else should build, compile, or use a simulator concurrently.
 
 ### Stream screen and Move box
 
@@ -52,12 +48,12 @@ At old source `0a9461e4`, selected OLD tests produced 2/2 intended RED in both p
 dock clearance and healthy-frame premises. Root reviewed the whole videos: On Top showed the green
 stream displaced from the red Move box; In Place picture and box aligned, with a green rotation handle
 causing a false-positive pixel probe. This is a real On Top discrepancy, not a qualification pass.
-The newer source test `6c6ff97f` uses blue as the new frame, proves no blue is present before arrival,
-and checks the whole capture before arrival plus pixel/box parity. It is **not run**. Next: root
-reviews that witness and tests the existing post-gesture frame/model-write boundary in the current
-stream owner map. Crash evidence traces a post-GESTURE-END model write against the canonical
-shown/written map before the fix; confirm this boundary against the new witness before attribution.
-Do not infer a product fix or device cause from the old tests.
+Source `d8d5be82` contains the proposed post-gesture shown/written-pose correction and a blue-frame
+public witness. Its packet `stream-move-normal146-d8d5be82/native-run01` is **not a test result**:
+`summary.json` says `unknown`, `totalTestCount: 0`, and the log has a Swift compile error at
+`StreamPlacementUITests.swift:147` (missing `try` on `streamPixelBounds`). No runtime assertion ran.
+Repair and rerun the witness before crediting the fix. The OLD On Top discrepancy is visible in the
+captured witness, but its source cause and artist-facing correction remain unqualified.
 
 Evidence and trace: `/Users/juliapark/PaintWork/s55-recorded-regressions/stream-move-old2-0a9461e4/`,
 `stream-move-owner-bug-map.md`, and `crash-evidence/` in the recorded-regressions directory. The
@@ -66,14 +62,16 @@ preserved; source/build provenance is not established for either recording. Do n
 
 ### Eraser preview
 
-The previous `bfd95b4e` slice (normal176 plus nine controls) does not qualify the new preview. At
-`535a0adf`, two selected native failures came from stale test construction/probe premises; `1a` fixes
-those while retaining committed-model parity and adding posed backing, held-picture, growth and
-performance coverage. `649c1dd6` reached zero tests (compile-only argument-label error); corrected
-source is `d034036f`. The root-reported normal291 run on that source is the next current gate; check
-its packet/status before acting. Do not modify the eraser worktree. No assembled-source eraser
-qualification, merge, or physical Mode3-crash cause is established. Independent source review found
-no concrete blocker but identified coverage gaps; see
+The previous `bfd95b4e` slice (normal176 plus nine controls) does not qualify the new preview. The
+`d034036f` normal291 run in `/Users/juliapark/PaintWork/s55-recorded-regressions/eraser-native-preview-normal291-d034036f/`
+is **RED**: 286 passed, 3 failed, 2 named opt-in skips. The failures were
+a preview fixture expected24/got0, a cache-hit premise expected1/got0, and an 8/16384-pixel Mode1
+coverage mismatch. Test-only successor `6af` corrects cache-lifetime and brush-premise fixtures,
+restores the intended hard opaque brush, and adds a growth safeguard; it is not yet qualified by a
+rerun. The 12-control map awaits positive-baseline review. A real Mode1 live In-Place public workflow
+is being added to protect the production binding. Do not modify the owned eraser worktree before
+handback. No assembled-source eraser qualification or physical Mode3-crash cause is established.
+Independent source review found no concrete blocker but identified coverage gaps; see
 `s55-recorded-regressions/eraser-window-source-review-535a0adf.md` and
 `eraser-window-peer-review-1a4937a7.md`.
 
@@ -81,18 +79,17 @@ no concrete blocker but identified coverage gaps; see
 
 Fill-window fixture `995677c5` is independently 47/47 GREEN. Its extracted `LayerFillView` means that
 candidate's source count is 731; current integration package `e4f9c8fa` remains 730. Do not mix the
-censuses. The staged source `393c10ef` adds a default-equivalent surface factory seam and three
-selected OLD controls in `WindowSurfaceViewLogicTests` (class count 21): identical render/clip retry
-RED; zero-area refusal callback RED; partial second-allocation Set Down lifecycle GREEN. Packet
-`fill-owner-refusal-old3-393c10ef` is **PREPARED, not run**. No completion/retry behavior fix has been
-authorized yet. Peer review found the key teardown trap: a refusal callback that clears `shownFill`
-can make the existing identity-before-nil guard reject Set Down and retain the partial surface. Root
-must run selected OLD controls and review that result before authorizing the minimal behavior fix.
+censuses. `fill-owner-refusal-old4-57073ba1` is the latest OLD run: **RED**, 1 pass and 3 failures at source731.
+Callback and retry controls reached their intended RED assertions; ABA passed; partial-release failed
+at a combined assertion, leaving its lifetime premise unresolved. Test-only pool fix `c056` is
+committed but unrun; no fill behavior correction is established. Run the corrected selected controls
+and review exact reached assertions before any runtime fix. The older old3 packet is superseded.
 
 The separate reduced-budget manager test that failed to produce `fillLastRender` is still unresolved;
 it does not exercise `LayerFillView` and is not proof of user-visible failure. No extra wait, retry, or
-weaker assertion. Fixture and receipts: `s55-recorded-regressions/fill-owner-window47-995677c5/` and
-`fill-owner-refusal-old3-393c10ef/`.
+weaker assertion. Fixture and receipts: `s55-recorded-regressions/fill-owner-window47-995677c5/`,
+`fill-owner-refusal-old3-393c10ef/` (superseded OLD plan), and
+`fill-owner-refusal-old4-57073ba1/` (latest RED OLD run).
 
 ### Saved-file package boundary and cold Gallery
 
@@ -112,9 +109,9 @@ the existing one-shot protocol. Cold Gallery packet: `package-address-cold-ui-29
 
 ## Remaining owner queue
 
-Keep every unfinished TODO item. Immediate source/native queue after checking the lease: eraser normal291
-result; stream witness review and post-gesture placement ownership; fill OLD selected3 result and then
-root review. Also retain these exact boundaries:
+Keep every unfinished TODO item. Immediate queue after checking ownership: corrected stream witness
+compile/run; eraser `6af` normal and positive controls plus the Mode1 live In-Place witness; fill
+selected OLD controls after `c056`. Also retain these exact boundaries:
 
 - Autosave `4c`: inventory and deliberate failure/reopen controls remain in
   `/Users/juliapark/PaintWork/s55-recorded-regressions/autosave-next-native.md`.
