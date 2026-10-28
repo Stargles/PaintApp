@@ -19,7 +19,7 @@ codesign --verify --deep --strict "$SEED" >/dev/null
 
 # The test runs the candidate's actual clean/build/verify/install source region.
 awk '/^mint_outcome\(\)/{copy=1} copy{print} /^}/{if(copy) exit}' "$CANDIDATE" > "$WORK/mint_outcome.sh"
-awk '/^CONFIGURATION="\$\{CONFIGURATION:-Release\}"/{copy=1} /^# --- Record success and schedule next wake ---/{copy=0} copy' "$CANDIDATE" > "$WORK/region.sh"
+awk '/^CONFIGURATION="\$\{CONFIGURATION:-Release\}"/{copy=1} /^chown .*STATE_FILE/{copy=0} copy' "$CANDIDATE" > "$WORK/region.sh"
 awk '/^# Select a build source that never moves backwards/{copy=1} /^# --- Make sure we are about to build a monotonic source ---/{copy=0} copy' "$CANDIDATE" > "$WORK/provenance.sh"
 [[ -s "$WORK/mint_outcome.sh" && -s "$WORK/region.sh" && -s "$WORK/provenance.sh" ]] || { echo 'could not extract candidate helpers/regions'; exit 1; }
 
@@ -110,6 +110,9 @@ PROJECT_DIR="$WORK/$NAME/project" PROJECT_FILE=Paint.xcodeproj SCHEME=PaintTest 
 DEVICE_UUID=fixture-device RUN_USER=$(id -un) BUILD_LOG_DIR="$PROJECT_DIR/../logs" NOW=$(date +%s)
 STATE_FILE="$PROJECT_DIR/../state" SOURCE_SHA=0123456789abcdef0123456789abcdef01234567
 OLD_STATE_SOURCE_SHA=abcdef0123456789abcdef0123456789abcdef01
+LAST_SOURCE_SHA=$OLD_STATE_SOURCE_SHA
+FIXTURE_INSTALL_RC=0
+[[ "$NAME" == install-failure ]] && FIXTURE_INSTALL_RC=9
 printf 'LAST_APP_PATH=/previous/Paint.app\nLAST_SOURCE_SHA=%s\nLAST_PROFILE_EXPIRATION=2026-10-25T00:00:00Z\nLAST_PROFILE_CREATION=2026-10-18T00:00:00Z\n' "$OLD_STATE_SOURCE_SHA" > "$STATE_FILE"
 cp "$STATE_FILE" "$STATE_FILE.before"
 [[ "$MINT_MODE" == aged ]] && NOW=$((NOW - 15))
@@ -157,7 +160,7 @@ run_as_user(){
     fi
     if [[ "$cmd" == /usr/bin/xcrun ]]; then
       printf 'INSTALL\n' >> "$BUILD_LOG_DIR/actions.log"
-      return 0
+      return "$FIXTURE_INSTALL_RC"
     fi
     "$cmd" "$@"
 }
@@ -167,7 +170,6 @@ SEED_APP=$SEED_APP
 . "$REGION"
 if [[ -f "$BUILD_LOG_DIR/actions.log" ]] && grep -q '^INSTALL$' "$BUILD_LOG_DIR/actions.log"; then
   printf 'LAST_APP_PATH=%s\nLAST_SOURCE_SHA=%s\nLAST_PROFILE_EXPIRATION=%s\nLAST_PROFILE_CREATION=%s\n' "$APP_PATH" "$SOURCE_SHA" "$PROFILE_EXPIRATION_ISO" "$PROFILE_CREATION_ISO" > "$PROJECT_DIR/../expected-state"
-  write_success_state "$STATE_FILE" "$APP_PATH" "$SOURCE_SHA" "$PROFILE_EXPIRATION_ISO" "$PROFILE_CREATION_ISO"
 fi
 CASE
     chmod +x "$d/case.sh"
@@ -195,6 +197,9 @@ valid_result=$(run_case valid-new-profile 0 0 advanced no)
 echo 'PASS valid-new-profile'
 [[ -f "$WORK/valid-new-profile/logs/actions.log" ]] || { echo 'valid profile was not installed'; exit 1; }
 cmp -s "$WORK/valid-new-profile/state" "$WORK/valid-new-profile/expected-state" || { echo 'successful fixture install did not advance all four state fields'; exit 1; }
+expect install-failure FAIL 1
+[[ -f "$WORK/install-failure/logs/actions.log" ]] || { echo 'install failure fixture did not attempt install'; exit 1; }
+cmp -s "$WORK/install-failure/state" "$WORK/install-failure/state.before" || { echo 'failed install changed provenance'; exit 1; }
 expect too-early SKIP 0 0 0 early no
 [[ ! -f "$WORK/too-early/logs/actions.log" ]] || { echo 'too-early profile installed'; exit 1; }
 expect stale-profile FAIL 1 0 0 stale no
