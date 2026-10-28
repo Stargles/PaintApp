@@ -82,6 +82,20 @@ existing503 left-edge pixel after Undo. Drawing-over-pending-fill, original Unla
 playback4 and logic71 pass. Exact730/method/device/argv reconciled; no GREEN85 or harvest claim.
 Inspect actual failure capture and run OLD441 same whole FillUndoRedo5 before any change to the
 new stroke policy or existing assertion. No arbitrary delay/probe/tolerance adjustment. Native free.
+Root LOOKed whole failure-video final frame: only top/right outline exists, bottom is under the
+timeline, left absent, and frame4 is selected. Candidate fixture problem: normalized0.7 gestures
+start on timeline on this iPad9 portrait, unlike13-inch assumptions. OLD441 whole5 now running;
+keep all source/assertions unchanged for that comparison before correcting fixture geometry.
+
+Eraser window-source implementation authorized separately from stroke wait qualification. Reuse
+existing CelContentPicture as subtractive/replacing Role backdrop instead of UIImage; draw into
+existing admitted scratch-sized contexts with translated content and identity placement. No new
+provider/cache/flag/parallel old path. Raster/derived images wrap rendered ink; vector backdrop uses
+reference-free freeze(.full), matching old render(), not freezeDisplay's stream-inclusive source.
+Keep current display CelContent/pixel backing ownership. Remove full vector render and only its
+unconditional held-ink clearing; existing UnlandedInk display plan keeps ink outside replacement
+window. Propagate draw Bool through existing failure path. Add crop/growth/clip/refusal logic and
+outside-held-ink public regression coverage; commit before mutations. No CPU/crash claim yet.
 
 Renewal safety source work authorized: existing resign.sh blindly selects old origin/main, while
 verified installed6fb is a descendant. Add installed source SHA to existing successful-install state;

@@ -49,6 +49,12 @@ render. Early top8 summaries remain incomplete, so no whole-run zero-main-render
 TEMP measurement wrapper whole and qualify original drawing, Move and pending-fill workflows.
 Original85 run:84passed, but Undo-fill left-edge pixel failed once. Compare OLD441 whole fill-Undo
 class and inspect captures; no current-stroke correction qualification/harvest yet.
+The actual capture shows the test's lower gestures hitting the timeline, leaving the left boundary
+undrawn. Confirm against OLD first, then correct fixture placement through existing visible-paper
+geometry; retain every output/Undo assertion and add premises so missing strokes cannot pass.
+Eraser source work is scoped to replacing its full-canvas backdrop with the existing immutable
+cel-picture renderer drawn into the existing stroke window. Preserve reference exclusion, pose,
+backing and held strokes outside that window; new logic/public checks required. No new app service.
 
 Items leave this file only in the qualified merge. “Installed” and “tested separately” do not mean
 that the final combined audit build has passed.
