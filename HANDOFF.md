@@ -33,6 +33,17 @@ uses firstcel.endFrame, source-only/native unrun. Package owner lift2c8 remains 
 Autosave4c, Gradient8e/Resizeac and other earlier queue remain. Autosave prepared inventory is
 s55/autosave-next-native.md. Fresh saved/unlocked export question has no answer; no physical restart.
 
+**Latest continuation:** Fill47 independently GREEN, actual freeze731 (extra extracted LayerFillView),
+not730; original mistaken grant preserved and root-corrected census grant records exact all731.
+Public growth1/fault4 still pending, not harvested. Current sole native is eraser165 on0fe7c64f,
+session9876, packet eraser-window-logic-and-public1-0fe7c64f. Four whole logic classes164 plus new
+Mode1 public1 at owner landscape. Actual method ends `RenderWait`, not old `Landing`; stale name was
+rejected BEFORE native. Prior f26 build then failed one test parenthesis, zero tests; fixed and all8
+changed Swift files parse clean. Source730; staticfast5416/full6014. Existing-only normal run operator
+`s55-recorded-regressions/run-normal-grant.py` wraps frozen d231 helper and validates pin/clean/count/
+space before launch; source/method/device/argv extraction still independent afterward. No engine
+qualification or physical/crash claim yet. OLDtidy6fee selected1 is QUEUED ONLY after this lease.
+
 Kevin says the problem seems limited to one canvas and authorizes starting. Investigate both
 preserved recordings first: selection→Move in Test/2048² and drawing/erasing latency/new crash in
 Test1/4096². Do not conflate the scenes or assume which report the new canvas-specific observation
