@@ -106,6 +106,9 @@ that the final combined audit build has passed.
     failed while all19surface checks passed; no retry or enlarged wait. The Test1 erasing respring
     still needs fresh physical evidence.
     Remove finished items whole at merge. Resolve the October29 automatic build's old-main risk.
+    Renewal source correction is now scoped: reuse existing managed checkout and successful-install
+    state to retain the verified installed SHA until main contains it. Prepare/test a candidate
+    before changing the live script; preserve signing, profile-life, retry and user/root boundaries.
 
 Future interpolation overhaul, multi-cel selection, linear-light blending, audio/video editing and
 other explicitly deferred features stay written down. Dropped brush importers are not reopened.

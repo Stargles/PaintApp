@@ -76,6 +76,15 @@ global zero-main-render count. Source removes the ordinary explicit wait, retain
 settlement. Retire TEMP recorder wrap/delays WHOLE back to441 original test before final product
 qualification; run original Unlanded3, Guide2, pending-fill whole class and existing related logic.
 No device install/physical latency/crash completion claim. Only runtime CanvasView diff is retained.
+Permanent-source6b7759a9 original ten whole classes85 is now the sole native lease, TEMP retired.
+
+Renewal safety source work authorized: existing resign.sh blindly selects old origin/main, while
+verified installed6fb is a descendant. Add installed source SHA to existing successful-install state;
+allow main only when it descends from that source, otherwise renew exact installed SHA when main
+is its ancestor; fail on unrelated/unverifiable history. Reuse the existing clean managed checkout,
+build paths/signature/lifetime/mint/user gates; no disposable build service/worktree machinery.
+Prepare a candidate copy and hermetic Git source-choice tests first. No live script/state/daemon
+mutation until root review/tests. Seed only from verified6fb receipt when applying, not guessed main.
 
 ## Previous parked checkpoint — October26–27
 
