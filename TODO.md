@@ -24,31 +24,29 @@ Test package is still unanswered; continue simulator/source work without restart
   Existing85 checks pass after correcting three test drawings that previously hit the timeline.
   All source entries reconcile and root inspected filled/Undo pictures (portrait). Temporary
   recorder/delay changes were retired whole. Integrated; no physical latency/crash claim.
-- Erasing's shared stale-picture correction passes176 checks, including all11 eraser UI workflows.
-  Root inspected6 whole landscape drawings;9 deliberate faults hit12 intended assertions with exact
-  source restoration. Before integration, test a source-traced possible gap around in-place streamed
-  references: the clearing overlay may omit their pixels. No further runtime change before an actual
-  pixel witness. Preserve reference ordering and use the existing display owner; no new flags/cache.
-  Mode3 incremental rendering remains asynchronous/unchanged from6fb; iPad crash cause unproved.
+- Erasing: earlier176 checks and11 public workflows passed, but stronger reference-picture
+  comparisons then found gaps. Candidate535 removes the flat cut/restamp preview and shares the
+  committed ordered vector geometry in one bounded window. Its first native2 compiled but both
+  failed: Mode1 reference parity, plus a Mode2/4 committed-picture premise. Source correction and
+  replacement coverage for posed backing, held pictures, growth/refusal and latency are active.
+  Independent review found no concrete source blocker; that is not a test pass or physical proof.
+  Mode3 remains asynchronous/unchanged from6fb; iPad crash cause remains unproved.
 - Fill-window fixture47 is independently green; actual source count731 includes the extracted
   existing LayerFillView. Public growth/fault and final integration checks remain.
-- Saved-file tidy's old code reproduces partial migration on a blocked later destination. Candidate
-  bf1c9113 preflights all generated destinations through the existing checked resolver before any
-  rename/move, refusing the whole plan. Its first build ran0 tests (local writer missing `throws`); corrected7eafe7d9 will rerun38; wider package/fault/UI checks
-  remain. No format or old-spelling change is part of this correction.
+- Saved-file tidy now preflights every generated destination before any rename/move and rejects
+  escaping resource addresses through one checked owner. Whole14classes293 pass at2905abd5.
+  First9 deliberate controls are accepted; successor8 ran, with7 intended assertion targets reached
+  and one linked-destination target needing causal review. Normal rebuild plus ordinary Gallery
+  whole5 is running before the two fresh-container cold Gallery cases. No format change here.
 - Automatic renewal source protection is activated and verified: renew installed6fb while main is
   older instead of downgrading it. Existing successful-install state is atomic and records the source;
   no current device/build/daemon change. Future manual installs update that state only after success.
 
-Package's current14-class293 gate passes at2905abd5, with three stale PNG-encoding checks replaced
-by the stronger existing protected-source/byte/pixel witnesses. First9 deliberate controls accepted;
-old10 stopped insetup and earns zero. A narrower8-case successor is running. Cold Gallery pair is
-captured/verified7files and TEMPcapturecode fullyretired; the two permanent coldUIcases await a fresh
-owned simulator. Verify Bbytes afterArefusal and beforeBopen with freshpost-testcontainer lookup.
-Eraser reference matrices now reproduce defects inModes1/2/4; implement shared canonical native-list
-preview and retire the flat erase/restamp path, keeping one bounded window and existing state/memo.
-No new persistent flags/services/cache, no runtimeforked reference redraw. Current implementation
-is agent-owned until committed/reviewed/tested. Prior176green slice is not fullreferencequalification.
+The cold Gallery pair is captured/verified7files and temporary capture code is retired. Verify B's
+complete bytes after A is refused and before B opens, with a fresh post-test container lookup.
+The streamed-screen/Move-box report is recorded separately; source mapping found unchanged stream
+placement since installed6fb. Test both On Top and In Place across drag/release/Set Down before
+attributing a cause or changing coordinates. Owner timing answer is optional and still pending.
 
 Simulator cache cleanup reclaimed4.33GB at a joined native boundary, preserving and verifying all
 containers and existing Paint/Runner data. Only two exact generated cache paths were removed. Full
@@ -65,7 +63,7 @@ that the final combined audit build has passed.
 | Erasing crash in Test1 | Logs preserved; app/system allocation cause remains unproved | Finish window-renderer checks and fresh physical evidence |
 | Drawing/erasing lag and Move regression | Move and ordinary drawing-wait corrections integrated; 85 focused checks pass | Eraser window source and device confirmation remain |
 | Architecture, cleanup and bug audit | In progress; several corrections separately tested and integrated | Remaining source review, findings below, combined checks and performance |
-| Development disk cleanup | About54GB reclaimed across passes; about18GB currently free | Continue bounded cache housekeeping between test batches |
+| Development disk cleanup | About54GB reclaimed across passes; about13GB currently free | Continue bounded cache housekeeping between test batches |
 | Undo on an edited cel | Correction integrated; model/public/fault checks passed | Final combined checks |
 | Very large curve coordinates | Safe narrowing integrated; model/archive/fault checks passed | Final combined checks; no crash-cause claim |
 | Library relocation and Trash ownership | Corrections integrated and separately checked | Final combined checks |

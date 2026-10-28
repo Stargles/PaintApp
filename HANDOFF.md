@@ -67,64 +67,50 @@ extraction. Remaining in the fill packet: public growth 1 and fault controls 4, 
 256×255 and 120×119 fixture stays within the 705600-byte budget and retains output assertions.
 Evidence: `/Users/juliapark/PaintWork/s55-recorded-regressions/fill-owner-window47-995677c5/`.
 
-### Eraser window — qualified slice, reference presentation HOLD
+### Eraser preview — reference qualification in progress
 
-Tree `/Users/juliapark/PaintWork/PaintApp-s55-eraser-window`, unharvested. Runtimebfd95b4e reuses
-existing CelContentPicture for scratch-sized backdrop drawing, preserving reference-free source,
-held exterior ink and failure propagation; shared clipping copies transparent pixels. It skips
-original source where the full ink patch replaces it. The old public white-target check and focused
-transparent-hole test both reproduced stale ink before that correction. No new provider/cache/state.
+Tree `PaintApp-s55-eraser-window`. Earlierbfd95b4e normal176/controls9 qualified only the older
+slice; root LOOKed six whole owner-landscape pictures. Stronger current-preview versus actual
+committed-picture matrices then reproduced missing references (Mode1 six rows, Modes2/4 eight).
+Candidate535a0adf removes flat cut/restamp preview APIs and unused replacement raster allocation;
+preview/commit share canonical ordered vector geometry and one admitted native window. Independent
+review: no concrete source blocker, but posed backing/held-picture, geometric growth and latency
+coverage gaps remain. Report `s55-recorded-regressions/eraser-window-source-review-535a0adf.md`.
 
-**Current normal176 GREEN**, root730/method/device/argv exact after rebuilding normal source:
-Hybrid27 +Brush67 +LiquifyRaster31 +Residency40 +wholeMode1(5)/Cutting(4)/Picker(2). Root LOOKed6
-complete owner-landscape pictures covering Cut/Undo/Redo, splatter and immediate target removal.
-Controls9 accepted at12 actual assertions, all730 restored; v3's off-by-one brace location is preserved
-and corrected byv4 to the predeclared hasFailed assertion898. Packets `s55-recorded-regressions/`
-`eraser-normal-and-whole-ui176-bfd95b4e` and `eraser-bounded-controls9-bfd95b4e` retain all receipts.
+First535 native selected2 compiled and ran: both RED, no skips. Root reconciled all730 immutable
+source entries, methods/device/argv. Mode1 still loses outside/partly covered reference pixels;
+Mode2/4 fails a committed red-pixel premise91>220. Agent owns source correction and broader meaningful
+replacement tests; no native while it edits. Packet `eraser-native-preview-new2-535a0adf` preserves
+originals. Never weaken committed-model pixel parity to pass. Rebuild normal then meaningful new
+controls and all affected public classes. No harvest or physical latency/crash claim. Mode3 remains
+asynchronous/unchanged from6fb; its source/evidence limits are in `mode3-current-source-map.md`.
 
-**HOLD before harvest:** code tracing finds the reference-free inkPatch may clear an in-place stream
-inside its window. The outer composite draws the reference vector before the clearing overlay, with
-no later same-layer restoration. This is source-level only, not yet a native/UI observation. Agent
-is adding a finite actualScratch→CelDisplay comparison against the committed fully erased stroke
-with its reference frame retained. Commit witness, run it before any further runtime change; preserve
-reference z-order through the existing display owner, no new flags/services or flattening shortcut.
-Mode3cut path remains asynchronous and unchanged from6fb; this optimization concerns Mode1's old
-full backdrop. `s55-recorded-regressions/mode3-current-source-map.md` records exact paths and evidence
-limits; 1850MiB backboardd report is not an app kill or a proven allocation cause.
+### Saved files — current package boundary and next cold Gallery gates
 
-### Package migration / tidy
+Tree `PaintApp-s54-package-address`, source2905abd5. Whole14classes293 GREEN/root730exact.
+One checked address owner rejects traversal, links and wrong entry types before IO, while preserving
+literal names/URL kind/probe order. Tidy preflights all generated destinations before any move/rename.
+No schema or legal-old-spelling change. Three obsolete PNG-encode counts reuse existing qualified
+protected-source/byte/pixel witnesses; no production change in that fixture adaptation.
 
-OLD `6fee` ran one intended partial-migration witness and reached its intended RED after setup passed.
-XCTest catches thrown reads and continues, so later preservation checks ran but do not discriminate
-this boundary. Prior `9d` setup failed on overlapping cels (934/935), zero credit. Causal review `v2`
-is authoritative. Candidate NEW `bf1c9113` in `PaintApp-s54-package-address` has 38 tests,
-**not qualified**: preflight every generated target globally before moves,
-reuse checked resolver/CAS, preserve spellings and decoder, and refuse whole plan if any target is
-occupied; remove old per-item skip. Its first whole38 native attempt built **0 tests**: the earlier
-checked-write change left a local ProjectStore.write wrapper missing `throws` although its callers
-already propagate it. Bounded signature correction7eafe7d9 committed in source branch; rerun38 before
-wider package/fault/UI gates. No migration qualification yet.
+Original17 controls stopped at10: first9 accepted at10 actual assertions, old10 threw insetup and
+gets zero. Narrowed successor8 completed all8 assertion_red and restored730sourceentries;
+independent extraction finds7/8 unique mapped targets reached. Linked-destination title-rename
+assertion stayed healthy while earlier-sidecar preservation failed: causal review remains, no broad
+8accepted claim. Packet `package-address-controls8-legal-read-2905abd5/native-run01` and original
+maps/results are immutable. First9 filename-percent case proves identity before laterIO fallout only.
 
-**Current native boundary:** package remaining-controls8 native running, operator session35632,
-packet `s55-recorded-regressions/package-address-controls8-legal-read-2905abd5/native-run01`.
-Package source2905abd5: whole14classes293 GREEN/root730exact after reusing the already-qualified4c
-protected-source/pixel fixtures for3obsolete PNG-encode counts. Original17 controls stopped at10:
-first9 accepted/10 actual assertion sites;10 threw insetup, ZEROcredit;11–17unrun. New8 retains11–17
-and narrows10 to existingURL's missing-read fallback. Corrected original mapv2 for actual wrong-leaf
-kind assertions641/642; originals/extractions preserved. Literal-percent control credit only filename
-identity606 before secondaryIOfallout608. Allsource restored before this successor. Root must extract
-new outcomes and rebuildNORMAL before UI/install after mutants.
+**Current native:** normal package Layout38 + ordinary whole Gallery5, total43 with3 expected named
+opt-in skips, root operator session24517. Packet `package-address-normal-gallery43-2905abd5`.
+This rebuilds NORMAL products after mutants. Existing positive293 remains at the exact same source.
+After join/reconciliation, use reviewed capture/stager/runner copy on a fresh owned iPad9sim, A alone,
+new post-A `simctl get_app_container` lookup then B byte verification BEFORE opening B, B alone.
+Never run reset-heavy ordinary Gallery class against the staged pair. No physical restart/install.
 
-Eraser29-caseHybrid sourcebb9db5dc: actualnewselected2 both RED/referenceparity (Mode1 six rows and
-Mode2/4 eight rows), healthypremises, root730exact. Source agent currently owns runtime refactor in
-eraser tree (uncommitted until handback); no eraser native may run during edits. Approved: canonical
-ordered post-edit elements shared with cut commit, one bounded geometry-only scratch window/no
-unused raster buffer, existing memo invalidated on content update, atomicrefusal retains prior
-picture; Mode1uses captured complete display source matching real punch semantics. Remove flat
-applyPreview/CutPreviewEdit/obsolete image replacement behavior/tests/docs; keep replacement role
-only for the real native preview. Reference streams can be punched by Mode1 when actually touched;
-do not invent immutable-reference behavior. Wait for sourcecommit/peerreview, run logic/pixel then
-wholeaffectedUI/meaningfulcontrols; no harvest yet despite olderbfd176 proof.
+Stream Move owner report source map is `stream-move-owner-bug-map.md`: relevant placement/frame
+code unchanged6fb→integration; default OnTop shares floatView, InPlace composite is asynchronous.
+Agent is preparing drawn stream bounds versus Move hull tests for both modes and all landing phases.
+No confirmed defect/source change or native run; pending timing answer is not a blocker.
 
 Cold Gallery pair writerff selected1 GREEN/root730exact; copied7files byte/hash exact (IDs/index/
 A's one required raster ref toB verified), artifact `package-cold-writer-ff62580e/captured-pair-`
