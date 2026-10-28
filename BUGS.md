@@ -17,13 +17,11 @@ Compare installed6fb and current stream-window/float placement ownership. OLD se
 failed both intended new-frame comparisons after healthy visibility/dock premises. Root inspected the
 whole videos: On Top showed the green stream displaced from its red Move box; In Place image aligned,
 with a green rotation handle causing a false-positive pixel probe. This is evidence for an On Top
-discrepancy in that witness, not a confirmed source cause. Source `d8d5be82` contains the proposed post-gesture pose correction and blue-frame witness, but its
-`stream-move-normal146-d8d5be82` packet is not a result: `summary.json` reports unknown/zero tests and
-the build log has a missing `try` at `StreamPlacementUITests.swift:147`. No assertion ran. Repair and
-rerun before crediting the correction. Root has a plausible post-GESTURE-END model-write versus
-shown/written-map trace, but source behavior remains unqualified. Continue distinguishing held,
-released, and Set Down; no speculative offset, retry, or duplicate transform state. Timing remains
-pending; no device restart authorized.
+discrepancy in that witness, not a confirmed source cause. Source131 corrects that On Top shown/written-pose ownership without new stored transform state.
+All7 public stream workflows passed at214 (whole146=145pass/1 new unit convention failure); test-only131
+corrected that convention and focused2 passed. Restoring the old route and reversing pose composition
+each produced actual assertion RED; source730 restored. Post-fault normal rebuild and independent
+causal extraction are pending. No assembled-source qualification, harvest or install.
 
 ## Vector eraser preview window — October 28
 
@@ -31,9 +29,9 @@ The older `bfd95b4e` slice (normal176 and nine controls) does not qualify the ne
 The `d034036f` normal291 run is RED (286 passed, 3 failed, 2 named opt-in skips): preview coverage
 expected24/got0, cache-hit premise expected1/got0, and Mode1 committed-coverage comparison differed
 by8/16384 pixels. The source successor `6af` changes tests only: repairs cache/brush premises, restores
-the intended hard opaque brush, and adds growth protection. It has not been rerun; the twelve-control
-map still needs a positive baseline. A Mode1 live In-Place public workflow is being added to cover the
-production binding. No assembled qualification or physical Mode3-crash cause is established.
+the intended hard opaque brush, and adds growth protection. Source9c includes the real held Mode1 In-Place reference workflow and fixes its compile-only optional
+pixel types; selected11 and13 deliberate controls are pending. All11 previous public eraser workflows
+and the200-stroke bounded parity/cost check passed within the earlier291 run; root inspected six pictures. No assembled qualification or physical Mode3-crash cause is established.
 
 ## Adjustable fill can cache a preview that never drew — October 28
 

@@ -54,12 +54,15 @@ At old source `0a9461e4`, selected OLD tests produced 2/2 intended RED in both p
 dock clearance and healthy-frame premises. Root reviewed the whole videos: On Top showed the green
 stream displaced from the red Move box; In Place picture and box aligned, with a green rotation handle
 causing a false-positive pixel probe. This is a real On Top discrepancy, not a qualification pass.
-Source `d8d5be82` contains the proposed post-gesture shown/written-pose correction and a blue-frame
-public witness. Its packet `stream-move-normal146-d8d5be82/native-run01` is **not a test result**:
-`summary.json` says `unknown`, `totalTestCount: 0`, and the log has a Swift compile error at
-`StreamPlacementUITests.swift:147` (missing `try` on `streamPixelBounds`). No runtime assertion ran.
-Repair and rerun the witness before crediting the fix. The OLD On Top discrepancy is visible in the
-captured witness, but its source cause and artist-facing correction remain unqualified.
+Source `131475f7` contains the On Top correction: return each live child from already-written
+geometry into the bitmap's latched pose before the parent Move is applied. Authored cel pose stays
+in its existing order; unchanged geometry returns its original pose. No extra stored transform.
+Whole146 at `214617d3` passed145 and failed the new unit's coordinate convention; all7 public
+stream workflows passed. Test-only131 fixes that centered-view convention; focused2 passed2/2.
+Two deliberate faults then produced assertion RED (old On Top route and reversed authored-pose
+order), restoring all730 source entries. Generic/manual causal extraction is pending. A normal
+post-fault rebuild of selected2 is currently running; do not reuse mutated Products. No final
+whole146 or assembled-source qualification, harvest or installation is claimed.
 
 Evidence and trace: `/Users/juliapark/PaintWork/s55-recorded-regressions/stream-move-old2-0a9461e4/`,
 `stream-move-owner-bug-map.md`, and `crash-evidence/` in the recorded-regressions directory. The
@@ -72,10 +75,12 @@ The previous `bfd95b4e` slice (normal176 plus nine controls) does not qualify th
 `d034036f` normal291 run in `/Users/juliapark/PaintWork/s55-recorded-regressions/eraser-native-preview-normal291-d034036f/`
 is **RED**: 286 passed, 3 failed, 2 named opt-in skips. The failures were
 a preview fixture expected24/got0, a cache-hit premise expected1/got0, and an 8/16384-pixel Mode1
-coverage mismatch. Test-only successor `6af` corrects cache-lifetime and brush-premise fixtures,
-restores the intended hard opaque brush, and adds a growth safeguard; it is not yet qualified by a
-rerun. The 12-control map awaits positive-baseline review. A real Mode1 live In-Place public workflow
-is being added to protect the production binding. Do not modify the owned eraser worktree before
+coverage mismatch. Test-only successors correct cache-lifetime and brush-premise fixtures, restore the intended hard
+opaque brush, and add growth protection. The new public Mode1 held In-Place reference workflow is
+committed. Source `9c4da00e` fixes its optional pixel types after447 compiled zero tests. Selected11
+and13 deliberate faults remain unrun at9c. The broader291 run did pass all11 prior public eraser
+workflows and the bounded200-stroke parity/cost check; root inspected six whole pictures. Simulator
+counts:1,117 brush marks versus33,400 full-scene;57,408 window pixels versus4,194,304 canvas pixels. Do not modify the owned eraser worktree before
 handback. No assembled-source eraser qualification or physical Mode3-crash cause is established.
 Independent source review found no concrete blocker but identified coverage gaps; see
 `s55-recorded-regressions/eraser-window-source-review-535a0adf.md` and
@@ -115,8 +120,8 @@ the existing one-shot protocol. Cold Gallery packet: `package-address-cold-ui-29
 
 ## Remaining owner queue
 
-Keep every unfinished TODO item. Immediate queue after checking ownership: corrected stream witness
-compile/run; eraser `6af` normal and positive controls plus the Mode1 live In-Place witness; fill
+Keep every unfinished TODO item. Immediate queue after checking ownership: stream normal post-fault
+rebuild/causal extraction/harvest; eraser9c selected11 and13 faults; new Move-exit OLD public2; fill
 selected OLD controls after `c056`. Also retain these exact boundaries:
 
 - Autosave `4c`: inventory and deliberate failure/reopen controls remain in
