@@ -4,9 +4,12 @@ New active owner Move handoff report: after moving a selection, switching to Bru
 hides the placed drawing. Owner's theory is early preview retirement; explicit preference is keep
 same lifted picture until composited base actually lands, accepting temporary raw overlay. Recorded
 in TODO/BUGS before investigation; reuse existing held-content/revision retirement, no timer/newcache.
-OLD21b and5f public2 each failed moved-ink premises before the tool switch, so neither proves the
-exit gap. Third test-only witness b99 recalculates paper geometry across docks and waits for actual
-black moved ink; it is running. No Move-exit runtime correction yet.
+OLD9649 now reproduces the immediate gap: the drawing is visible in its moved position, then the
+first post-exit ink check fails. Its delayed/final checks were unreached; earlier21b/5f/b99 packets
+failed setup and get no gap credit. A source-only correction reuses UnlandedInk to retain the same
+transformed picture and actual On Top surfaces until installed-base retirement. Independent review
+found a new test's mismatched image sizes; that test-only correction is in progress before native
+qualification. No Move-exit harvest or assembled-source qualification yet.
 This adds to (does not replace) stream offset, Test Move/lag/crash and the rest of TODO.
 
 Kevin resumed: **continue; do not park**. Read this file, `AGENTS.md`, `CLAUDE.md`, `TODO.md`,
@@ -17,9 +20,9 @@ Historical technical detail and raw results remain in Git and the external packe
 ## Integration, install, and protected data
 
 - Integration worktree: `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch
-  `tmp/s54-qualified-integration`, documentation HEAD `f9faf3e8` before this reconciliation. Current
-  package harvest is `e4f9c8fa`; stream harvest is `a97f3f47`; current eraser harvest follows.
-  Pre-eraser static census was730 source entries / fast5,425 / full6,026; refresh after this harvest.
+  `tmp/s54-qualified-integration`, source HEAD `4381c457` before this documentation reconciliation.
+  Package harvest is `e4f9c8fa`, stream `a97f3f47`, eraser `66c15482`, and fill `4381c457`.
+  Current static census:731 source entries / fast5,427 / full6,030 (255 fast classes).
   These are static counts only: this assembled source has **not** passed its final native gates.
 - Main/origin remain `afd2030c`; no merge or push. A qualified merge is authorized after remaining
   gates pass. Component qualification and harvested source do not qualify the assembled integration.
@@ -51,8 +54,8 @@ root owns native execution. No one else should build, compile, or use a simulato
 
 The new owner report is recorded in TODO/BUGS: a streamed screen can move somewhere different from its
 Move box. Timing (held drag, release, or Set Down) is still unanswered; independent work continues.
-Installed6fb and integration source have no stream-specific placement change. Do not add offsets or
-duplicate transform state.
+Installed6fb predates the placement correction; integration has the qualified component below.
+Do not add offsets or duplicate transform state.
 
 At old source `0a9461e4`, selected OLD tests produced 2/2 intended RED in both placement modes after
 dock clearance and healthy-frame premises. Root reviewed the whole videos: On Top showed the green
@@ -133,12 +136,16 @@ the existing one-shot protocol. Cold Gallery packet: `package-address-cold-ui-29
 
 ## Remaining owner queue
 
-Keep every unfinished TODO item. Immediate queue after checking ownership: stream normal post-fault
-rebuild/causal extraction/harvest; final assembled eraser gates; corrected Move-exit OLD public2; final assembled fill gates. Also retain these exact boundaries:
+Keep every unfinished TODO item. Immediate queue: finish autosave controls and normal rebuild;
+qualify Move-exit correction; then final assembled eraser/fill/stream/package gates. Stream and fill
+component rebuild, causal extraction and harvest are already complete. Also retain these boundaries:
 
 - Autosave product4c / test-onlye3: fresh normal154 passed, exact730 and corrected Gate class names.
-  OrdinaryUI2 (1pass/1namedoptinskip) and six meaningful controls remain in
-  `/Users/juliapark/PaintWork/s55-recorded-regressions/autosave-next-native.md`.
+  OrdinaryUI2 completed1pass/1namedoptinskip; root inspected the reopened stroke (portrait). Six
+  protected-data controls are active under root41439. Separate16 clock/driver/landing controls are
+  still unrun and being repinned; neither set gets credit until actual target failures are extracted.
+  Normal154 must rebuild after the last fault before ordinary UI or install. Original inventory is
+  historical; current packets are recorded in root-next-gates.json.
 - Export `694bdf49`: ToolPanels class count is 20. Drive actual Share dismissal/close-return and
   cancel → drawing/gesture checks. Fresh saved/unlocked export readiness is unanswered.
 - Gradient `8e5d100e`: whole15 plus public1 are prepared, native unrun. Check current packet/gates.

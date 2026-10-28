@@ -13,8 +13,11 @@ Owner reports a visible gap when a selected/moved object is placed down by chang
 Eraser. Theory: the float preview is removed before the background compositor's new frame lands.
 Owner authorizes retaining the same lifted picture, even temporarily uncomposited, until the finished
 base is actually displayed. Trace endVectorFloat/raster float settlement versus existing UnlandedInk,
-held edit/derived pictures and content/base revisions. Reuse the existing handoff and protect late
-callbacks, history and cel/scene changes; no guessed delay or new cache. Native proof pending.
+held edit/derived pictures and content/base revisions. OLD9649 now reproduces the immediate blank
+after all moved-ink premises pass; its delayed/final assertions were unreached. The source-only
+correction transfers the existing image/transform and actual On Top surfaces to UnlandedInk, using
+its installed-base retirement; no delay/new cache/render. Independent review found a test image-size
+mismatch being corrected before native gates. History, cel/scene and late-result checks remain.
 
 ## Streamed screen can separate from its Move box — October 28
 

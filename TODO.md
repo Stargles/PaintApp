@@ -14,8 +14,10 @@ prefers keeping the existing lifted drawing visible, temporarily uncomposited, u
 frame is actually shown. Treat separately from repeated-tap Move and streamed-frame placement.
 Test that theory first; reuse existing held-picture/base-revision retirement ownership, no timeout,
 blocking render or parallel Move cache. Record cold exit-to-Brush/Erase drawn evidence and stale/
-cancel/Undo/cel-switch boundaries; continue all earlier tasks. OLD21b public2 reached a moved-ink
-premise failure before the tool switch, so it proves no exit gap; test setup is being corrected.
+cancel/Undo/cel-switch boundaries; continue all earlier tasks. OLD9649 reached the immediate gap after healthy moved-ink premises. Earlier setup failures remain
+uncredited. The source-only fix reuses UnlandedInk and the actual displayed picture; an independent
+review found a test image-size mismatch being corrected before native qualification. Cancel/Undo/
+cel-switch boundaries and cold Brush/Erase exit checks remain; no harvest or installation yet.
 
 **New owner report, October28:** with a streamed screen present, moving it sometimes places the
 screen picture somewhere different from its Move box. Treat as an active stream/Move correctness
@@ -89,7 +91,7 @@ that the final combined audit build has passed.
 | Mend inside/attached vector strokes and Mend All Fills | Installed; public workflows and deliberate-failure checks passed | Current Release cost/memory comparison; preserve outside edges and uncertain joins |
 | Smart father–grandfather saving | Newest clock-bucket versions implemented and installed | Finish newly found failed-save retry and safe-exit correction |
 | Erasing crash in Test1 | Logs preserved; app/system allocation cause remains unproved | Finish window-renderer checks and fresh physical evidence |
-| Drawing/erasing lag and Move regression | Move and ordinary drawing-wait corrections integrated; 85 focused checks pass | Eraser window source and device confirmation remain |
+| Drawing/erasing lag and Move regression | Earlier Move/drawing-wait corrections and bounded eraser preview integrated; Move-exit gap reproduced | Qualify and integrate Move-exit handoff; combined tests and device confirmation remain |
 | Architecture, cleanup and bug audit | In progress; several corrections separately tested and integrated | Remaining source review, findings below, combined checks and performance |
 | Development disk cleanup | About59GB reclaimed across passes; about19GB currently free | Continue bounded cache housekeeping between test batches |
 | Undo on an edited cel | Correction integrated; model/public/fault checks passed | Final combined checks |
@@ -104,7 +106,9 @@ that the final combined audit build has passed.
 
 1. Saving: the failed-save correction keeps the drawing open, preserves newer edits and retries
    through the existing timer. The model checks and cold failure → automatic save → reopen workflow
-   pass. Finish deliberate-failure checks, ordinary UI checks and final composition.
+   pass. Currente3 normal154 and ordinary UI (1pass/1namedoptinskip) pass. Six protected-data controls
+   are running; separate16 clock/driver/landing controls remain unrun. Finish actual fault extraction,
+   post-fault normal rebuild and final composition; preserve original packets and limits.
 2. Gradient movement: keep the existing two-point paint representation and correct its affine
    colour calculation. The component and model fault checks pass. The public fault test stopped at
    an earlier drawing witness; investigate that witness before claiming the colour check is proved.
