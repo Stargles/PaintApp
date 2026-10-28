@@ -1779,9 +1779,10 @@ struct CanvasView: UIViewRepresentable {
                 coordinator.onStreamFrame = { [weak self] layerID, elementID in
                     guard let self, let host = self.layerHosts[layerID] else { return }
                     self.requestStreamDisplay()
-                    if let part = self.canvasManager.vectorFloat?.part(carrying: elementID, onLayer: layerID) {
+                    if let part = self.canvasManager.vectorFloat?.part(carrying: elementID, onLayer: layerID),
+                       let poses = self.canvasManager.latchedStreamSurfacePoses(for: part) {
                         host.strokeView.presentStreamFrame(elementID: elementID, isolating: part.insideIDs,
-                                                           posedBy: part.poses)
+                                                           posedBy: poses)
                     } else {
                         host.strokeView.presentStreamFrame(elementID: elementID)
                     }

@@ -27,8 +27,10 @@ class StreamUITestCase: PaintUITestCase {
     /// is on the canvas, active, and its bar is up. Returns the canvas.
     @discardableResult
     func launchWithALiveStream(_ app: XCUIApplication,
+                               orientationBeforeCreatingCanvas: UIDeviceOrientation? = nil,
                                file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
-        XCTAssertTrue(launchIntoEditor(app), "Gallery → New Canvas → Create must land in the editor",
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: orientationBeforeCreatingCanvas),
+                      "Gallery → New Canvas → Create must land in the editor",
                       file: file, line: line)
         connectStream(app, file: file, line: line)
         let canvas = app.otherElements["canvas.host"]

@@ -20,8 +20,9 @@ with a green rotation handle causing a false-positive pixel probe. This is evide
 discrepancy in that witness, not a confirmed source cause. Source131 corrects that On Top shown/written-pose ownership without new stored transform state.
 All7 public stream workflows passed at214 (whole146=145pass/1 new unit convention failure); test-only131
 corrected that convention and focused2 passed. Restoring the old route and reversing pose composition
-each produced actual assertion RED; source730 restored. Post-fault normal rebuild and independent
-causal extraction are pending. No assembled-source qualification, harvest or install.
+each produced actual assertion RED; source730 restored. Post-fault normal2 passed; root reviewed source-bound causal extraction and both whole landscape
+blue-frame pictures. Five exact source/test endpoints are harvested. Assembled-source qualification
+and physical confirmation remain; no main merge or install.
 
 ## Vector eraser preview window — October 28
 

@@ -436,6 +436,105 @@ final class LassoMoveLogicTests: XCTestCase {
 
     // MARK: - The nudge
 
+    /// A live stream surface is nested in the bitmap's latched Move view. Once a gesture writes the
+    /// moved stream geometry into the vector cel, its next live frame must first return to the
+    /// latched picture's coordinates; the parent view then applies the move exactly once. An
+    /// authored cel pose and a scale/rotation/translation nudge make reversing those two maps visible.
+    func testALiveStreamSurfaceReturnsWrittenGeometryToItsLatchedFloatBeforeParentTransform() throws {
+        let (manager, layerIndex, vector) = fixture()
+        let stream = VectorStreamElement(naturalSize: CGSize(width: 20, height: 12),
+                                         host: "laptop", port: 47301, sourceLabel: "screen",
+                                         transform: LayerTransform(position: CGPoint(x: 32, y: 32),
+                                                                   scale: 1, rotation: 0))
+        vector.elements = [.stream(stream)]
+        vector.bumpVersion()
+        let poseBox = CGRect(x: 22, y: 26, width: 20, height: 12)
+        let poseCentre = CGPoint(x: 32, y: 32)
+        let authoredScale: CGFloat = 1.2, authoredAngle: CGFloat = 0.31
+        let a = authoredScale * cos(authoredAngle), b = authoredScale * sin(authoredAngle)
+        let c = -b, d = a
+        let authoredPose = CGAffineTransform(a: a, b: b, c: c, d: d,
+            tx: poseCentre.x + 3 - a * poseCentre.x - c * poseCentre.y,
+            ty: poseCentre.y - 2 - b * poseCentre.x - d * poseCentre.y)
+        let cel = manager.layers[layerIndex].cels[0]
+        CanvasFixture.setPoseTrack(manager, layerID: manager.layers[layerIndex].id, celID: cel.id,
+            CanvasFixture.poseTrack(box: poseBox, [(frame: 0, pose: PoseQuad(box: poseBox, mappedBy: authoredPose))]))
+        let storedElement = try XCTUnwrap(vector.elements.first { $0.id == stream.id })
+
+        XCTAssertTrue(manager.beginVectorWholeCelMove(), "the stream's whole vector cel lifts")
+        guard let lifted = manager.vectorFloat else { return XCTFail("the stream has a Move float") }
+        XCTAssertFalse(lifted.mayDiverge, "the live stream alone keeps its ordinary latched picture")
+        XCTAssertTrue(lifted.wantsLatch)
+        guard let liftedPart = lifted.part(carrying: stream.id, onLayer: manager.layers[layerIndex].id),
+              let authored = liftedPart.poses[stream.id] else {
+            return XCTFail("the lifted stream carries its resolved cel pose")
+        }
+        let originalElement = try XCTUnwrap(VectorCanvas.posing(storedElement, through: authored))
+        let originalCorners = try XCTUnwrap(originalElement.stream).corners
+        let originalWindow = try XCTUnwrap(vector.streamWindow(id: stream.id, posedBy: authored))
+        XCTAssertEqual(manager.latchedStreamSurfacePoses(for: liftedPart), liftedPart.poses,
+                       "an unchanged float reuses its authored pose dictionary directly")
+        let latchedMap = CanvasManager.floatPictureMap(of: lifted,
+            transform: lifted.latchedFrameTransform, aspect: lifted.latchedAspect,
+            stretchAxis: lifted.latchedStretchAxis, distort: lifted.latchedDistort)
+
+        var destination = movedBy(manager, dx: 8, dy: 6)
+        destination.rotation += 0.37
+        destination.scale *= 1.12
+        manager.nudgeVectorFloat(to: destination)
+        guard let moved = manager.vectorFloat, let layerID = moved.parts.first?.layerID,
+              let part = moved.part(carrying: stream.id, onLayer: layerID) else {
+            return XCTFail("the moved stream stays in its latched float")
+        }
+        let posedBy = try XCTUnwrap(manager.latchedStreamSurfacePoses(for: part),
+                                    "a live stream gets the inverse of its already-written Move")
+        let surfacePose = try XCTUnwrap(posedBy[stream.id], "the live stream has its latched surface pose")
+        let localWindow = try XCTUnwrap(vector.streamWindow(id: stream.id, posedBy: surfacePose))
+        let writtenElement = try XCTUnwrap(vector.elements.first { $0.id == stream.id },
+                                           "the vector model already contains the nudge")
+        let correctedElement = try XCTUnwrap(VectorCanvas.posing(writtenElement, through: surfacePose))
+        let correctedCorners = try XCTUnwrap(correctedElement.stream).corners
+        let displayedElement = try XCTUnwrap(VectorCanvas.posing(writtenElement, through: authored))
+        let displayedCorners = try XCTUnwrap(displayedElement.stream).corners
+        let writtenMap = CanvasManager.floatPictureMap(of: moved, transform: moved.frame.transform,
+            aspect: moved.frame.aspect, stretchAxis: moved.frame.stretchAxis, distort: moved.distort)
+        let parentMove = try XCTUnwrap(LiveLayerTransform.viewMap(from: latchedMap, to: writtenMap,
+                                                                  inBoundsOfSize: Self.size))
+
+        XCTAssertEqual(localWindow, originalWindow,
+                       "the child surface is restored to the same local window as the latched bitmap")
+        XCTAssertEqual(correctedCorners.count, originalCorners.count)
+        for (corrected, original) in zip(correctedCorners, originalCorners) {
+            XCTAssertEqual(corrected.x, original.x, accuracy: 1e-6,
+                           "the child map returns each stream corner to the authored latched picture")
+            XCTAssertEqual(corrected.y, original.y, accuracy: 1e-6)
+        }
+
+        let centre = CGPoint(x: Self.size.width / 2, y: Self.size.height / 2)
+        let transportedCorners = try correctedCorners.map { corner -> CGPoint in
+            let shifted = CGPoint(x: corner.x - centre.x, y: corner.y - centre.y)
+            let mapped = try XCTUnwrap(parentMove.map(shifted))
+            return CGPoint(x: mapped.x + centre.x, y: mapped.y + centre.y)
+        }
+        XCTAssertEqual(transportedCorners.count, displayedCorners.count)
+        for (transported, displayed) in zip(transportedCorners, displayedCorners) {
+            XCTAssertEqual(transported.x, displayed.x, accuracy: 1e-6,
+                           "the parent maps the corrected child to the model's written pose")
+            XCTAssertEqual(transported.y, displayed.y, accuracy: 1e-6)
+        }
+
+        let inverseWritten = try XCTUnwrap(writtenMap.inverse)
+        let returnToLatch = PoseMap(latchedMap * inverseWritten)
+        let reversed = try XCTUnwrap(VectorCanvas.posing(writtenElement,
+            through: returnToLatch.concatenating(authored)))
+        let reversedCorners = try XCTUnwrap(reversed.stream).corners
+        let reversedError = zip(reversedCorners, originalCorners).map {
+            hypot($0.x - $1.x, $0.y - $1.y)
+        }.max() ?? 0
+        XCTAssertGreaterThan(reversedError, 1,
+                             "applying the authored pose after returning to latch is materially different")
+    }
+
     /// **The ink moves, not only the samples.** `stamp` draws from `lattice?.samples ?? samples`, so
     /// mapping `samples` and leaving the lattice behind moves the geometry and not one pixel.
     ///

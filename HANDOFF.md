@@ -60,9 +60,10 @@ in its existing order; unchanged geometry returns its original pose. No extra st
 Whole146 at `214617d3` passed145 and failed the new unit's coordinate convention; all7 public
 stream workflows passed. Test-only131 fixes that centered-view convention; focused2 passed2/2.
 Two deliberate faults then produced assertion RED (old On Top route and reversed authored-pose
-order), restoring all730 source entries. Generic/manual causal extraction is pending. A normal
-post-fault rebuild of selected2 is currently running; do not reuse mutated Products. No final
-whole146 or assembled-source qualification, harvest or installation is claimed.
+order), restoring all730 source entries. Generic/manual causal extraction is pending. The post-fault normal rebuild passed2/2 at131, source730/methods/device/argv exact. Root accepted
+the source-bound forwarded UI callsite while retaining generic unhit statements and inspected both
+whole landscape blue-frame pictures. The five source/test endpoints are now harvested byte-exact
+into integration; no final whole146 or assembled-source qualification or installation is claimed.
 
 Evidence and trace: `/Users/juliapark/PaintWork/s55-recorded-regressions/stream-move-old2-0a9461e4/`,
 `stream-move-owner-bug-map.md`, and `crash-evidence/` in the recorded-regressions directory. The

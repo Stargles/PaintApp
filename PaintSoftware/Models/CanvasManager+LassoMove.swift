@@ -1253,6 +1253,36 @@ extension CanvasManager {
             ?? Homography(placement)
     }
 
+    /// A live stream surface is a child of the latched float bitmap. After a nudge, the vector
+    /// elements already contain the written pose, so put the stream back into the bitmap's latched
+    /// coordinates before that parent applies its base-to-current transform. This is the same
+    /// written/shown transport used by the InPlace compositor, with the latched picture as the
+    /// destination because the child rides the float view.
+    func latchedStreamSurfacePoses(for part: VectorFloatPart) -> [UUID: PoseMap]? {
+        guard let float = vectorFloat, float.wantsLatch,
+              let currentPart = float.parts.first(where: {
+                  $0.layerID == part.layerID && $0.celID == part.celID && $0.insideIDs == part.insideIDs
+              }) else { return nil }
+        guard float.frame.transform != float.latchedFrameTransform
+                || float.frame.aspect != float.latchedAspect
+                || float.frame.stretchAxis != float.latchedStretchAxis
+                || float.distort != float.latchedDistort else { return currentPart.poses }
+        let written = Self.floatPictureMap(of: float, transform: float.frame.transform,
+                                           aspect: float.frame.aspect, stretchAxis: float.frame.stretchAxis,
+                                           distort: float.distort)
+        guard let inverseWritten = written.inverse else { return nil }
+        let latched = Self.floatPictureMap(of: float, transform: float.latchedFrameTransform,
+                                           aspect: float.latchedAspect,
+                                           stretchAxis: float.latchedStretchAxis,
+                                           distort: float.latchedDistort)
+        let returnToLatch = PoseMap(latched * inverseWritten)
+        var poses = currentPart.poses
+        for id in currentPart.insideIDs {
+            poses[id] = (currentPart.poses[id] ?? .identity).concatenating(returnToLatch)
+        }
+        return poses
+    }
+
     /// **Turns the handle box alone and leaves the drawing exactly where it is** — the yellow knob
     /// off the bottom edge, LASSO_MOVE.md §5.19–21 and TODO item (20).
     ///

@@ -2,6 +2,187 @@ import XCTest
 
 /// Cold-start reachability and actual pixels, including the artist's rotoscoping gesture.
 final class StreamPlacementUITests: StreamUITestCase {
+    /// The test laptop sends one solid-colour frame, so the edge of that colour is the stream's
+    /// actual drawn rectangle. Read it from the canvas screenshot in the same unit square as
+    /// `moveBox(_:)`; this deliberately compares the artist-visible picture with the published
+    /// Move hull rather than trusting either stored placement alone.
+    private func streamPixelBounds(on canvas: XCUIElement, colour: Colour) throws -> CGRect? {
+        let pixel = try pixelProbe(canvas)
+        let divisions = 160
+        var minX = divisions, minY = divisions, maxX = -1, maxY = -1
+        for y in 0...divisions {
+            for x in 0...divisions where colour.matches(pixel(Double(x) / Double(divisions),
+                                                               Double(y) / Double(divisions))) {
+                minX = min(minX, x); minY = min(minY, y)
+                maxX = max(maxX, x); maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= 0 else { return nil }
+        return CGRect(x: Double(minX) / Double(divisions), y: Double(minY) / Double(divisions),
+                      width: Double(maxX - minX) / Double(divisions),
+                      height: Double(maxY - minY) / Double(divisions))
+    }
+
+    /// Mid-gesture screenshots are sampled on a 41×41 canvas grid. The stream is much larger than
+    /// one grid cell; the 3% tolerance accounts for sampling the edge between grid points.
+    private func assertHeldStreamBounds(_ samples: [MidGestureSampler.Sample],
+                                        colour: Colour, moveBox: CGRect, _ message: String,
+                                        file: StaticString = #filePath, line: UInt = #line) {
+        let divisions = 40
+        for sample in samples.suffix(3) {
+            let hits = sample.pixels.indices.filter { sample.pixels[$0].map(colour.matches) == true }
+            XCTAssertFalse(hits.isEmpty, "\(message): no \(colour.rawValue) pixels while the finger is down",
+                           file: file, line: line)
+            guard !hits.isEmpty else { continue }
+            let xs = hits.map { $0 % (divisions + 1) }, ys = hits.map { $0 / (divisions + 1) }
+            let drawn = CGRect(x: Double(xs.min()!) / Double(divisions),
+                               y: Double(ys.min()!) / Double(divisions),
+                               width: Double(xs.max()! - xs.min()!) / Double(divisions),
+                               height: Double(ys.max()! - ys.min()!) / Double(divisions))
+            assertBounds(drawn, match: moveBox, tolerance: 0.035, message: message,
+                         file: file, line: line)
+        }
+    }
+
+    private func assertBounds(_ drawn: CGRect, match hull: CGRect, tolerance: CGFloat,
+                              message: String, file: StaticString = #filePath, line: UInt = #line) {
+        for (edge, actual, expected) in [("left", drawn.minX, hull.minX), ("top", drawn.minY, hull.minY),
+                                         ("right", drawn.maxX, hull.maxX), ("bottom", drawn.maxY, hull.maxY)] {
+            XCTAssertLessThanOrEqual(abs(actual - expected), tolerance,
+                                     "\(message): drawn \(edge)=\(actual), Move hull \(edge)=\(expected)",
+                                     file: file, line: line)
+        }
+    }
+
+    private func assertFullyVisible(_ rect: CGRect, _ message: String,
+                                    file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertGreaterThan(rect.minX, 0.02, "\(message): left edge is visible with margin", file: file, line: line)
+        XCTAssertGreaterThan(rect.minY, 0.02, "\(message): top edge is visible with margin", file: file, line: line)
+        XCTAssertLessThan(rect.maxX, 0.98, "\(message): right edge is visible with margin", file: file, line: line)
+        XCTAssertLessThan(rect.maxY, 0.98, "\(message): bottom edge is visible with margin", file: file, line: line)
+    }
+
+    private func exerciseLiveStreamMove(_ app: XCUIApplication, placement expectedPlacement: String) throws {
+        app.launchArguments += ["-uiTestSlowWindowDrawMillis", "300"]
+        let canvas = launchWithALiveStream(app, orientationBeforeCreatingCanvas: .landscapeLeft)
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(window.width, window.height, "the app window is landscape like the owner's iPad")
+        XCTAssertGreaterThan(canvas.frame.width, canvas.frame.height, "the canvas host is landscape")
+        let timeline = app.otherElements["timeline.panel"]
+        let collapseTimeline = app.buttons["timeline.collapseButton"]
+        XCTAssertTrue(collapseTimeline.waitForExistence(timeout: 5), "the timeline exposes its public collapse button")
+        collapseTimeline.tap()
+        let collapseDeadline = Date().addingTimeInterval(5)
+        while Date() < collapseDeadline, timeline.frame.height > 70 {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        XCTAssertLessThan(timeline.frame.height, 70, "the timeline finishes collapsing before measuring the stream")
+
+        laptop.show(.red)
+        waitForPicture(.red, on: canvas)
+        attachScreenshot(XCUIScreen.main, "\(expectedPlacement) connected stream before visibility premises")
+        let connectedPixels = try XCTUnwrap(streamPixelBounds(on: canvas, colour: .red),
+                                            "the stream picture arrives before Move is raised")
+        assertFullyVisible(connectedPixels,
+                           "the complete initial stream frame is visible above the canvas and dock")
+        assertAboveTheDock(app, canvas, dy: Double(connectedPixels.maxY),
+                           "the complete initial stream frame clears the collapsed timeline and stream card")
+        let placement = app.buttons["streamBar.placementButton"]
+        XCTAssertEqual(placement.value as? String, "onTop")
+        if expectedPlacement == "inPlace" { placement.tap() }
+        XCTAssertEqual(placement.value as? String, expectedPlacement)
+
+        app.buttons["toolbar.moveButton"].tap()
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5),
+                      "Move lifts the live stream into its box")
+        guard let initialHull = settledMoveBox(app) else {
+            XCTFail("the lifted stream publishes its Move hull")
+            return
+        }
+        attachScreenshot(XCUIScreen.main, "\(expectedPlacement) stream and Move box before visibility premises")
+        assertAboveTheDock(app, canvas, dy: Double(initialHull.maxY),
+                           "the full initial Move hull clears the collapsed timeline and Move card")
+        let initialPixels = try XCTUnwrap(streamPixelBounds(on: canvas, colour: .red),
+                                          "the red stream is actually drawn while its Move box is up")
+        assertBounds(initialPixels, match: initialHull, tolerance: 0.025,
+                     message: "\(expectedPlacement): lifted stream pixels match the visible Move box")
+
+        let offset = CGVector(dx: 0.06, dy: 0.06)
+        let destination = CGVector(dx: initialHull.midX + offset.dx, dy: initialHull.midY + offset.dy)
+        let hostFrame = canvas.frame
+        var points: [CGPoint] = []
+        points.reserveCapacity(41 * 41)
+        for y in 0...40 {
+            for x in 0...40 {
+                points.append(CGPoint(x: hostFrame.minX + hostFrame.width * CGFloat(x) / 40,
+                                      y: hostFrame.minY + hostFrame.height * CGFloat(y) / 40))
+            }
+        }
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: initialHull.midX, dy: initialHull.midY))
+        let end = canvas.coordinate(withNormalizedOffset: destination)
+        let held = samplesDuring(points, "\(expectedPlacement) stream follows Move while held") {
+            start.press(forDuration: 0.6, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 4)
+        }
+        XCTAssertGreaterThanOrEqual(held.count, 3,
+                                    "the Move comparison has several screenshots taken while the finger is down")
+        guard let movedHull = settledMoveBox(app) else {
+            XCTFail("the dragged stream publishes its settled Move hull")
+            return
+        }
+        XCTAssertGreaterThan(movedHull.midX - initialHull.midX, 0.025,
+                             "the Move box actually travelled right by a visible amount")
+        XCTAssertGreaterThan(movedHull.midY - initialHull.midY, 0.04,
+                             "the Move box actually travelled down by more than the pixel-edge tolerance")
+        assertFullyVisible(movedHull, "the moved stream and its box remain inside the canvas host")
+        assertHeldStreamBounds(held, colour: .red, moveBox: movedHull,
+                               "\(expectedPlacement): drawn stream and Move box agree while held")
+        let releasedPixels = try XCTUnwrap(streamPixelBounds(on: canvas, colour: .red),
+                                           "the red stream remains drawn after the drag is released")
+        assertBounds(releasedPixels, match: movedHull, tolerance: 0.025,
+                     message: "\(expectedPlacement): released stream pixels match the Move box")
+
+        // A newer blue frame arrives while Move is still up; blue distinguishes the stream from
+        // the Move box's green rotation handle. Set Down must leave this latest frame at the moved
+        // location. This does not claim that a frame was delivered after Set Down.
+        XCTAssertNil(try streamPixelBounds(on: canvas, colour: .blue),
+                     "PREMISE: no existing canvas or Move chrome matches the new-frame colour")
+        laptop.show(.blue)
+        let blue = try XCTUnwrap(waitForStreamBounds(.blue, on: canvas, inside: movedHull),
+                                 "a new computer frame reaches the moved stream")
+        attachScreenshot(XCUIScreen.main, "\(expectedPlacement) new blue frame before Move-hull parity")
+        assertBounds(blue, match: movedHull, tolerance: 0.025,
+                     message: "\(expectedPlacement): new frame stays inside the moved box")
+
+        app.buttons["moveBar.doneButton"].tap()
+        let deadline = Date().addingTimeInterval(10)
+        var clearedReads = 0
+        while Date() < deadline, clearedReads < 3 {
+            clearedReads = moveBox(app) == nil ? clearedReads + 1 : 0
+            if clearedReads < 3 { Thread.sleep(forTimeInterval: 0.3) }
+        }
+        XCTAssertGreaterThanOrEqual(clearedReads, 3, "Set Down publishes three reads without a Move hull")
+        let landed = try XCTUnwrap(waitForStreamBounds(.blue, on: canvas, inside: movedHull),
+                                   "Set Down leaves the newest computer frame on the canvas")
+        assertBounds(landed, match: movedHull, tolerance: 0.025,
+                     message: "\(expectedPlacement): Set Down leaves the picture where the box was")
+    }
+
+    private func waitForStreamBounds(_ colour: Colour, on canvas: XCUIElement,
+                                     inside hull: CGRect) throws -> CGRect? {
+        guard hull.width > 0.08, hull.height > 0.08,
+              let _ = waitForPixel(canvas, at: CGVector(dx: hull.midX, dy: hull.midY), timeout: 12,
+                                   matches: colour.matches) else { return nil }
+        return try streamPixelBounds(on: canvas, colour: colour)
+    }
+
+    func testOnTopStreamPixelsFollowTheMoveBoxWhileHeldReleasedAndAfterSetDown() throws {
+        try exerciseLiveStreamMove(XCUIApplication(), placement: "onTop")
+    }
+
+    func testInPlaceStreamPixelsFollowTheMoveBoxWhileHeldReleasedAndAfterSetDown() throws {
+        try exerciseLiveStreamMove(XCUIApplication(), placement: "inPlace")
+    }
+
     private func selectLayer(_ app: XCUIApplication, _ index: Int) {
         openLayerPanel(app)
         let row = app.staticTexts["layerPanel.row.\(index)"]
