@@ -2,64 +2,36 @@
 
 ## Current owner-facing status — October 28
 
-**Resumed October28. Priority now:** investigate the owner-recorded drawing/erasing latency and new
-crash, and selection→Move requiring repeated taps. Owner clarified: **Move-button problem in Test
-is the canvas-specific one**; no such scope established for drawing/erasing latency. Preserve the
-separate Test1/4096² and Test/2048²
-evidence. Establish affected build and cause before changing code; use agents and keep all earlier
-unfinished tasks queued. No fresh authorization to restart an unsaved physical scene.
+**Active: Kevin resumed; continue independently.** Prioritize the recorded drawing/erasing lag,
+new crash in **Test1 / 4096²**, and repeated-tap Move failure in **Test / 2048²**. Kevin clarified
+that only the Move problem is canvas-specific. Preserve the separate recordings and real artwork;
+use useful agents, conserve usage, and fix shared root causes. Historical retrieval-only park
+instructions are superseded by this resume. Fresh saved/unlocked readiness for exporting the current
+Test package is still unanswered; continue simulator/source work without restarting the iPad.
 
-October27 limited request: owner circles a selection, then Move sometimes does nothing until
-repeated taps. Latest iPad recording contains this reported regression. Copy that recording and
-park; no investigation, replay, build, install or fix now. Keep root-cause/architecture requirements.
-Retrieval complete: `recording-20261027-205207.jsonl` (47,404B), scene Test/2048², preserved under
-`~/PaintWork/s54-final-qualification/owner-selection-move-recording-20261028-005920Z/`. Original
-unchanged on iPad; investigation remains queued. Parked again.
-
-New owner report while parked: major drawing latency, also during erasing, plus another crash while
-drawing. Owner saved an iPad recording; installed version is not yet freshly verified. Immediate
-scope is **copy the recording only, then park again** because usage is low. On later resume,
-investigate the actual installed build and root cause; clean architecture and regression prevention
-remain mandatory. No fix/refactor, build, replay or install is requested now.
-Recording retrieval completed: `recording-20261026-213750.jsonl` (55,035B), preserved under
-`~/PaintWork/s54-final-qualification/owner-latency-recording-20261026-214541/`. Header identifies
-Test1/4096², v1.0.43(1), buildOctober25; exact source unverified. Latency/crash analysis remains
-outstanding and takes priority when the owner resumes. Parked again; original left on the iPad.
-
-Kevin resumed after the retrieval-only park. Conserve usage and use
-agents for independent work. Architecture, correctness and performance take priority over speed.
-Fresh saved/unlocked readiness is requested for exporting the current Test package; no reply yet.
-Old iPad readiness is consumed; continue simulator/source work without restarting the iPad.
-
-Move component4413a846 now passes77 focused checks, and restoring the old guard fails the original
-Move-box assertion. Root inspected both owner-landscape terminal drawings. This fixes required
-vector picture acquisition while retaining ordinary hidden-layer suppression; no new stored state.
-Current Test/device confirmation and final integration remain. Latency OLD recorder witness stopped
-at a TEMP accessibility setup check before drawing, so no latency result; correct setup and rerun.
-The corrected OLD public witness now passes, but its early top8 metric windows are inconclusive.
-The frame baker can fill the shared render cache before the next test stroke despite the existing
-stroke-render delay. Stage both existing worker delays together in one TEMP measurement fixture;
-retain all drawing/landing checks. No runtime fix or no-main-render claim yet.
-OLD both-worker fixture57aa now explicitly records one main-thread vector render, while the public
-two-stroke drawing/landing checks pass. Implement the shared stroke-preparation wait correction:
-only pending interactive edits require synchronous landing. Keep Move's required picture and all
-source/mask admission. No stored flag/cache/new service; eraser's separate full backdrop remains.
-The correction passes the two-stroke picture/landing check; recorder explicitly captures a worker
-render. Early top8 summaries remain incomplete, so no whole-run zero-main-render claim. Retire the
-TEMP measurement wrapper whole and qualify original drawing, Move and pending-fill workflows.
-Original85 run:84passed, but Undo-fill left-edge pixel failed once. Compare OLD441 whole fill-Undo
-class and inspect captures; no current-stroke correction qualification/harvest yet.
-The actual capture shows the test's lower gestures hitting the timeline, leaving the left boundary
-undrawn. Confirm against OLD first, then correct fixture placement through existing visible-paper
-geometry; retain every output/Undo assertion and add premises so missing strokes cannot pass.
-OLD441 confirms the same one failure in5. Correct only the three closed-box test fixtures; the
-application wait correction remains unchanged while the strengthened tests are qualified.
-Eraser source work is scoped to replacing its full-canvas backdrop with the existing immutable
-cel-picture renderer drawn into the existing stroke window. Preserve reference exclusion, pose,
-backing and held strokes outside that window; new logic/public checks required. No new app service.
-First current eraser165:161pass4fail. Window/crop/reference/refusal logic passes; compare blank-tier
-budget failures and replacement clipping with OLD, and trace the async preview counter before
-changing code. The public test has not yet reached its after-gesture exterior-ink assertions.
+- Move's required vector picture acquisition is corrected through the existing render contract;
+  ordinary hidden-layer suppression remains. Its77 focused checks and old-fault control passed,
+  and root inspected owner-landscape pictures. Integrated; current Test/device confirmation remains.
+- Ordinary drawing now waits for a current base only when interactive edits actually need landing.
+  Existing85 checks pass after correcting three test drawings that previously hit the timeline.
+  All source entries reconcile and root inspected filled/Undo pictures (portrait). Temporary
+  recorder/delay changes were retired whole. Integrated; no physical latency/crash claim.
+- Erasing uses the existing cel-picture renderer inside the admitted stroke window rather than
+  rendering the entire canvas at gesture start. Candidate2f343024 passes165 checks, but root's picture
+  review found the erased target apparently retained until the background picture landed. The UI
+  test only checked untouched ink. **Hold qualification:** add blank-before, ink-before and immediate
+  erased-target pixel checks, measure paper after configuration and capture the whole screen through
+  the existing helper. Preserve outside ink, counts, delays and all assertions; no runtime change
+  until this distinguishes a drawing defect from a fixture/capture defect. Source-only, unharvested.
+- Fill-window fixture47 is independently green; actual source count731 includes the extracted
+  existing LayerFillView. Public growth/fault and final integration checks remain.
+- Saved-file tidy's old code reproduces partial migration on a blocked later destination. Candidate
+  bf1c9113 preflights all generated destinations through the existing checked resolver before any
+  rename/move, refusing the whole plan. Whole Layout38 is now running; wider package/fault/UI checks
+  remain. No format or old-spelling change is part of this correction.
+- Automatic renewal source protection is activated and verified: renew installed6fb while main is
+  older instead of downgrading it. Existing successful-install state is atomic and records the source;
+  no current device/build/daemon change. Future manual installs update that state only after success.
 
 Items leave this file only in the qualified merge. “Installed” and “tested separately” do not mean
 that the final combined audit build has passed.
@@ -119,14 +91,10 @@ that the final combined audit build has passed.
     its drawing and fault checks. Investigate the existing reduced-budget fill preview check that
     failed while all19surface checks passed; no retry or enlarged wait. The Test1 erasing respring
     still needs fresh physical evidence.
-    Remove finished items whole at merge. October29 automatic build's old-main risk is corrected:
-    live renewal retains verified installed6fb while main is older, with atomic source/profile state.
-    Renewal source correction is now scoped: reuse existing managed checkout and successful-install
-    state to retain the verified installed SHA until main contains it. Prepare/test a candidate
-    before changing the live script; preserve signing, profile-life, retry and user/root boundaries.
-    Candidate and root's actual-success-call/install-failure harness now pass, including deliberate
-    downgrade/partial-write/stale-source failures. Activate only after verifying the installed6fb
-    artifact and unchanged live inputs; this changes future renewal source, not the current build.
+    Remove finished items whole at merge. October29 automatic renewal's old-main risk is corrected
+    and live: retain verified installed6fb until main contains it, with atomic source/profile state.
+    Preserve the signing/lifetime/user boundaries and advance this state after every successful
+    future manual install (CLAUDE.md).
 
 Future interpolation overhaul, multi-cel selection, linear-light blending, audio/video editing and
 other explicitly deferred features stay written down. Dropped brush importers are not reopened.
