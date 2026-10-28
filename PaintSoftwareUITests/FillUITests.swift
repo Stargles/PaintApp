@@ -478,13 +478,16 @@ final class FillUndoRedoUITests: PaintUITestCase {
     /// Draw and prove a closed box on the visible paper, away from the toolbar and dock.
     /// The returned points share the same host mapping as the gestures and later pixel probes.
     private func drawClosedSquareFixture(on app: XCUIApplication, canvas: XCUIElement) throws
-        -> (inside: CGVector, leftEdge: CGVector) {
+        -> (inside: CGVector, leftEdge: CGVector, bounds: CGRect) {
         let paper = visiblePaperRect(app, in: canvas)
         func at(_ x: Double, _ y: Double) -> CGVector { onHost(paper, x, y) }
 
         let left = 0.32, right = 0.68, top = 0.34, bottom = 0.66
         let topLeft = at(left, top), topRight = at(right, top)
         let bottomRight = at(right, bottom), bottomLeft = at(left, bottom)
+        let bounds = CGRect(x: CGFloat(topLeft.dx), y: CGFloat(topLeft.dy),
+                            width: CGFloat(bottomRight.dx - topLeft.dx),
+                            height: CGFloat(bottomRight.dy - topLeft.dy))
         let inside = at(0.5, 0.5)
         let leftEdge = at(left, 0.5)
         let edgeSamples = [
@@ -515,7 +518,7 @@ final class FillUndoRedoUITests: PaintUITestCase {
                              "The pre-fill \(sample.name) edge must be visibly drawn")
         }
         attachScreenshot(app, "closed square edges before fill")
-        return (inside, leftEdge)
+        return (inside, leftEdge, bounds)
     }
 
     /// Undoing right after a fill must remove exactly the fill — not the strokes underneath it, and not
@@ -641,15 +644,10 @@ final class FillUndoRedoUITests: PaintUITestCase {
         app.buttons["toolbar.brushButton"].tap()
         let visiblePaper = visiblePaperRect(app, in: canvas)
         let p = onHost(visiblePaper, 0.12, 0.12)
-        let squareTopLeft = onHost(visiblePaper, 0.32, 0.34)
-        let squareBottomRight = onHost(visiblePaper, 0.68, 0.66)
-        let squareRect = CGRect(x: CGFloat(squareTopLeft.dx), y: CGFloat(squareTopLeft.dy),
-                                width: CGFloat(squareBottomRight.dx - squareTopLeft.dx),
-                                height: CGFloat(squareBottomRight.dy - squareTopLeft.dy))
-        XCTAssertFalse(squareRect.contains(CGPoint(x: CGFloat(p.dx), y: CGFloat(p.dy))),
+        XCTAssertFalse(square.bounds.contains(CGPoint(x: CGFloat(p.dx), y: CGFloat(p.dy))),
                        "The outside stroke probe must remain on visible paper and outside the closed square")
         let strokeEnd = CGVector(dx: p.dx + 0.12, dy: p.dy)
-        XCTAssertLessThan(strokeEnd.dx, squareTopLeft.dx,
+        XCTAssertLessThan(strokeEnd.dx, square.bounds.minX,
                           "The complete outside stroke must remain left of the square")
         drawLine(on: canvas, from: p, to: strokeEnd)
 
