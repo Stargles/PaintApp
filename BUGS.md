@@ -24,11 +24,23 @@ Move recording: each of three candidate toolbar taps creates vectorFloat then re
 bypasses DeferredVectorRender's explicit waitingForTheRender exception; beginVectorFloat can then
 refuse and cancel the new float. Run existing GuideUnderLassoMoveUITests unchanged before a fix.
 Preserve ordinary hidden-host allocation protection and all earlier image-admission guarantees.
+Component4413a846 now reproduces OLD refusal2, passes normal77 and fails original Move-box85
+again when the old guard is restored. Root LOOKed both current whole owner-landscape terminal
+drawings. Required vector acquisition now follows the existing DeferredVectorRender exception;
+bulk refresh uses authoritative hostIsBlanked to retain both artist-hidden/composite suppression.
+Harvested integration13ab86df; current Test/device confirmation and final combined gates remain.
 
 Latency recording: hardware touch-end3.23 is delivered after the main/recognizer gap to3.97. An
 aggregate window contains a main vector-render entry and ~1.13s mainBusy; it does not distinguish
 new raster work from rasterizeLock waiting. Shared stroke-begin refresh synchronously asks every
 host; this predates the recent settlement rename. Exact cause remains open.
+Public OLD both-worker witness57aa explicitly records vectorRasterize n1/main1 while its two-stroke
+pixel/landing checks pass. The two existing background delays stage an uncached next stroke; a
+stroke-render-only delay was insufficient because FrameBaker shares the memo. Minimal sourceb9f18333
+captures existing hasInteractiveStatePending before preparation and passes it as the existing refresh
+wait requirement. New recording/native qualification is running. No new stored state; pending edits
+and direct Move still require current images. Mode1 eraser's separate full-backdrop render remains
+under review, and no crash-cause or owner-latency magnitude claim follows from simulator milliseconds.
 
 Fresh Oct26,21:35:39 jetsam explicitly records backboardd.reason=per-process-limit at1850MiB;
 PaintSoftware is separately active/frontmost at~1021MiB/max~1086MiB. UUIDAE3F matches preserved6fb.
