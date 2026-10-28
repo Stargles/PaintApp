@@ -151,29 +151,36 @@ final class CelContentPicture {
             }
             guard completed else { return }
             cg.saveGState()
+            var drawsSource = true
             if inkPatch != nil {
                 let local = CGPath(rect: window, transform: nil)
                 let patchPath = inkPose(placement: placement)?.mapped(local) ?? local
-                cg.addPath(footprint.subtracting(patchPath, using: .winding))
-                cg.clip()
+                let outsidePatch = footprint.subtracting(patchPath, using: .winding)
+                drawsSource = !outsidePatch.isEmpty
+                if drawsSource {
+                    cg.addPath(outsidePatch)
+                    cg.clip()
+                }
             }
-            switch ink {
-            case .ordinary(let source, let elements, let rewriting):
-                let shown = CanvasManager.posed(elements, through: [], inheriting: placement.ink)
-                let rewritten = placement.ink == nil ? rewriting : Set(shown.map(\.id))
-                let references = Set(shown.compactMap { $0.stream }.filter(\.rendersInPlace).map(\.id))
-                let frozen = source.replacingDisplayElements(shown, rewriting: rewritten, referenceIDs: references)
-                completed = frozen.draw(into: cg, frameRect: CGRect(origin: .zero, size: size), quality: .full) != nil
-            case .linked(let evaluation):
-                let area = footprint.boundingBoxOfPath.integral.intersection(CGRect(origin: .zero, size: size))
-                if let image = InterpolationEvaluator.composite(evaluation, size: size, window: area) {
-                    image.draw(in: area)
-                } else { completed = false }
-            case .derived(let content, let quality):
-                if let image = content.render(quality) { image.draw(in: CGRect(origin: .zero, size: size)) }
-                else { completed = false }
-            case .rendered(let image): image.draw(in: CGRect(origin: .zero, size: size))
-            case nil: break
+            if drawsSource {
+                switch ink {
+                case .ordinary(let source, let elements, let rewriting):
+                    let shown = CanvasManager.posed(elements, through: [], inheriting: placement.ink)
+                    let rewritten = placement.ink == nil ? rewriting : Set(shown.map(\.id))
+                    let references = Set(shown.compactMap { $0.stream }.filter(\.rendersInPlace).map(\.id))
+                    let frozen = source.replacingDisplayElements(shown, rewriting: rewritten, referenceIDs: references)
+                    completed = frozen.draw(into: cg, frameRect: CGRect(origin: .zero, size: size), quality: .full) != nil
+                case .linked(let evaluation):
+                    let area = footprint.boundingBoxOfPath.integral.intersection(CGRect(origin: .zero, size: size))
+                    if let image = InterpolationEvaluator.composite(evaluation, size: size, window: area) {
+                        image.draw(in: area)
+                    } else { completed = false }
+                case .derived(let content, let quality):
+                    if let image = content.render(quality) { image.draw(in: CGRect(origin: .zero, size: size)) }
+                    else { completed = false }
+                case .rendered(let image): image.draw(in: CGRect(origin: .zero, size: size))
+                case nil: break
+                }
             }
             cg.restoreGState()
             guard completed else { return }

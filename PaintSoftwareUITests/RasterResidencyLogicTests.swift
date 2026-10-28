@@ -1396,8 +1396,10 @@ final class RasterResidencyLogicTests: XCTestCase {
                 }.get()
                 let raster = RasterLayerTexture(size: size, source: red, strokeCount: 1)
                 let backdrop = try red.resolveImage().get()
+                let backdropPicture = CelContentPicture(size: size, window: CGRect(origin: .zero, size: size),
+                    backing: nil, patch: nil, ink: .rendered(backdrop))
                 let scratch = StrokeScratch(canvasSize: size,
-                    role: erasing ? .subtractive(backdrop: backdrop) : .additive, residency: owner)
+                    role: erasing ? .subtractive(backdrop: backdropPicture) : .additive, residency: owner)
                 scratch.stampCircle(at: CGPoint(x: 32, y: 32), radius: 4, color: .blue,
                                     alpha: 1, hardness: 1, blendMode: .normal)
                 try scratch.lastMutationResult.get()

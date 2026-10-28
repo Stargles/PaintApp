@@ -106,7 +106,7 @@ Twenty-two sites in the app, all but two of them inside `VectorLayer.swift`.
 | `renderIsolated(ids:)`, `:2400-2406` | the same arm again, for a lasso float's own picture |
 | `layerTransform(pivot:)`, `:866-871` | decomposes the affine into `LayerTransform` **for the Move box that wrote it** |
 | `canvasText(fromLocal:)`, `:809-813` | maps a stored text frame back out so the editor can be opened on it |
-| `cutPreviewEdits`' `canvasSamples`, `:1964`, `:1975` | maps stored geometry back to canvas space to re-stamp into the eraser's scratch raster. Its own doc: *"Only `cutPreviewPieces` needs this; every other caller is going the other way."* |
+| `cutPreviewElements`, `VectorLayer.swift` | retains cut pieces in the native display list and maps only the bounded damage rectangle through the layer transform; it does not re-stamp strokes in canvas space. |
 
 **The eleven entry points that invert it away before storing or testing anything:**
 
@@ -120,7 +120,7 @@ Twenty-two sites in the app, all but two of them inside `VectorLayer.swift`.
 | `localPath(fromCanvas:)` | `:845` | `:848` |
 | `erase(alongPath:…)` | `:958` | `:967`, `:968` |
 | `cutToIntersection(atCanvasPoint:…)` | `:1017` | `:1025`, `:1026` |
-| `cutPreviewEdits(alongPath:…)` | `:1891` | `:1898`, `:1899` |
+| `cutPreviewElements(alongPath:…)` | reads the gesture in canvas space | maps it to layer-local geometry, then returns ordered native pieces |
 | `topmostText(atCanvasPoint:)` | `:2272` | `:2277-2279` (point **and** the fingertip slop) |
 | `splitForLassoMove(insideLocalPath:)` | `:1427` | not itself — its **name** records that its caller already did it, through `localPath(fromCanvas:)` |
 
@@ -149,7 +149,7 @@ come from.
 | **Interpolation** | **no — it drops it on the floor.** `interpolationContentProvider` returns `.vector?.elements` raw (`CanvasManager+Interpolation.swift:545`), and `InterpolationEvaluator.render` takes `content` + `size` and no affine (`Engine/InterpolationEvaluator.swift:773-777`) | No. See §2 defect C: this is a live correctness bug caused by the transform's existence. |
 | **Onion skin, gallery thumbnails, export, flatten, merge** | indirectly, via `PixelOps.rasterize(cel:)` → `cel.vector?.render()` (`PixelOps.swift:276`) | **No.** They ask for a picture. Identity costs them nothing; `render()` already branches on `_transform.isIdentity` and skips the pass. |
 | **Interactive fill's reference composite** | indirectly, `CanvasManager+Fill.swift:848` | No, same reason. The fill's own path goes in through `addFill(canvasSpacePath:)`, which inverts. |
-| **Vector eraser (all three modes)** | via `erase`, `cutToIntersection`, `eraseHybrid`, `cutPreviewEdits` | **No.** Every one of them inverts a canvas-space gesture into storage on the way in, and the preview maps back out. Identity deletes eight lines. |
+| **Vector eraser (all modes)** | via `erase`, `cutToIntersection`, `eraseHybrid`, `cutPreviewElements` | **No.** Each maps the canvas gesture to layer-local geometry; Mode 2/4 preview keeps the result as an ordered native list. |
 | **Fills** | via `addFill(canvasSpacePath:)`, `localPath(fromCanvas:)` | No. |
 | **Placed images** | via `addImage(canvasSpaceElement:)` | No — but the *element* keeps its own pose. §5. |
 | **Text** | via `localText`/`canvasText`/`topmostText` | No — but the *frame* keeps its four corners. §5. |

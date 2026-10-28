@@ -37,9 +37,8 @@ import CoreGraphics
 /// this stroke's own **removal coverage** and *stands in for* the layer's picture inside the window,
 /// so the display has to hide the layer's picture there (`StrokeCanvasView.showOverlays` punches it
 /// out) and the commit is one `.destinationOut` merge of that coverage at the stroke's opacity.
-/// `.replacing` is the odd one out and is now the cut preview's alone: its window genuinely holds a
-/// *picture*, several `stampStroke` calls deep (`VectorCanvas.applyPreview` erases and then restamps
-/// caps into it), so it starts from a copy of the layer's own pixels and commits by replacing them.
+/// `.replacing` presents a frozen ordered native vector list through the same bounded window; it
+/// allocates one rendered content image and has no raster commit.
 ///
 /// **`.subtractive` is BRUSH.md §2.11's eraser and the arithmetic is exact.** N `.destinationOut`
 /// dabs at `aᵢ` punched one at a time leave `∏(1 - aᵢ)` — a number no cap can be applied to, because
@@ -58,16 +57,11 @@ final class StrokeScratch: DabTarget {
         /// of it) and to decide whether there is anything to remove at all; the window itself never
         /// holds a pixel of it. **Nil is a legitimate empty start**: a layer with no bitmap yet has
         /// nothing to erase.
-        case subtractive(backdrop: UIImage?)
-        /// The layer's picture with this stroke applied to it. `backdrop` is the picture it starts
-        /// from — canvas-sized and already resident (it is what is on screen), never rendered a
-        /// second time for this. **Nil is a legitimate empty start**, not a missing one: a layer
-        /// with no bitmap yet has nothing to copy and nothing to erase.
-        ///
-        /// **No longer the eraser's role.** It was, until §12 stage 8; what is left is Mode 2's cut
-        /// preview, where one window holds an erase walk *and* the restamped end caps and so is a
-        /// picture rather than a coverage map.
-        case replacing(backdrop: UIImage?)
+        case subtractive(backdrop: CelContentPicture?)
+        /// A bounded native display-list replacement used while vector geometry is being edited.
+        /// Its pixels are rendered directly from `celContent` into `windowRect`; no raster scratch
+        /// is allocated alongside that presentation window.
+        case replacing
     }
 
     let canvasSize: CGSize
@@ -79,19 +73,62 @@ final class StrokeScratch: DabTarget {
         let ink: CelContentPicture.Ink
         let placement: CelContentPlacement
     }
-    let celContent: CelContent?
+    private(set) var celContent: CelContent?
     private var contentPresentation: (version: Int, value: CelContentPicture.RenderedWindow)?
 
     /// The existing window version also owns the complete shown picture. A recreated window drops
     /// this memo with its other image memos, so version zero never aliases an earlier texture.
     var renderedCelContent: CelContentPicture.RenderedWindow? {
-        guard let celContent, let window, let image else { return nil }
-        if let cached = contentPresentation, cached.version == window.version { return cached.value }
-        let picture = CelContentPicture(size: canvasSize, window: windowRect,
-            backing: celContent.backing, patch: nil, ink: celContent.ink, inkPatch: image)
+        guard let celContent, !windowRect.isNull else { return nil }
+        let version = window?.version ?? -1
+        if let cached = contentPresentation, cached.version == version { return cached.value }
+        let picture: CelContentPicture
+        if case .replacing = role {
+            picture = CelContentPicture(size: canvasSize, window: windowRect,
+                backing: celContent.backing, patch: nil, ink: celContent.ink)
+        } else {
+            guard let window, let image else { return nil }
+            picture = CelContentPicture(size: canvasSize, window: windowRect,
+                backing: celContent.backing, patch: nil, ink: celContent.ink, inkPatch: image)
+        }
         guard let rendered = picture.rendered(placement: celContent.placement) else { return nil }
-        contentPresentation = (window.version, rendered)
+        contentPresentation = (version, rendered)
         return rendered
+    }
+
+    /// Replaces the frozen display list and admits its measured damage into the existing geometric
+    /// window. This path owns no raster texture: `renderedCelContent` is the one bounded image.
+    func replaceCelContent(ink: CelContentPicture.Ink, damage: CGRect) -> Bool {
+        guard case .replacing = role, let celContent,
+              let next = nextWindowRect(containing: damage) else { return false }
+        let updated = CelContent(backing: celContent.backing, ink: ink,
+                                 placement: celContent.placement)
+        let picture = CelContentPicture(size: canvasSize, window: next,
+            backing: updated.backing, patch: nil, ink: updated.ink)
+        guard let rendered = picture.rendered(placement: updated.placement) else {
+            failure = picture.hasFailed ? .unreadableBacking : .allocationRefused
+            return false
+        }
+        self.celContent = updated
+        windowRect = next
+        contentPresentation = (-1, rendered)
+        return true
+    }
+
+    /// Reuses the touch-down reference frames and their original display-list slots while replacing
+    /// only editable geometry. `contentPresentation` is the one invalidated image memo.
+    func replaceVectorDisplay(elements: [VectorElement], rewriting: Set<UUID>, damage: CGRect) -> Bool {
+        guard let celContent,
+              case .ordinary(let source, let captured, _) = celContent.ink else { return false }
+        let references = Dictionary(uniqueKeysWithValues: captured.filter(\.isReference).map { ($0.id, $0) })
+        let ordered = elements.map { element in
+            element.isReference ? (references[element.id] ?? element) : element
+        }
+        let referenceIDs = Set(ordered.lazy.filter(\.isReference).map(\.id))
+        let frozen = source.replacingDisplayElements(ordered, rewriting: rewriting,
+                                                      referenceIDs: referenceIDs)
+        return replaceCelContent(ink: .ordinary(source: frozen, elements: ordered, rewriting: rewriting),
+                                 damage: damage)
     }
 
     /// **The stroke's own opacity — BRUSH.md §2.11's cap, applied once when the window merges.**
@@ -110,12 +147,7 @@ final class StrokeScratch: DabTarget {
     /// display shows the same picture the commit lands, and two callers each supplying it is two
     /// chances for what is under the pen and what is drawn to disagree.
     ///
-    /// **It is the ungrouped walk this exists for.** The live tier stamps straight into the window
-    /// as the pen moves — `BrushStamper.LiveWalk` calls `stampDab`, never `stampStroke` — so
-    /// there is no `beginStrokeGroup` bracket to hang the texture off, and the merge is `commit`.
-    /// The grouped path through this class (`VectorCanvas.applyPreview`'s restamps) carries its own
-    /// texture on its own group and is untouched by this field, which is why applying it here cannot
-    /// double up: a group is never open on a role that reads this.
+    /// The live tier stamps straight into the window as the pen moves; paper is applied at merge.
     let texture: BrushTextureSettings?
 
     /// Whether the window stands in for the layer's own picture inside `windowRect`, rather than
@@ -171,6 +203,7 @@ final class StrokeScratch: DabTarget {
     /// opacity. That is the same arithmetic `commit` performs against the cel, one crop wide, which
     /// is what makes the ink that lands the ink that was under the pen.
     var image: UIImage? {
+        if case .replacing = role { return renderedCelContent?.image }
         guard let window, !windowRect.isNull else { return nil }
         guard case .subtractive(let backdrop) = role else { return windowContents }
         // Memoized on the window's own version, exactly as `RasterLayerTexture.renderToUIImage` is
@@ -180,10 +213,12 @@ final class StrokeScratch: DabTarget {
         // would never hit either.
         if let cached = punchedImage, cachedPunchVersion == window.version { return cached }
         guard let coverage = windowContents else { return nil }
-        guard let punched = renderedImage(size: windowRect.size, drawing: { _ in
-            backdrop?.draw(at: CGPoint(x: -windowRect.minX, y: -windowRect.minY))
+        guard let punched = renderedImage(size: windowRect.size, drawing: { context in
+            let completed = backdrop?.draw(into: context,
+                content: CGRect(origin: CGPoint(x: -windowRect.minX, y: -windowRect.minY), size: canvasSize),
+                placement: .identity) ?? true
             coverage.draw(at: .zero, blendMode: .destinationOut, alpha: opacity)
-            return true
+            return completed
         }) else { return nil }
         punchedImage = punched
         cachedPunchVersion = window.version
@@ -198,18 +233,10 @@ final class StrokeScratch: DabTarget {
     /// **The window's own pixels with BRUSH.md §2.25's paper multiplied in** — what this stroke's ink
     /// (or its removal coverage) actually *is*, once the texture has had its say.
     ///
-    /// **This is the live tier's merge point, and it is the same arithmetic the grouped one runs.**
-    /// A group multiplies the paper into the accumulated dabs inside its transparency layer, just
-    /// before the one draw that applies the stroke's opacity; the window here *is* the accumulated
-    /// dabs, and `commit` is the one draw that applies the opacity. So the two tiers are not two
-    /// implementations of §2.25 — they are one arithmetic reached at the two places this app happens
-    /// to accumulate a stroke.
+    /// **This is the live tier's merge point.** The window holds the accumulated dabs, and `commit`
+    /// applies the paper and stroke opacity once.
     ///
-    /// **`.replacing` is excluded and that is not an oversight.** Its window holds a *picture* —
-    /// `VectorCanvas.applyPreview` erases spans out of a copy of the layer and restamps the caps —
-    /// so multiplying paper into it would texture the artist's existing ink. Those restamps run
-    /// `stampStroke`, which opens a real group, so the texture reaches them the grouped way and
-    /// reaches only their own dabs.
+    /// `.replacing` is excluded because its native display-list render already contains the layer's ink.
     ///
     /// Memoized on the window's own version, exactly as the punch above is and for the same reason:
     /// `StrokeCanvasView.refreshDisplay` asks several times between two dabs.
@@ -265,9 +292,7 @@ final class StrokeScratch: DabTarget {
 
     /// No-ops. `BrushStamper.stampStroke` brackets its walk with these to maintain a *persistent*
     /// texture's stroke count; a scratch is thrown away at lift and nothing counts strokes on it.
-    /// They must stay no-ops rather than forwarding: `VectorCanvas.applyPreview` runs a fresh
-    /// `stampStroke` per preview edit, and forwarding `beginStroke` would clear the window's dirty
-    /// rect part-way through a stroke.
+    /// They stay no-ops rather than forwarding: the live tier has no group to retain between calls.
     func beginStroke() {}
     func endStroke() {}
 
@@ -279,50 +304,16 @@ final class StrokeScratch: DabTarget {
     /// in canvas space here, the window is grown once to contain all of them, and only then is the
     /// group opened on the window that is going to keep them. Nothing is buffered outside a group,
     /// which is the live walk's whole path: it stamps straight through, and the merge is `commit`.
-    private var group: StrokeGroupBuffer?
-
-    func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode, texture: BrushTextureSettings?) {
-        group = StrokeGroupBuffer(opacity: opacity, blendMode: blendMode, texture: texture)
-    }
-
-    /// **The texture is forwarded and its phase is not**, because the window carries its own: the
-    /// dabs below are translated into window space, and `RasterLayerTexture.canvasOrigin` — set when
-    /// the window was built — is what puts the paper back in canvas space at the merge. BRUSH.md
-    /// §2.25's anchoring therefore survives a window reallocation with nothing here to keep in step.
-    func endStrokeGroup() {
-        guard let group else { return }
-        self.group = nil
-        guard !group.isEmpty, !group.bounds.isNull,
-              let window = window(containing: group.bounds) else { return }
-        let offset = CGPoint(x: -windowRect.minX, y: -windowRect.minY)
-        window.beginStrokeGroup(opacity: group.opacity, blendMode: group.blendMode,
-                                texture: group.texture)
-        for dab in group.dabs {
-            let point = CGPoint(x: dab.center.x + offset.x, y: dab.center.y + offset.y)
-            switch dab.tip {
-            case .round(let hardness):
-                window.stampCircle(at: point, radius: dab.radius, color: dab.color, alpha: dab.alpha,
-                                   hardness: hardness, blendMode: dab.blendMode)
-            case .image(let texture, let angle):
-                window.stampImage(texture, at: point, diameter: dab.radius * 2, angle: angle,
-                                  color: dab.color, alpha: dab.alpha, blendMode: dab.blendMode)
-            }
-        }
-        window.endStrokeGroup()
-    }
+    func beginStrokeGroup(opacity: CGFloat, blendMode: CGBlendMode, texture: BrushTextureSettings?) {}
+    func endStrokeGroup() {}
 
     func stampCircle(at point: CGPoint, radius: CGFloat, color: UIColor,
                      alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
+        if case .replacing = role { return }
         guard radius > 0, alpha > 0 else { return }
         // `options: []` on the dab's radial gradient paints nothing past `radius`, so this is the
         // exact bound — the same rectangle `RasterLayerTexture.stampCircle` accumulates.
         let bounds = dabCircleBounds(at: point, radius: radius)
-        if group != nil {
-            group?.add(BrushStamper.BakedDab(center: point, radius: radius, color: color,
-                                             alpha: alpha, blendMode: blendMode,
-                                             tip: .round(hardness: hardness)), painting: bounds)
-            return
-        }
         guard let window = window(containing: bounds) else { return }
         window.stampCircle(at: CGPoint(x: point.x - windowRect.minX, y: point.y - windowRect.minY),
                            radius: radius, color: color, alpha: alpha, hardness: hardness,
@@ -331,18 +322,13 @@ final class StrokeScratch: DabTarget {
 
     func stampImage(_ texture: BrushTextureRef, at point: CGPoint, diameter: CGFloat,
                     angle: CGFloat, color: UIColor, alpha: CGFloat, blendMode: CGBlendMode) {
+        if case .replacing = role { return }
         guard diameter > 0, alpha > 0 else { return }
         // A turned square reaches further than an unturned one — up to `diameter · √2 / 2` at 45° —
         // and the window has to contain the pixels, not the nominal size. `dabImageBounds` is the
         // same function `RasterLayerTexture.stampImage` accumulates its dirty rect with, so the
         // window and the dirty rect cannot disagree about what a dab covered.
         let bounds = dabImageBounds(at: point, diameter: diameter, angle: angle)
-        if group != nil {
-            group?.add(BrushStamper.BakedDab(center: point, radius: diameter / 2, color: color,
-                                             alpha: alpha, blendMode: blendMode,
-                                             tip: .image(texture, angle: angle)), painting: bounds)
-            return
-        }
         guard let window = window(containing: bounds) else { return }
         window.stampImage(texture, at: CGPoint(x: point.x - windowRect.minX, y: point.y - windowRect.minY),
                           diameter: diameter, angle: angle, color: color, alpha: alpha,
@@ -355,9 +341,8 @@ final class StrokeScratch: DabTarget {
     /// before — the window-space form of what the raster commit used to do with a canvas-sized
     /// `PixelOps.maskedComposite`.
     ///
-    /// For `.additive` and `.subtractive` "what was there before" is nothing, since the window holds
-    /// only this stroke's own ink or its own removal coverage; for `.replacing` it is the backdrop,
-    /// which is why the clip has to redraw it rather than merely clearing.
+    /// The raster window holds only this stroke's ink or removal coverage, so clipping clears its
+    /// outside portion rather than restoring any backdrop.
     func clip(to path: CGPath) {
         guard let window, !windowRect.isNull else { return }
         let current: UIImage
@@ -369,11 +354,10 @@ final class StrokeScratch: DabTarget {
         let clipped = RasterLayerTexture.rendered(size: windowRect.size, canvasOrigin: windowRect.origin,
                                                    using: residency) { context in
             context.translateBy(x: -windowRect.minX, y: -windowRect.minY)
-            backdrop?.draw(at: .zero)
             context.saveGState()
             context.addPath(path)
             context.clip()
-            current.draw(at: windowRect.origin)
+            current.draw(at: windowRect.origin, blendMode: .copy, alpha: 1)
             context.restoreGState()
             return true
         }
@@ -397,9 +381,7 @@ final class StrokeScratch: DabTarget {
     /// - `.subtractive` punches the coverage out at the same opacity, which is the identical
     ///   statement for the eraser — see the type comment for why one punch of the sum is not the sum
     ///   of the punches.
-    /// - `.replacing` copies (its window already holds the final pixels for its region, alpha
-    ///   included — a source-over draw could not take ink away). It commits nothing today: the cut
-    ///   preview it belongs to is a preview, and the cut itself is vector geometry.
+    /// - `.replacing` is a display-only native geometry snapshot and has no raster commit.
     /// Prepare both undo pictures before the live tier changes. The final picture is drawn directly
     /// into owned storage; the live write is one admitted copy and cannot leave a half-stroke.
     func preparedPatch(over before: RasterSource, in rect: CGRect) -> Result<RasterSource, RasterResidency.Failure> {
@@ -412,7 +394,7 @@ final class StrokeScratch: DabTarget {
                 switch role {
                 case .additive: contents.draw(at: origin, blendMode: blendMode, alpha: opacity)
                 case .subtractive: contents.draw(at: origin, blendMode: .destinationOut, alpha: opacity)
-                case .replacing: contents.draw(at: origin, blendMode: .copy, alpha: 1)
+                case .replacing: return false
                 }
                 return true
             }
@@ -422,6 +404,7 @@ final class StrokeScratch: DabTarget {
     @discardableResult
     func commit(into texture: RasterLayerTexture) -> Result<Void, RasterResidency.Failure> {
         if case .failure(let error) = lastMutationResult { return .failure(error) }
+        if case .replacing = role { return .success(()) }
         guard !windowRect.isNull else { return .success(()) }
         if case .subtractive(let backdrop) = role, backdrop == nil, !texture.hasContent { return .success(()) }
         return texture.copiedPatch(in: windowRect).flatMap { before in
@@ -434,23 +417,40 @@ final class StrokeScratch: DabTarget {
 
     // MARK: - The window
 
-    /// The picture a window of this role *starts from*, which is `.replacing`'s alone.
-    ///
-    /// **`.subtractive` carries a backdrop and it is deliberately not this one.** That window holds
-    /// removal coverage, so seeding it with the layer's pixels — or redrawing them under a clip, or
-    /// copying them into a grown window — would make the coverage a picture and the punch punch
-    /// itself. Its backdrop is read only where a *picture* is wanted: `image`, and `commit`'s
-    /// is-there-anything-to-erase guard.
-    private var backdrop: UIImage? {
-        if case .replacing(let backdrop) = role { return backdrop }
-        return nil
-    }
-
     /// The window enlarged if necessary to contain `rect`, or nil when `rect` lies entirely off the
     /// canvas — off-canvas pixels are storable nowhere and displayable nowhere, so a dab there is
     /// dropped rather than growing the box to reach it.
     private func window(containing rect: CGRect) -> RasterLayerTexture? {
         guard failure == nil else { return nil }
+        if case .replacing = role { return nil }
+        guard let next = nextWindowRect(containing: rect) else { return nil }
+        if let window, next == windowRect { return window }
+        let previous: UIImage?
+        do { previous = try window?.renderToUIImage().get() }
+        catch { failure = error; return nil }
+        let prepared = RasterLayerTexture.rendered(size: next.size, canvasOrigin: next.origin, using: residency) { _ in
+            previous?.draw(at: CGPoint(x: windowRect.minX - next.minX, y: windowRect.minY - next.minY),
+                           blendMode: .copy, alpha: 1)
+            return true
+        }
+        let grown: RasterLayerTexture
+        switch prepared {
+        case .success(let value): grown = value
+        case .failure(let error): failure = error; return nil
+        }
+        carriedDirtyRect = dirtyRect
+        windowRect = next
+        window = grown
+        punchedImage = nil
+        texturedImage = nil
+        contentPresentation = nil
+        return grown
+    }
+
+    /// The existing geometric growth rule without allocating a raster surface. Native display-list
+    /// replacements use this same admitted rectangle for their sole rendered image.
+    private func nextWindowRect(containing rect: CGRect) -> CGRect? {
+        guard failure == nil, !rect.isNull, !rect.isInfinite else { return nil }
         // Rounded the way `RasterLayerTexture` rounds its own size, so the window's pixel grid is
         // the cel's pixel grid: an integral origin is what makes a dab land on exactly the pixels it
         // would have landed on stamped straight into the cel, sub-pixel phase included.
@@ -466,41 +466,14 @@ final class StrokeScratch: DabTarget {
         // dab that has drifted entirely off-canvas would otherwise pass containment against
         // whatever window already exists instead of being dropped.
         guard !onCanvas.isNull else { return nil }
-        if let window, windowRect.contains(onCanvas) { return window }
+        if !windowRect.isNull, windowRect.contains(onCanvas) { return windowRect }
         let wanted = windowRect.isNull ? rect : windowRect.union(rect)
         let held = windowRect.isNull ? CGSize.zero : windowRect.size
         let next = wanted.insetBy(dx: -Self.pad(held: held.width, wanted: wanted.width),
                                   dy: -Self.pad(held: held.height, wanted: wanted.height))
             .integral.intersection(canvas)
         guard next.width >= 1, next.height >= 1 else { return nil }
-        // **The window's canvas origin travels with it**, which is the whole of BRUSH.md §2.25's
-        // anchoring on the live tier: the paper is a function of the canvas point, so a window that
-        // has just moved has to know where it now is or the texture would slide under the ink.
-        let previous: UIImage?
-        do { previous = try window?.renderToUIImage().get() }
-        catch { failure = error; return nil }
-        let prepared = RasterLayerTexture.rendered(size: next.size, canvasOrigin: next.origin, using: residency) { _ in
-            backdrop?.draw(at: CGPoint(x: -next.minX, y: -next.minY))
-            if let previous, !windowRect.isNull {
-                previous.draw(at: CGPoint(x: windowRect.minX - next.minX, y: windowRect.minY - next.minY),
-                              blendMode: .copy, alpha: 1)
-            }
-            return true
-        }
-        let grown: RasterLayerTexture
-        switch prepared {
-        case .success(let value): grown = value
-        case .failure(let error): failure = error; return nil
-        }
-        carriedDirtyRect = dirtyRect
-        windowRect = next
-        window = grown
-        // A fresh texture starts at version 0, so the memos have to be dropped by hand rather than
-        // trusted to notice — see `image` and `windowContents`.
-        punchedImage = nil
-        texturedImage = nil
-        contentPresentation = nil
-        return grown
+        return next
     }
 
     /// How far one axis is outset when the window is rebuilt. `held` is what that axis measures now

@@ -1,6 +1,6 @@
 import UIKit
 
-/// How the live-preview scratch raster relates to the vector canvas's own render. Differs per tool
+/// How the live-preview scratch layer relates to the vector canvas's own render. Differs per tool
 /// and — for the eraser — per mode. Set once in `StrokeCanvasView.beginVectorStroke`, read by
 /// `refreshDisplay` through `VectorPreviewPlan`, and named in
 /// `StrokeCanvasView.lastVectorGestureTrace`.
@@ -14,10 +14,9 @@ enum VectorScratchRole {
     /// A paint stroke: the scratch holds only this stroke's ink, shown *over* the canvas render. The
     /// canvas itself is untouched until lift.
     case overlay
-    /// Modes 1 and 2: the scratch starts as a copy of the canvas render *inside its own window* and
-    /// dabs punch `.destinationOut` into it, standing in for the canvas render over that window for
-    /// the stroke's duration — the raster eraser's own code path applied to the vector layer's
-    /// pixels. `StrokeCanvasView.showOverlays` punches the base out under it; see `StrokeScratch`.
+    /// Eraser preview: Mode 1 punches removal coverage from the captured display, while Modes 2 and
+    /// 4 render an updated ordered native display list. The window stands in for the committed render
+    /// there, so `StrokeCanvasView.showOverlays` punches the base out beneath it.
     case replacement
     /// Mode 3: nothing is drawn into the scratch. It commits during the drag, so the canvas render
     /// alone is truth and a scratch would show what is already on screen.
@@ -51,9 +50,10 @@ enum VectorScratchRole {
 /// without changing this type, which is a conspicuous thing to do.
 ///
 /// **`.replacement` reaches the screen through the scratch layer too, and cannot reach it any other
-/// way.** Its scratch is a window over the stroke's own dirty rect (`StrokeScratch`), so it is not a
-/// picture of the canvas and cannot fill the base slot: the base is the committed render, as it is
-/// for every other role, and the window sits above it with the base punched out underneath.
+/// way.** Its scratch is a bounded window (`StrokeScratch`): Mode 1 shows removal coverage over its
+/// captured display, while Modes 2 and 4 show a native post-edit list. It cannot fill the base slot:
+/// the base is the committed render, as it is for every other role, and the window sits above it
+/// with the base punched out underneath.
 /// `.none` is the one role that shows no second layer, and a regression there or in `.replacement`
 /// is not slow ink: it is the artist erasing and seeing nothing happen until they lift.
 /// `VectorPreviewPlanLogicTests` pins both.
@@ -75,12 +75,11 @@ struct VectorPreviewPlan: Equatable {
     /// composite. False means the scratch contributes nothing to this refresh — **not** that it is
     /// flattened into the base, which is no longer a thing this type can say.
     ///
-    /// **This is also the live-preview frame count**, i.e. it is what moves
-    /// `StrokeCanvasView.livePreviewFrames` and so the second field of `lastVectorGestureTrace`.
-    /// Every role that draws draws through the scratch layer, so the two are one question, and a
-    /// separate field could only ever repeat this one and give it somewhere to disagree. "The
-    /// scratch layer was updated repeatedly during the drag" is the only thing about the live path
-    /// an XCUITest can observe at all —
+    /// Every role that draws draws through the scratch layer, so this is the visibility decision.
+    /// `StrokeCanvasView` counts only when that image is actually submitted to its presentation
+    /// surface; this plan alone cannot observe whether a deferred base path returned early or
+    /// whether a new image was assigned. "The scratch layer was updated repeatedly during the drag"
+    /// is the only thing about the live path an XCUITest can observe at all —
     /// `press(forDuration:thenDragTo:)` blocks the test thread for the gesture's whole duration, so
     /// every screenshot it can take is post-lift. `VectorEraserUITests` asserts the count for both
     /// drawing roles, and `.none` still publishes zero.

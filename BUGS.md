@@ -26,25 +26,25 @@ and physical confirmation remain; no main merge or install.
 
 ## Vector eraser preview window — October 28
 
-The older `bfd95b4e` slice (normal176 and nine controls) does not qualify the newer bounded preview.
-The `d034036f` normal291 run is RED (286 passed, 3 failed, 2 named opt-in skips): preview coverage
-expected24/got0, cache-hit premise expected1/got0, and Mode1 committed-coverage comparison differed
-by8/16384 pixels. The source successor `6af` changes tests only: repairs cache/brush premises, restores
-the intended hard opaque brush, and adds growth protection. Source9c includes the real held Mode1 In-Place reference workflow and fixes its compile-only optional
-pixel types; selected11 and13 deliberate controls are pending. All11 previous public eraser workflows
-and the200-stroke bounded parity/cost check passed within the earlier291 run; root inspected six pictures. No assembled qualification or physical Mode3-crash cause is established.
+Native geometry/window componentcf is harvested after selected11 green before/after13 actual target
+failures. It removes flat erase/restamp code, shares canonical cut geometry, preserves references and
+poses, and refuses partial publication. Original mutation whole-file hashes were baseline hashes;
+post-run corrected metadata preserves all predeclared target statements and actual source/recipe
+binding. Thirteen canonical targets accepted; eleven collateral issue records get no extra credit.
+Earlier d034291 passed286, with three fixture corrections checked in cf and two named opt-in skips;
+no whole291-green claim. Root inspected whole public pictures. Final combined gates and physical
+Mode3 crash/latency evidence remain; no crash-cause claim.
 
 ## Adjustable fill can cache a preview that never drew — October 28
 
 Read-only source audit found a conditional owner gap in extracted LayerFillView candidate995677c5:
 showFill records render/clip identity before presentation; a surface-mint refusal returns without
-completion, so a later identical request is skipped. The latest OLD run, `fill-owner-refusal-old4-57073ba1`,
-is RED (1 pass, 3 failures, source731): callback and retry hit intended RED assertions, ABA passed,
-and partial-release failed at a combined assertion, leaving the lifetime premise unresolved. Test-only
-pool fix `c056` is committed but unrun; no fill behavior change is established. Run corrected selected
-controls and review exact assertion reach before a behavior fix. The separate reduced-budget manager
-failure does not instantiate LayerFillView. No arbitrary retry/cache/service or increased wait. Earlier
-source/packet history remains in Git and the recorded-regressions directory.
+completion, so a later identical request is skipped. Corrected OLDc056 selected4 is2intendedRED/2healthyGREEN, source731 exact: missing refusal
+completion and same-render retry fail; Set Down release and reentrant A→B→A controls pass. Minimal
+051 runtime correction reports refused frames, fences stale failures and handles nil teardown before
+identity dedupe. It is source-only; normal50, four controls, public growth and final integration remain.
+The separate reduced-budget manager failure does not instantiate LayerFillView. No timer, spin or
+larger wait was added. Original runs and metadata remain in the recorded-regressions directory.
 
 ## Brush response-curve drag loses its selected key on clamped ticks — 2026-10-24
 
@@ -2074,9 +2074,10 @@ it directly instead of only after lifting off.
 Mode 2 removes the parametric span of a stroke's centreline that lies under the eraser, then hands the
 two surviving pieces to `BrushStamper`, which gives every stroke **round end caps**. Each cap reaches
 back into the gap by the stroke's own radius. Cut a 40pt line with an 8pt eraser and the two caps meet
-in the middle: the display list gains an element and **zero pixels change**. MEASURED —
-`VectorCutPreviewLogicTests.testAStrokeThickerThanTheEraserPreviewsTheNothingThatTheCutActuallyTakes`
-asserts the pixel delta is exactly 0.
+in the middle: the display list gains an element and **zero pixels change**. That outcome remains an
+owner decision. The former focused pixel-delta test was retired when preview and commit moved to one
+shared cut-piece path; the current aggregate parity witness is
+`VectorCutPreviewLogicTests.testAccumulatedPreviewListMatchesCommittedCut`.
 
 The cut is real and useful — the line is now two strokes that can be moved apart — but nothing on
 screen says so. Before the live preview the artist at least saw the same nothing *after* lifting; now
@@ -2094,21 +2095,19 @@ they watch nothing happen for the whole drag, which is a more pointed version of
 Nothing was changed here. The preview reports the current behaviour faithfully, which is the most a
 preview should do about it.
 
-## Mode 2's preview draws into a flattened copy, so a crossing stroke flickers (2026-08-22)
+## Mode 2's flattened live preview lost crossing ink — fixed (2026-10-28)
 
-The live preview seeds a scratch raster from `VectorCanvas.render()` — a **flattened** image — and
-erases the doomed spans out of it. A second stroke whose *ink* overlaps a doomed span, but whose
-*centreline* stays outside the eraser, is not cut and keeps all its ink after the lift; in the preview
-its overlapping pixels go with the span and come back the moment the finger comes up.
+The old live preview seeded a scratch raster from `VectorCanvas.render()` and erased doomed spans from
+that flattened image. Ink from an uncut stroke could disappear with the removed span until lift.
+Mode 4 used the same flat erase-and-restamp representation and also mishandled references in the
+affected window. Those preview paths and their pixel-cost benchmark were removed.
 
-Bounded by construction: the region at risk is the overlap of two strokes inside one eraser footprint.
-`VectorCutPreviewLogicTests.testInkThatSurvivesTheCutIsBrieflyErasedFromTheFlattenedPreview` pins it
-under 10% of what the cut removes, so a change that made it large would fail rather than be noticed by
-somebody drawing.
-
-The exact fix is to re-render the affected strokes instead of drawing into a flat copy, and that is
-precisely the term that makes Mode 3 cost ~95 ms a sample (PERFORMANCE.md items 10 and 17). Not worth
-it for a flicker on a crossing, unless the owner reports seeing it.
+Modes 2 and 4 now build the ordered post-edit native display list and render only the admitted damage
+window. Mode 2's preview and commit share the same lattice-preserving cut pieces. The former focused
+crossing-ink test was retired; `VectorCutPreviewLogicTests.testAccumulatedPreviewListMatchesCommittedCut`
+and `VectorEraserHybridLogicTests.testModeTwoAndFourScratchMatchCommittedReferenceOrdering` cover
+preview/commit parity, including in-place references. Native verification is pending for this source
+successor.
 
 ## The mask cache is the one canvas-sized cache with no byte bound (2026-08-20) — FIXED 2026-09-06
 

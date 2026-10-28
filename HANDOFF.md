@@ -4,8 +4,9 @@ New active owner Move handoff report: after moving a selection, switching to Bru
 hides the placed drawing. Owner's theory is early preview retirement; explicit preference is keep
 same lifted picture until composited base actually lands, accepting temporary raw overlay. Recorded
 in TODO/BUGS before investigation; reuse existing held-content/revision retirement, no timer/newcache.
-OLD21b public2 failed its moved-ink premise before the tool switch; no exit-gap proof or runtime fix
-yet. Correct the setup from actual whole captures, then rerun OLD.
+OLD21b and5f public2 each failed moved-ink premises before the tool switch, so neither proves the
+exit gap. Third test-only witness b99 recalculates paper geometry across docks and waits for actual
+black moved ink; it is running. No Move-exit runtime correction yet.
 This adds to (does not replace) stream offset, Test Move/lag/crash and the rest of TODO.
 
 Kevin resumed: **continue; do not park**. Read this file, `AGENTS.md`, `CLAUDE.md`, `TODO.md`,
@@ -17,8 +18,9 @@ Historical technical detail and raw results remain in Git and the external packe
 
 - Integration worktree: `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch
   `tmp/s54-qualified-integration`, documentation HEAD `f9faf3e8` before this reconciliation. Current
-  package harvest is `e4f9c8fa`; stream harvest is `a97f3f47`, with730 source entries, fast static5,425 and full6,026. These are
-  static counts only: this assembled source has **not** passed its final native gates.
+  package harvest is `e4f9c8fa`; stream harvest is `a97f3f47`; current eraser harvest follows.
+  Pre-eraser static census was730 source entries / fast5,425 / full6,026; refresh after this harvest.
+  These are static counts only: this assembled source has **not** passed its final native gates.
 - Main/origin remain `afd2030c`; no merge or push. A qualified merge is authorized after remaining
   gates pass. Component qualification and harvested source do not qualify the assembled integration.
 - Installed Release is still source `6fb979f442f4d3da1299785de2a077a2058a4dfe`, UUID
@@ -74,20 +76,24 @@ preserved; source/build provenance is not established for either recording. Do n
 
 ### Eraser preview
 
-The previous `bfd95b4e` slice (normal176 plus nine controls) does not qualify the new preview. The
-`d034036f` normal291 run in `/Users/juliapark/PaintWork/s55-recorded-regressions/eraser-native-preview-normal291-d034036f/`
-is **RED**: 286 passed, 3 failed, 2 named opt-in skips. The failures were
-a preview fixture expected24/got0, a cache-hit premise expected1/got0, and an 8/16384-pixel Mode1
-coverage mismatch. Test-only successors correct cache-lifetime and brush-premise fixtures, restore the intended hard
-opaque brush, and add growth protection. The new public Mode1 held In-Place reference workflow is
-committed. Source `9c4da00e` fixes its optional pixel types after447 compiled zero tests. Selected11
-and13 deliberate faults remain unrun at9c. The broader291 run did pass all11 prior public eraser
-workflows and the bounded200-stroke parity/cost check; root inspected six whole pictures. Simulator
-counts:1,117 brush marks versus33,400 full-scene;57,408 window pixels versus4,194,304 canvas pixels. Do not modify the owned eraser worktree before
-handback. No assembled-source eraser qualification or physical Mode3-crash cause is established.
-Independent source review found no concrete blocker but identified coverage gaps; see
-`s55-recorded-regressions/eraser-window-source-review-535a0adf.md` and
-`eraser-window-peer-review-1a4937a7.md`.
+Native preview component `cf3304b8` is harvested through a reviewed24-file virtual merge. It removes
+flat erase/restamp machinery, uses canonical native vector geometry and one bounded replacement
+window, and captures actual display references for subtractive erasing. Package codec suffix and
+four integration-owned files remain byte-exact; stream Move tests/helper are combined, not replaced.
+
+The earlier d034 normal291 had286passed/3fixturefailures/2namedskips; all11 old public eraser routes
+and output-checked200-stroke benchmark passed. Corrected cf selected11 passed before and after13
+actual assertion-red controls, all730 source entries/methods/device/argv exact. Root accepted13
+intended target statements and left11 collateral issues uncredited. Original mutation-file hashes
+mistakenly named baseline bytes; a transparent POST-RUN hash-only correction binds preserved recipes/
+patches and compiled cases. Original map/rejection remain; do not call those whole-file hashes premapped.
+Root inspected six old whole pictures and the new live-reference post-gesture picture; held evidence
+is timed pixels, not an invented held screenshot. Counts:1,117 marks versus33,400 full-scene;
+57,408 window pixels versus4,194,304 canvas pixels. No physical latency or Mode3 crash-cause claim.
+
+Evidence: `s55-recorded-regressions/eraser-normal-after-controls13-cf3304b8/`,
+`eraser-bounded-controls13-cf3304b8/hash-correction-postrun-01/`, and
+`eraser-harvest-e102-cf3304b8/root-applied-source-receipt.json`. Final assembled gates remain.
 
 ### Layer fill
 
@@ -124,7 +130,7 @@ the existing one-shot protocol. Cold Gallery packet: `package-address-cold-ui-29
 ## Remaining owner queue
 
 Keep every unfinished TODO item. Immediate queue after checking ownership: stream normal post-fault
-rebuild/causal extraction/harvest; eraser9c selected11 and13 faults; new Move-exit OLD public2; fill
+rebuild/causal extraction/harvest; final assembled eraser gates; corrected Move-exit OLD public2; fill
 selected OLD controls after `c056`. Also retain these exact boundaries:
 
 - Autosave `4c`: inventory and deliberate failure/reopen controls remain in
@@ -169,3 +175,9 @@ pass; push status is unchanged.
 Keep the report short and artist-facing: root cause; changed/deleted files and symbols; exact merged
 SHA; Debug/Release fast counts; UI classes added/run; what was driven and seen; what Kevin does next;
 refuted premises; and anything not run. Ask only a concrete owner decision when a ruling is required.
+
+Owned56C post-eraser13 cache cleanup reclaimed4,726,562,816bytes. All11,831 Containers entries
+were archived/hash-verified and stayed exact through deletion and boot (zero added/changed). About19GB
+free. Only the two validated generated cache targets were deleted; iPad/library copies untouched.
+Run reusable off-repo qualification-input preflight before future grants/maps to catch selector/hash/
+incomplete-assertion errors before native work. Exact receipts remain in root-next-gates.json.

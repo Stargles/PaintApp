@@ -50,10 +50,8 @@ protocol DabTarget: AnyObject {
     /// hundred.
     ///
     /// Groups do **not** nest, and they are not `beginStroke`/`endStroke`: those bracket a *gesture*
-    /// on a persistent texture (`RasterLayerTexture.strokeCount`) and are deliberate no-ops on a
-    /// `StrokeScratch`, because `VectorCanvas.applyPreview` runs several `stampStroke` calls into one
-    /// scratch. A group per `stampStroke` call is exactly the right granularity there: the erase walk
-    /// gets its own `.destinationOut` group and each restamp its own normal one.
+    /// on a persistent texture (`RasterLayerTexture.strokeCount`). A group per `stampStroke` call is
+    /// the right granularity: each walk carries its own opacity, blend mode and paper.
     ///
     /// **`texture` is BRUSH.md §2.25's paper, and it rides the group because the group is the
     /// moment.** The owner's rule is that the texture *"uses the untextured brush as a transparency

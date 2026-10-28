@@ -256,13 +256,12 @@ final class StrokeCanvasView: CanvasPlaneView {
     ///
     /// **The preview needs the whole gesture's cut even though it is applied one increment at a
     /// time.** A cut piece is drawn with a round end cap at the boundary, and the boundary walks
-    /// outward with the eraser; caps drawn at boundaries the gesture has already passed are ink the
-    /// finished cut does not leave, and unless they are accounted for they fill the gap back in
-    /// behind the finger. `VectorCanvas.cutPreviewEdits` merges into this and reads the caps off the
-    /// merged result. It is a few ranges per stroke touched, not per sample.
+    /// outward with the eraser; pieces therefore have to be rebuilt from the complete accumulated
+    /// cut and touched spans before the ordered list is presented. It is a few ranges per stroke,
+    /// not per sample.
     private var previewCuts: [UUID: VectorCanvas.CutPreviewProgress] = [:]
-    /// Mode 4's preview: the strokes the gesture has already erased out of the scratch, so each is
-    /// walked once. Empty except mid-drag.
+    /// Mode 4's preview: the strokes the gesture has removed from the ordered display list, so each
+    /// is walked once. Empty except mid-drag.
     private var previewDoomed: Set<UUID> = []
     /// Smooths raw touch positions into a trailing "follow" point before `stampPath`. Reset to the
     /// raw touch-down position at the start of every stroke so the first stamp lands under the
@@ -500,10 +499,9 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// Empty means the gesture ended or was abandoned.
     var guideOverlayNeedsUpdate: (([TimedSample]) -> Void)?
 
-    /// Count of live preview frames shown before lift. `.replacement` and `.overlay` both count —
-    /// each publishes something the canvas render does not already contain — and `.none` never
-    /// draws, so it stays at zero. `VectorPreviewPlan.publishesLivePreviewFrame` is the rule and
-    /// carries the note on why `.overlay` was excluded until 2026-08-20 and is not any more.
+    /// Count of nonnil live-preview images published before lift. `.replacement` and `.overlay`
+    /// count when their image reaches the display; `.none` and raster strokes do not. Timing ink
+    /// counts each nonnil payload delivered to its sibling view, without claiming unique images.
     private var livePreviewFrames = 0
 
     /// What the last finished vector gesture did about live preview, as `"<role>,<frames>"` — read
@@ -1172,7 +1170,6 @@ final class StrokeCanvasView: CanvasPlaneView {
         if imageView.image !== base { imageView.image = base }
         if plan.base == .committedRender { baseDocumentVersion = documentVersion }
         showOverlays(plan.showsScratchLayer ? scratch : nil)
-        if plan.showsScratchLayer { livePreviewFrames += 1 }
         return true
     }
 
@@ -1416,8 +1413,12 @@ final class StrokeCanvasView: CanvasPlaneView {
         // the same pixels drawn twice — which for a semi-transparent brush is visibly darker ink
         // under the pen than the ink that lands. One rule, one drawer.
         if timingStroke != nil {
-            onLiveInkChanged?(scratch?.image, scratch?.windowRect ?? .null,
+            let image = scratch?.image
+            onLiveInkChanged?(image, scratch?.windowRect ?? .null,
                               scratch.map { $0.replacesBase ? 1 : $0.opacity } ?? 1)
+            if image != nil, onLiveInkChanged != nil, vectorCanvas != nil, vectorScratchRole != .none {
+                livePreviewFrames += 1
+            }
             if scratchView.image != nil {
                 scratchView.image = nil
                 scratchView.isHidden = true
@@ -1437,14 +1438,17 @@ final class StrokeCanvasView: CanvasPlaneView {
         // ink at full flow and is shown at the stroke's own opacity, which is exactly what
         // `StrokeScratch.commit` will do to it at lift — so what the artist watches build up under
         // the pen is what lands. The other two roles have already applied the cap inside their own
-        // pixels (`.subtractive` punches the backdrop with it; `.replacing`'s groups each carried
-        // it), so those are shown at 1.
+        // pixels (`.subtractive` punches its captured display; `.replacing` is a full-opacity
+        // native display-list render), so those are shown at 1.
         let alpha = (scratch?.replacesBase ?? true) ? 1 : (scratch?.opacity ?? 1)
         if scratchView.alpha != alpha { scratchView.alpha = alpha }
         guard scratchView.image !== image else { return }
         if let scratch, image != nil { scratchView.frame = shown?.window ?? scratch.windowRect }
         scratchView.image = image
         scratchView.isHidden = image == nil
+        if image != nil, scratch != nil, vectorCanvas != nil, vectorScratchRole != .none {
+            livePreviewFrames += 1
+        }
     }
 
     /// **Moves the finished stroke's picture from the live overlay to the held one** — the pen-up
@@ -1749,8 +1753,12 @@ final class StrokeCanvasView: CanvasPlaneView {
         // BRUSH.md §2.11: the window is this stroke's own, and the stroke's opacity is the cap it
         // merges under rather than something each dab carries. An eraser's window holds removal
         // *coverage* (`.subtractive`); a brush's holds ink.
+        let backdropPicture = backdrop.map { image in
+            CelContentPicture(size: raster.size, window: CGRect(origin: .zero, size: raster.size),
+                              backing: nil, patch: nil, ink: .rendered(image))
+        }
         let scratch = StrokeScratch(canvasSize: raster.size,
-                                    role: strokeTool == .eraser ? .subtractive(backdrop: backdrop)
+                                    role: strokeTool == .eraser ? .subtractive(backdrop: backdropPicture)
                                                    : .additive,
                                     opacity: CGFloat(profile.opacity),
                                     blendMode: strokeTool == .eraser ? .normal : profile.preset.stroke.blendMode.cgBlendMode,
@@ -2348,42 +2356,29 @@ final class StrokeCanvasView: CanvasPlaneView {
         // like any other.
         vectorScratchRole = Self.scratchRole(tool: strokeTool,
                                              mode: inBetweenCelID != nil ? .erase : vectorEraserMode)
-        // Mode 1 previews by punching into a copy of what's already on screen — at an in-between
-        // that's the evaluated frame, not the (empty) canvas. The copy is of the window only, and
-        // the backdrop it copies from is the render already on screen (`render`, memoized
-        // on the canvas's version) rather than a second one: this used to be two canvas-sized
-        // buffers at touch-down, 2 GiB at 16383².
+        // The vector scratch freezes the displayed list by value so reference frames and editable
+        // ink keep their captured order, while backing pixels remain on their independent pose.
         scratch = {
             if case .replacement = vectorScratchRole {
-                // The picture of the layer *in the space this gesture draws in*: under a pose that is
-                // the cel's own render, which `poseSpace` shows posed, and not the posed picture in
-                // the base slot, which is already in canvas points.
                 let shown = poseSpacePose == nil ? interpolationImage : nil
-                guard let backdrop = shown ?? vectorCanvas.render() else { return nil }
                 let elements = vectorCanvas.elements
                 let references = Set(elements.compactMap { $0.stream }.filter(\.rendersInPlace).map(\.id))
-                let ink: CelContentPicture.Ink = shown.map(CelContentPicture.Ink.rendered)
+                let displayInk: CelContentPicture.Ink = shown.map(CelContentPicture.Ink.rendered)
                     ?? .ordinary(source: vectorCanvas.freezeDisplay(quality: .full, referenceIDs: references),
                                  elements: elements, rewriting: [])
-                let celContent = StrokeScratch.CelContent(backing: celPixelSnapshot, ink: ink,
+                let backdrop = CelContentPicture(size: vectorCanvas.size,
+                    window: CGRect(origin: .zero, size: vectorCanvas.size), backing: nil,
+                    patch: nil, ink: displayInk)
+                let celContent = StrokeScratch.CelContent(backing: celPixelSnapshot, ink: displayInk,
                     placement: CelContentPlacement(ink: poseSpacePose, backing: contentPlacement.backing))
-                // **That render was synchronous and it is a picture of everything committed**, so
-                // every held picture's ink is inside it — both in this window and, because
-                // `render` memoizes, in the base the `refreshDisplay` at the end of this
-                // method is about to install. Keeping them would draw that ink a second time.
-                unlandedInk.removeAll()
-                // **Mode 1 and the cutting modes want different windows, and §12 stage 8 is where
-                // they part.** Mode 1 *is* an eraser stroke, so its window holds removal coverage and
-                // caps at the eraser's opacity like any other stroke. Mode 2's window is a picture —
-                // `applyPreview` erases doomed spans out of it and then restamps the end caps back —
-                // and each of those `stampStroke` calls carries its own cap already; Mode 4's is the
-                // same picture with whole strokes erased out of it.
+                // Mode 1 holds removal coverage. Modes 2 and 4 present updated ordered native element
+                // lists through the same bounded content window and do not allocate a raster scratch.
                 let isModeOne = (inBetweenCelID != nil ? VectorEraserMode.erase : vectorEraserMode) == .erase
                 return isModeOne
                     ? StrokeScratch(canvasSize: vectorCanvas.size, role: .subtractive(backdrop: backdrop),
                                     opacity: CGFloat(profile.opacity), texture: profile.preset.texture,
                                     celContent: celContent)
-                    : StrokeScratch(canvasSize: vectorCanvas.size, role: .replacing(backdrop: backdrop),
+                    : StrokeScratch(canvasSize: vectorCanvas.size, role: .replacing,
                                     celContent: celContent)
             }
             return StrokeScratch(canvasSize: vectorCanvas.size, role: .additive,
@@ -2407,14 +2402,10 @@ final class StrokeCanvasView: CanvasPlaneView {
 
     /// Which preview strategy a gesture on a vector layer uses — see `VectorScratchRole`.
     ///
-    /// **Mode 2 joined `.replacement` on 2026-08-22.** It had `.none` since it was written, on the
-    /// reasoning that a cut commits on lift so the canvas render alone is truth — true of the
-    /// *document*, and beside the point for the artist, who was dragging an eraser across their line
-    /// and seeing absolutely nothing happen until they lifted off. The owner asked for the same live
-    /// feedback Mode 3 gives, twice. It gets it here without Mode 3's mechanism: Mode 3 is "live"
-    /// because it commits real cuts per sample and pays ~95 ms a time re-rendering the layer cold
-    /// ([PERFORMANCE.md](PERFORMANCE.md) item 10), whereas `.replacement` erases into a *copy* of the
-    /// render and never touches the display list at all.
+    /// **Modes 1, 2 and 4 use `.replacement`.** Mode 1 shows its removal coverage; Modes 2 and 4
+    /// show an updated ordered native display list. None changes the document until lift. Mode 3 is
+    /// different: it commits real cuts per sample and re-renders the layer
+    /// ([PERFORMANCE.md](../../PERFORMANCE.md) item 10).
     ///
     /// Mode 3 keeps `.none`, and must: it has already changed the document by the time the next
     /// refresh runs, so the canvas render genuinely is the truth for it, and a scratch would be a
@@ -2777,10 +2768,8 @@ final class StrokeCanvasView: CanvasPlaneView {
             }
             return
         }
-        // Live preview into the scratch raster: this stroke's ink for a paint stroke, (Mode 1) this
-        // eraser's removal coverage shown punched out of a copy of the layer, (Mode 2) the doomed
-        // spans punched out of that same copy, or (Mode 4) the doomed strokes whole. Mode 3 has no
-        // scratch content — it has already cut for real.
+        // Live feedback: a paint stroke's dabs, Mode 1's removal coverage, or Modes 2/4's bounded
+        // ordered display list. Mode 3 has no scratch content — it has already cut for real.
         guard let scratch, !isNoScratchRole else { return }
         if strokeTool == .eraser, inBetweenCelID == nil, let vectorCanvas, vectorEraserMode == .cutPoints {
             previewCutSpans(to: point, pressure: pressure, in: vectorCanvas, into: scratch)
@@ -2815,21 +2804,18 @@ final class StrokeCanvasView: CanvasPlaneView {
         return StrokeSamples(increment, channels: .pressureOnly)
     }
 
-    /// Mode 4's live feedback: each stroke the eraser reaches is erased out of the scratch copy of
-    /// the layer whole, on the sample that reaches it — `VectorCanvas.wholeStrokePreviewEdits`
-    /// names them once each, and `applyPreview(erasing:into:)` walks them as erasers. Nothing is
-    /// mutated; the deletion happens exactly once, in `commitVectorStroke`.
+    /// Mode 4's live feedback is the ordered native display list with reached paint strokes removed.
+    /// References keep their captured slots; the document changes only in `commitVectorStroke`.
     private func previewWholeStrokes(to point: CGPoint, pressure: CGFloat, in canvas: VectorCanvas,
                                      into scratch: StrokeScratch) {
         guard let increment = previewIncrement(to: point, pressure: pressure) else { return }
-        for stroke in canvas.wholeStrokePreviewEdits(alongPath: increment, brush: profile.preset, size: gestureBrushSize,
-                                                     accumulating: &previewDoomed) {
-            VectorCanvas.applyPreview(erasing: stroke, into: scratch)
-        }
+        guard let preview = canvas.wholeStrokePreviewElements(alongPath: increment, brush: profile.preset,
+            size: gestureBrushSize, accumulating: &previewDoomed) else { return }
+        _ = scratch.replaceVectorDisplay(elements: preview.elements, rewriting: preview.rewriting,
+                                         damage: preview.damage)
     }
 
-    /// Mode 2's live feedback: erase, out of the scratch copy of the layer, exactly the ink the lift
-    /// is going to remove.
+    /// Mode 2's live feedback: render the ordered geometry that the lift is going to commit.
     ///
     /// **Not the eraser's footprint**, which is Mode 1's preview and is right only for Mode 1. Mode 2
     /// removes the parametric spans of a stroke's *centreline* that pass under the footprint — the
@@ -2838,22 +2824,20 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// and the two caps meet: the layer gains an element and **not one pixel changes**. A footprint
     /// preview would show a nib-shaped notch and hand it back the instant the artist lifted off.
     ///
-    /// `VectorCanvas.cutPreviewEdits` answers with both terms — the doomed spans, from the same
-    /// `VectorEraser.cutRanges` walk the commit uses, and the caps, from the same
-    /// `StrokeGeometry.splitStroke` pieces the commit builds — and `VectorCanvas.applyPreview` erases
-    /// the first and draws the second. For an opaque brush that is the post-cut render's own pixels.
+    /// `VectorCanvas.cutPreviewElements` uses the same lattice-preserving pieces and touched-stub
+    /// rule as commit, retaining their original z-order among fills, images and stream references.
     ///
     /// **Nothing is mutated.** No element changes, `version` does not move, no render cache is
-    /// dropped — so this does not buy the cold-re-render term that costs Mode 3 ~95 ms a sample.
-    /// The real cut still happens exactly once, in `commitVectorStroke`.
+    /// dropped. Each update renders only its admitted damage window; the real cut still happens
+    /// exactly once, in `commitVectorStroke`.
     ///
     private func previewCutSpans(to point: CGPoint, pressure: CGFloat, in canvas: VectorCanvas,
                                  into scratch: StrokeScratch) {
         guard let increment = previewIncrement(to: point, pressure: pressure) else { return }
-        for edit in canvas.cutPreviewEdits(alongPath: increment, brush: profile.preset, size: gestureBrushSize,
-                                           accumulating: &previewCuts) {
-            VectorCanvas.applyPreview(edit, into: scratch)
-        }
+        guard let preview = canvas.cutPreviewElements(alongPath: increment, brush: profile.preset,
+            size: gestureBrushSize, accumulating: &previewCuts) else { return }
+        _ = scratch.replaceVectorDisplay(elements: preview.elements, rewriting: preview.rewriting,
+                                         damage: preview.damage)
     }
 
     private var isNoScratchRole: Bool {

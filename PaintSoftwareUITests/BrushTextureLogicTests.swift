@@ -390,38 +390,7 @@ final class BrushTextureLogicTests: XCTestCase {
                        + "— \(differing) bytes differ")
     }
 
-    /// **The grouped walk *through* a scratch, which is a fourth path and not a repeat of the third.**
-    ///
-    /// `VectorCanvas.applyPreview` runs whole `stampStroke` calls into a `StrokeScratch` — an erase
-    /// walk and a restamp per surviving piece — so the group is opened on the *window*, in window
-    /// coordinates, and the paper's phase can only come from `RasterLayerTexture.canvasOrigin`. The
-    /// scratch's own `texture` is deliberately nil here, exactly as it is for that role: the texture
-    /// arrives on the group, the way it does on a cel.
-    ///
-    /// **This test exists because a mutation went unpunished.** Setting a grown window's
-    /// `canvasOrigin` to `.zero` reddened nothing in the first draft of this file — every other test
-    /// reaches the window either ungrouped (where `windowRect.origin` is read directly) or not at
-    /// all. A field with no assertion on it is a field that will be wrong later.
-    func testAGroupedWalkThroughTheScratchPutsTheTextureWhereTheCelTierDoes() throws {
-        let sheet = try Self.writeTestTexture()
-        let brush = Self.brush(BrushTextureSettings(mask: sheet, tileSize: 64))
-        let origin = CGPoint(x: 53, y: 91)
-        let cel = RasterLayerTexture(size: Self.canvas)
-        let scratch = StrokeScratch(canvasSize: Self.canvas, role: .additive, opacity: 1)
-        BrushStamper.stampStroke(into: scratch, samples: Self.samples(from: origin), brush: brush,
-                                 color: .black, brushSize: brush.size, brushOpacity: 1,
-                                 random: DabRandom(seed: 0x51A7))
-        try scratch.commit(into: cel).get()
-
-        let viaScratch = try Self.pixels(cel)
-        let direct = try Self.pixels(Self.replayTier(brush, at: origin))
-        XCTAssertFalse(viaScratch.isBlank, "fixture precondition: the grouped walk drew something")
-        XCTAssertEqual(viaScratch.bytes, direct.bytes,
-                       "a group merged inside a window has to land the paper on the canvas pixels a "
-                       + "group merged into the cel does")
-    }
-
-    /// And the third buffer kind: `CGContextDabTarget`, which is what a vector cel's own render draws
+    /// The third buffer kind: `CGContextDabTarget`, which is what a vector cel's own render draws
     /// through. Same stroke, same paper, same pixels — so the anchoring is a property of the canvas
     /// and not of `RasterLayerTexture`.
     func testTheRenderLocalTierPutsTheTextureWhereTheCelTierDoes() throws {

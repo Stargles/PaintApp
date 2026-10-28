@@ -275,9 +275,7 @@ enum BrushStamper {
     /// a `.multiply` stroke blends against what is under it rather than against its own overlaps.
     ///
     /// **A group per `stampStroke` call is the right granularity**, and it is why this is not on
-    /// `beginStroke`/`endStroke`. `VectorCanvas.applyPreview` runs several of these into one
-    /// `StrokeScratch` — an erase walk and then a restamp per surviving piece — and each wants its own
-    /// merge with its own blend mode.
+    /// `beginStroke`/`endStroke`: each replayed walk has its own opacity and blend mode.
     static func stampStroke(into raster: DabTarget, samples: StrokeSamples, brush: Brush,
                             color: UIColor, brushSize: CGFloat, brushOpacity: Double, isEraser: Bool = false,
                             random: DabRandom, visibleRange: ClosedRange<CGFloat>? = nil) {

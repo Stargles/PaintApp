@@ -176,6 +176,110 @@ final class Mode1UITests: VectorEraserTestSupport {
                        + "scribbling a stroke out costs an element forever (plan §1)")
     }
 
+    /// Erasing one pending picture must not drop a disjoint picture that is still held over the
+    /// older base. The two existing delays widen the pending-render/presentation interval after
+    /// the prior strokes commit to the vector model.
+    ///
+    /// `press(forDuration:thenDragTo:)` blocks the test thread, so this samples immediately after
+    /// the public gesture (and checks that its live replacement preview published multiple
+    /// frames), then again after the existing render delays. The first pixel is the intended
+    /// regression oracle: a clear-only mutation should drop the untouched line if eraser begin still
+    /// falls inside the pending-base interval.
+    func testMode1KeepsDisjointPendingInkVisibleThroughEraseAndRenderWait() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestSlowVectorRenderMillis", "4000",
+                               "-uiTestSlowBakeMillis", "4000"]
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft),
+                      "Setup: the editor should open in the owner's landscape orientation")
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        // Arm Mode 1 before the paint strokes so their pen-ups and erase begin during the delayed
+        // work window. The small upper line is fully covered; the lower line
+        // is disjoint from the eraser window and is the picture the artist must keep seeing.
+        selectVectorEraserMode(app, "Erase")
+        setEraserSize(app, normalized: 0.6)
+        app.buttons["toolbar.brushButton"].tap()
+
+        // Measure after the tool setup: opening its controls can change the host's visible paper.
+        // Both coordinates below are the midpoints of the strokes this test draws.
+        let paper = visiblePaperRect(app, in: canvas)
+        let target = onHost(paper, 0.47, 0.35)
+        let untouched = onHost(paper, 0.50, 0.68)
+
+        // Sample the whole display because an element screenshot can be malformed in landscape.
+        // `canvas.frame` is in screen points, which ScreenshotPixels maps into the displayed image.
+        func screenPixels(at points: [CGVector]) throws -> [RGBA?] {
+            let pixels = try XCTUnwrap(ScreenshotPixels(XCUIScreen.main.screenshot().image),
+                                       "PREMISE: the whole-screen screenshot has readable pixels")
+            let frame = canvas.frame
+            return points.map { point in
+                pixels.pixel(at: CGPoint(x: frame.minX + CGFloat(point.dx) * frame.width,
+                                         y: frame.minY + CGFloat(point.dy) * frame.height))
+            }
+        }
+
+        let beforeInk = try screenPixels(at: [target, untouched])
+        XCTAssertTrue(isWhitish(beforeInk[0]),
+                      "PREMISE: the upper target midpoint starts as white paper")
+        XCTAssertTrue(isWhitish(beforeInk[1]),
+                      "PREMISE: the lower untouched midpoint starts as white paper")
+
+        drawLine(on: canvas, from: onHost(paper, 0.44, 0.35), to: onHost(paper, 0.50, 0.35))
+        drawLine(on: canvas, from: onHost(paper, 0.30, 0.68), to: onHost(paper, 0.70, 0.68))
+
+        let painted = try screenPixels(at: [target, untouched])
+        XCTAssertTrue(isInk(painted[0]),
+                      "PREMISE: the upper target midpoint is visibly ink before erasing")
+        XCTAssertTrue(isInk(painted[1]),
+                      "PREMISE: the disjoint lower midpoint is visibly ink before erasing")
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, at: untouched)),
+                       "PREMISE: the disjoint pending stroke is visibly on the paper before erasing")
+
+        let rasterizationsBeforeErase = try XCTUnwrap(Int(readField(app, "rasterizes:")),
+            "PREMISE: canvas.host publishes the process-wide committed vector rasterization count")
+        app.buttons["toolbar.eraserButton"].tap()
+        drawLine(on: canvas, from: onHost(paper, 0.36, 0.35), to: onHost(paper, 0.58, 0.35))
+        let immediatelyAfterErase = try screenPixels(at: [target, untouched])
+        XCTAssertTrue(isWhitish(immediatelyAfterErase[0]),
+                      "The erased upper target must already be white at lift, before any render wait")
+        XCTAssertTrue(isInk(immediatelyAfterErase[1]),
+                      "The disjoint lower stroke must remain visible at lift")
+
+        let rasterizationsAfterErase = try XCTUnwrap(Int(readField(app, "rasterizes:")),
+            "The canvas keeps publishing its committed vector rasterization count")
+        XCTAssertEqual(rasterizationsAfterErase, rasterizationsBeforeErase,
+                       "Mode 1 touch-down resolves only the bounded scratch window; it must not start "
+                       + "a canvas-sized committed vector render. A delayed worker landing between "
+                       + "these reads invalidates the staged premise and must be diagnosed, not "
+                       + "hidden by increasing either delay")
+
+        let trace = gestureTrace(canvas)
+        XCTAssertEqual(trace?.role, "replacement",
+                       "Mode 1 must run through the live replacement window")
+        XCTAssertGreaterThan(trace?.frames ?? 0, 1,
+                             "The eraser replacement must publish during the gesture")
+        attachScreenshot(XCUIScreen.main, "whole editor immediately after the Mode 1 gesture")
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, at: untouched)),
+                       "The untouched held stroke outside the eraser window must remain visible at lift")
+
+        // Allow for two paint renders and the erase render using the existing 4-second delay. The
+        // pixel is checked after that interval; native qualification must confirm the jobs landed.
+        Thread.sleep(forTimeInterval: 12)
+        attachScreenshot(XCUIScreen.main, "whole editor after the existing 12-second render wait")
+        XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, at: untouched)),
+                       "The untouched stroke must remain visible after the delayed-render wait")
+
+        openLayerPanel(app)
+        let marker = readVectorMarker(app, layerIndex: 0)
+        XCTAssertEqual(marker?.isVector, true, "Setup: the strokes are on the vector layer")
+        XCTAssertEqual(marker?.strokes, 1,
+                       "The short upper stroke was fully erased; the lower untouched stroke remains")
+        XCTAssertEqual(marker?.erases, 0,
+                       "A fully covered stroke is deleted rather than retained as an erase punch")
+    }
+
     /// Mode 1's live preview: it seeds a scratch `RasterLayerTexture` from the layer's own
     /// render and punches `.destinationOut` dabs into it *during* the drag, so the hole follows the
     /// finger instead of appearing on lift.

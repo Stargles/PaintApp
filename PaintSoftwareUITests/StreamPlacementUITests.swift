@@ -225,6 +225,106 @@ final class StreamPlacementUITests: StreamUITestCase {
         waitForPicture(.blue, on: canvas)
     }
 
+    /// Mode 1's live scratch replaces the layer picture while the eraser is down. The public stream
+    /// route must bind the in-place reference into that picture, so unaffected screen pixels stay
+    /// visible as the scratch is punched and after it lands.
+    func testMode1HeldEraseKeepsUnaffectedInPlaceReferencePixels() throws {
+        let app = XCUIApplication()
+        let scene = CGSize(width: 128, height: 128)
+        let canvas = launchWithALiveStream(app, canvasSize: scene,
+                                           orientationBeforeCreatingCanvas: .landscapeLeft)
+        let window = app.windows.firstMatch
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "PREMISE: the fresh editor window is landscape")
+        XCTAssertGreaterThan(canvas.frame.width, canvas.frame.height,
+                             "PREMISE: the canvas host is landscape")
+        let paper = visiblePaperRect(app, in: canvas, canvasSize: scene)
+        XCTAssertGreaterThan(paper.width, 0.5, "PREMISE: the small scene is visible across the host")
+        XCTAssertGreaterThan(paper.height, 0.5, "PREMISE: the scene is visible above the dock")
+
+        func screenPoint(_ x: Double, _ y: Double) -> CGPoint {
+            let host = onHost(paper, x, y)
+            return CGPoint(x: canvas.frame.minX + canvas.frame.width * host.dx,
+                           y: canvas.frame.minY + canvas.frame.height * host.dy)
+        }
+        func hostPoint(_ x: Double, _ y: Double) -> CGVector { onHost(paper, x, y) }
+
+        let outsideHost = hostPoint(0.70, 0.50)
+        let eraseHost = hostPoint(0.50, 0.50)
+        let outsideReference = screenPoint(0.70, 0.50)
+        let eraseTarget = screenPoint(0.50, 0.50)
+        for (host, label) in [(outsideHost, "the unaffected reference probe"),
+                              (eraseHost, "the eraser target")] {
+            XCTAssertTrue(paper.contains(CGPoint(x: host.dx, y: host.dy)),
+                          "PREMISE: \(label) is on the visible paper")
+            assertAboveTheDock(app, canvas, dy: Double(host.dy), label)
+        }
+        XCTAssertTrue(window.frame.contains(outsideReference), "PREMISE: the reference probe is on screen")
+        XCTAssertTrue(window.frame.contains(eraseTarget), "PREMISE: the erase target is on screen")
+
+        laptop.show(.red)
+        waitForPicture(.red, on: canvas, "PREMISE: the fake laptop's red frame is visible")
+        let placement = app.buttons["streamBar.placementButton"]
+        XCTAssertTrue(placement.waitForExistence(timeout: 5))
+        XCTAssertEqual(placement.value as? String, "onTop", "PREMISE: the public insertion starts On Top")
+        placement.tap()
+        XCTAssertEqual(placement.value as? String, "inPlace", "The same stream is now an In Place reference")
+        let before = readScreenNow([outsideReference, eraseTarget])
+        let beforeOutside = try XCTUnwrap(before[0], "PREMISE: the unaffected stream pixel is readable")
+        let beforeTarget = try XCTUnwrap(before[1], "PREMISE: the erase target pixel is readable")
+        XCTAssertTrue(Colour.red.matches(beforeOutside),
+                      "PREMISE: the unaffected point is actual red stream content: \(before)")
+        XCTAssertTrue(Colour.red.matches(beforeTarget),
+                      "PREMISE: the erase target begins on the same red reference: \(before)")
+
+        openBrushLibrary(app)
+        tapWhenHittable(app.buttons["brushPanel.group.Basics"], "The public Basics brush group")
+        let brush = app.buttons["brushPanel.brush.Opaque Round"]
+        XCTAssertTrue(brush.waitForExistence(timeout: 5))
+        if !brush.isSelected { tapWhenHittable(brush, "The Opaque Round paint brush") }
+        XCTAssertTrue(brush.isSelected)
+        setBrushSize(app, normalized: 0.05)
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5))
+        setBrushColor(app, hex: "000000")
+        drawLine(on: canvas, from: hostPoint(0.44, 0.50), to: hostPoint(0.56, 0.50))
+        XCTAssertNotNil(waitForPixel(canvas, at: eraseHost, matches: Colour.black.matches),
+                        "PREMISE: the black vector mark is drawn over the reference")
+        let afterPaintOutside = try XCTUnwrap(readScreenNow([outsideReference]).first.flatMap { $0 },
+                                              "PREMISE: the unaffected stream pixel is readable after paint")
+        XCTAssertTrue(Colour.red.matches(afterPaintOutside),
+                      "PREMISE: the nearby unaffected stream pixel remains red beside the mark")
+
+        openEraserPanel(app)
+        pickVectorEraserMode(app, "Erase")
+        tapWhenHittable(app.buttons["eraserPanel.group.Basics"], "The public eraser Basics group")
+        let eraser = app.buttons["eraserPanel.brush.Opaque Round"]
+        XCTAssertTrue(eraser.waitForExistence(timeout: 5))
+        if !eraser.isSelected { tapWhenHittable(eraser, "The Opaque Round eraser") }
+        XCTAssertTrue(eraser.isSelected)
+        setBrushSize(app, tool: "eraser", normalized: 0.03)
+        closeEraserPanel(app)
+
+        let start = canvas.coordinate(withNormalizedOffset: hostPoint(0.44, 0.50))
+        let end = canvas.coordinate(withNormalizedOffset: eraseHost)
+        let held = samplesDuring([outsideReference, eraseTarget], "In Place reference under Mode 1 scratch") {
+            start.press(forDuration: 0.3, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 4)
+        }
+        XCTAssertGreaterThanOrEqual(held.count, 3, "PREMISE: several screenshots landed while the eraser was held")
+        for sample in held.suffix(3) {
+            XCTAssertTrue(sample.pixels[0].map { Colour.red.matches($0) } == true,
+                          "Unaffected In Place reference pixels stay red during the held scratch: \(sample.pixels)")
+            XCTAssertTrue(sample.pixels[1].map { !Colour.black.matches($0) } == true,
+                           "The Mode 1 scratch changes the black mark before lift: \(sample.pixels)")
+        }
+        XCTAssertTrue(readScreenNow([outsideReference]).first.flatMap { $0 }
+                          .map { Colour.red.matches($0) } == true,
+                      "The unaffected In Place reference remains red after lift")
+        XCTAssertNotNil(waitForPixel(canvas, at: eraseHost, matches: { !Colour.black.matches($0) }),
+                        "The erased mark stays changed after the scratch lands")
+        attachScreenshot(XCUIScreen.main, "Mode 1 erasing over a live In Place screen reference")
+    }
+
     func testGuideAboveTheStreamStaysAboveTheScratchWhileThePenIsHeld() throws {
         let app = XCUIApplication()
         let canvas = launchWithALiveStream(app)

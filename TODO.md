@@ -34,11 +34,11 @@ Test package is still unanswered; continue simulator/source work without restart
   Existing85 checks pass after correcting three test drawings that previously hit the timeline.
   All source entries reconcile and root inspected filled/Undo pictures (portrait). Temporary
   recorder/delay changes were retired whole. Integrated; no physical latency/crash claim.
-- Erasing: d034 normal291 is286passed/3fixturefailures/2namedopt-in skips. All11 previous public
-  workflows and bounded200-stroke preview/output parity passed; root inspected six whole pictures.
-  Fixture successors correct actual brush/cache premises. New live Mode1 In-Place witness cf3304b8
-  is running in selected11; previous447/9c compiled zero tests. Thirteen controls remain unrun.
-  No final new-architecture qualification or physical Mode3 crash cause is established.
+- Erasing: native geometry/window componentcf is now harvested, removing the old flat erase/restamp
+  machinery. Corrected selected11 passed before/after13 actual target failures; earlier291 passed all11
+  prior public routes and bounded output/cost check, with three subsequently corrected fixture failures.
+  Root inspected whole pictures. Mutation metadata hash correction is explicitly post-run; no extra
+  collateral assertions credited. Final assembled tests and physical Mode3 crash evidence remain.
 - Fill-window fixture995 passed47/47. Corrected OLDc056 selected4 is2intendedRED/2healthyGREEN,
   source731 exact: missing refusal completion and same-request retry fail; Set Down release and ABA
   remain healthy. Minimal051 runtime correction uses existing completion and an attempt generation;
@@ -70,9 +70,9 @@ and focused2 passed. Two deliberate faults were assertionRED with source730 rest
 then passed. Root inspected aligned blue-frame pictures for both placements. Assembled-source tests
 and device confirmation remain. Source-specific evidence is retained externally; no main merge/install.
 
-Simulator cache cleanup reclaimed4.33GB at a joined native boundary, preserving and verifying all
-containers and existing Paint/Runner data. Only two exact generated cache paths were removed. Full
-receipt and the specifically accepted new boot snapshot are in the owned56C-cache-cleanup packet.
+Simulator cache cleanup recovered another4.7GB after eraser controls joined; all11,831 app-data
+entries remained exact through reboot. Only two exact generated cache paths were deleted. Current
+free space is about19GB; prior cleanup receipts and protected artwork remain unchanged.
 
 Items leave this file only in the qualified merge. “Installed” and “tested separately” do not mean
 that the final combined audit build has passed.
@@ -85,7 +85,7 @@ that the final combined audit build has passed.
 | Erasing crash in Test1 | Logs preserved; app/system allocation cause remains unproved | Finish window-renderer checks and fresh physical evidence |
 | Drawing/erasing lag and Move regression | Move and ordinary drawing-wait corrections integrated; 85 focused checks pass | Eraser window source and device confirmation remain |
 | Architecture, cleanup and bug audit | In progress; several corrections separately tested and integrated | Remaining source review, findings below, combined checks and performance |
-| Development disk cleanup | About54GB reclaimed across passes; about13GB currently free | Continue bounded cache housekeeping between test batches |
+| Development disk cleanup | About59GB reclaimed across passes; about19GB currently free | Continue bounded cache housekeeping between test batches |
 | Undo on an edited cel | Correction integrated; model/public/fault checks passed | Final combined checks |
 | Very large curve coordinates | Safe narrowing integrated; model/archive/fault checks passed | Final combined checks; no crash-cause claim |
 | Library relocation and Trash ownership | Corrections integrated and separately checked | Final combined checks |

@@ -28,8 +28,8 @@ import CoreGraphics
 /// all scale `spacing` and `brushSize` together — MEASURED, `(k·size·fraction)/(k·size)` and
 /// `(size·fraction)/size` are the *same Double* across every scale, size and fraction tried, so 60,000
 /// accumulated dabs disagree by exactly zero. In points the same scale would re-roll every dab of
-/// every scattering stroke the artist picks up with the lasso, and would put the Mode 2 cut preview
-/// (which walks canvas space) on different dabs from the render (which walks the layer's own).
+/// every scattering stroke the artist picks up with the lasso. Mode 2 pieces keep the parent's
+/// lattice so a previewed cut reuses the same dab locations as the committed geometry.
 ///
 /// Pure `Foundation`/`CoreGraphics` — no UIKit, no `Brush` — so it is exercisable headless, the
 /// bargain `StrokeStabilizer` and `StrokePathFit` both make. The one thing a caller owes it is the

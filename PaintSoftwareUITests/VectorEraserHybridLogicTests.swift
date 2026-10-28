@@ -772,7 +772,10 @@ final class VectorEraserHybridLogicTests: XCTestCase {
             let before = try XCTUnwrap(canvas.render())
             func liveImage(seed: UInt64) throws -> UIImage {
                 let texture = try CanvasFixture.rasterTexture(before, size: Self.canvasSize)
-                let scratch = StrokeScratch(canvasSize: Self.canvasSize, role: .subtractive(backdrop: before),
+                let backdrop = CelContentPicture(size: Self.canvasSize,
+                    window: CGRect(origin: .zero, size: Self.canvasSize), backing: nil, patch: nil,
+                    ink: .rendered(before))
+                let scratch = StrokeScratch(canvasSize: Self.canvasSize, role: .subtractive(backdrop: backdrop),
                                             texture: brush.texture)
                 var walk = BrushStamper.LiveWalk(seed: seed)
                 walk.stamp(to: sample, into: scratch, brush: brush, color: .black, brushSize: 8)
@@ -803,6 +806,500 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                 raster: committed, vector: try XCTUnwrap(restored.render()), size: Self.canvasSize))
             XCTAssertTrue(reopened.isExact, "The saved punch reopens without moving its removal: \(reopened.diagnostic)")
         }
+    }
+
+    func testFrozenVectorScratchSourceMatchesNonzeroCropAndExcludesReferenceStream() throws {
+        let size = CGSize(width: 192, height: 160)
+        let fill = VectorFillElement(path: CGPath(rect: CGRect(x: 12, y: 18, width: 108, height: 86), transform: nil),
+            color: CodableColor(red: 0.2, green: 0.7, blue: 0.35, alpha: 1))
+        let stream = VectorStreamElement(naturalSize: CGSize(width: 24, height: 16), host: "fixture",
+            port: 47301, sourceLabel: "reference", rendersInPlace: true,
+            transform: LayerTransform(position: CGPoint(x: 78, y: 70), scale: 1, rotation: 0))
+        let canvas = VectorCanvas(size: size, elements: [.fill(fill), .stream(stream)])
+        XCTAssertTrue(canvas.setStreamFrame(id: stream.id,
+            image: UIGraphicsImageRenderer(size: stream.naturalSize, format: PixelOps.transparentFormat()).image { context in
+                UIColor.red.setFill(); context.fill(CGRect(origin: .zero, size: stream.naturalSize))
+            }, index: 1), "PREMISE: the contrasting red reference frame is present")
+        let frozen = canvas.freeze(quality: .full)
+        XCTAssertTrue(canvas.elements.contains(where: \.isReference), "PREMISE: a live reference crosses the tested crop")
+        let picture = CelContentPicture(size: size, window: CGRect(origin: .zero, size: size),
+            backing: nil, patch: nil, ink: .ordinary(source: frozen,
+                elements: canvas.elements.withoutReference, rewriting: []))
+        let window = CGRect(x: 43, y: 37, width: 74, height: 69)
+        let cropped = try RasterSource.render(size: window.size) { context in
+            picture.draw(into: context, content: CGRect(origin: CGPoint(x: -window.minX, y: -window.minY), size: size),
+                         placement: .identity, replacing: true)
+        }.get().resolveImage().get()
+        let referenceFree = try XCTUnwrap(VectorCanvas(size: size, elements: [.fill(fill)]).render())
+        let expectedCG = try XCTUnwrap(referenceFree.cgImage).cropping(to: window)
+        let expected = UIImage(cgImage: try XCTUnwrap(expectedCG), scale: referenceFree.scale, orientation: .up)
+        let parity = try XCTUnwrap(RasterVectorParity.report(raster: expected, vector: cropped, size: window.size))
+        XCTAssertTrue(parity.isExact, "Nonzero-origin scratch source must match the equivalent frozen full-image crop: \(parity.diagnostic)")
+    }
+
+    func testSubtractiveCelDisplayMatchesCommittedInPlaceReferenceCoverage() throws {
+        defer { PixelOps.clearRasterizeCache() }
+        let size = CGSize(width: 128, height: 128)
+        let stream = VectorStreamElement(naturalSize: CGSize(width: 20, height: 8), host: "fixture",
+            port: 47301, sourceLabel: "reference", rendersInPlace: true,
+            transform: LayerTransform(position: CGPoint(x: 64, y: 12), scale: 1, rotation: 0))
+        let paint = VectorStroke(brush: TestBrushes.hardRound,
+            color: CodableColor(red: 0.1, green: 0.3, blue: 0.95, alpha: 1), size: 12, opacity: 1,
+            samples: StrokeSamples([VectorSample(x: 64, y: 64, pressure: 1)], channels: .pressureOnly), seed: 7)
+        let eraserBrush = TestBrushes.hardRound
+        let eraserSample = VectorSample(x: 64, y: 64, pressure: 1)
+        let eraserSamples = StrokeSamples([eraserSample], channels: .pressureOnly)
+        let sweep = try XCTUnwrap(VectorEraser.Sweep(samples: eraserSamples, brush: eraserBrush, size: 48))
+
+        func composite(_ vector: VectorCanvas,
+                       overlay: CelContentPicture.RenderedWindow? = nil) throws -> UIImage {
+            var display = PixelOps.CelDisplay()
+            display.vector = vector.freezeDisplay(quality: .full,
+                referenceIDs: Set(vector.streams.filter(\.rendersInPlace).map(\.id)))
+            if let overlay {
+                display.drawOverlays = { cg, content in
+                    overlay.draw(into: cg, content: content, canvasSize: size)
+                    return true
+                }
+            }
+            var cel = CanvasFixture.manager().layers[0].cels[0]
+            cel.vector = vector
+            let frozen = PixelOps.FrozenCel(cel: cel, derived: nil, quality: .full, display: display)
+            return try XCTUnwrap(PixelOps.rasterize(frozen, canvasSize: size, quality: .full),
+                                 "The CelDisplay rasterizer must produce the composed picture")
+        }
+
+        let referenceCases: [(name: String, position: CGPoint, intersectsCoverage: Bool,
+                              fullyCovered: Bool)] = [
+            ("outside", CGPoint(x: 64, y: 12), false, false),
+            ("fully covered", CGPoint(x: 64, y: 64), true, true),
+            ("partly covered", CGPoint(x: 86, y: 64), true, false)
+        ]
+        for referenceCase in referenceCases {
+            for referenceAbovePaint in [false, true] {
+                var placedStream = stream
+                placedStream.transform = LayerTransform(position: referenceCase.position, scale: 1, rotation: 0)
+                let elements: [VectorElement] = referenceAbovePaint
+                    ? [.stroke(paint), .stream(placedStream)] : [.stream(placedStream), .stroke(paint)]
+                let source = VectorCanvas(size: size, elements: elements)
+                let referenceFrame = UIGraphicsImageRenderer(size: stream.naturalSize,
+                    format: PixelOps.transparentFormat()).image { context in
+                        UIColor.red.setFill(); context.fill(CGRect(origin: .zero, size: stream.naturalSize))
+                    }
+                XCTAssertTrue(source.setStreamFrame(id: stream.id, image: referenceFrame, index: 1),
+                              "PREMISE: the in-place reference frame is available")
+                let referenceWindow = try XCTUnwrap(source.streamWindow(id: stream.id))
+                XCTAssertEqual(sweep.touches(region: CGPath(rect: referenceWindow, transform: nil)),
+                               referenceCase.intersectsCoverage,
+                               "PREMISE: the \(referenceCase.name) reference has the expected sweep relationship")
+                XCTAssertGreaterThan(source.strokes.count, 0, "PREMISE: editable ink exists before erasing")
+                let before = try XCTUnwrap(source.render())
+                let beforeBytes = try XCTUnwrap(RasterVectorParity.premultipliedBytes(of: before, size: size))
+                let paintOffset = (64 * Int(size.width) + 64) * 4
+                XCTAssertGreaterThan(beforeBytes[paintOffset + 3], 240,
+                                     "PREMISE: the editable mark is visible before erasing")
+
+                let references = Set(source.streams.filter(\.rendersInPlace).map(\.id))
+                let sourceElements = source.elements
+                let displayInk = CelContentPicture.Ink.ordinary(
+                    source: source.freezeDisplay(quality: .full, referenceIDs: references),
+                    elements: sourceElements, rewriting: [])
+                let backdrop = CelContentPicture(size: size, window: CGRect(origin: .zero, size: size),
+                    backing: nil, patch: nil, ink: displayInk)
+                let scratch = StrokeScratch(canvasSize: size, role: .subtractive(backdrop: backdrop),
+                    celContent: StrokeScratch.CelContent(backing: nil, ink: displayInk, placement: .identity))
+                var liveWalk = BrushStamper.LiveWalk(seed: 9)
+                liveWalk.stamp(to: eraserSample, into: scratch, brush: eraserBrush, color: .black, brushSize: 48)
+                liveWalk.finish(into: scratch, brush: eraserBrush, color: .black, brushSize: 48)
+                let shown = try XCTUnwrap(scratch.renderedCelContent,
+                                          "PREMISE: the live scratch resolves a window picture")
+                XCTAssertTrue(scratch.windowRect.contains(CGPoint(x: referenceWindow.midX, y: referenceWindow.midY)),
+                              "PREMISE: the reference test pixel lies inside the scratch window")
+
+                let committed = VectorCanvas(size: size, elements: source.elements)
+                XCTAssertTrue(committed.erase(alongPath: eraserSamples, brush: eraserBrush, size: 48,
+                                               opacity: 1, mode: .erase, seed: 9),
+                              "PREMISE: the real Mode 1 producer deletes the covered editable stroke")
+                XCTAssertEqual(committed.strokes.filter { $0.composite == .paint }.count, 0,
+                               "PREMISE: the covered own stroke is gone from the committed model")
+                XCTAssertEqual(committed.strokes.filter { $0.composite == .erase }.count,
+                               referenceCase.intersectsCoverage ? 1 : 0,
+                               "PREMISE: a retained punch exists only when it also covers the reference")
+                XCTAssertEqual(committed.streams.count, 1, "PREMISE: the in-place reference remains in the model")
+
+                let expected = try composite(committed)
+                let expectedBytes = try XCTUnwrap(RasterVectorParity.premultipliedBytes(of: expected, size: size))
+                let referenceX = Int(referenceWindow.midX), referenceY = Int(referenceWindow.midY)
+                let referenceOffset = (referenceY * Int(size.width) + referenceX) * 4
+                if !referenceCase.intersectsCoverage {
+                    XCTAssertGreaterThan(expectedBytes[referenceOffset], 220,
+                                         "PREMISE: committed display retains the untouched red reference")
+                    XCTAssertLessThan(expectedBytes[referenceOffset + 1], 64)
+                } else if referenceCase.fullyCovered {
+                    XCTAssertLessThan(expectedBytes[referenceOffset + 3], 16,
+                                      "PREMISE: the committed erase punch removes the fully covered reference")
+                } else {
+                    let coveredOffset = (referenceY * Int(size.width) + 80) * 4
+                    let uncoveredOffset = (referenceY * Int(size.width) + 92) * 4
+                    XCTAssertLessThan(expectedBytes[coveredOffset + 3], 16,
+                                      "PREMISE: the punch removes the partly covered reference edge")
+                    XCTAssertGreaterThan(expectedBytes[uncoveredOffset], 220,
+                                         "PREMISE: the uncovered reference edge remains red")
+                }
+
+                let actual = try composite(source, overlay: shown)
+                let actualBytes = try XCTUnwrap(RasterVectorParity.premultipliedBytes(of: actual, size: size))
+                let parity = try XCTUnwrap(RasterVectorParity.report(raster: expected, vector: actual, size: size))
+                XCTAssertTrue(parity.isExact,
+                              "The live scratch must match the committed display (reference=\(referenceCase.name), referenceAbovePaint=\(referenceAbovePaint)): \(parity.diagnostic)")
+                XCTAssertEqual(Array(actualBytes[referenceOffset..<(referenceOffset + 4)]),
+                               Array(expectedBytes[referenceOffset..<(referenceOffset + 4)]),
+                               "The reference pixel must match committed display ordering and erase coverage")
+                if !referenceCase.fullyCovered, referenceCase.intersectsCoverage {
+                    let coveredOffset = (referenceY * Int(size.width) + 80) * 4
+                    let uncoveredOffset = (referenceY * Int(size.width) + 92) * 4
+                    XCTAssertEqual(actualBytes[coveredOffset + 3], expectedBytes[coveredOffset + 3])
+                    XCTAssertEqual(actualBytes[uncoveredOffset], expectedBytes[uncoveredOffset],
+                                   "The surviving reference edge must retain committed red")
+                }
+            }
+        }
+    }
+
+    func testModeTwoAndFourScratchMatchCommittedReferenceOrdering() throws {
+        defer { PixelOps.clearRasterizeCache() }
+        let size = Self.canvasSize
+        let paintSamples = Self.ramp(from: CGPoint(x: 24, y: 64), to: CGPoint(x: 104, y: 64),
+                                     count: 9, from: 1, to: 1)
+        let paint = VectorStroke(brush: TestBrushes.hardRound,
+            color: CodableColor(red: 0.1, green: 0.3, blue: 0.95, alpha: 1), size: 16, opacity: 1,
+            samples: paintSamples, seed: 17)
+        let brush = TestBrushes.hardRound
+        let modeCases: [(name: String, mode: VectorEraserMode, samples: StrokeSamples, size: CGFloat)] = [
+            ("cut points", .cutPoints,
+             Self.ramp(from: CGPoint(x: 64, y: 32), to: CGPoint(x: 64, y: 96), count: 9, from: 1, to: 1), 16),
+            ("whole stroke", .wholeStroke,
+             StrokeSamples([VectorSample(x: 64, y: 64, pressure: 1)], channels: .pressureOnly), 112)
+        ]
+        let referenceCases: [(name: String, position: CGPoint)] = [
+            ("outside changed ink and sweep", CGPoint(x: 12, y: 12)),
+            ("over changed ink", CGPoint(x: 42, y: 64))
+        ]
+
+        func composite(_ vector: VectorCanvas,
+                       overlay: CelContentPicture.RenderedWindow? = nil) throws -> UIImage {
+            var display = PixelOps.CelDisplay()
+            display.vector = vector.freezeDisplay(quality: .full,
+                referenceIDs: Set(vector.streams.filter(\.rendersInPlace).map(\.id)))
+            if let overlay {
+                display.drawOverlays = { cg, content in
+                    overlay.draw(into: cg, content: content, canvasSize: size)
+                    return true
+                }
+            }
+            var cel = CanvasFixture.manager().layers[0].cels[0]
+            cel.vector = vector
+            let frozen = PixelOps.FrozenCel(cel: cel, derived: nil, quality: .full, display: display)
+            return try XCTUnwrap(PixelOps.rasterize(frozen, canvasSize: size, quality: .full),
+                                 "The CelDisplay rasterizer must produce the composed picture")
+        }
+
+        for modeCase in modeCases {
+            for referenceCase in referenceCases {
+                for referenceAbovePaint in [false, true] {
+                    let stream = VectorStreamElement(naturalSize: CGSize(width: 20, height: 8), host: "fixture",
+                        port: 47301, sourceLabel: "reference", rendersInPlace: true,
+                        transform: LayerTransform(position: referenceCase.position, scale: 1, rotation: 0))
+                    let elements: [VectorElement] = referenceAbovePaint
+                        ? [.stroke(paint), .stream(stream)] : [.stream(stream), .stroke(paint)]
+                    let source = VectorCanvas(size: size, elements: elements)
+                    let frame = UIGraphicsImageRenderer(size: stream.naturalSize,
+                        format: PixelOps.transparentFormat()).image { context in
+                            UIColor.red.setFill(); context.fill(CGRect(origin: .zero, size: stream.naturalSize))
+                        }
+                    XCTAssertTrue(source.setStreamFrame(id: stream.id, image: frame, index: 1),
+                                  "PREMISE: the in-place reference frame is available")
+                    XCTAssertGreaterThan(source.strokes.count, 0, "PREMISE: own ink exists before preview")
+
+                    let before = try XCTUnwrap(source.render())
+                    let beforeBytes = try XCTUnwrap(RasterVectorParity.premultipliedBytes(of: before, size: size))
+                    let ownInkOffset = (64 * Int(size.width) + 40) * 4
+                    XCTAssertGreaterThan(beforeBytes[ownInkOffset + 3], 240,
+                                         "PREMISE: the editable stroke is visible before preview")
+
+                    let references = Set(source.streams.filter(\.rendersInPlace).map(\.id))
+                    let sourceElements = source.elements
+                    let displayInk = CelContentPicture.Ink.ordinary(
+                        source: source.freezeDisplay(quality: .full, referenceIDs: references),
+                        elements: sourceElements, rewriting: [])
+                    let scratch = StrokeScratch(canvasSize: size, role: .replacing,
+                        celContent: StrokeScratch.CelContent(backing: nil, ink: displayInk, placement: .identity))
+
+                    let previewResult: VectorCanvas.EraserPreview?
+                    switch modeCase.mode {
+                    case .cutPoints:
+                        var progress: [UUID: VectorCanvas.CutPreviewProgress] = [:]
+                        previewResult = source.cutPreviewElements(alongPath: modeCase.samples, brush: brush,
+                            size: modeCase.size, accumulating: &progress)
+                    case .wholeStroke:
+                        var doomed: Set<UUID> = []
+                        previewResult = source.wholeStrokePreviewElements(alongPath: modeCase.samples, brush: brush,
+                            size: modeCase.size, accumulating: &doomed)
+                    case .erase, .cutToIntersection:
+                        XCTFail("The fixture only covers Mode 2 and Mode 4")
+                        previewResult = nil
+                    }
+                    let preview = try XCTUnwrap(previewResult, "PREMISE: geometry mode produces an ordered preview")
+                    switch modeCase.mode {
+                    case .cutPoints:
+                        XCTAssertFalse(preview.rewriting.isEmpty, "PREMISE: Mode 2 rewrites a cut stroke")
+                    case .wholeStroke:
+                        XCTAssertEqual(preview.rewriting, Set([paint.id]),
+                                       "PREMISE: Mode 4 previews the own stroke once")
+                    case .erase, .cutToIntersection:
+                        XCTFail("The fixture only covers Mode 2 and Mode 4")
+                    }
+                    XCTAssertTrue(preview.rewriting.contains(paint.id), "PREMISE: own stroke is rewritten")
+                    XCTAssertTrue(scratch.replaceVectorDisplay(elements: preview.elements,
+                        rewriting: preview.rewriting, damage: preview.damage),
+                        "PREMISE: the changed list is admitted into the bounded scratch window")
+                    let shown = try XCTUnwrap(scratch.renderedCelContent,
+                        "PREMISE: the Mode 2/4 scratch resolves its bounded replacement picture")
+                    let referenceWindow = try XCTUnwrap(source.streamWindow(id: stream.id))
+                    XCTAssertTrue(scratch.windowRect.contains(CGPoint(x: referenceWindow.midX,
+                                                                       y: referenceWindow.midY)),
+                                  "PREMISE: the reference is inside the changed scratch window")
+
+                    let committed = VectorCanvas(size: size, elements: source.elements)
+                    XCTAssertTrue(committed.erase(alongPath: modeCase.samples, brush: brush,
+                        size: modeCase.size, opacity: 1, mode: modeCase.mode, seed: 19),
+                        "PREMISE: the real Mode 2/4 commit changes own geometry")
+                    XCTAssertEqual(committed.strokes.filter { $0.composite == .paint }.count,
+                                   modeCase.mode == .cutPoints ? 2 : 0,
+                                   "PREMISE: committed Mode 2 cuts into pieces; Mode 4 removes the whole stroke")
+                    XCTAssertEqual(committed.strokes.filter { $0.composite == .erase }.count, 0,
+                                   "PREMISE: geometry modes retain no erase punch")
+                    XCTAssertEqual(committed.streams.count, 1, "PREMISE: commit retains the reference element")
+
+                    let expected = try composite(committed)
+                    let expectedBytes = try XCTUnwrap(RasterVectorParity.premultipliedBytes(of: expected, size: size))
+                    let refX = Int(referenceWindow.midX), refY = Int(referenceWindow.midY)
+                    let refOffset = (refY * Int(size.width) + refX) * 4
+                    if referenceCase.name == "over changed ink", modeCase.mode == .cutPoints,
+                       !referenceAbovePaint {
+                        XCTAssertGreaterThan(expectedBytes[refOffset + 2], 180,
+                            "PREMISE: the surviving paint remains above a reference below it")
+                    } else {
+                        XCTAssertGreaterThan(expectedBytes[refOffset], 220,
+                            "PREMISE: committed \(modeCase.name) display keeps the exposed reference red")
+                        XCTAssertLessThan(expectedBytes[refOffset + 1], 64)
+                    }
+
+                    let actual = try composite(source, overlay: shown)
+                    let parity = try XCTUnwrap(RasterVectorParity.report(raster: expected, vector: actual, size: size))
+                    XCTAssertTrue(parity.isExact,
+                        "Live \(modeCase.name) scratch must match committed reference order (\(referenceCase.name), referenceAbovePaint=\(referenceAbovePaint)): \(parity.diagnostic)")
+                }
+            }
+        }
+    }
+
+    func testFullWindowInkPatchDoesNotResurrectFrozenInkThroughTransparentPixels() throws {
+        let size = CGSize(width: 96, height: 80)
+        let fill = VectorFillElement(path: CGPath(rect: CGRect(origin: .zero, size: size), transform: nil),
+            color: CodableColor(red: 0.05, green: 0.2, blue: 0.95, alpha: 1))
+        let canvas = VectorCanvas(size: size, elements: [.fill(fill)])
+        let frozen = canvas.freeze(quality: .full)
+        let window = CGRect(x: 30, y: 24, width: 32, height: 28)
+        let patch = UIGraphicsImageRenderer(size: window.size, format: PixelOps.transparentFormat()).image { renderer in
+            let cg = renderer.cgContext
+            UIColor.red.setFill()
+            cg.fill(CGRect(origin: .zero, size: window.size))
+            cg.clear(CGRect(x: 12, y: 10, width: 8, height: 8))
+        }
+        let picture = CelContentPicture(size: size, window: window, backing: nil, patch: nil,
+            ink: .ordinary(source: frozen, elements: canvas.elements.withoutReference, rewriting: []),
+            inkPatch: patch)
+        let output = try RasterSource.render(size: size) { context in
+            picture.draw(into: context, content: CGRect(origin: .zero, size: size),
+                         placement: .identity, replacing: true)
+        }.get().resolveImage().get()
+        let bytes = try XCTUnwrap(RasterVectorParity.premultipliedBytes(of: output, size: size))
+        let patchBytes = try XCTUnwrap(RasterVectorParity.premultipliedBytes(of: patch, size: window.size))
+        func pixel(_ x: Int, _ y: Int) -> [UInt8] {
+            let offset = (y * Int(size.width) + x) * 4
+            return Array(bytes[offset..<(offset + 4)])
+        }
+        let source = try XCTUnwrap(RasterVectorParity.premultipliedBytes(
+            of: try XCTUnwrap(canvas.render()), size: size))
+        let hole = pixel(Int(window.minX) + 15, Int(window.minY) + 13)
+        let patched = pixel(Int(window.minX) + 4, Int(window.minY) + 4)
+        let outside = pixel(8, 8)
+        let sourceOffset = (Int(window.minY + 13) * Int(size.width) + Int(window.minX + 15)) * 4
+        let patchHoleOffset = (13 * Int(window.width) + 15) * 4
+        let patchOpaqueOffset = (4 * Int(window.width) + 4) * 4
+        XCTAssertGreaterThan(source[sourceOffset + 3],
+                             240, "PREMISE: frozen blue ink exists under the transparent patch pixel")
+        XCTAssertLessThan(patchBytes[patchHoleOffset + 3], 16, "PREMISE: the patch is transparent at the hole")
+        XCTAssertGreaterThan(patchBytes[patchOpaqueOffset], 220, "PREMISE: the patch is red outside the hole")
+        XCTAssertLessThan(hole[3], 16,
+                          "A transparent pixel in a full-window replacement must not reveal frozen pre-edit ink")
+        XCTAssertGreaterThan(patched[0], 220, "The opaque patch pixel must replace the frozen source")
+        XCTAssertGreaterThan(patched[3], 240, "The opaque patch pixel remains fully covered")
+        XCTAssertLessThan(outside[3], 16, "The replacement leaves pixels outside its footprint untouched")
+    }
+
+    func testScratchRefusedDisplaySourcePublishesNoWindowAndReturnsFailure() {
+        let size = CGSize(width: 32, height: 32)
+        let scratch = StrokeScratch(canvasSize: size, role: .replacing,
+            celContent: StrokeScratch.CelContent(backing: nil,
+                ink: .rendered(UIImage()), placement: .identity))
+        let refused = scratch.replaceCelContent(
+            ink: .derived(DerivedCelContent(identity: "refused-source", render: { _ in nil }), .full),
+            damage: CGRect(x: 8, y: 8, width: 8, height: 8))
+        XCTAssertFalse(refused, "A refused source must not publish a partial replacement window")
+        XCTAssertTrue(scratch.windowRect.isNull, "A refused backdrop must not publish a partial window")
+        XCTAssertNil(scratch.image, "A refused source cannot publish a preview image")
+        if case .success = scratch.lastMutationResult {
+            XCTFail("The scratch must retain the source failure")
+        }
+    }
+
+    func testSmallScratchDrawDoesNotRasterizeOrMemoizeTheFullCanvas() throws {
+        let size = CGSize(width: 2048, height: 2048)
+        let fill = VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 8, width: 32, height: 32), transform: nil),
+            color: CodableColor(red: 0.1, green: 0.35, blue: 0.9, alpha: 1))
+        let distantFill = VectorFillElement(path: CGPath(rect: CGRect(x: 700, y: 700, width: 32, height: 32), transform: nil),
+            color: CodableColor(red: 0.1, green: 0.8, blue: 0.2, alpha: 1))
+        let elements: [VectorElement] = [.fill(fill), .fill(distantFill)]
+        let canvas = VectorCanvas(size: size, elements: elements)
+        XCTAssertEqual(canvas.rasterizations, 0)
+        if case .needsRasterize = canvas.cachedRender() {} else {
+            XCTFail("PREMISE: this nonempty canvas has no full-image memo")
+        }
+        let frozen = canvas.freeze(quality: .full)
+        let scratch = StrokeScratch(canvasSize: size, role: .replacing,
+            celContent: StrokeScratch.CelContent(backing: nil,
+                ink: .ordinary(source: frozen, elements: [.fill(fill)], rewriting: [distantFill.id]),
+                placement: .identity))
+        XCTAssertTrue(scratch.replaceCelContent(
+            ink: .ordinary(source: frozen, elements: [.fill(fill)], rewriting: [distantFill.id]),
+            damage: CGRect(x: 8, y: 8, width: 32, height: 32)))
+        XCTAssertFalse(scratch.windowRect.isNull, "A changed native list publishes an admitted presentation window")
+        XCTAssertGreaterThan(scratch.windowRect.width, 0)
+        XCTAssertGreaterThan(scratch.windowRect.height, 0)
+        XCTAssertEqual(scratch.windowPixelCount, 0,
+                       "Native replacement must not allocate a second raster scratch")
+        let first = try XCTUnwrap(scratch.renderedCelContent,
+                                  "The first damage rectangle publishes its rendered window")
+        XCTAssertLessThan(first.window.width * first.window.height, 256 * 256,
+                          "The first native replacement window stays local on the large canvas")
+
+        XCTAssertTrue(scratch.replaceCelContent(
+            ink: .ordinary(source: frozen, elements: elements, rewriting: Set(elements.map(\.id))),
+            damage: CGRect(x: 700, y: 700, width: 32, height: 32)),
+            "A later edit grows the existing geometric window without creating a raster scratch")
+        let grown = try XCTUnwrap(scratch.renderedCelContent)
+        XCTAssertGreaterThan(grown.window.width, first.window.width)
+        XCTAssertGreaterThan(grown.window.height, first.window.height)
+        XCTAssertTrue(grown.window.contains(first.window),
+                      "The grown replacement window retains the first admitted window")
+        XCTAssertLessThan(grown.window.width * grown.window.height, size.width * size.height,
+                          "Growth remains smaller than the canvas for separated local edits")
+        XCTAssertEqual(scratch.windowPixelCount, 0,
+                       "Geometric growth must not allocate an ignored raster window")
+        let bytes = try XCTUnwrap(RasterVectorParity.premultipliedBytes(of: grown.image,
+                                                                         size: grown.window.size))
+        func pixel(_ x: Int, _ y: Int) -> [UInt8] {
+            let offset = (y * Int(grown.window.width) + x) * 4
+            return Array(bytes[offset..<(offset + 4)])
+        }
+        let firstProbe = CGPoint(x: 12, y: 12)
+        let distantProbe = CGPoint(x: 704, y: 704)
+        let containsBothProbes = grown.window.contains(firstProbe) && grown.window.contains(distantProbe)
+        XCTAssertTrue(containsBothProbes, "Both retained fills must lie inside the grown window before pixel reads")
+        guard containsBothProbes else { return }
+        let firstPixel = pixel(Int(firstProbe.x) - Int(grown.window.minX),
+                               Int(firstProbe.y) - Int(grown.window.minY))
+        let distantPixel = pixel(Int(distantProbe.x) - Int(grown.window.minX),
+                                 Int(distantProbe.y) - Int(grown.window.minY))
+        XCTAssertGreaterThan(firstPixel[3], 240, "Growth retains the first admitted source pixels")
+        XCTAssertGreaterThan(firstPixel[2], firstPixel[0], "The first visible fill keeps its blue color")
+        XCTAssertGreaterThan(distantPixel[3], 240, "The newly admitted distant fill is visible")
+        XCTAssertGreaterThan(distantPixel[1], distantPixel[0], "The distant fill keeps its green color")
+        XCTAssertEqual(canvas.rasterizations, 0, "The scratch draw must not create a canvas-sized render")
+        if case .needsRasterize = canvas.cachedRender() {} else {
+            XCTFail("The window source must not fill the live canvas memo")
+        }
+    }
+
+    func testNativeReplacementKeepsIndependentPosesAndHeldWindowImmutable() throws {
+        let size = CGSize(width: 256, height: 256)
+        let victim = VectorStroke(brush: TestBrushes.hardRound,
+            color: CodableColor(red: 0.05, green: 0.2, blue: 0.95, alpha: 1), size: 8, opacity: 1,
+            samples: StrokeSamples([VectorSample(x: 40, y: 100, pressure: 1),
+                                    VectorSample(x: 80, y: 100, pressure: 1)], channels: .pressureOnly), seed: 13)
+        let canvas = VectorCanvas(size: size, elements: [.stroke(victim)])
+        let original = canvas.elements
+        _ = canvas.render()
+        let frozen = canvas.freezeDisplay(quality: .full, referenceIDs: [])
+        let backing = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 32, y: 92, width: 56, height: 16))
+        }
+        let snapshot = try XCTUnwrap(CelPixelSnapshot(capturing: nil, baked: backing, size: size))
+        let placement = CelContentPlacement(
+            ink: PoseMap(CGAffineTransform(translationX: 80, y: 0)),
+            backing: PoseMap(CGAffineTransform(translationX: 0, y: 32)))
+        let sourceInk = CelContentPicture.Ink.ordinary(source: frozen, elements: original, rewriting: [])
+        let scratch = StrokeScratch(canvasSize: size, role: .replacing,
+            celContent: StrokeScratch.CelContent(backing: snapshot, ink: sourceInk, placement: placement))
+        let damage = CGRect(x: 32, y: 92, width: 56, height: 16)
+
+        XCTAssertTrue(scratch.replaceVectorDisplay(elements: [], rewriting: [victim.id], damage: damage),
+                      "The fully removed editable stroke publishes its bounded native replacement")
+        let first = try XCTUnwrap(scratch.renderedCelContent)
+        XCTAssertTrue(first.window.contains(CGPoint(x: 40, y: 130)),
+                      "PREMISE: independently posed backing is inside the replacement footprint")
+        XCTAssertTrue(first.window.contains(CGPoint(x: 140, y: 100)),
+                      "PREMISE: posed ink space is also inside the replacement footprint")
+        let firstBytes = try XCTUnwrap(RasterVectorParity.premultipliedBytes(of: first.image,
+                                                                            size: first.window.size))
+        func pixel(_ bytes: [UInt8], window: CGRect, x: Int, y: Int) -> [UInt8] {
+            let offset = ((y - Int(window.minY)) * Int(window.width) + x - Int(window.minX)) * 4
+            return Array(bytes[offset..<(offset + 4)])
+        }
+        let backingPixel = pixel(firstBytes, window: first.window, x: 40, y: 130)
+        XCTAssertGreaterThan(backingPixel[0], 220, "The raster backing follows its own vertical pose")
+        XCTAssertLessThan(pixel(firstBytes, window: first.window, x: 40, y: 100)[3], 16,
+                          "The backing does not inherit the editable ink's distinct pose")
+
+        var held = UnlandedInk()
+        held.hold(.init(id: 1, version: canvas.version, windowRect: first.window,
+                        replacing: first.footprint, contents: .image(first.image)))
+        guard let heldPicture = held.pictures.first,
+              case .image(let heldImage) = heldPicture.contents,
+              let heldBytes = RasterVectorParity.premultipliedBytes(of: heldImage, size: first.window.size) else {
+            return XCTFail("The existing held-picture path must retain the admitted window image")
+        }
+
+        let replacement = VectorStroke(brush: TestBrushes.hardRound,
+            color: CodableColor(red: 0.05, green: 0.9, blue: 0.15, alpha: 1), size: 8, opacity: 1,
+            samples: victim.samples, seed: victim.seed)
+        XCTAssertTrue(scratch.replaceVectorDisplay(elements: [.stroke(replacement)], rewriting: [victim.id],
+                                                    damage: damage),
+                      "A later geometry update replaces the current presentation")
+        let second = try XCTUnwrap(scratch.renderedCelContent)
+        let secondBytes = try XCTUnwrap(RasterVectorParity.premultipliedBytes(of: second.image,
+                                                                             size: second.window.size))
+        let posedInkPixel = pixel(secondBytes, window: second.window, x: 140, y: 100)
+        XCTAssertGreaterThan(posedInkPixel[1], posedInkPixel[0],
+                             "Editable ink follows its independent horizontal pose")
+        XCTAssertEqual(RasterVectorParity.premultipliedBytes(of: first.image, size: first.window.size), firstBytes,
+                       "Advancing the source leaves the earlier rendered window immutable")
+        XCTAssertEqual(heldBytes, firstBytes, "The pending-lift picture retains those original pixels")
+        XCTAssertEqual(scratch.windowPixelCount, 0,
+                       "Native replacement and held capture allocate no raster scratch")
     }
 
     /// A scattering eraser is a distinct retained element and punches without deleting paint.

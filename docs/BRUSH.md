@@ -340,11 +340,11 @@ reallocation — which is the sprite behaviour §2.4 deleted, reached by acciden
 origin is `.zero`, and the two previews are the deliberate exception: a swatch sits in no canvas, so
 `BrushPreview` and `SizePreview` anchor to their own origin.
 
-**Every tier, and there are four rather than three.** The cel (`RasterLayerTexture`), the render-local
-context (`CGContextDabTarget`, which is `VectorCanvas.renderLocalContent`), the **ungrouped** live walk
-— `BrushStamper.LiveWalk` stamps dabs with no group open, so the scratch carries the texture
-itself and applies it where the window merges — and a **grouped walk inside a scratch window**, which is
-`VectorCanvas.applyPreview`'s restamps and the only reader of `canvasOrigin`. Nothing was added to
+**The three brush raster tiers.** The cel (`RasterLayerTexture`), the render-local context
+(`CGContextDabTarget`, which is `VectorCanvas.renderLocalContent`), and the **ungrouped** live walk
+— `BrushStamper.LiveWalk` stamps dabs with no group open, so the scratch carries the texture itself
+and applies it where the window merges. The Mode 2/4 geometry preview renders an ordered native
+element list and does not replay brush dabs. Nothing was added to
 `DabImageCache` or `DabGradientCache`: a texture in a dab-level key would be a texture in the wrong
 place. Nothing was added to `PixelOps.RasterizeKey` or `LayerContentVersion` either, and that is a
 finding rather than an omission — the texture is a field of `Brush`, `Brush` is `Hashable`, a stroke
@@ -1219,9 +1219,8 @@ canvas points do not have: **a uniform scale of a stroke changes nothing at all.
 `n · spacing / brushSize` widths, and a lasso resize, a canvas resize and a layer transform all scale
 `spacing` and `brushSize` by one factor. MEASURED: `(k·size·fraction)/(k·size)` and `(size·fraction)/size`
 are the *same* `Double` across every scale, size and fraction tried, so 60,000 accumulated dabs disagree
-by exactly zero. In points, every scattering stroke an artist picked up with the lasso would re-roll, and
-the Mode 2 cut preview — which walks canvas space while the render walks the layer's own — would sit on
-different dabs from the thing it previews.
+by exactly zero. In points, every scattering stroke an artist picked up with the lasso would re-roll.
+Mode 2 pieces keep the parent's `DabLattice`, so the preview and committed geometry render the same dabs.
 
 **The lattice quantum is 1/4096 of a brush width**, and both bounds on it are measured.
 
@@ -3002,8 +3001,8 @@ first, which cleanly replaces the old one."*
    brackets its whole walk in one, a dab inside lays down its `flow` at `.normal`, and the merge is a
    CoreGraphics transparency layer composited under the stroke's own alpha and blend mode. The live
    tier gets a third `StrokeScratch` role, `.subtractive`, whose window holds an eraser's **removal
-   coverage** rather than a punched picture; `.replacing` keeps its meaning and is the cut preview's
-   alone. `StrokeSettingsPanel`'s *"Pressure → Opacity"* becomes *"Pressure → Flow"* — a label
+   coverage** rather than a punched picture; `.replacing` presents the bounded ordered native list for
+   geometry previews and does not allocate a raster window. `StrokeSettingsPanel`'s *"Pressure → Opacity"* becomes *"Pressure → Flow"* — a label
    corrected rather than a control added, since that row always drove the dab's coverage and coverage
    is what `flow` is now called.
    Pinned by `BrushEngineLogicTests`' six new tests — the crossing reads the cap and not `1 - (1-o)²`;

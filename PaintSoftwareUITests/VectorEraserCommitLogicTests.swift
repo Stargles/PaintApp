@@ -422,20 +422,22 @@ final class VectorEraserCommitLogicTests: XCTestCase {
         XCTAssertEqual(canvas.strokes.count, 1)
     }
 
-    /// The preview names each doomed stroke once, on the sample that reaches it, and never one the
-    /// lift will keep.
-    func testWholeModePreviewNamesEachDoomedStrokeOnce() {
+    /// The ordered preview drops each doomed stroke once, on the sample that reaches it, and never
+    /// one the lift will keep.
+    func testWholeModePreviewListDropsEachDoomedStrokeOnce() {
         let crossed = Self.stroke([CGPoint(x: 20, y: 128), CGPoint(x: 236, y: 128)], size: 6)
         let far = Self.stroke([CGPoint(x: 20, y: 30), CGPoint(x: 236, y: 30)], size: 6)
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [.stroke(crossed), .stroke(far)])
         let nib = Self.brush(size: 20)
         var doomed: Set<UUID> = []
-        let first = canvas.wholeStrokePreviewEdits(alongPath: Self.gesture([CGPoint(x: 128, y: 100), CGPoint(x: 128, y: 120)]),
-                                                   brush: nib, size: 20, accumulating: &doomed)
-        XCTAssertEqual(first.map(\.id), [crossed.id], "reached on the sample whose footprint meets its ink")
-        let second = canvas.wholeStrokePreviewEdits(alongPath: Self.gesture([CGPoint(x: 128, y: 120), CGPoint(x: 128, y: 140)]),
-                                                    brush: nib, size: 20, accumulating: &doomed)
-        XCTAssertTrue(second.isEmpty, "named once, not on every sample that stays over it")
+        let first = canvas.wholeStrokePreviewElements(alongPath: Self.gesture([CGPoint(x: 128, y: 100), CGPoint(x: 128, y: 120)]),
+            brush: nib, size: 20, accumulating: &doomed)
+        XCTAssertEqual(first?.rewriting, Set([crossed.id]), "reached on the sample whose footprint meets its ink")
+        XCTAssertEqual(first?.elements.compactMap(\.stroke).map(\.id), [far.id],
+                        "the replacement list removes only the crossed stroke")
+        let second = canvas.wholeStrokePreviewElements(alongPath: Self.gesture([CGPoint(x: 128, y: 120), CGPoint(x: 128, y: 140)]),
+            brush: nib, size: 20, accumulating: &doomed)
+        XCTAssertNil(second, "removed once, not rebuilt on every sample that stays over it")
         XCTAssertEqual(canvas.strokes.count, 2, "the preview mutates nothing")
     }
 
