@@ -17,6 +17,25 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 # Known Issues
 
+## October28 evidence continuation for recorded canvas regressions
+
+Move recording: each of three candidate toolbar taps creates vectorFloat then removes it within
+0–140ms. Source candidate4dbffaea7's unconditional blanked-host guard in StrokeCanvasView.refreshDisplay
+bypasses DeferredVectorRender's explicit waitingForTheRender exception; beginVectorFloat can then
+refuse and cancel the new float. Run existing GuideUnderLassoMoveUITests unchanged before a fix.
+Preserve ordinary hidden-host allocation protection and all earlier image-admission guarantees.
+
+Latency recording: hardware touch-end3.23 is delivered after the main/recognizer gap to3.97. An
+aggregate window contains a main vector-render entry and ~1.13s mainBusy; it does not distinguish
+new raster work from rasterizeLock waiting. Shared stroke-begin refresh synchronously asks every
+host; this predates the recent settlement rename. Exact cause remains open.
+
+Fresh Oct26,21:35:39 jetsam explicitly records backboardd.reason=per-process-limit at1850MiB;
+PaintSoftware is separately active/frontmost at~1021MiB/max~1086MiB. UUIDAE3F matches preserved6fb.
+Later21:55 CPU report Action:none samples FrameBaker→compositor→PixelOps; not an app-crash report
+and not independent proof of the earlier jetsam/main stall. Corrected mechanical report-v2 and
+originals are under `~/PaintWork/s55-recorded-regressions/`; original incorrect report retained.
+
 ## Selection-to-Move sometimes requires repeated taps — 2026-10-27
 
 Owner circles a selection, taps Move and sees no response until repeated taps register. Reported

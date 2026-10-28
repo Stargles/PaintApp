@@ -16,6 +16,11 @@ apply that observation to Test1 drawing/erasing latency. Root-cause changes,
 clean shared ownership and no regression/band-aid workaround remain the priorities. Use source/
 recording agents; root owns native work. No fresh physical restart readiness has been given.
 Old park notes below are historical; they do not block this explicit resume.
+First native gate: existing GuideUnderLassoMoveUITests2 unchanged, separate s55-canvas-input tree;
+prove required-image/blanked-host start→cancel before a fix. Source work may continue beside root's
+single native lease. Read-only s55 recording summaries/source maps survive three agents' usage-limit
+errors; root continues, one cheap mechanical evidence agent remains usable. Fresh jetsam/CPU reports
+and symbolication under s55/device-evidence and crash-evidence/report-v2; no physical app restart.
 
 ## Previous parked checkpoint — October26–27
 
