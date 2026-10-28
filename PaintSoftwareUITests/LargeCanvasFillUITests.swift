@@ -14,6 +14,8 @@ final class LargeCanvasFillUITests: PaintUITestCase {
     func testABucketFillLandsInsideAShapeOnACanvasAtTheCeiling() throws {
         let app = XCUIApplication()
         app.launchArguments.append("-resetEditorPreferences")
+        app.launchArguments.append("-resetBrushLibrary")
+        XCUIDevice.shared.orientation = .landscapeLeft
         app.launch()
 
         let newCanvas = app.buttons["gallery.newCanvasButton"]
@@ -34,26 +36,42 @@ final class LargeCanvasFillUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 10), "the canvas host")
 
-        // A closed square of line art, in the middle of the page.
-        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.35), to: CGVector(dx: 0.65, dy: 0.35))
-        drawLine(on: canvas, from: CGVector(dx: 0.65, dy: 0.35), to: CGVector(dx: 0.65, dy: 0.65))
-        drawLine(on: canvas, from: CGVector(dx: 0.65, dy: 0.65), to: CGVector(dx: 0.35, dy: 0.65))
-        drawLine(on: canvas, from: CGVector(dx: 0.35, dy: 0.65), to: CGVector(dx: 0.35, dy: 0.35))
-        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.5, dy: 0.5)), "PREMISE: the interior is paper before the fill")
-        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.2, dy: 0.5)), "PREMISE: so is the paper outside the square")
+        // Keep the same 1800-pixel square on the actual paper, clear of the timeline and toolbar.
+        // The host extends under chrome and may letterbox the 6000² paper, so all gesture and probe
+        // points are converted from paper coordinates instead of treating host fractions as pixels.
+        let canvasSize = CGSize(width: CanvasManager.maxCanvasExtent, height: CanvasManager.maxCanvasExtent)
+        let paper = paperRect(in: canvas, canvasSize: canvasSize)
+        let row = rowAboveTheDock(canvas)
+        let paperRow = (row - Double(paper.minY)) / Double(paper.height)
+        let halfSide = 900.0 / Double(CanvasManager.maxCanvasExtent)
+        let top = paperRow - halfSide
+        let bottom = paperRow + halfSide
+        assertBelowTheToolbar(app, canvas, dy: onHost(paper, 0.5, top).dy, "square top")
+        assertAboveTheDock(app, canvas, dy: onHost(paper, 0.5, bottom).dy, "square bottom")
+        let inside = onHost(paper, 0.5, paperRow)
+        let outside = onHost(paper, 0.2, paperRow)
+
+        // A closed square of line art, 1800 pixels wide so the fill window grows twice.
+        drawLine(on: canvas, from: onHost(paper, 0.5 - halfSide, top), to: onHost(paper, 0.5 + halfSide, top))
+        drawLine(on: canvas, from: onHost(paper, 0.5 + halfSide, top), to: onHost(paper, 0.5 + halfSide, bottom))
+        drawLine(on: canvas, from: onHost(paper, 0.5 + halfSide, bottom), to: onHost(paper, 0.5 - halfSide, bottom))
+        drawLine(on: canvas, from: onHost(paper, 0.5 - halfSide, bottom), to: onHost(paper, 0.5 - halfSide, top))
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: inside)), "PREMISE: the interior is paper before the fill")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: outside)), "PREMISE: so is the paper outside the square")
+        attachScreenshot(XCUIScreen.main, "large-canvas-fill-before")
 
         let fillButton = app.buttons["toolbar.fillButton"]
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5), "the fill tool")
         fillButton.tap()
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        canvas.coordinate(withNormalizedOffset: inside).tap()
 
         // The bucket's window starts at 1024² about the tap and has to grow twice to enclose a
         // 1800-pixel square, so this is the growth loop on a real document as well as the fill.
-        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5, timeout: 30),
+        XCTAssertTrue(waitUntilFilled(canvas, dx: inside.dx, dy: inside.dy, timeout: 30),
                       "the square's interior is coloured after a tap inside it")
-        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: 0.2, dy: 0.5)),
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: outside)),
                       "the paper outside the square is untouched — the fill stayed inside the line art")
 
-        attachScreenshot(app, "large-canvas-fill")
+        attachScreenshot(XCUIScreen.main, "large-canvas-fill")
     }
 }

@@ -341,12 +341,16 @@ final class FillWindowLogicTests: XCTestCase {
     /// 1 is worked smaller, and the traced fill still lands where the shape is, in canvas pixels.
     func testAFillPastTheBudgetLandsAtCanvasScaleThroughTheWindow() throws {
         try XCTSkipIf(MetalFillEngine.shared == nil, "no Metal device")
-        let manager = largeManager()
+        let canvasSize = CGSize(width: 256, height: 255)
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.canvasSize = canvasSize
+        manager.addLayer()
+        manager.brushColor = Self.red
         manager.layers[0].kind = .vector
         let brush = Brush(name: "Test", tip: .round, size: 12, opacity: 1,
                           dab: BrushDabSettings(flow: 1, spacing: 0.1, hardness: 1, angle: BrushAngleSettings(jitter: 0)),
                           stroke: BrushStrokeSettings(stabilization: 0, blendMode: .normal))
-        let shape = CGRect(x: 640, y: 640, width: 120, height: 120)
+        let shape = CGRect(x: 68, y: 68, width: 120, height: 120)
         let outline = VectorStroke(brush: brush, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                    size: 12, opacity: 1,
                                    samples: [VectorSample(x: Double(shape.minX), y: Double(shape.minY), pressure: 1),
@@ -354,14 +358,14 @@ final class FillWindowLogicTests: XCTestCase {
                                              VectorSample(x: Double(shape.maxX), y: Double(shape.maxY), pressure: 1),
                                              VectorSample(x: Double(shape.minX), y: Double(shape.maxY), pressure: 1),
                                              VectorSample(x: Double(shape.minX), y: Double(shape.minY), pressure: 1)])
-        let canvas = VectorCanvas(size: Self.largeCanvas, strokes: [outline])
+        let canvas = VectorCanvas(size: canvasSize, strokes: [outline])
         manager.layers[0].cels[0].vector = canvas
 
-        // A budget that holds a lasso session of 120² working pixels, against a loop whose window
-        // is 356² — so the window has to come down to about 0.34.
+        // The unchanged 200² loop plus its 78px halo asks for 356², clipped to this canvas. A
+        // 120×119 working grid fits the budget with room for the session's fixed parameter buffers.
         CompositorBudget.budgetOverrideBytes = MetalFillSession.bytesPerPixel(isLasso: true, twoReferenceColours: true) * 120 * 120
         let loop = CGMutablePath()
-        loop.addRect(CGRect(x: 600, y: 600, width: 200, height: 200))
+        loop.addRect(CGRect(x: 28, y: 28, width: 200, height: 200))
         manager.beginInteractiveLassoFill(path: loop)
         manager.endInteractiveFill()
         manager.fillQueue.sync {}
@@ -370,10 +374,11 @@ final class FillWindowLogicTests: XCTestCase {
         let render = try XCTUnwrap(manager.fillLastRender, "the loop previewed nothing")
         XCTAssertLessThan(render.window.scale, 0.5, "the window was worked below scale 1")
         XCTAssertEqual(render.window.rect, loop.boundingBoxOfPath.insetBy(
-            dx: -CanvasManager.fillWindowHalo, dy: -CanvasManager.fillWindowHalo), "…over the same rect it would have had")
+            dx: -CanvasManager.fillWindowHalo, dy: -CanvasManager.fillWindowHalo)
+            .intersection(CGRect(origin: .zero, size: canvasSize)), "the 356² request is clipped to the canvas")
         XCTAssertLessThanOrEqual(render.window.workingWidth * render.window.workingHeight, 120 * 120)
-        XCTAssertTrue(manager.isPointInPendingFill(at: CGPoint(x: 700, y: 700)), "the shape inside the loop is filled")
-        XCTAssertFalse(manager.isPointInPendingFill(at: CGPoint(x: 610, y: 610)), "the paper between the loop and the shape is not")
+        XCTAssertTrue(manager.isPointInPendingFill(at: CGPoint(x: 128, y: 128)), "the shape inside the loop is filled")
+        XCTAssertFalse(manager.isPointInPendingFill(at: CGPoint(x: 38, y: 38)), "the paper between the loop and the shape is not")
 
         manager.commitInteractiveFill()
         let fill = try XCTUnwrap(canvas.elements.last?.fill, "the commit is a vector fill element")

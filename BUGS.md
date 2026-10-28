@@ -44,14 +44,13 @@ Mode3 crash/latency evidence remain; no crash-cause claim.
 
 ## Adjustable fill can cache a preview that never drew — October 28
 
-Read-only source audit found a conditional owner gap in extracted LayerFillView candidate995677c5:
-showFill records render/clip identity before presentation; a surface-mint refusal returns without
-completion, so a later identical request is skipped. Corrected OLDc056 selected4 is2intendedRED/2healthyGREEN, source731 exact: missing refusal
-completion and same-render retry fail; Set Down release and reentrant A→B→A controls pass. Minimal
-051 runtime correction reports refused frames, fences stale failures and handles nil teardown before
-identity dedupe. It is source-only; normal50, four controls, public growth and final integration remain.
-The separate reduced-budget manager failure does not instantiate LayerFillView. No timer, spin or
-larger wait was added. Original runs and metadata remain in the recorded-regressions directory.
+Correction0405 is harvested: the extracted fill view owns the original surface pair; failed frames
+complete false, only the matching request memo clears, ABA failures are fenced, and nil teardown
+precedes dedupe. Component50/51 green plus four fault controls and the strengthened owner-alive
+release control establish the contracts; all source restored and normal51 rebuilt green. Root saw
+a6000² fill stay inside its line art in complete landscape pictures. The earlier app-window PNGs
+were cropped artifacts; the permanent captures use the whole screen. Final integration and physical
+checks remain. No timer, render delay or memory-budget increase was added.
 
 ## Brush response-curve drag loses its selected key on clamped ticks — 2026-10-24
 

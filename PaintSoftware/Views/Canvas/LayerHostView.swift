@@ -16,16 +16,7 @@ final class LayerHostView: CanvasPlaneView {
     /// **The live fill's plane: the layer's own space, posed** (`shownPose`). Its bounds are the host's
     /// with the anchor at the origin, so the pose is its transform about the canvas origin; the fill's
     /// surface inside it is placed in the layer's own space, where a fill is worked out.
-    private let fillPlane = UIView()
-    /// The adjustable fill's picture (`showFill`) — made with the fill's first render, and let go with
-    /// the fill.
-    private var fillSurface: WindowSurfaceView?
-    /// The render and clip `fillSurface` was last asked to show, so the passes that change nothing are
-    /// two identity checks.
-    private var shownFill: (render: CanvasManager.FillRenderResult, clip: CGPath?)?
-    /// Where every host's fill pictures are drawn — one fill is live at a time.
-    private static let fillDrawQueue = DispatchQueue(label: "com.paintapp.LayerHostView.fill",
-                                                     qos: .userInteractive)
+    private let fillPlane = LayerFillView()
 
     init() {
         super.init(frame: .zero)
@@ -100,44 +91,9 @@ final class LayerHostView: CanvasPlaneView {
         bakedImageView.isHidden = image == nil
     }
 
-    /// **Shows the adjustable fill's render over this layer's own pixels, or nothing**, and answers
-    /// whether that changed anything — TODO (179). The bytes are drawn into a surface off the main
-    /// thread (`WindowSurfaceView`) through the same `FillRenderResult.preview(clippedTo:)` the commit
-    /// flattens, so a render reaches the screen with no image built on the main thread and none handed
-    /// to Core Animation, and the picture does not change when the pencil lifts.
-    ///
-    /// The surface is the render's window at the window's working size, stretched over the window's
-    /// rect — 1:1 at scale 1, and below it the resample the fill already accepted. The host's points
-    /// are canvas pixels (the stack is magnified by a transform on the container), so the rect is
-    /// placed in them directly, through the layer's pose (`fillPlane`).
-    ///
-    /// **A window of another size gets a surface of its own**, and the one on screen stays up until
-    /// the new one's first picture lands — a bucket's window grows when a slider lets the paint
-    /// further, and a surface remade in place would show the layer without its fill for a draw.
     @discardableResult
     func showFill(_ render: CanvasManager.FillRenderResult?, clip: CGPath?) -> Bool {
-        guard shownFill?.render !== render || shownFill?.clip !== clip else { return false }
-        guard let render else {
-            shownFill = nil
-            fillSurface = nil
-            for surface in fillPlane.subviews { surface.removeFromSuperview() }
-            return true
-        }
-        shownFill = (render, clip)
-        let window = CGRect(x: 0, y: 0, width: render.window.workingWidth, height: render.window.workingHeight)
-        var replaced: WindowSurfaceView?
-        if fillSurface.map({ !$0.surfaceWindow.isNull && $0.surfaceWindow.size != window.size }) ?? true {
-            replaced = fillSurface
-            let surface = WindowSurfaceView(queue: Self.fillDrawQueue)
-            fillPlane.addSubview(surface)
-            fillSurface = surface
-        }
-        fillSurface?.present(window: window, placement: render.window.transform.inverted(), draw: { _ in
-            guard let preview = render.preview(clippedTo: clip) else { return nil }
-            preview.image.draw(in: window)
-            return window
-        }, finished: { _ in replaced?.removeFromSuperview() })
-        return true
+        fillPlane.showFill(render, clip: clip)
     }
 
     /// The accepted ink and backing placements belong to the same installed base. Ordinary cel

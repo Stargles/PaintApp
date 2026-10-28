@@ -29,6 +29,15 @@ import UIKit
 /// picture's shape can change between frames (a nudge in the Move box) and the pixels outside the
 /// new shape must be transparent, not last frame's.
 final class WindowSurfaceView: UIView {
+    typealias SurfaceFactory = (_ width: Int, _ height: Int) -> IOSurface?
+
+    static func makeSurface(width: Int, height: Int) -> IOSurface? {
+        IOSurface(properties: [
+            .width: width, .height: height, .bytesPerElement: 4,
+            .pixelFormat: kCVPixelFormatType_32BGRA,
+        ])
+    }
+
 
     /// Counts an allocation for its actual lifetime, including a draw finishing after cancellation
     /// or a finished picture waiting for the base. Moving ownership never changes the byte count.
@@ -61,6 +70,7 @@ final class WindowSurfaceView: UIView {
     private var presented: FrozenWindow?
     /// The draws, on the queue the view was made with — see the class comment.
     private let draws: LatestWins
+    private let surfaceFactory: SurfaceFactory
 
     /// **How long every draw waits after its clear, on the view's queue** — zero on every ordinary
     /// launch, and set only by `UITestSeeds.applyWindowDrawDelayIfRequested`
@@ -93,8 +103,9 @@ final class WindowSurfaceView: UIView {
 
     /// `queue` is where every picture is drawn — serial, so the draws of every view sharing it
     /// take turns (`StrokeCanvasView.renderQueue`).
-    init(queue: DispatchQueue) {
+    init(queue: DispatchQueue, surfaceFactory: @escaping SurfaceFactory = WindowSurfaceView.makeSurface) {
         draws = LatestWins(queue: queue)
+        self.surfaceFactory = surfaceFactory
         super.init(frame: .zero)
         isUserInteractionEnabled = false
         isHidden = true
@@ -155,7 +166,11 @@ final class WindowSurfaceView: UIView {
     func present(_ mint: @escaping () -> Frame?) {
         draws.request { [weak self] in
             guard let self, let frame = mint() else { return nil }
-            return self.drawing(frame)
+            guard let work = self.drawing(frame) else {
+                frame.finished?(false)
+                return nil
+            }
+            return work
         }
     }
 
@@ -244,10 +259,7 @@ final class WindowSurfaceView: UIView {
         let width = Int(window.width), height = Int(window.height)
         guard width > 0, height > 0 else { return }
         for _ in 0..<2 {
-            guard let surface = IOSurface(properties: [
-                .width: width, .height: height, .bytesPerElement: 4,
-                .pixelFormat: kCVPixelFormatType_32BGRA,
-            ]) else { return }
+            guard let surface = surfaceFactory(width, height) else { return }
             // The same 8-bit premultiplied BGRA every raster tier renders as; the context is made
             // once over the surface's own memory, flipped so it is the UIKit context
             // `VectorCanvas.drawStreamWindow` expects (`UIImage.draw(in:)` in the placed arms).

@@ -155,6 +155,7 @@
 		E2FD2BA7D05AD14F3CB1094D /* PaintSoftware/Engine/PlaybackClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AC9AF3B2A180DCF5733729B /* PaintSoftware/Engine/PlaybackClock.swift */; };
 		F87038A716A7B10437327F08 /* PaintSoftware/Models/CanvasManager+Eraser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FD4CF75ACB8BD2252912D26 /* PaintSoftware/Models/CanvasManager+Eraser.swift */; };
 		02F9079C7F465179B1804C45 /* PaintSoftware/Views/Canvas/WindowSurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7DFD37AB80BD28D239573B8 /* PaintSoftware/Views/Canvas/WindowSurfaceView.swift */; };
+		7F08A9B1C2D34E56F708A901 /* PaintSoftware/Views/Canvas/LayerFillView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F08A9B1C2D34E56F708A902 /* PaintSoftware/Views/Canvas/LayerFillView.swift */; };
 		9F1D70F63B89C54F9EB9EBDE /* PaintSoftware/Views/HeldFrameLanding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 167392A3617FBE9497281159 /* PaintSoftware/Views/HeldFrameLanding.swift */; };
 		7EE82CA2B1D6CA711AD1CCBD /* PaintSoftware/Engine/LatestWins.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCD61ED5A18E54F7FD71DEC7 /* PaintSoftware/Engine/LatestWins.swift */; };
 		B3EB2864ABA9B24338A670D1 /* PaintSoftware/Models/CanvasManager+Recording.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9CC38C517B476B69DF9F369 /* PaintSoftware/Models/CanvasManager+Recording.swift */; };
@@ -819,6 +820,7 @@
 		8AC9AF3B2A180DCF5733729B /* PaintSoftware/Engine/PlaybackClock.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/PlaybackClock.swift; sourceTree = "<group>"; };
 		5FD4CF75ACB8BD2252912D26 /* PaintSoftware/Models/CanvasManager+Eraser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Eraser.swift"; sourceTree = "<group>"; };
 		C7DFD37AB80BD28D239573B8 /* PaintSoftware/Views/Canvas/WindowSurfaceView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Views/Canvas/WindowSurfaceView.swift"; sourceTree = "<group>"; };
+		7F08A9B1C2D34E56F708A902 /* PaintSoftware/Views/Canvas/LayerFillView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Views/Canvas/LayerFillView.swift"; sourceTree = "<group>"; };
 		167392A3617FBE9497281159 /* PaintSoftware/Views/HeldFrameLanding.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Views/HeldFrameLanding.swift"; sourceTree = "<group>"; };
 		CCD61ED5A18E54F7FD71DEC7 /* PaintSoftware/Engine/LatestWins.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/LatestWins.swift"; sourceTree = "<group>"; };
 		D9CC38C517B476B69DF9F369 /* PaintSoftware/Models/CanvasManager+Recording.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Recording.swift"; sourceTree = "<group>"; };
@@ -1857,6 +1859,7 @@
 				8AC9AF3B2A180DCF5733729B /* PaintSoftware/Engine/PlaybackClock.swift */,
 				5FD4CF75ACB8BD2252912D26 /* PaintSoftware/Models/CanvasManager+Eraser.swift */,
 				C7DFD37AB80BD28D239573B8 /* PaintSoftware/Views/Canvas/WindowSurfaceView.swift */,
+				7F08A9B1C2D34E56F708A902 /* PaintSoftware/Views/Canvas/LayerFillView.swift */,
 				167392A3617FBE9497281159 /* PaintSoftware/Views/HeldFrameLanding.swift */,
 				CCD61ED5A18E54F7FD71DEC7 /* PaintSoftware/Engine/LatestWins.swift */,
 				D9CC38C517B476B69DF9F369 /* PaintSoftware/Models/CanvasManager+Recording.swift */,
@@ -2348,6 +2351,7 @@
 				E2FD2BA7D05AD14F3CB1094D /* PaintSoftware/Engine/PlaybackClock.swift in Sources */,
 				F87038A716A7B10437327F08 /* PaintSoftware/Models/CanvasManager+Eraser.swift in Sources */,
 				02F9079C7F465179B1804C45 /* PaintSoftware/Views/Canvas/WindowSurfaceView.swift in Sources */,
+				7F08A9B1C2D34E56F708A901 /* PaintSoftware/Views/Canvas/LayerFillView.swift in Sources */,
 				9F1D70F63B89C54F9EB9EBDE /* PaintSoftware/Views/HeldFrameLanding.swift in Sources */,
 				7EE82CA2B1D6CA711AD1CCBD /* PaintSoftware/Engine/LatestWins.swift in Sources */,
 				B3EB2864ABA9B24338A670D1 /* PaintSoftware/Models/CanvasManager+Recording.swift in Sources */,

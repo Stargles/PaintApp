@@ -97,19 +97,23 @@ Evidence: `s55-recorded-regressions/eraser-normal-after-controls13-cf3304b8/`,
 
 ### Layer fill
 
-Fill-window fixture `995677c5` is independently 47/47 GREEN. Its extracted `LayerFillView` means that
-candidate's source count is 731; current integration package `e4f9c8fa` remains 730. Do not mix the
-censuses. `fill-owner-refusal-old4-57073ba1` is the latest OLD run: **RED**, 1 pass and 3 failures at source731.
-That predecessor is superseded by OLDc056 selected4:2intendedRED/2healthyGREEN, source731 exact.
-Refusal completion and same-request retry fail; Set Down release and ABA pass. Minimal runtime051
-now fixes the callback/memo attempt fence and puts nil teardown before dedupe; source-only, normal50
-and deliberate controls pending. No qualified fill behavior correction is established.
+The fill owner/refusal correction from `0405d382` is harvested through seven reviewed paths. The
+view owns its existing surface pair, clears only a matching refused attempt, and tears down nil
+before dedupe. No timer or retry loop. The new queue label follows its new owner, LayerFillView.
+All outside source remained exact; PBX adds two unique IDs for the extracted source.
 
-The separate reduced-budget manager test that failed to produce `fillLastRender` is still unresolved;
-it does not exercise `LayerFillView` and is not proof of user-visible failure. No extra wait, retry, or
-weaker assertion. Fixture and receipts: `s55-recorded-regressions/fill-owner-window47-995677c5/`,
-`fill-owner-refusal-old3-393c10ef/` (superseded OLD plan), and
-`fill-owner-refusal-old4-c056e592/` (latest expected RED OLD run).
+OLDc056 reproduced callback/retry failure while release/ABA controls passed. Runtime051 passed50;
+four actual faults reached five canonical targets. The old release fixture destroyed its owner at
+pool exit, so two apparent release guards got no mutation credit. Test-only successor keeps the
+owner alive;585 normal51 passed, nil-order fault1 then failed the intended weak-child guard, and
+0405 normal51 passed after source restoration (731 entries/methods/device/argv exact). The public
+6000² fill drew the square's interior and preserved outside paper. Root inspected both whole
+landscape pictures. App-window attachments were cropped capture artifacts; current permanent
+captures use XCUIScreen.main, and the rejected PNGs remain preserved. No invented video evidence.
+
+Evidence: `s55-recorded-regressions/fill-owner-normal-whole51-0405d382/`,
+`fill-owner-controls4-successor-051336c1/`, `fill-owner-nil-order-control1-585b548d/`, and
+`fill-harvest-0405-to-1ac/root-applied-source-receipt.json`. Final assembled gates remain.
 
 ### Saved-file package boundary and cold Gallery
 
@@ -130,10 +134,10 @@ the existing one-shot protocol. Cold Gallery packet: `package-address-cold-ui-29
 ## Remaining owner queue
 
 Keep every unfinished TODO item. Immediate queue after checking ownership: stream normal post-fault
-rebuild/causal extraction/harvest; final assembled eraser gates; corrected Move-exit OLD public2; fill
-selected OLD controls after `c056`. Also retain these exact boundaries:
+rebuild/causal extraction/harvest; final assembled eraser gates; corrected Move-exit OLD public2; final assembled fill gates. Also retain these exact boundaries:
 
-- Autosave `4c`: inventory and deliberate failure/reopen controls remain in
+- Autosave product4c / test-onlye3: fresh normal154 passed, exact730 and corrected Gate class names.
+  OrdinaryUI2 (1pass/1namedoptinskip) and six meaningful controls remain in
   `/Users/juliapark/PaintWork/s55-recorded-regressions/autosave-next-native.md`.
 - Export `694bdf49`: ToolPanels class count is 20. Drive actual Share dismissal/close-return and
   cancel → drawing/gesture checks. Fresh saved/unlocked export readiness is unanswered.

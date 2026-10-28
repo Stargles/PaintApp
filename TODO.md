@@ -44,10 +44,11 @@ Test package is still unanswered; continue simulator/source work without restart
   prior public routes and bounded output/cost check, with three subsequently corrected fixture failures.
   Root inspected whole pictures. Mutation metadata hash correction is explicitly post-run; no extra
   collateral assertions credited. Final assembled tests and physical Mode3 crash evidence remain.
-- Fill-window fixture995 passed47/47. Corrected OLDc056 selected4 is2intendedRED/2healthyGREEN,
-  source731 exact: missing refusal completion and same-request retry fail; Set Down release and ABA
-  remain healthy. Minimal051 runtime correction uses existing completion and an attempt generation;
-  it is source-only, not qualified. Normal50, deliberate controls and public growth remain.
+- Fill preview recovery is harvested: failed allocation now clears only its matching cached request,
+  and Set Down releases the preview even after refusal. Component normal50/51 and four faults plus
+  a stronger owner-alive release fault passed their intended checks. The6000² public fill stayed
+  inside its square; root inspected complete landscape before/after pictures. Final combined gates
+  remain; no new iPad install or physical-performance claim.
 - Saved-file tidy now preflights every generated destination before any rename/move and rejects
   escaping resource addresses through one checked owner. Whole14classes293 pass at2905abd5;
   deliberate controls expose all17 mutated contracts (one observed sidecar target was classified
@@ -133,9 +134,9 @@ that the final combined audit build has passed.
    project structure, affected UI classes and the full phase gate. Then run paired Release fill/
    effect measurements with correct-output checks and whole-memory limits.
 10. Finish the architecture review and integrate qualified changes, then merge/push and check the
-    device with fresh readiness. The fill preview now reuses its existing surface owner; complete
-    its drawing and fault checks. Investigate the existing reduced-budget fill preview check that
-    failed while all19surface checks passed; no retry or enlarged wait. The Test1 erasing respring
+    device with fresh readiness. The fill preview owner, refusal/teardown and public growth checks are now qualified separately
+    and harvested; preserve them through the combined gates. The earlier reduced-budget fixture
+    failure is corrected in that component; no retry or enlarged wait was added. The Test1 erasing respring
     still needs fresh physical evidence.
     Remove finished items whole at merge. October29 automatic renewal's old-main risk is corrected
     and live: retain verified installed6fb until main contains it, with atomic source/profile state.
