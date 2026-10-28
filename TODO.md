@@ -40,6 +40,10 @@ The corrected OLD public witness now passes, but its early top8 metric windows a
 The frame baker can fill the shared render cache before the next test stroke despite the existing
 stroke-render delay. Stage both existing worker delays together in one TEMP measurement fixture;
 retain all drawing/landing checks. No runtime fix or no-main-render claim yet.
+OLD both-worker fixture57aa now explicitly records one main-thread vector render, while the public
+two-stroke drawing/landing checks pass. Implement the shared stroke-preparation wait correction:
+only pending interactive edits require synchronous landing. Keep Move's required picture and all
+source/mask admission. No stored flag/cache/new service; eraser's separate full backdrop remains.
 
 Items leave this file only in the qualified merge. “Installed” and “tested separately” do not mean
 that the final combined audit build has passed.

@@ -61,6 +61,14 @@ not stage an uncached second-stroke start. Author one TEMP fixture successor usi
 simulator-only uiTestSlowBakeMillis4000 alongside unchanged vector delay4000. Same original2
 strokes,12s landing wait,pixels/count assertions. No metrics/product hook or timeout increase.
 Capture OLD JSONL before runtime fix; require explicit main vectorRasterize evidence.
+OLD57aa nowGREEN1/exact730; fresh recording20261028-105249 SHA8da3c32fccc193983926c6048d2446d42a4b6653ff87b5b3e6a9ba299e3b268c
+explicitly reports vectorRasterize n1/main1 at2.01s (3.74ms simulator, not owner-latency magnitude).
+This validates the source path despite both background producers held. Author minimal correction
+in separate s55-stroke-start tree: capture existing hasInteractiveStatePending BEFORE prepareCanvasEdit;
+pass captured Bool through refreshAfterPreparedCanvasEdit(waitingForTheRender:). Keep all admission,
+commit, hidden-host filter, overlay/timer cleanup and direct Move wait unchanged. No stored state or
+new policy helper. Same TEMP witness must pass pixels AND show explicit worker rendering; compare
+OLD/new metrics, never treat a missing top8 phase aszero. Mode1's separate full render still queued.
 
 ## Previous parked checkpoint — October26–27
 
