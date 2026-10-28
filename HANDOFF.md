@@ -4,6 +4,8 @@ New active owner Move handoff report: after moving a selection, switching to Bru
 hides the placed drawing. Owner's theory is early preview retirement; explicit preference is keep
 same lifted picture until composited base actually lands, accepting temporary raw overlay. Recorded
 in TODO/BUGS before investigation; reuse existing held-content/revision retirement, no timer/newcache.
+OLD21b public2 failed its moved-ink premise before the tool switch; no exit-gap proof or runtime fix
+yet. Correct the setup from actual whole captures, then rerun OLD.
 This adds to (does not replace) stream offset, Test Move/lag/crash and the rest of TODO.
 
 Kevin resumed: **continue; do not park**. Read this file, `AGENTS.md`, `CLAUDE.md`, `TODO.md`,
@@ -15,7 +17,7 @@ Historical technical detail and raw results remain in Git and the external packe
 
 - Integration worktree: `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch
   `tmp/s54-qualified-integration`, documentation HEAD `f9faf3e8` before this reconciliation. Current
-  package harvest is `e4f9c8fa`, with 730 source entries, fast static count 5,424 and full count 6,023. These are
+  package harvest is `e4f9c8fa`; stream harvest is `a97f3f47`, with730 source entries, fast static5,425 and full6,026. These are
   static counts only: this assembled source has **not** passed its final native gates.
 - Main/origin remain `afd2030c`; no merge or push. A qualified merge is authorized after remaining
   gates pass. Component qualification and harvested source do not qualify the assembled integration.
@@ -92,16 +94,16 @@ Independent source review found no concrete blocker but identified coverage gaps
 Fill-window fixture `995677c5` is independently 47/47 GREEN. Its extracted `LayerFillView` means that
 candidate's source count is 731; current integration package `e4f9c8fa` remains 730. Do not mix the
 censuses. `fill-owner-refusal-old4-57073ba1` is the latest OLD run: **RED**, 1 pass and 3 failures at source731.
-Callback and retry controls reached their intended RED assertions; ABA passed; partial-release failed
-at a combined assertion, leaving its lifetime premise unresolved. Test-only pool fix `c056` is
-committed but unrun; no fill behavior correction is established. Run the corrected selected controls
-and review exact reached assertions before any runtime fix. The older old3 packet is superseded.
+That predecessor is superseded by OLDc056 selected4:2intendedRED/2healthyGREEN, source731 exact.
+Refusal completion and same-request retry fail; Set Down release and ABA pass. Minimal runtime051
+now fixes the callback/memo attempt fence and puts nil teardown before dedupe; source-only, normal50
+and deliberate controls pending. No qualified fill behavior correction is established.
 
 The separate reduced-budget manager test that failed to produce `fillLastRender` is still unresolved;
 it does not exercise `LayerFillView` and is not proof of user-visible failure. No extra wait, retry, or
 weaker assertion. Fixture and receipts: `s55-recorded-regressions/fill-owner-window47-995677c5/`,
 `fill-owner-refusal-old3-393c10ef/` (superseded OLD plan), and
-`fill-owner-refusal-old4-57073ba1/` (latest RED OLD run).
+`fill-owner-refusal-old4-c056e592/` (latest expected RED OLD run).
 
 ### Saved-file package boundary and cold Gallery
 

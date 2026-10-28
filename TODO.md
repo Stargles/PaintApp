@@ -9,7 +9,8 @@ prefers keeping the existing lifted drawing visible, temporarily uncomposited, u
 frame is actually shown. Treat separately from repeated-tap Move and streamed-frame placement.
 Test that theory first; reuse existing held-picture/base-revision retirement ownership, no timeout,
 blocking render or parallel Move cache. Record cold exit-to-Brush/Erase drawn evidence and stale/
-cancel/Undo/cel-switch boundaries; continue all earlier tasks.
+cancel/Undo/cel-switch boundaries; continue all earlier tasks. OLD21b public2 reached a moved-ink
+premise failure before the tool switch, so it proves no exit gap; test setup is being corrected.
 
 **New owner report, October28:** with a streamed screen present, moving it sometimes places the
 screen picture somewhere different from its Move box. Treat as an active stream/Move correctness
@@ -33,17 +34,15 @@ Test package is still unanswered; continue simulator/source work without restart
   Existing85 checks pass after correcting three test drawings that previously hit the timeline.
   All source entries reconcile and root inspected filled/Undo pictures (portrait). Temporary
   recorder/delay changes were retired whole. Integrated; no physical latency/crash claim.
-- Erasing: earlier176 checks and11 public workflows qualify only the old preview slice. The d034
-  normal291 result is RED (286 passed, 3 failed, 2 named opt-in skips). Test-only successor6af fixes
-  identified brush/cache fixture premises and adds a growth safeguard; it has not been rerun. Twelve
-  controls await positive-baseline review, and a Mode1 live In-Place public witness is being added.
-  No new-architecture qualification or physical Mode3 crash cause is established.
-- Fill-window fixture995 is independently47/47 green (source731 with extracted LayerFillView; current
-  integration e4f9 remains source730). Latest OLD packet `fill-owner-refusal-old4-57073ba1` is RED
-  (1 pass, 3 failures): callback/retry reached intended RED, ABA passed, and partial-release failed at
-  a combined assertion. Test-only pool fix c056 is committed but unrun; no behavior fix or partial
-  lifetime proof is established. Corrected selected controls, public growth/fault and final integration
-  checks remain.
+- Erasing: d034 normal291 is286passed/3fixturefailures/2namedopt-in skips. All11 previous public
+  workflows and bounded200-stroke preview/output parity passed; root inspected six whole pictures.
+  Fixture successors correct actual brush/cache premises. New live Mode1 In-Place witness cf3304b8
+  is running in selected11; previous447/9c compiled zero tests. Thirteen controls remain unrun.
+  No final new-architecture qualification or physical Mode3 crash cause is established.
+- Fill-window fixture995 passed47/47. Corrected OLDc056 selected4 is2intendedRED/2healthyGREEN,
+  source731 exact: missing refusal completion and same-request retry fail; Set Down release and ABA
+  remain healthy. Minimal051 runtime correction uses existing completion and an attempt generation;
+  it is source-only, not qualified. Normal50, deliberate controls and public growth remain.
 - Saved-file tidy now preflights every generated destination before any rename/move and rejects
   escaping resource addresses through one checked owner. Whole14classes293 pass at2905abd5;
   deliberate controls expose all17 mutated contracts (one observed sidecar target was classified
@@ -63,14 +62,13 @@ The cold Gallery pair is captured/verified7files and temporary capture code is r
 changed the disposable simulator's app-container UUID; the original path-strict verifier refused.
 Root retained that result and separately verified the actual freshly queried app container and all
 B bytes against staging/capture before opening B. Protected artwork was never used.
-The streamed-screen/Move-box report is recorded separately. OLD selected2 at0a9461e4 failed both
-intended new-frame checks after dock clearance and healthy-picture premises. Root reviewed the whole
-videos: On Top's green picture was displaced from the red Move box; In Place picture aligned, while a
-green rotation handle caused a false-positive probe. This establishes an On Top discrepancy in that
-test, not its cause. Source6c6ff97 changes the next frame to blue, proves no blue exists before its
-arrival, and captures whole-frame/pixel parity; it is unrun. Root also traced a possible post-gesture
-frame/model-write boundary in `crash-evidence`; use the existing stream ownership map, not an offset
-or second transform. Owner timing answer remains pending; independent work continues.
+The streamed-screen/Move-box correction is harvested into integrationa97f3f47. On Top had applied
+already-written movement again inside the still-transformed float. The correction returns live child
+frames to the existing bitmap latch, with no additional stored transform. All7 public stream routes
+passed at214 (whole146=145pass/1 new-unit convention failure); test-only131 corrected that convention
+and focused2 passed. Two deliberate faults were assertionRED with source730 restored; normal post-fault2
+then passed. Root inspected aligned blue-frame pictures for both placements. Assembled-source tests
+and device confirmation remain. Source-specific evidence is retained externally; no main merge/install.
 
 Simulator cache cleanup reclaimed4.33GB at a joined native boundary, preserving and verifying all
 containers and existing Paint/Runner data. Only two exact generated cache paths were removed. Full
