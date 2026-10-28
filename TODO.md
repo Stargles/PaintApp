@@ -37,16 +37,20 @@ Test package is still unanswered; continue simulator/source work without restart
   actual owner-level refusal/retry pixel witness before a root-cause change. Public growth/fault
   and final integration checks remain.
 - Saved-file tidy now preflights every generated destination before any rename/move and rejects
-  escaping resource addresses through one checked owner. Whole14classes293 pass at2905abd5.
-  First9 deliberate controls are accepted; successor8 ran, with7 intended assertion targets reached
-  and one linked-destination target needing causal review. Normal rebuild plus ordinary Gallery
-  whole5 is running before the two fresh-container cold Gallery cases. No format change here.
+  escaping resource addresses through one checked owner. Whole14classes293 pass at2905abd5;
+  deliberate controls expose all17 mutated contracts (one observed sidecar target was classified
+  after the run; its original title-rename assertion remains unproved). A normal rebuild then ran
+  Layout38 plus whole Gallery5:40pass/3expected opt-in skips. Both separate cold Gallery cases pass:
+  damaged A refused; B's complete files unchanged before B opens and visibly draws its own blue.
+  Root inspected both landscape pictures. Final combined gates and old-format retirement remain.
 - Automatic renewal source protection is activated and verified: renew installed6fb while main is
   older instead of downgrading it. Existing successful-install state is atomic and records the source;
   no current device/build/daemon change. Future manual installs update that state only after success.
 
-The cold Gallery pair is captured/verified7files and temporary capture code is retired. Verify B's
-complete bytes after A is refused and before B opens, with a fresh post-test container lookup.
+The cold Gallery pair is captured/verified7files and temporary capture code is retired. A native test
+changed the disposable simulator's app-container UUID; the original path-strict verifier refused.
+Root retained that result and separately verified the actual freshly queried app container and all
+B bytes against staging/capture before opening B. Protected artwork was never used.
 The streamed-screen/Move-box report is recorded separately; source mapping found unchanged stream
 placement since installed6fb. Test both On Top and In Place across drag/release/Set Down before
 attributing a cause or changing coordinates. Owner timing answer is optional and still pending.

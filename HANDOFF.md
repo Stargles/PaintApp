@@ -99,32 +99,37 @@ No schema or legal-old-spelling change. Three obsolete PNG-encode counts reuse e
 protected-source/byte/pixel witnesses; no production change in that fixture adaptation.
 
 Original17 controls stopped at10: first9 accepted at10 actual assertions, old10 threw insetup and
-gets zero. Narrowed successor8 completed all8 assertion_red and restored730sourceentries;
-independent extraction finds7/8 unique mapped targets reached. Linked-destination title-rename
-assertion stayed healthy while earlier-sidecar preservation failed: causal review remains, no broad
-8accepted claim. Packet `package-address-controls8-legal-read-2905abd5/native-run01` and original
-maps/results are immutable. First9 filename-percent case proves identity before laterIO fallout only.
+gets zero. Narrowed successor8 all assertion_red/restored730; seven premapped targets accepted.
+For linked destination, title-rename1094 stayed healthy while direct sidecar-preservation1099 failed.
+The observed1099 classification is explicitly post-run, original1094 uncredited. Raw results/maps
+unchanged; generic derived extraction was overwritten once, then original-map extraction regenerated
+and saved separately beside the observed-map extraction. Root causal receipt states exact limits.
 
-**Current native:** normal package Layout38 + ordinary whole Gallery5, total43 with3 expected named
-opt-in skips, root operator session24517. Packet `package-address-normal-gallery43-2905abd5`.
-This rebuilds NORMAL products after mutants. Existing positive293 remains at the exact same source.
-After join/reconciliation, use reviewed capture/stager/runner copy on a fresh owned iPad9sim, A alone,
-new post-A `simctl get_app_container` lookup then B byte verification BEFORE opening B, B alone.
-Never run reset-heavy ordinary Gallery class against the staged pair. No physical restart/install.
+NORMAL Layout38+ordinary Gallery5 passed40/3expected namedskips at exact2905/source730. The older
+unchanged293positive is retained. Fresh owned iPad9simE15D8434-9A95-4996-8C47-B1F18E731621 then ran
+A-refusal1 and B-open1 GREEN each, root methods/device/argv/source730exact and LOOKed both whole
+landscape pictures. Bcomplete3files matched stage/capture AFTER Arefusal BEFORE Bopen. NativeA changed
+app-container UUID84833→64CA; original verifier rejected that change. Root's successor read-only proof
+uses a fresh authoritative bundle lookup, fixedowned device/nonlinkdirectorychain, projectUUID and
+all Bhashes. No stagingreceipt/path edit or assumedrelocationcause. Packet
+`package-address-cold-ui-2905abd5` retains all results. Same device now shutdown with data retained;
+no reset or physicalinstall. Finalcombined/fast/old-format-retirement gates remain.
+
+**Next native:** newstreamMove selected2 at sourcebe82618f, packet `stream-move-old2-be82618f`;
+owned56 reboot in progress, root will start only after join. Source product unchanged fromintegration,
+only publictestfixture/helper additions. Eraser source1a4937a7 ready for normal reference/geometry
+checks; broad manifest291 (not native-tested), peerreview/faultplan active. 730 means tracked native
+source file entries, never test count. Native selectors use actual classes, not sourcefilename.
 
 Stream Move owner report source map is `stream-move-owner-bug-map.md`: relevant placement/frame
 code unchanged6fb→integration; default OnTop shares floatView, InPlace composite is asynchronous.
 Agent is preparing drawn stream bounds versus Move hull tests for both modes and all landing phases.
 No confirmed defect/source change or native run; pending timing answer is not a blocker.
 
-Cold Gallery pair writerff selected1 GREEN/root730exact; copied7files byte/hash exact (IDs/index/
-A's one required raster ref toB verified), artifact `package-cold-writer-ff62580e/captured-pair-`
-`9D151F05-6036-4457-8D63-0E87F8F25F59`. TEMPcapture completelyretired2c921; Layouttest byteexacte36.
-Permanent GalleryRecovery class5 has2 new opt-in methods; neither run yet. Scopedstage/runnercopy/
-B-after-Averify scripts reviewed in writerpacket. Create fresh owned iPad9sim AFTER native lease,
-normalbuild then stage without resetGallery; must freshlookup app container AFTER A refusal before
-B-hash verification, BEFORE opening B. Stagegrant/schema in coordinatorproposal. No freshsim yet.
-MotionGroup previous-writer3 remains unconsumed separately.
+Cold pair real-writer provenance remains packet `package-cold-writer-ff62580e` (seven files, nonce
+9D151F05-6036-4457-8D63-0E87F8F25F59). Temporary writer hook retired2c921; no regeneration. The two
+permanent Gallery methods are now qualified as above. MotionGroup previous-writer3 remains separate,
+prepared/unconsumed.
 
 Owned56 cache housekeeping completed:4.33GBactualfreed, whole9446Container entries unchanged across
 clean, archive60012349Bverified. After boot2840existingPaint/Runner entries exact; onlyone584B new
