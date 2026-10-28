@@ -16,14 +16,12 @@ Test package is still unanswered; continue simulator/source work without restart
   Existing85 checks pass after correcting three test drawings that previously hit the timeline.
   All source entries reconcile and root inspected filled/Undo pictures (portrait). Temporary
   recorder/delay changes were retired whole. Integrated; no physical latency/crash claim.
-- Erasing reuses the existing cel-picture renderer in the admitted stroke window. The stronger
-  public44c test reproduced a stale erased target; focusedeee logic isolated an empty outside-patch
-  clip that let frozen ink reappear through transparent pixels. Shared correctionbfd95b4e skips that
-  source draw when nothing remains outside the replacement. Its166 checks pass, including immediate
-  erased-target, exterior ink, rasterization/preview counts, model and crop/refusal/memory contracts.
-  Root reconciled730 entries and inspected both whole owner-landscape pictures: target gone at lift,
-  lower stroke intact through12s. No new stored state/cache/service. Deliberate controls, whole
-  affected UI and final composition/device checks remain; no iPad crash-cause claim.
+- Erasing's shared stale-picture correction passes176 checks, including all11 eraser UI workflows.
+  Root inspected6 whole landscape drawings;9 deliberate faults hit12 intended assertions with exact
+  source restoration. Before integration, test a source-traced possible gap around in-place streamed
+  references: the clearing overlay may omit their pixels. No further runtime change before an actual
+  pixel witness. Preserve reference ordering and use the existing display owner; no new flags/cache.
+  Mode3 incremental rendering remains asynchronous/unchanged from6fb; iPad crash cause unproved.
 - Fill-window fixture47 is independently green; actual source count731 includes the extracted
   existing LayerFillView. Public growth/fault and final integration checks remain.
 - Saved-file tidy's old code reproduces partial migration on a blocked later destination. Candidate
@@ -34,11 +32,16 @@ Test package is still unanswered; continue simulator/source work without restart
   older instead of downgrading it. Existing successful-install state is atomic and records the source;
   no current device/build/daemon change. Future manual installs update that state only after success.
 
-Eraser controls9 now reproduce all12 intended assertion sites with exact730-source restoration;
-whole affected UI/normal rebuild still pending. Preserve original mapv3 and its off-by-one correction
-v4 (failure-latch assertion898, not brace899). Simulator-generated caches reached4.05GiB at a joined
-native boundary; preserve/hash-verify its complete containers before clearing the two exact cache
-paths, using the reviewed scoped workflow. No iPad/artwork or global-cache cleanup.
+Packagee36wholeLayout38 passes; wider293, conditional17 controls and cold public Gallery proof remain.
+TEMP test-only writer captureff62580e is authorized to export a fresh private A/B pair, followed by
+complete retirement after root verifies the copy. Two permanent opt-in Gallery tests drive A's
+existing No Backup Available route and separately open B's blue raster. Stage on a fresh owned
+simulator without library reset; verify B's bytes after refusal before opening it. No protected
+artwork mutation. Current packageBFT is compilation only, not a passed test.
+
+Simulator cache cleanup reclaimed4.33GB at a joined native boundary, preserving and verifying all
+containers and existing Paint/Runner data. Only two exact generated cache paths were removed. Full
+receipt and the specifically accepted new boot snapshot are in the owned56C-cache-cleanup packet.
 
 Items leave this file only in the qualified merge. “Installed” and “tested separately” do not mean
 that the final combined audit build has passed.
@@ -51,7 +54,7 @@ that the final combined audit build has passed.
 | Erasing crash in Test1 | Logs preserved; app/system allocation cause remains unproved | Finish window-renderer checks and fresh physical evidence |
 | Drawing/erasing lag and Move regression | Move and ordinary drawing-wait corrections integrated; 85 focused checks pass | Eraser window source and device confirmation remain |
 | Architecture, cleanup and bug audit | In progress; several corrections separately tested and integrated | Remaining source review, findings below, combined checks and performance |
-| Development disk cleanup | About50GB reclaimed across cleanup passes; about15GB currently free | Continue bounded cache housekeeping between test batches |
+| Development disk cleanup | About54GB reclaimed across passes; about18GB currently free | Continue bounded cache housekeeping between test batches |
 | Undo on an edited cel | Correction integrated; model/public/fault checks passed | Final combined checks |
 | Very large curve coordinates | Safe narrowing integrated; model/archive/fault checks passed | Final combined checks; no crash-cause claim |
 | Library relocation and Trash ownership | Corrections integrated and separately checked | Final combined checks |

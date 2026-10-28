@@ -62,34 +62,30 @@ extraction. Remaining in the fill packet: public growth 1 and fault controls 4, 
 256×255 and 120×119 fixture stays within the 705600-byte budget and retains output assertions.
 Evidence: `/Users/juliapark/PaintWork/s55-recorded-regressions/fill-owner-window47-995677c5/`.
 
-### Eraser window — current native boundary
+### Eraser window — qualified slice, reference presentation HOLD
 
-Tree `/Users/juliapark/PaintWork/PaintApp-s55-eraser-window`, unharvested. Runtime reuses
-`CelContentPicture` as the subtractive/replacing backdrop and draws directly into admitted stroke
-windows. Vector source excludes references; existing display ownership/pose stay unchanged. Only the
-full render's unconditional held-ink clearing was removed. Draw failures use the existing refusal.
-No new provider, cache, flag or stored state. Shared clip correction copies transparency instead of
-resurrecting erased holes. Existing preview counter moved to actual ordinary overlay publication;
-no new metric. Blank test fixtures now exercise admissible painting and actual subtractive coverage.
+Tree `/Users/juliapark/PaintWork/PaintApp-s55-eraser-window`, unharvested. Runtimebfd95b4e reuses
+existing CelContentPicture for scratch-sized backdrop drawing, preserving reference-free source,
+held exterior ink and failure propagation; shared clipping copies transparent pixels. It skips
+original source where the full ink patch replaces it. The old public white-target check and focused
+transparent-hole test both reproduced stale ink before that correction. No new provider/cache/state.
 
-Successor `2f343024` ran **165/165 GREEN**, exact730/method/device/argv reconciled. OLD `9b` had
-independently reproduced the two stale blank tests and the shared clip defect. However root LOOK
-found the short erased target apparently visible in the first app picture and gone after12s; the
-original public test checked exterior ink/model but not the erased pixel. **HOLD qualification**.
-`44c2bbdd` adds only direct white-before/ink-before/white-immediately-after guards and whole-screen
-captures, measures paper after configuration, retaining original delays/wait/counts/exterior checks.
-Selected public1 **fails only immediate white-target assertion245**, after white-before and both
-ink-before premises pass; root reconciled730/method/device/argv and LOOKed the whole final-video
-frame: both marks remain. Packet `s55-recorded-regressions/eraser-direct-target1-44c2bbdd/`.
-Later count/trace/exterior/model assertions were not executed on this failing method. Exact method:
-`Mode1UITests/testMode1KeepsDisjointPendingInkVisibleThroughEraseAndRenderWait`.
-OLDeee focused logic isolates the same defect: transparent replacement hole had alpha255. Shared
-correctionbfd95b4e explicitly skips original ink when outside-patch path is empty; no new state,
-cache, service or wait. **Current166 GREEN**, root730/method/device/argv exact. Root LOOKed both
-whole owner-landscape screen captures: upper target absent immediately and after12s; lower ink
-intact. `s55-recorded-regressions/eraser-corrected-picture166-bfd95b4e/native-run01` has source/outcome/
-picture receipts. Controls8 and whole Mode1/Cutting/Picker11 remain before harvest. No device claim. Whole affected UI/fault controls, final gates and device evidence
-remain. No crash-cause or physical latency claim.
+**Current normal176 GREEN**, root730/method/device/argv exact after rebuilding normal source:
+Hybrid27 +Brush67 +LiquifyRaster31 +Residency40 +wholeMode1(5)/Cutting(4)/Picker(2). Root LOOKed6
+complete owner-landscape pictures covering Cut/Undo/Redo, splatter and immediate target removal.
+Controls9 accepted at12 actual assertions, all730 restored; v3's off-by-one brace location is preserved
+and corrected byv4 to the predeclared hasFailed assertion898. Packets `s55-recorded-regressions/`
+`eraser-normal-and-whole-ui176-bfd95b4e` and `eraser-bounded-controls9-bfd95b4e` retain all receipts.
+
+**HOLD before harvest:** code tracing finds the reference-free inkPatch may clear an in-place stream
+inside its window. The outer composite draws the reference vector before the clearing overlay, with
+no later same-layer restoration. This is source-level only, not yet a native/UI observation. Agent
+is adding a finite actualScratch→CelDisplay comparison against the committed fully erased stroke
+with its reference frame retained. Commit witness, run it before any further runtime change; preserve
+reference z-order through the existing display owner, no new flags/services or flattening shortcut.
+Mode3cut path remains asynchronous and unchanged from6fb; this optimization concerns Mode1's old
+full backdrop. `s55-recorded-regressions/mode3-current-source-map.md` records exact paths and evidence
+limits; 1850MiB backboardd report is not an app kill or a proven allocation cause.
 
 ### Package migration / tidy
 
@@ -104,13 +100,18 @@ checked-write change left a local ProjectStore.write wrapper missing `throws` al
 already propagate it. Bounded signature correction7eafe7d9 committed in source branch; rerun38 before
 wider package/fault/UI gates. No migration qualification yet.
 
-**Current native boundary:** eraser controls9 completed; root accepted all9 intended recipes at12
-actual assertions with730 source entries restored. v3 assertion map had an off-by-one closing-brace
-entry for hasFailed; original map/extraction retained, v4 corrects only metadata to actual898. Whole
-normal176 (fourlogic165 +Mode1/Cutting/Picker11) queued, compiled mutant products require rebuild.
-Owned56 caches now4.05GiB, native joined; archive/verify/clean only its two generated cache targets
-using prior reviewed preservation script before normal176. Free13.79GiB; no artwork/device cleanup.
-Packagee36 nowGREEN38/rootexact730; whole current14classes293/controls/publicUI remain.
+**Current native boundary:** packageff62580e BUILD-FOR-TESTING ONLY, no test credit yet; temporary
+current-writer A/B export hook plus2 permanent opt-in GalleryRecovery methods. Capture on owned56,
+copy/hashverify artifact, then retire TEMP WHOLE. Stage public A-refusal/B-blue jobs on a fresh owned
+simulator without resetGallery; hashBafterrefusal BEFOREopeningB. e36wholeLayout38 is independently
+GREEN; current14-class inventory293 and controls17 source packets are prepared, not native-run.
+MotionGroup previous-writer3 remains unconsumed separately. New source changes require refreshedpins.
+
+Owned56 cache housekeeping completed:4.33GBactualfreed, whole9446Container entries unchanged across
+clean, archive60012349Bverified. After boot2840existingPaint/Runner entries exact; onlyone584B new
+OS SplashBoard downscaled snapshot (AAPLheader,ktxextension), specifically reviewed/retained. Same56
+booted, ~18GiBfree. Evidence `s55-recorded-regressions/owned56C-cache-cleanup-20261028`. Other devices,
+iPad/artwork, sharedProducts and installed6fb release untouched.
 
 ## Other prepared work and still-open owner asks
 
