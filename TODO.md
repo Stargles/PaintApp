@@ -2,6 +2,15 @@
 
 ## Current owner-facing status — October 28
 
+**New owner report/ruling — Move Set Down gap:** selecting/moving an object, then switching to Brush
+or Eraser (exiting Move), briefly makes the moved drawing disappear before its baked/composited
+picture arrives. Owner suspects the preview is retired before the compositor finishes and explicitly
+prefers keeping the existing lifted drawing visible, temporarily uncomposited, until the finished
+frame is actually shown. Treat separately from repeated-tap Move and streamed-frame placement.
+Test that theory first; reuse existing held-picture/base-revision retirement ownership, no timeout,
+blocking render or parallel Move cache. Record cold exit-to-Brush/Erase drawn evidence and stale/
+cancel/Undo/cel-switch boundaries; continue all earlier tasks.
+
 **New owner report, October28:** with a streamed screen present, moving it sometimes places the
 screen picture somewhere different from its Move box. Treat as an active stream/Move correctness
 bug; exact drag/release/Set Down timing and scene are not established. Trace image and box through

@@ -1,5 +1,14 @@
 # Known Issues
 
+## Move exit briefly hides the placed drawing — October 28
+
+Owner reports a visible gap when a selected/moved object is placed down by changing to Brush or
+Eraser. Theory: the float preview is removed before the background compositor's new frame lands.
+Owner authorizes retaining the same lifted picture, even temporarily uncomposited, until the finished
+base is actually displayed. Trace endVectorFloat/raster float settlement versus existing UnlandedInk,
+held edit/derived pictures and content/base revisions. Reuse the existing handoff and protect late
+callbacks, history and cel/scene changes; no guessed delay or new cache. Native proof pending.
+
 ## Streamed screen can separate from its Move box — October 28
 
 Owner: “if i have a stream screen and i move it, sometimes the screen moves to a different place

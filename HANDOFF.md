@@ -1,5 +1,11 @@
 # Handoff — active owner-resumed work (October 28)
 
+New active owner Move handoff report: after moving a selection, switching to Brush/Erase briefly
+hides the placed drawing. Owner's theory is early preview retirement; explicit preference is keep
+same lifted picture until composited base actually lands, accepting temporary raw overlay. Recorded
+in TODO/BUGS before investigation; reuse existing held-content/revision retirement, no timer/newcache.
+This adds to (does not replace) stream offset, Test Move/lag/crash and the rest of TODO.
+
 Kevin resumed: **continue; do not park**. Read this file, `AGENTS.md`, `CLAUDE.md`, `TODO.md`,
 `BUGS.md`, and the relevant specification. TODO is the complete owner-ask queue; items leave only
 in a qualified merge. Preserve architecture, artwork, evidence, and one-native-lease-at-a-time rules.
