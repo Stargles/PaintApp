@@ -28,7 +28,14 @@ outstanding and takes priority when the owner resumes. Parked again; original le
 
 Kevin resumed after the retrieval-only park. Conserve usage and use
 agents for independent work. Architecture, correctness and performance take priority over speed.
-No question is pending. Old iPad readiness is consumed; do not restart it overnight.
+Fresh saved/unlocked readiness is requested for exporting the current Test package; no reply yet.
+Old iPad readiness is consumed; continue simulator/source work without restarting the iPad.
+
+Move component4413a846 now passes77 focused checks, and restoring the old guard fails the original
+Move-box assertion. Root inspected both owner-landscape terminal drawings. This fixes required
+vector picture acquisition while retaining ordinary hidden-layer suppression; no new stored state.
+Current Test/device confirmation and final integration remain. Latency OLD recorder witness stopped
+at a TEMP accessibility setup check before drawing, so no latency result; correct setup and rerun.
 
 Items leave this file only in the qualified merge. “Installed” and “tested separately” do not mean
 that the final combined audit build has passed.
@@ -40,7 +47,7 @@ that the final combined audit build has passed.
 | Smart father–grandfather saving | Newest clock-bucket versions implemented and installed | Finish newly found failed-save retry and safe-exit correction |
 | Erasing crash in Test1 | Source/data/log investigation complete so far; cause unproved | Fresh physical capture when Kevin is awake and the iPad is ready |
 | Architecture, cleanup and bug audit | In progress; several corrections separately tested and integrated | Remaining source review, findings below, combined checks and performance |
-| Development disk cleanup | About50GB reclaimed across cleanup passes; about46GB currently free | Continue bounded cache housekeeping between test batches |
+| Development disk cleanup | About50GB reclaimed across cleanup passes; about15GB currently free | Continue bounded cache housekeeping between test batches |
 | Undo on an edited cel | Correction integrated; model/public/fault checks passed | Final combined checks |
 | Very large curve coordinates | Safe narrowing integrated; model/archive/fault checks passed | Final combined checks; no crash-cause claim |
 | Library relocation and Trash ownership | Corrections integrated and separately checked | Final combined checks |

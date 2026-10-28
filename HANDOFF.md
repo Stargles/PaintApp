@@ -35,9 +35,10 @@ bulk sync, matching OLD guard for both hidden/masked. Peer proposal accepted. Na
 730reconciled. Author that one-line successor, and run existing Guide2 at owner landscape via
 class setup plus terminal whole screenshots; assertions/fixtures/probes unchanged. No new flags.
 Current4413a846 corrects that visibility predicate through the existing pushed-down state. Whole
-77 nowGREEN/root730/device/method/argv reconciled; root LOOKed90c's two Move/guide pictures, current
-owner-size terminal captures pendingLOOK. Original-guard restoration1 currently running; join and
-restore all730 before next native. No new iPad install.
+77 GREEN/root730/device/method/argv reconciled. Root LOOKed both whole current owner-landscape
+terminal captures: guide and moved ink retained after Set Down. Restoring the original guard fails
+only existing85 Move-box exposure; all earlier premises pass, all730 restored and runner joined.
+Component qualified; harvest90c+441 to integration. Current Test package/device still unverified.
 
 Next latency witness SOURCE ONLY authorized: reuse existing UnlandedInkUITests two-stroke landing
 method and existing4s worker delay; wrap the unchanged drawing/pixel/count checks in public
@@ -47,6 +48,11 @@ explicit vectorRasterize phase and inspect main counts, never credit a missing t
 OLD method may pass picture checks while synchronous fallback bypasses worker delay; recorder
 measurement is a separate cross-boundary contract, not a claimed native assertion failure. No
 latency runtime change until OLD evidence is captured. No new IPC or metrics service.
+OLD91f recorder wrapper ran1 but stopped at its new setup106: SwiftUI's live readout is not exposed
+as an otherElements match. Toggle label correctly became Stop recording actions; drawing never
+began, so zero latency credit. Drop that redundant TEMP readout assertion only; keep public toggle
+state and final durable recording row checks, all original drawing/pixel/delay/count checks unchanged.
+Rerun the OLD witness before any runtime correction. Fresh saved/unlocked export question pending.
 
 ## Previous parked checkpoint — October26–27
 
