@@ -57,6 +57,9 @@ application wait correction remains unchanged while the strengthened tests are q
 Eraser source work is scoped to replacing its full-canvas backdrop with the existing immutable
 cel-picture renderer drawn into the existing stroke window. Preserve reference exclusion, pose,
 backing and held strokes outside that window; new logic/public checks required. No new app service.
+First current eraser165:161pass4fail. Window/crop/reference/refusal logic passes; compare blank-tier
+budget failures and replacement clipping with OLD, and trace the async preview counter before
+changing code. The public test has not yet reached its after-gesture exterior-ink assertions.
 
 Items leave this file only in the qualified merge. “Installed” and “tested separately” do not mean
 that the final combined audit build has passed.

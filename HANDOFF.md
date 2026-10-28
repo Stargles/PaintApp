@@ -43,6 +43,13 @@ changed Swift files parse clean. Source730; staticfast5416/full6014. Existing-on
 `s55-recorded-regressions/run-normal-grant.py` wraps frozen d231 helper and validates pin/clean/count/
 space before launch; source/method/device/argv extraction still independent afterward. No engine
 qualification or physical/crash claim yet. OLDtidy6fee selected1 is QUEUED ONLY after this lease.
+Actual0fe165 joined161pass/4fail, root reconciled730/method/device/argv. All Hybrid26 (including
+new crop/reference/window/refusal), Liquify31, Residency40 pass. Failures: existing blank-tier2 throw
+budgetExceeded, new replacement clip parity2040bytes/worst255, and new Mode1 UI preview frames0.
+UI passed its replacement role and unchanged rasterizes count BEFORE frames assertion; later held
+pixel/model assertions unexecuted. No renderer harvest. Compare OLD6b blank2+same clip witness
+and inspect preview counter placement (refreshDisplay early async wait may skip counting shown
+overlay). No weakening assertions/budgets/delays; fix shared root only after evidence. Native free.
 
 Kevin says the problem seems limited to one canvas and authorizes starting. Investigate both
 preserved recordings first: selection→Move in Test/2048² and drawing/erasing latency/new crash in
