@@ -51,7 +51,8 @@ pixel/model assertions unexecuted. No renderer harvest. Compare OLD6b blank2+sam
 and inspect preview counter placement (refreshDisplay early async wait may skip counting shown
 overlay). No weakening assertions/budgets/delays; fix shared root only after evidence. Native free.
 OLD tidy6fee now reaches intended refusal/manifest/source-location failures after all setup passes;
-root reconciled730. Later external-byte assertions stop at missing moved source and earn no credit.
+root reconciled730. XCTest catches thrown reads and continues; later external-preservation checks
+have no failing issue, but do not discriminate this OLD boundary. Corrected causal review-v2.
 Authorize NEW2c shared global preflight of all generated targets BEFORE rename/moves, reuse checked
 resolver and CAS, preserve spellings/no decoder change. Existing occupied regular-target skip does
 not rewrite that cel but permits mixed partial migration; choose non-destructive whole-plan refusal,
@@ -62,6 +63,15 @@ changed ordinary vector image and delivered timing trail, keep raster/Mode3 excl
 Clip remains unchanged until OLD scratch3 runs. Source9b adds exact new clip test using OLD UIImage
 backdrop; blank2 original. Native selected3 next. Empty-read trace refutes early-empty-allocation
 theory: first blank test then stamps1GiB tier; second uses old replacement rather than actual coverage.
+OLD scratch9b selected3 now reproduces all three exact failures, source730/method/device/argv
+reconciled. Author shared clip correction: copy current window's pixels including transparency
+inside selected path; keep source outside, no new role branch/state. Source-over resurrects holes.
+Author test-only blank fixture correction separately: retain16383² nil-read, use an admissible small
+raster for the nonempty-dab comparison; large whole-tier write is legitimately refused. Blank eraser
+must exercise actual subtractive coverage (normal coverage stamps), positive window and successful
+no-allocation commit, not old replacing/destinationOut path. Preserve final blank/empty assertions,
+no budget increases. Counter de481 is source-only ready. NEW package preflightbf1c has38 tests,
+source-only/compiler unrun. Current renderer0fe not harvested, no crash/device claim.
 
 Kevin says the problem seems limited to one canvas and authorizes starting. Investigate both
 preserved recordings first: selection→Move in Test/2048² and drawing/erasing latency/new crash in
