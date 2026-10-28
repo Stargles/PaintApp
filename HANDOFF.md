@@ -29,6 +29,11 @@ forbidden. Filter the existing bulk post-settlement sync to visible hosts, prese
 hidden-host suppression; no new flags/cache/retry/delay or bypassing source admission. Reuse
 existing DeferredVectorRender logic and whole Guide/Move tests unchanged. Latency fix remains
 separate; this change does not claim to remove the recorded main-thread render wait.
+Candidate90c Guide2 nowGREEN, but peer caught that LayerHostView.isBlanked excludes artist-hidden
+hosts. Do not qualify90c: successor must use existing authoritative strokeView.hostIsBlanked in
+bulk sync, matching OLD guard for both hidden/masked. Peer proposal accepted. Native90c alljoined/
+730reconciled. Author that one-line successor, and run existing Guide2 at owner landscape via
+class setup plus terminal whole screenshots; assertions/fixtures/probes unchanged. No new flags.
 
 ## Previous parked checkpoint — October26–27
 
