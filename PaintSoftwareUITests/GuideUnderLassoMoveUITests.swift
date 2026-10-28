@@ -22,6 +22,11 @@ import XCTest
 /// what the canvas shows from the lift to the drop's bake.
 final class GuideUnderLassoMoveUITests: PaintUITestCase {
 
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        XCUIDevice.shared.orientation = .landscapeLeft
+    }
+
     /// One screen point at paper fractions.
     private func screenPoint(_ canvas: XCUIElement, _ paper: CGRect, _ px: Double, _ py: Double) -> CGPoint {
         let frame = canvas.frame
@@ -126,6 +131,7 @@ final class GuideUnderLassoMoveUITests: PaintUITestCase {
         let moved = movedEnd(canvas, paper)
         XCTAssertGreaterThan(readScreenNow(moved).filter(isInk).count, moved.count / 2,
                              "\(what): the line is set down where it was dragged")
+        attachScreenshot(XCUIScreen.main, "\(what)-after-set-down")
     }
 
     /// **The owner's report**: the guide under the drawing, a lasso move of the drawing. What the artist
