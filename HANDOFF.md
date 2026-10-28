@@ -77,6 +77,11 @@ settlement. Retire TEMP recorder wrap/delays WHOLE back to441 original test befo
 qualification; run original Unlanded3, Guide2, pending-fill whole class and existing related logic.
 No device install/physical latency/crash completion claim. Only runtime CanvasView diff is retained.
 Permanent-source6b7759a9 original ten whole classes85 is now the sole native lease, TEMP retired.
+That run joined85:84pass/1fail at FillUndoRedoUITests.testUndoRemovesFillKeepingUnderlyingStrokes
+existing503 left-edge pixel after Undo. Drawing-over-pending-fill, original Unlanded3, Move2,
+playback4 and logic71 pass. Exact730/method/device/argv reconciled; no GREEN85 or harvest claim.
+Inspect actual failure capture and run OLD441 same whole FillUndoRedo5 before any change to the
+new stroke policy or existing assertion. No arbitrary delay/probe/tolerance adjustment. Native free.
 
 Renewal safety source work authorized: existing resign.sh blindly selects old origin/main, while
 verified installed6fb is a descendant. Add installed source SHA to existing successful-install state;

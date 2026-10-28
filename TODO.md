@@ -47,6 +47,8 @@ source/mask admission. No stored flag/cache/new service; eraser's separate full 
 The correction passes the two-stroke picture/landing check; recorder explicitly captures a worker
 render. Early top8 summaries remain incomplete, so no whole-run zero-main-render claim. Retire the
 TEMP measurement wrapper whole and qualify original drawing, Move and pending-fill workflows.
+Original85 run:84passed, but Undo-fill left-edge pixel failed once. Compare OLD441 whole fill-Undo
+class and inspect captures; no current-stroke correction qualification/harvest yet.
 
 Items leave this file only in the qualified merge. “Installed” and “tested separately” do not mean
 that the final combined audit build has passed.
