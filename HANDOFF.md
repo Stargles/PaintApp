@@ -34,6 +34,19 @@ hosts. Do not qualify90c: successor must use existing authoritative strokeView.h
 bulk sync, matching OLD guard for both hidden/masked. Peer proposal accepted. Native90c alljoined/
 730reconciled. Author that one-line successor, and run existing Guide2 at owner landscape via
 class setup plus terminal whole screenshots; assertions/fixtures/probes unchanged. No new flags.
+Current4413a846 corrects that visibility predicate through the existing pushed-down state. Whole
+77 nowGREEN/root730/device/method/argv reconciled; root LOOKed90c's two Move/guide pictures, current
+owner-size terminal captures pendingLOOK. Original-guard restoration1 currently running; join and
+restore all730 before next native. No new iPad install.
+
+Next latency witness SOURCE ONLY authorized: reuse existing UnlandedInkUITests two-stroke landing
+method and existing4s worker delay; wrap the unchanged drawing/pixel/count checks in public
+recorder.toggle start/stop, with no product hook or timing-threshold change. Preserve all existing
+assertions. Capture a fresh JSONL after native via existing simulator file interface; require an
+explicit vectorRasterize phase and inspect main counts, never credit a missing top8 phase aszero.
+OLD method may pass picture checks while synchronous fallback bypasses worker delay; recorder
+measurement is a separate cross-boundary contract, not a claimed native assertion failure. No
+latency runtime change until OLD evidence is captured. No new IPC or metrics service.
 
 ## Previous parked checkpoint — October26–27
 
