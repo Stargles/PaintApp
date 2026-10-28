@@ -34,6 +34,12 @@ Test package is still unanswered; continue simulator/source work without restart
   older instead of downgrading it. Existing successful-install state is atomic and records the source;
   no current device/build/daemon change. Future manual installs update that state only after success.
 
+Eraser controls9 now reproduce all12 intended assertion sites with exact730-source restoration;
+whole affected UI/normal rebuild still pending. Preserve original mapv3 and its off-by-one correction
+v4 (failure-latch assertion898, not brace899). Simulator-generated caches reached4.05GiB at a joined
+native boundary; preserve/hash-verify its complete containers before clearing the two exact cache
+paths, using the reviewed scoped workflow. No iPad/artwork or global-cache cleanup.
+
 Items leave this file only in the qualified merge. “Installed” and “tested separately” do not mean
 that the final combined audit build has passed.
 

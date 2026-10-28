@@ -104,6 +104,14 @@ checked-write change left a local ProjectStore.write wrapper missing `throws` al
 already propagate it. Bounded signature correction7eafe7d9 committed in source branch; rerun38 before
 wider package/fault/UI gates. No migration qualification yet.
 
+**Current native boundary:** eraser controls9 completed; root accepted all9 intended recipes at12
+actual assertions with730 source entries restored. v3 assertion map had an off-by-one closing-brace
+entry for hasFailed; original map/extraction retained, v4 corrects only metadata to actual898. Whole
+normal176 (fourlogic165 +Mode1/Cutting/Picker11) queued, compiled mutant products require rebuild.
+Owned56 caches now4.05GiB, native joined; archive/verify/clean only its two generated cache targets
+using prior reviewed preservation script before normal176. Free13.79GiB; no artwork/device cleanup.
+Packagee36 nowGREEN38/rootexact730; whole current14classes293/controls/publicUI remain.
+
 ## Other prepared work and still-open owner asks
 
 Keep every queue item in TODO, including autosave `4c`, export `694`, gradient `8e`, resize `ac`,
