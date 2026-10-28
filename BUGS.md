@@ -1,4 +1,4 @@
-Response-curve correction prepared: landed frame travels with the moved curve, replacing post-move
+# Known Issues
 
 ## Streamed screen can separate from its Move box — October 28
 
@@ -9,9 +9,16 @@ box positions through existing stream/Move workflows, including late frame deliv
 No speculative coordinate offset, retry or duplicate transform state. Record whether the discrepancy
 is during drag, after release or after Set Down when the owner replies. No device restart authorized.
 
-nearest-key reacquisition. Two continuation/ownership logic methods plus one cold drawn control
-are integrated; logic passed in normal1cf422 and separate cold continuation/portrait controls each
-passed1/1. Final assembled-source whole classes and assertion faults remain pending.
+## Adjustable fill can cache a preview that never drew — October 28
+
+Read-only source audit found a conditional owner gap in LayerHostView and the pending extracted
+LayerFillView candidate995677c5: showFill records the render/clip identity before presentation; a
+WindowSurfaceView surface-mint refusal returns without completion, so an identical subsequent
+request is skipped forever by the owner. Existing lower-level refusal/retry test explicitly asks
+again and does not prove the host does so. Native reproduction is pending. Add one deterministic
+owner-level failed-mint→identical-request→visible-pixels witness before changing source. Reuse the
+existing completion/result and owner identity; no polling service, arbitrary retry or new cache.
+Reports: s55-recorded-regressions/layerhost-fill-preview-retry-review-cd393bf.md and followup995.
 
 ## Brush response-curve drag loses its selected key on clamped ticks — 2026-10-24
 
@@ -24,8 +31,6 @@ past a neighbor can land1023, then freeze on return or start moving the neighbor
 ordinary modulation bindings use this control. Root approved returning landed frame with the updated
 curve on the existing movement seam, with multi-tick/neighbor and drawn cold controls. Work recorded
 before implementation on tmp/s54-response-curve; no native/compiler/device run by source author.
-
-# Known Issues
 
 ## October28 evidence continuation for recorded canvas regressions
 

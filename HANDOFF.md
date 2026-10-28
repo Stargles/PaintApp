@@ -67,6 +67,11 @@ extraction. Remaining in the fill packet: public growth 1 and fault controls 4, 
 256×255 and 120×119 fixture stays within the 705600-byte budget and retains output assertions.
 Evidence: `/Users/juliapark/PaintWork/s55-recorded-regressions/fill-owner-window47-995677c5/`.
 
+LayerFillView candidate995 still caches render/clip identity before a refused surface mint with no
+completion. Source-only audit and followup survive extraction; root recorded in TODO/BUGS before
+work. Add an OLD owner-level deterministic refusal→same-request pixel witness; no speculative retry
+service/new cache. hcompact owns source-only reproduction, no native until root grants.
+
 ### Eraser preview — reference qualification in progress
 
 Tree `PaintApp-s55-eraser-window`. Earlierbfd95b4e normal176/controls9 qualified only the older

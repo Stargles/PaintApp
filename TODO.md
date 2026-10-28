@@ -32,7 +32,10 @@ Test package is still unanswered; continue simulator/source work without restart
   Independent review found no concrete source blocker; that is not a test pass or physical proof.
   Mode3 remains asynchronous/unchanged from6fb; iPad crash cause remains unproved.
 - Fill-window fixture47 is independently green; actual source count731 includes the extracted
-  existing LayerFillView. Public growth/fault and final integration checks remain.
+  existing LayerFillView. Audit found the owner may cache an undrawn preview after surface creation
+  refuses, so identical later requests never ask again. This also exists in candidate995; record an
+  actual owner-level refusal/retry pixel witness before a root-cause change. Public growth/fault
+  and final integration checks remain.
 - Saved-file tidy now preflights every generated destination before any rename/move and rejects
   escaping resource addresses through one checked owner. Whole14classes293 pass at2905abd5.
   First9 deliberate controls are accepted; successor8 ran, with7 intended assertion targets reached
