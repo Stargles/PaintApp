@@ -36,6 +36,10 @@ Move-box assertion. Root inspected both owner-landscape terminal drawings. This 
 vector picture acquisition while retaining ordinary hidden-layer suppression; no new stored state.
 Current Test/device confirmation and final integration remain. Latency OLD recorder witness stopped
 at a TEMP accessibility setup check before drawing, so no latency result; correct setup and rerun.
+The corrected OLD public witness now passes, but its early top8 metric windows are inconclusive.
+The frame baker can fill the shared render cache before the next test stroke despite the existing
+stroke-render delay. Stage both existing worker delays together in one TEMP measurement fixture;
+retain all drawing/landing checks. No runtime fix or no-main-render claim yet.
 
 Items leave this file only in the qualified merge. “Installed” and “tested separately” do not mean
 that the final combined audit build has passed.

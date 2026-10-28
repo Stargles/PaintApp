@@ -53,6 +53,14 @@ as an otherElements match. Toggle label correctly became Stop recording actions;
 began, so zero latency credit. Drop that redundant TEMP readout assertion only; keep public toggle
 state and final durable recording row checks, all original drawing/pixel/delay/count checks unchanged.
 Rerun the OLD witness before any runtime correction. Fresh saved/unlocked export question pending.
+OLD5bf public witness1 nowGREEN, exact730/method/device/argv reconciled and fresh40,623B JSONL
+preserved. It does NOT prove absence of main rendering: early2s windows omit vectorRasterize from
+top8, later windows explicitly show worker-only events. Source review identifies a second producer:
+FrameBaker also fills the shared vector memo, so delaying only StrokeCanvasView.renderQueue does
+not stage an uncached second-stroke start. Author one TEMP fixture successor using the EXISTING
+simulator-only uiTestSlowBakeMillis4000 alongside unchanged vector delay4000. Same original2
+strokes,12s landing wait,pixels/count assertions. No metrics/product hook or timeout increase.
+Capture OLD JSONL before runtime fix; require explicit main vectorRasterize evidence.
 
 ## Previous parked checkpoint — October26–27
 
