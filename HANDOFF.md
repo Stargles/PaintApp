@@ -21,6 +21,14 @@ prove required-image/blanked-host start→cancel before a fix. Source work may c
 single native lease. Read-only s55 recording summaries/source maps survive three agents' usage-limit
 errors; root continues, one cheap mechanical evidence agent remains usable. Fresh jetsam/CPU reports
 and symbolication under s55/device-evidence and crash-evidence/report-v2; no physical app restart.
+OLD b016 Guide/Move2 now both fail exactly existing80 Move-box exposure, all prior actual Guide/
+drawn-line/selection/compositor premises pass. Root reconciled730/device/methods/argv and joined.
+Authorize minimal shared contract correction in s55 tree: hidden hosts stay suppressed ordinarily;
+explicit required VECTOR image may be acquired for Move. Hidden raster provider reads remain
+forbidden. Filter the existing bulk post-settlement sync to visible hosts, preserving its old
+hidden-host suppression; no new flags/cache/retry/delay or bypassing source admission. Reuse
+existing DeferredVectorRender logic and whole Guide/Move tests unchanged. Latency fix remains
+separate; this change does not claim to remove the recorded main-thread render wait.
 
 ## Previous parked checkpoint — October26–27
 
