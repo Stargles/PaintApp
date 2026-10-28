@@ -223,9 +223,10 @@ enum ProjectStore {
     }
 
     private static func loadManifest(at projectURL: URL) -> ProjectManifest? {
-        let manifestURL = projectURL.appendingPathComponent("manifest.json")
-        guard let data = try? Data(contentsOf: manifestURL) else { return nil }
-        return try? JSONDecoder().decode(ProjectManifest.self, from: data)
+        do {
+            let manifestURL = try ProjectPackageLayout.resolve("manifest.json", in: projectURL)
+            return try JSONDecoder().decode(ProjectManifest.self, from: Data(contentsOf: manifestURL))
+        } catch { return nil }
     }
 
     /// **Which imported tip files a saved package has to carry**, and it is two populations rather
@@ -268,16 +269,17 @@ enum ProjectStore {
     /// BRUSH.md §2.27's third requirement drawing exactly the line it means to: the package is this
     /// document's own folder and moves with the document, while the library is the thing that may
     /// one day be an external folder needing a security-scoped bracket around every read.
-    private static func copyCustomBrushTexturesIntoProject(_ fileNames: Set<String>, projectURL: URL) {
+    private static func copyCustomBrushTexturesIntoProject(_ fileNames: Set<String>, projectURL: URL) throws {
         guard !fileNames.isEmpty else { return }
         let fm = FileManager.default
-        let brushesDir = projectURL.appendingPathComponent("brushes", isDirectory: true)
-        try? fm.createDirectory(at: brushesDir, withIntermediateDirectories: true)
+        try ProjectRecipeMetadata.validateTextureNames(fileNames, in: projectURL)
+        let brushesDir = try ProjectPackageLayout.resolve("brushes", in: projectURL, isDirectory: true)
+        try fm.createDirectory(at: brushesDir, withIntermediateDirectories: true)
         for fileName in fileNames {
             guard let data = BrushStorage.shared.read(fileName) else { continue }
             // `.atomic` rather than remove-then-copy: the same overwrite-if-re-saving, without a
             // window in which the package holds no file at all.
-            try? data.write(to: brushesDir.appendingPathComponent(fileName), options: .atomic)
+            try data.write(to: ProjectPackageLayout.resolve("brushes/\(fileName)", in: projectURL), options: .atomic)
         }
     }
 
@@ -286,12 +288,13 @@ enum ProjectStore {
     /// project was last saved), restore it from this project's own `brushes/` copy so the brush
     /// still renders correctly. Same union as the save side, from the same one function, so the two
     /// cannot walk different populations again.
-    private static func restoreCustomBrushTexturesFromProject(_ fileNames: Set<String>, projectURL: URL) {
+    private static func restoreCustomBrushTexturesFromProject(_ fileNames: Set<String>, projectURL: URL) throws {
         guard !fileNames.isEmpty else { return }
-        let brushesDir = projectURL.appendingPathComponent("brushes", isDirectory: true)
+        try ProjectRecipeMetadata.validateTextureNames(fileNames, in: projectURL)
         for fileName in fileNames {
             guard !BrushStorage.shared.contains(fileName) else { continue }
-            guard let data = try? Data(contentsOf: brushesDir.appendingPathComponent(fileName)) else { continue }
+            let source = try ProjectPackageLayout.resolve("brushes/\(fileName)", in: projectURL)
+            guard let data = try? Data(contentsOf: source) else { continue }
             try? BrushStorage.shared.write(data, to: fileName)
         }
     }
@@ -975,7 +978,15 @@ enum ProjectStore {
             destination == .liveProject && ledger.landedAt == url ? (ledger, url) : nil
         let stash: ProjectBackupManager.SaveStash = ledger.landedAt == nil ? .sessionStart : .rolling
         let packageStarted = CFAbsoluteTimeGetCurrent()
-        let (celWalkSeconds, ledgerEntries) = writePackage(snapshot, to: stageURL, tally: tally, reuse: reuse)
+        let packageResult: (celWalkSeconds: Double, ledgerEntries: [UUID: PackageLedger.Entry])
+        do { packageResult = try writePackage(snapshot, to: stageURL, tally: tally, reuse: reuse) }
+        catch {
+            tally.record(encodeSeconds: 0, writeSeconds: 0, pngsEncoded: 0, pngsReused: 0,
+                         bytesWritten: 0, contentWriteFailed: true)
+            log.error("Package content refused: \(String(describing: error), privacy: .public)")
+            packageResult = (0, [:])
+        }
+        let (celWalkSeconds, ledgerEntries) = packageResult
         let packageEnded = CFAbsoluteTimeGetCurrent()
 
         // Published on every exit, including the three failure returns below: a save that bailed on a
@@ -1004,7 +1015,7 @@ enum ProjectStore {
         // Only replace the live package once the staged one is provably complete (e.g. a PNG that
         // failed to encode must not clobber the last-known-good save). The broken stage is kept
         // in Trash for diagnosis.
-        guard ProjectBackupManager.validateProject(at: stageURL) else {
+        guard !tally.totals.contentWriteFailed, ProjectBackupManager.validateProject(at: stageURL) else {
             _ = ProjectBackupManager.moveToTrash(stageURL, tag: "failedsave")
             ledger.clear()
             return nil
@@ -1132,9 +1143,9 @@ enum ProjectStore {
     private static func writePackage(_ snapshot: SaveSnapshot, to url: URL,
                                      tally: WriteTally = WriteTally(),
                                      reuse: (ledger: PackageLedger, package: URL)? = nil)
-        -> (celWalkSeconds: Double, ledgerEntries: [UUID: PackageLedger.Entry]) {
+        throws -> (celWalkSeconds: Double, ledgerEntries: [UUID: PackageLedger.Entry]) {
         let fm = FileManager.default
-        try? fm.createDirectory(at: url, withIntermediateDirectories: true)
+        try fm.createDirectory(at: url, withIntermediateDirectories: true)
         // **Exactly the content directories this document needs, created once, before the fan-out** —
         // TODO (57). Before, so no worker ever races another to `createDirectory`; exactly, so a
         // pure-vector document (the owner's own) stops shipping an empty `images/` folder beside its
@@ -1158,7 +1169,7 @@ enum ProjectStore {
                 }
             }
         }
-        ProjectPackageLayout.createDirectories(roles, in: url)
+        try ProjectPackageLayout.createDirectories(roles, in: url)
 
         var layerManifests: [LayerManifest] = []
 
@@ -1205,12 +1216,13 @@ enum ProjectStore {
             }
         }
         let written = PixelOps.parallelMap(jobs.count) { index in
-            writeCel(jobs[index].cel, to: url, canvasSize: snapshot.canvasSize, tally: tally, reuse: reuse,
-                     encodedSources: encodedSources)
+            Result { try writeCel(jobs[index].cel, to: url, canvasSize: snapshot.canvasSize, tally: tally, reuse: reuse,
+                                  encodedSources: encodedSources) }
         }
         var celManifestsByLayer = [[CelManifest]](repeating: [], count: snapshot.layers.count)
         var ledgerEntries: [UUID: PackageLedger.Entry] = [:]
-        for (index, write) in written.enumerated() {
+        for (index, result) in written.enumerated() {
+            let write = try result.get()
             celManifestsByLayer[jobs[index].layerIndex].append(write.manifest)
             ledgerEntries[write.manifest.id] = write.ledgerEntry
         }
@@ -1289,8 +1301,10 @@ enum ProjectStore {
             // throws today; the point is that if something starts to, it says so.
             do {
                 let name = "brushtable.json"
-                try JSONEncoder().encode(brushTable).write(to: url.appendingPathComponent(name))
+                try JSONEncoder().encode(brushTable).write(to: ProjectPackageLayout.resolve(name, in: url))
                 brushTableFileName = name
+            } catch let error as ProjectPackageLayout.AddressError {
+                throw error
             } catch {
                 log.error("""
                     The brush table for \(snapshot.projectName, privacy: .public) could not be written, \
@@ -1303,7 +1317,7 @@ enum ProjectStore {
         // Persist the user's actual brush choice + imported custom brushes (Worker B's brush engine
         // owns these on CanvasManager) so they survive a save/reload, and copy the stamp textures
         // both the drawing and the palette need into the project package for self-containment.
-        copyCustomBrushTexturesIntoProject(
+        try copyCustomBrushTexturesIntoProject(
             importedTextureFileNames(table: brushTable,
                                      palette: snapshot.editorState.tools.profiles.presets + snapshot.customBrushes,
                                      recipes: snapshot.layers.flatMap(\.cels).map(\.interpolation)),
@@ -1333,11 +1347,11 @@ enum ProjectStore {
         // The manifest certifies a complete package. Omitting it on a failed sidecar lets the
         // existing validator reject this stage now and if its diagnostic Trash copy is restored.
         if !tally.totals.contentWriteFailed, let data = try? JSONEncoder().encode(manifest) {
-            try? data.write(to: url.appendingPathComponent("manifest.json"))
+            try data.write(to: ProjectPackageLayout.resolve("manifest.json", in: url))
         }
 
         if let thumbnailImage = snapshot.renderThumbnail(), let data = thumbnailImage.pngData() {
-            try? data.write(to: url.appendingPathComponent("thumbnail.png"))
+            try data.write(to: ProjectPackageLayout.resolve("thumbnail.png", in: url))
         }
 
         // **The last word on lazy directories, and the reason the role scan above is not enough** —
@@ -1352,7 +1366,7 @@ enum ProjectStore {
         // reader and no other writer, which is the cheapest correctness argument available anywhere
         // on this path. `rmdir(2)` refuses a non-empty directory in the kernel, so it cannot reach a
         // file that was written.
-        ProjectPackageLayout.pruneEmptyContentDirectories(in: url)
+        try ProjectPackageLayout.pruneEmptyContentDirectories(in: url)
 
         return (celWalkSeconds, ledgerEntries)
     }
@@ -1397,8 +1411,13 @@ enum ProjectStore {
     /// list rather than from completion — see its comment.
     private static func writeCel(_ cel: SaveSnapshot.CelContent, to packageURL: URL,
                                  canvasSize: CGSize, tally: WriteTally,
-                                 reuse: (ledger: PackageLedger, package: URL)?, encodedSources: Set<UUID>) -> CelWrite {
+                                 reuse: (ledger: PackageLedger, package: URL)?, encodedSources: Set<UUID>) throws -> CelWrite {
         let cost = CelCost()
+        defer {
+            tally.record(encodeSeconds: cost.encodeSeconds, writeSeconds: cost.writeSeconds,
+                         pngsEncoded: cost.encoded, pngsReused: cost.reused, bytesWritten: cost.bytes,
+                         contentWriteFailed: cost.contentWriteFailed)
+        }
         // TODO item (8): the centre of *this* canvas is what stored sample coordinates are measured
         // from, and it is the one thing the encoder needs that the payload cannot work out for
         // itself. `PackedSampleRun` writes the origin it was given into the file, so a decoder needs
@@ -1410,7 +1429,7 @@ enum ProjectStore {
         var tiers: PixelTiers? = nil
         if let reuse, let entry = reuse.ledger.entry(for: cel.id), entry.stamp.matches(cel.stamp) {
             let started = CFAbsoluteTimeGetCurrent()
-            if cloneFiles(entry.files, from: reuse.package, into: packageURL) {
+            if try cloneFiles(entry.files, from: reuse.package, into: packageURL) {
                 let manifest = entry.manifest
                 tiers = PixelTiers(rasterFileName: manifest.rasterFileName,
                                    rasterOmitted: manifest.rasterOmitted,
@@ -1421,7 +1440,7 @@ enum ProjectStore {
             }
             cost.writeSeconds += CFAbsoluteTimeGetCurrent() - started
         }
-        let pixelTiers = tiers ?? encodePixelTiers(cel, to: packageURL, sampleOrigin: sampleOrigin, cost: cost,
+        let pixelTiers = try tiers ?? encodePixelTiers(cel, to: packageURL, sampleOrigin: sampleOrigin, cost: cost,
                                                  encodedSources: encodedSources)
 
         // The interpolation recipe, when this cel is a derived one. Its own JSON file for the
@@ -1431,7 +1450,7 @@ enum ProjectStore {
         if let recipe = cel.interpolation,
            let data = encodeJSON(recipe, cel: cel.id, sampleOrigin: sampleOrigin, cost: cost) {
             let name = ProjectPackageLayout.recordedName(for: .interpolation, cel: cel.id)
-            writeFile(data, named: name, role: .interpolation, in: packageURL, cost: cost)
+            try writeFile(data, named: name, role: .interpolation, in: packageURL, cost: cost)
             interpolationFileName = name
         }
 
@@ -1445,13 +1464,9 @@ enum ProjectStore {
                                                   baselines: cel.pendingPoseBaselines),
                                  cel: cel.id, sampleOrigin: sampleOrigin, cost: cost) {
             let name = ProjectPackageLayout.recordedName(for: .animation, cel: cel.id)
-            writeFile(data, named: name, role: .animation, in: packageURL, cost: cost)
+            try writeFile(data, named: name, role: .animation, in: packageURL, cost: cost)
             animationFileName = name
         }
-
-        tally.record(encodeSeconds: cost.encodeSeconds, writeSeconds: cost.writeSeconds,
-                     pngsEncoded: cost.encoded, pngsReused: cost.reused, bytesWritten: cost.bytes,
-                     contentWriteFailed: cost.contentWriteFailed)
 
         let manifest = CelManifest(id: cel.id, startFrame: cel.startFrame, frameCount: cel.frameCount,
                                    rasterFileName: pixelTiers.rasterFileName,
@@ -1509,10 +1524,10 @@ enum ProjectStore {
     /// Answers the path it wrote, which is what the ledger records.
     @discardableResult
     private static func writeFile(_ data: Data, named name: String, role: ProjectPackageLayout.Role,
-                                  in packageURL: URL, cost: CelCost) -> String {
+                                  in packageURL: URL, cost: CelCost) throws -> String {
         let started = CFAbsoluteTimeGetCurrent()
-        let path = ProjectPackageLayout.writePath(named: name, role: role)
-        try? data.write(to: ProjectPackageLayout.resolve(path, in: packageURL))
+        let path = try ProjectPackageLayout.writePath(named: name, role: role)
+        try data.write(to: ProjectPackageLayout.resolve(path, in: packageURL))
         cost.writeSeconds += CFAbsoluteTimeGetCurrent() - started
         cost.bytes += data.count
         return path
@@ -1521,7 +1536,7 @@ enum ProjectStore {
     /// The encode half of `writeCel`: the raster, fill and baked PNGs, the placed images, the stream
     /// pictures, the clips, and the display list — the body of the old per-cel loop, verbatim.
     private static func encodePixelTiers(_ cel: SaveSnapshot.CelContent, to packageURL: URL,
-                                         sampleOrigin: CGPoint, cost: CelCost, encodedSources: Set<UUID>) -> PixelTiers {
+                                         sampleOrigin: CGPoint, cost: CelCost, encodedSources: Set<UUID>) throws -> PixelTiers {
         var files: [String] = []
         func png(_ image: UIImage) -> Data? {
             let started = CFAbsoluteTimeGetCurrent()
@@ -1540,8 +1555,8 @@ enum ProjectStore {
             cost.encoded += 1
             return data
         }
-        func write(_ data: Data, _ name: String, _ role: ProjectPackageLayout.Role) -> String {
-            writeFile(data, named: name, role: role, in: packageURL, cost: cost)
+        func write(_ data: Data, _ name: String, _ role: ProjectPackageLayout.Role) throws -> String {
+            try writeFile(data, named: name, role: role, in: packageURL, cost: cost)
         }
         func json(_ payload: VectorCanvasData) -> Data? {
             encodeJSON(payload, cel: cel.id, sampleOrigin: sampleOrigin, cost: cost)
@@ -1563,7 +1578,7 @@ enum ProjectStore {
         /// `copyItem` rather than `Data(contentsOf:)` + `write`: a clip is unbounded in size and has
         /// no business passing through memory. Its bytes are not added to `bytes`, which counts what
         /// this save *encoded*.
-        func copyAsset(named name: String, from source: URL) {
+        func copyAsset(named name: String, from source: URL) throws {
             let fm = FileManager.default
             // `videos/` since TODO (57)'s sweep — an `.mp4` inside a folder called `images` is the
             // owner's own complaint one door over. **No migration moves an existing clip and none is
@@ -1571,8 +1586,8 @@ enum ProjectStore {
             // moving one would mean parsing every payload — and it does not have to, because this
             // copy reads the runtime `assetURL` the reader resolved, which already knows both
             // addresses. An old package keeps its clip in `images/` and opens forever.
-            let path = ProjectPackageLayout.writePath(named: name, role: .video)
-            let destination = ProjectPackageLayout.resolve(path, in: packageURL)
+            let path = try ProjectPackageLayout.writePath(named: name, role: .video)
+            let destination = try ProjectPackageLayout.resolve(path, in: packageURL)
             files.append(path)
             guard !fm.fileExists(atPath: destination.path) else { return }
             let started = CFAbsoluteTimeGetCurrent()
@@ -1601,10 +1616,10 @@ enum ProjectStore {
         // way.
         var tiers = PixelTiers(rasterFileName: "\(cel.id.uuidString)_raster.png", rasterOmitted: nil,
                                bakedFileName: nil, vectorFileName: nil, files: [])
-        func copySource(_ source: RasterSource, named name: String, role: ProjectPackageLayout.Role) {
+        func copySource(_ source: RasterSource, named name: String, role: ProjectPackageLayout.Role) throws {
             let started = CFAbsoluteTimeGetCurrent()
-            let path = ProjectPackageLayout.writePath(named: name, role: role)
-            switch source.copyPNG(to: ProjectPackageLayout.resolve(path, in: packageURL)) {
+            let path = try ProjectPackageLayout.writePath(named: name, role: role)
+            switch source.copyPNG(to: try ProjectPackageLayout.resolve(path, in: packageURL)) {
             case .success:
                 files.append(path)
                 if !encodedSources.contains(source.residencyID) { cost.reused += 1 }
@@ -1613,11 +1628,11 @@ enum ProjectStore {
             cost.writeSeconds += CFAbsoluteTimeGetCurrent() - started
         }
         if let rasterImage = cel.rasterImage {
-            copySource(rasterImage, named: tiers.rasterFileName, role: .raster)
+            try copySource(rasterImage, named: tiers.rasterFileName, role: .raster)
         } else { tiers.rasterOmitted = true }
         if let baked = cel.bakedImage {
             let name = "\(cel.id.uuidString)_baked.png"
-            copySource(baked, named: name, role: .baked)
+            try copySource(baked, named: name, role: .baked)
             tiers.bakedFileName = name
         }
 
@@ -1629,8 +1644,9 @@ enum ProjectStore {
             var imageFileNames: [UUID: String] = [:]
             for element in vector.images {
                 let name = element.fileName ?? "\(cel.id.uuidString)_vec_\(element.id.uuidString).png"
+                _ = try ProjectPackageLayout.writeURL(named: name, role: .placedImage, in: packageURL)
                 if let data = png(element.image) {
-                    files.append(write(data, name, .placedImage))
+                    files.append(try write(data, name, .placedImage))
                     imageFileNames[element.id] = name
                 }
             }
@@ -1638,7 +1654,7 @@ enum ProjectStore {
             // element's own field rather than one minted here, because a video element cannot exist
             // without the file it names (`VectorVideoElement.assetFileName`).
             for element in vector.videos {
-                copyAsset(named: element.assetFileName, from: element.assetURL)
+                try copyAsset(named: element.assetFileName, from: element.assetURL)
             }
             // **A stream's last picture, written by the save and by nothing else** — STREAM.md §5.6.
             // Whatever `displayFrame` holds at the snapshot: the live frame, the frozen one, or the
@@ -1650,7 +1666,7 @@ enum ProjectStore {
             for element in vector.streams {
                 guard let frame = element.displayFrame, let data = jpeg(frame) else { continue }
                 let name = "\(cel.id.uuidString)_stream_\(element.id.uuidString).jpg"
-                files.append(write(data, name, .placedImage))
+                files.append(try write(data, name, .placedImage))
                 streamFrameFileNames[element.id] = name
             }
             let payload = VectorCanvasData(from: vector, imageFileNames: imageFileNames,
@@ -1660,7 +1676,7 @@ enum ProjectStore {
                 // package-relative path it is, which is the whole of the format version: a bare name
                 // in this field means a package written before (57), and the reader resolves either.
                 let name = ProjectPackageLayout.recordedName(for: .drawing, cel: cel.id)
-                files.append(write(data, name, .drawing))
+                files.append(try write(data, name, .drawing))
                 tiers.vectorFileName = name
             }
         }
@@ -1676,12 +1692,17 @@ enum ProjectStore {
     /// `clonefile(2)` first, `copyItem` if the volume will not clone — the same two the backup
     /// manager's `cloneItem` reaches for, without its `removeItem` of the destination, which here
     /// would be a race between workers rather than a tidy-up.
-    private static func cloneFiles(_ paths: [String], from source: URL, into stage: URL) -> Bool {
+    private static func cloneFiles(_ paths: [String], from source: URL, into stage: URL) throws -> Bool {
+        // Invalid ledger addresses refuse the stage; an ordinary missing legal resource may re-encode.
+        for path in paths {
+            _ = try ProjectPackageLayout.resolve(path, in: source)
+            _ = try ProjectPackageLayout.resolve(path, in: stage)
+        }
         let fm = FileManager.default
         var cloned: [URL] = []
         for path in paths {
-            let src = ProjectPackageLayout.resolve(path, in: source)
-            let dst = ProjectPackageLayout.resolve(path, in: stage)
+            let src = try ProjectPackageLayout.resolve(path, in: source)
+            let dst = try ProjectPackageLayout.resolve(path, in: stage)
             if fm.fileExists(atPath: dst.path) { continue }
             if cloneRasterResource(from: src, to: dst, allowingExisting: true) {
                 cloned.append(dst)
@@ -1868,8 +1889,8 @@ enum ProjectStore {
         }
         guard let decoded = decoded.value else { return nil }
         return await MainActor.run {
-            let manager = assemble(manifest: manifest, decoded: decoded, url: url,
-                                   startedAt: loadStarted, generatingThumbnails: false)
+            guard let manager = assemble(manifest: manifest, decoded: decoded, url: url,
+                                         startedAt: loadStarted, generatingThumbnails: false) else { return nil }
             // Item 9(c). The thumbnails are a third of what an open used to cost (MEASURED: 96.3 ms
             // of 303.6 ms) and none of it is needed to show the artwork, so the open no longer waits
             // on it — see `CanvasManager.backfillMissingThumbnails`, which also explains why the
@@ -1923,15 +1944,27 @@ enum ProjectStore {
         // each worker: `BrushPool.intern` is lock-guarded, and a hundred cels racing to intern the
         // same five brushes would be a hundred acquires for one answer. What travels to the workers is
         // the finished `Remap`, which is immutable.
-        let brushTable = loadBrushTable(manifest: manifest, projectURL: projectURL)
+        let brushTable: BrushTable
+        do {
+            brushTable = try loadBrushTable(manifest: manifest, projectURL: projectURL)
+            try ProjectRecipeMetadata.validateTextureNames(
+                importedTextureFileNames(table: brushTable,
+                    palette: manifest.editorState.tools.profiles.presets + manifest.customBrushes, recipes: []),
+                in: projectURL)
+        } catch { return nil }
         let brushes = brushTable.resolvingIntoPool()
         let jobs: [(layerIndex: Int, cel: CelManifest, kind: LayerKind)] =
             manifest.layers.enumerated().flatMap { layerIndex, layerManifest in
                 layerManifest.cels.map { (layerIndex, $0, layerManifest.kind) }
             }
-        let decoded = PixelOps.parallelMap(jobs.count) { index in
-            decodeCel(jobs[index].cel, layerKind: jobs[index].kind,
-                      projectURL: projectURL, canvasSize: canvasSize, brushes: brushes, residency: residency)
+        let decoded: [DecodedCel?] = PixelOps.parallelMap(jobs.count) { index in
+            do {
+                return try decodeCel(jobs[index].cel, layerKind: jobs[index].kind,
+                    projectURL: projectURL, canvasSize: canvasSize, brushes: brushes, residency: residency)
+            } catch {
+                log.error("Cannot open package resource: \(String(describing: error), privacy: .public)")
+                return nil
+            }
         }
         var celsByLayer = [[Cel]](repeating: [], count: manifest.layers.count)
         // **The layer's name is attached here, not in `decodeCel`.** A cel does not know which layer
@@ -1994,9 +2027,10 @@ enum ProjectStore {
     /// alternative — substituting a default brush — would put the artist's line back in a brush they
     /// never chose with nothing saying so. `validateProject` refuses such a package before a normal
     /// open reaches here; this is the path for a load that skipped it.
-    private static func loadBrushTable(manifest: ProjectManifest, projectURL: URL) -> BrushTable {
+    private static func loadBrushTable(manifest: ProjectManifest, projectURL: URL) throws -> BrushTable {
         guard let fileName = manifest.brushTableFileName else { return BrushTable() }
-        guard let data = try? Data(contentsOf: projectURL.appendingPathComponent(fileName)),
+        let url = try ProjectPackageLayout.resolve(fileName, in: projectURL)
+        guard let data = try? Data(contentsOf: url),
               let table = try? JSONDecoder().decode(BrushTable.self, from: data) else {
             log.error("""
                 Brush table \(fileName, privacy: .public) is missing or unreadable — every stroke in \
@@ -2009,14 +2043,14 @@ enum ProjectStore {
 
     private static func decodeCel(_ celManifest: CelManifest, layerKind: LayerKind,
                                   projectURL: URL, canvasSize: CGSize,
-                                  brushes: BrushTable.Remap, residency: RasterResidency) -> DecodedCel? {
+                                  brushes: BrushTable.Remap, residency: RasterResidency) throws -> DecodedCel? {
         var damage = ProjectLoadDamage.LayerDamage()
         /// Where one of this cel's files actually is — TODO (57). Every read below goes through it,
         /// **including the four whose answer never changes**: one rule, asked one way, is what stops
         /// the writer, the reader and the validator drifting apart, which is the failure this item's
         /// survey named as the one that would silently trash every save.
-        func fileURL(_ name: String, _ role: ProjectPackageLayout.Role) -> URL {
-            ProjectPackageLayout.existingURL(named: name, role: role, cel: celManifest.id, in: projectURL)
+        func fileURL(_ name: String, _ role: ProjectPackageLayout.Role) throws -> URL {
+            try ProjectPackageLayout.existingURL(named: name, role: role, cel: celManifest.id, in: projectURL)
         }
         /// Every decoder this cel uses, so none of them can be built without the brush table. The key
         /// is set even when the remap is empty, and that is the point: with it absent a stroke's stored
@@ -2025,6 +2059,7 @@ enum ProjectStore {
         func decoder() -> JSONDecoder {
             let decoder = JSONDecoder()
             decoder.userInfo[.brushTable] = brushes
+            decoder.userInfo[ProjectPackageLayout.packageURLUserInfoKey] = projectURL
             return decoder
         }
         // Logical absence is recorded by the manifest. A named but unreadable source refuses the
@@ -2042,12 +2077,12 @@ enum ProjectStore {
         if celManifest.rasterOmitted == true {
             raster = RasterLayerTexture(size: canvasSize, residency: residency)
         } else {
-            guard let source = protectedSource(fileURL(celManifest.rasterFileName, .raster)) else { return nil }
+            guard let source = protectedSource(try fileURL(celManifest.rasterFileName, .raster)) else { return nil }
             raster = RasterLayerTexture(size: canvasSize, source: source, strokeCount: 1)
         }
         var bakedImage: RasterSource?
         if let bakedFileName = celManifest.bakedImageFileName {
-            guard let source = protectedSource(fileURL(bakedFileName, .baked)) else { return nil }
+            guard let source = protectedSource(try fileURL(bakedFileName, .baked)) else { return nil }
             bakedImage = source
         }
 
@@ -2069,7 +2104,7 @@ enum ProjectStore {
         // the cel, which is the same reasoning the interpolation recipe below already applies.
         var vector: VectorCanvas?
         if let vectorFileName = celManifest.vectorFileName {
-            let vectorURL = fileURL(vectorFileName, .drawing)
+            let vectorURL = try fileURL(vectorFileName, .drawing)
             if let data = try? Data(contentsOf: vectorURL) {
                 do {
                     let payload = try decoder().decode(VectorCanvasData.self, from: data)
@@ -2078,10 +2113,10 @@ enum ProjectStore {
                     // rather than there because the resolver is the one place that knows a ref failed,
                     // and because `VectorCanvasData` is deliberately free of any notion of a project
                     // directory.
-                    // **`validateProject` cannot catch this one**: image refs live inside the vector
-                    // JSON, not in the manifest, so the integrity check never sees their file names.
-                    let elements = payload.canvasSpaceElements(resolvingImages: { ref in
-                        guard let image = UIImage(contentsOfFile: fileURL(ref.fileName, .placedImage).path) else {
+                    // Metadata preflight rejects invalid addresses. A missing legal resource keeps
+                    // the existing reported-loss policy here.
+                    let elements = try payload.canvasSpaceElements(resolvingImages: { ref in
+                        guard let image = UIImage(contentsOfFile: try fileURL(ref.fileName, .placedImage).path) else {
                             damage.images += 1
                             log.error("""
                                 Placed image \(ref.fileName, privacy: .public) for cel \
@@ -2099,7 +2134,7 @@ enum ProjectStore {
                         // decoder, and VIDEO.md stage 3 owns that; a file that is present and
                         // unplayable is a stage-3 failure to report at the frame, not a stage-2
                         // reason to throw the element away at load.
-                        let url = fileURL(ref.fileName, .video)
+                        let url = try fileURL(ref.fileName, .video)
                         guard FileManager.default.fileExists(atPath: url.path) else {
                             damage.videos += 1
                             log.error("""
@@ -2115,7 +2150,7 @@ enum ProjectStore {
                         // as it last did. Not damage when it is missing — the element is intact and
                         // the laptop will answer; the artist sees the placeholder until then.
                         guard let name = ref.lastFrameFileName else { return nil }
-                        let image = UIImage(contentsOfFile: fileURL(name, .placedImage).path)
+                        let image = UIImage(contentsOfFile: try fileURL(name, .placedImage).path)
                         if image == nil {
                             log.error("""
                                 Stream picture \(name, privacy: .public) for cel \
@@ -2137,6 +2172,8 @@ enum ProjectStore {
                     for _ in 0..<payload.decodeReport.malformedCount {
                         damage.countMalformed(kind: named.next())
                     }
+                } catch let error as ProjectPackageLayout.AddressError {
+                    throw error
                 } catch let error as VectorGeometryCodingError {
                     log.error("Cannot open geometry in cel \(celManifest.id, privacy: .public): \(String(describing: error), privacy: .public)")
                     return nil
@@ -2181,7 +2218,8 @@ enum ProjectStore {
         // artist's work, and an unreported loss is one the next save makes permanent.
         var animation = CelAnimationData()
         if let animationFileName = celManifest.animationFileName {
-            if let data = try? Data(contentsOf: fileURL(animationFileName, .animation)),
+            let animationURL = try fileURL(animationFileName, .animation)
+            if let data = try? Data(contentsOf: animationURL),
                let decoded = try? decoder().decode(CelAnimationData.self, from: data) {
                 animation = decoded
             } else {
@@ -2210,8 +2248,18 @@ enum ProjectStore {
     @MainActor
     private static func assemble(manifest: ProjectManifest, decoded: DecodedCels,
                                  url: URL, startedAt loadStarted: CFAbsoluteTime,
-                                 generatingThumbnails: Bool = true) -> CanvasManager {
+                                 generatingThumbnails: Bool = true) -> CanvasManager? {
         let celsByLayer = decoded.celsByLayer
+        // Restore this project's own custom-brush texture copies into the shared library if a
+        // referenced file is missing there (project moved to another device, or the global entry
+        // was deleted) — see copyCustomBrushTexturesIntoProject's doc comment for the save side.
+        do {
+            try restoreCustomBrushTexturesFromProject(
+                importedTextureFileNames(table: decoded.brushTable,
+                                         palette: manifest.editorState.tools.profiles.presets + manifest.customBrushes,
+                                         recipes: decoded.celsByLayer.flatMap { $0 }.map(\.interpolation)),
+                projectURL: url)
+        } catch { return nil }
         let manager = CanvasManager()
         manager.projectID = manifest.id
         manager.projectName = manifest.name
@@ -2225,14 +2273,6 @@ enum ProjectStore {
         manager.canvasBackgroundColor = manifest.backgroundColor.color
         manager.isCanvasBackgroundVisible = manifest.isBackgroundVisible
 
-        // Restore this project's own custom-brush texture copies into the shared library if a
-        // referenced file is missing there (project moved to another device, or the global entry
-        // was deleted) — see copyCustomBrushTexturesIntoProject's doc comment for the save side.
-        restoreCustomBrushTexturesFromProject(
-            importedTextureFileNames(table: decoded.brushTable,
-                                     palette: manifest.editorState.tools.profiles.presets + manifest.customBrushes,
-                                     recipes: decoded.celsByLayer.flatMap { $0 }.map(\.interpolation)),
-            projectURL: url)
         manager.customBrushes = manifest.customBrushes
         // BRUSH.md §8.1: the library is app-level and the manifest's list is this *document's*.
         // A project made on another device carries brushes this library has never seen, and the two

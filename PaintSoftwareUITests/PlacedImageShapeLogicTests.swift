@@ -226,7 +226,7 @@ final class PlacedImageShapeLogicTests: XCTestCase {
                            "an unstretched placement must cost the file nothing: \(plainJSON)")
         }
 
-        let reloaded = try XCTUnwrap(decodedImage(from: payload(for: shaped)))
+        let reloaded = try XCTUnwrap(try decodedImage(from: payload(for: shaped)))
         XCTAssertEqual(reloaded.aspect, shaped.aspect, accuracy: 1e-9)
         XCTAssertEqual(reloaded.stretchAxis, shaped.stretchAxis, accuracy: 1e-9)
         XCTAssertTrue(reloaded.mirrored)
@@ -490,9 +490,9 @@ final class PlacedImageShapeLogicTests: XCTestCase {
         return ref
     }
 
-    private func decodedImage(from ref: VectorCanvasData.ImageRef) -> VectorImageElement? {
+    private func decodedImage(from ref: VectorCanvasData.ImageRef) throws -> VectorImageElement? {
         let data = VectorCanvasData(elements: [.image(ref)], transform: [])
-        let rebuilt = data.canvasSpaceElements(resolvingImages: { _ in
+        let rebuilt = try data.canvasSpaceElements(resolvingImages: { _ in
             CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 6, height: 6),
                                      size: CGSize(width: 6, height: 6))
         }, resolvingVideos: { _ in nil })

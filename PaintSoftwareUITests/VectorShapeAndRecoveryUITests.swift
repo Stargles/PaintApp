@@ -143,6 +143,77 @@ final class GalleryRecoveryUITests: PaintUITestCase {
                        "The deleted project's stroke content should survive the trash/restore round trip")
     }
 
+    /// Requires the externally staged current-writer A/B package pair in an otherwise empty owned
+    /// app container. Ordinary Gallery runs skip this selected-only cold refusal witness.
+    func testEscapingRequiredRasterShowsNoBackupAndKeepsSiblingListed() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["PAINTAPP_PACKAGE_ADDRESS_COLD_UI"] == "1",
+                          "Requires the explicit external sibling-raster staging contract")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        app.launch()
+        let window = rotateDevice(app, to: .landscapeLeft)
+        XCTAssertGreaterThan(window.width, window.height, "The artist's recovery route is landscape")
+        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 15))
+
+        let aMenu = app.buttons["gallery.tileMenu.A"]
+        let bMenu = app.buttons["gallery.tileMenu.B"]
+        XCTAssertTrue(aMenu.waitForExistence(timeout: 10), "The staged invalid A package is listed")
+        XCTAssertTrue(bMenu.waitForExistence(timeout: 10), "The valid sibling B package is also listed")
+        let aTile = app.staticTexts.matching(NSPredicate(format: "label == %@", "A")).firstMatch
+        let bTile = app.staticTexts.matching(NSPredicate(format: "label == %@", "B")).firstMatch
+        XCTAssertTrue(aTile.exists && bTile.exists)
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "Damaged — tap to recover")).count,
+                       1, "Only the package with the escaping required raster is damaged")
+
+        aTile.tap()
+        let noBackup = app.alerts["No Backup Available"]
+        XCTAssertTrue(noBackup.waitForExistence(timeout: 10),
+                      "The public recovery route must refuse A when no intact backup exists")
+        XCTAssertTrue(noBackup.staticTexts[
+            "This project is damaged and no intact backup of it exists to restore from."].exists)
+        XCTAssertFalse(app.staticTexts["timeline.frameLabel"].exists,
+                       "The invalid package never opens in the editor")
+        attachScreenshot(XCUIScreen.main, "package-address-A-no-backup-landscape")
+        noBackup.buttons["OK"].tap()
+
+        XCTAssertTrue(aTile.waitForExistence(timeout: 5), "A remains listed for recovery or deletion")
+        XCTAssertTrue(bMenu.exists && bTile.exists,
+                      "Refusing A leaves the legitimate neighboring package available")
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "Damaged — tap to recover")).count,
+                       1, "The refusal does not reclassify the valid neighbor as damaged")
+        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].exists,
+                      "Gallery is responsive again after the refused recovery")
+    }
+
+    /// A separate cold launch proves that B is a real usable package, not only an untouched byte
+    /// neighbor. The coordinator verifies B's pre/post-refusal bytes before this method opens it.
+    func testSiblingRequiredRasterOpensAndDrawsBluePaper() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["PAINTAPP_PACKAGE_ADDRESS_COLD_UI"] == "1",
+                          "Requires the explicit external sibling-raster staging contract")
+        let size = CGSize(width: 64, height: 64)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        app.launch()
+        let window = rotateDevice(app, to: .landscapeLeft)
+        XCTAssertGreaterThan(window.width, window.height, "The ordinary Gallery opens in artist landscape")
+        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 15))
+
+        let bMenu = app.buttons["gallery.tileMenu.B"]
+        XCTAssertTrue(bMenu.waitForExistence(timeout: 10), "The staged valid sibling package is listed")
+        let bTile = app.staticTexts.matching(NSPredicate(format: "label == %@", "B")).firstMatch
+        XCTAssertTrue(bTile.waitForExistence(timeout: 5))
+        bTile.tap()
+        XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 15),
+                      "The valid sibling opens through the public Gallery")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = paperRect(in: canvas, canvasSize: size)
+        let blueCenter = onHost(paper, 0.5, 0.5)
+        XCTAssertTrue(waitUntil(canvas, blueCenter, isBlue),
+                      "B's own required raster visibly draws blue at the paper center")
+        attachScreenshot(XCUIScreen.main, "package-address-B-blue-paper-landscape")
+    }
+
     /// Requires the externally staged, uniquely identified copy of the actual previous-writer
     /// 64-square package. Ordinary runs skip it; the staged runner selects this method alone because
     /// the two resetGallery workflows above deliberately clear their own simulator library.

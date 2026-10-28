@@ -190,37 +190,86 @@ final class AutosaveLogicTests: XCTestCase {
         XCTAssertNotNil(ProjectStore.load(from: url))
     }
 
-    func testAReopenedDocumentStartsItsSessionWithAFullWrite() throws {
+    func testAReopenedDocumentWritesProtectedSourcesAndStartsANewLedger() throws {
         let manager = makeManager()
         let url = ProjectStore.createNewProjectURL(name: "Autosave")
+        let originalPixels = try (0..<2).map { index in
+            try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(
+                try manager.layers[index].cels[0].raster.renderToUIImage().get().cgImage)))
+        }
         saveAndWait(manager, to: url)
+        let originalPNGs = try (0..<2).map { try XCTUnwrap(rasterBytes(of: manager, layerIndex: $0, in: url)) }
         saveAndWait(manager, to: url)
         XCTAssertEqual(try XCTUnwrap(profile()).pngsReused, 2, "Setup: the session is incremental by now")
 
         let reopened = try XCTUnwrap(ProjectStore.load(from: url))
         XCTAssertNil(reopened.packageLedger.landedAt, "A new CanvasManager is a new ledger")
+        for index in 0..<2 {
+            let cel = reopened.layers[index].cels[0]
+            XCTAssertNil(reopened.packageLedger.entry(for: cel.id))
+            let source = try XCTUnwrap(cel.raster.snapshot())
+            let checkpoint = try source.prepareForSave().get()
+            XCTAssertFalse(checkpoint.encoded, "PREMISE: observing an already durable source must not encode a checkpoint")
+            let backing = checkpoint.backing
+            XCTAssertFalse(backing.url.standardizedFileURL.path.hasPrefix(url.standardizedFileURL.path + "/"),
+                           "A reopened source owns its compressed bytes outside the live package")
+            XCTAssertEqual(try Data(contentsOf: backing.url), originalPNGs[index])
+        }
         saveAndWait(reopened, to: url)
         let profile = try XCTUnwrap(profile())
-        XCTAssertEqual(profile.pngsEncoded, 2, "New textures, no stamps to match: everything encodes")
-        XCTAssertEqual(profile.pngsReused, 0)
+        XCTAssertEqual(profile.pngsEncoded, 0, "Already protected sources require no PNG encoder")
+        XCTAssertEqual(profile.pngsReused, 2, "Both immutable PNG resources are copied into the complete new package")
+        XCTAssertEqual(reopened.packageLedger.landedAt, url)
+        XCTAssertTrue(ProjectBackupManager.validateProject(at: url))
+        let saved = try XCTUnwrap(ProjectStore.load(from: url))
+        for index in 0..<2 {
+            XCTAssertNotNil(reopened.packageLedger.entry(for: reopened.layers[index].cels[0].id))
+            XCTAssertEqual(try XCTUnwrap(rasterBytes(of: saved, layerIndex: index, in: url)), originalPNGs[index])
+            let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(
+                try saved.layers[index].cels[0].raster.renderToUIImage().get().cgImage)))
+            XCTAssertEqual(pixels, originalPixels[index], "The first save after reopening preserves the actual drawing")
+        }
+        XCTAssertEqual(saved.layers[2].cels[0].vector?.elements.count, 1)
     }
 
-    func testACelWhoseFileHasGoneFromTheLivePackageIsReEncodedRatherThanTrusted() throws {
+    func testAMissingLivePNGIsRestoredFromItsProtectedSource() throws {
         let manager = makeManager()
         let url = ProjectStore.createNewProjectURL(name: "Autosave")
+        let originalPixels = try (0..<2).map { index in
+            try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(
+                try manager.layers[index].cels[0].raster.renderToUIImage().get().cgImage)))
+        }
         saveAndWait(manager, to: url)
+        let originalPNGs = try (0..<2).map { try XCTUnwrap(rasterBytes(of: manager, layerIndex: $0, in: url)) }
 
-        // The ledger still says layer 1's PNG is on disk. It is not.
+        // The live package file can disappear without changing this immutable source version.
         let cel = manager.layers[1].cels[0]
         let missing = url.appendingPathComponent("images").appendingPathComponent("\(cel.id.uuidString)_raster.png")
+        let source = try XCTUnwrap(cel.raster.snapshot())
+        let checkpoint = try source.prepareForSave().get()
+        XCTAssertFalse(checkpoint.encoded, "PREMISE: observing an already durable source must not encode a checkpoint")
+        let backing = checkpoint.backing
+        XCTAssertNotEqual(backing.url.standardizedFileURL, missing.standardizedFileURL)
+        XCTAssertFalse(backing.url.standardizedFileURL.path.hasPrefix(url.standardizedFileURL.path + "/"))
+        XCTAssertEqual(try Data(contentsOf: backing.url), originalPNGs[1])
         try FileManager.default.removeItem(at: missing)
+        XCTAssertEqual(try Data(contentsOf: backing.url), originalPNGs[1], "Deleting the live file does not delete the protected source")
 
         saveAndWait(manager, to: url)
         let profile = try XCTUnwrap(profile())
-        XCTAssertEqual(profile.pngsEncoded, 1, "The cel that would not clone falls back to the encode")
-        XCTAssertEqual(profile.pngsReused, 1, "The cel that would still clones")
+        XCTAssertEqual(profile.pngsEncoded, 0, "A missing live clone falls back to the existing immutable PNG")
+        XCTAssertEqual(profile.pngsReused, 2, "One live-package clone and one protected-source copy preserve both cels")
         XCTAssertTrue(FileManager.default.fileExists(atPath: missing.path), "…and the file is back")
         XCTAssertTrue(ProjectBackupManager.validateProject(at: url))
+        XCTAssertEqual(manager.packageLedger.landedAt, url)
+        let saved = try XCTUnwrap(ProjectStore.load(from: url))
+        for index in 0..<2 {
+            XCTAssertEqual(try XCTUnwrap(rasterBytes(of: saved, layerIndex: index, in: url)), originalPNGs[index])
+            let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(
+                try saved.layers[index].cels[0].raster.renderToUIImage().get().cgImage)))
+            XCTAssertEqual(pixels, originalPixels[index], "Recovery restores the drawing, not just a valid PNG header")
+        }
+        XCTAssertEqual(saved.layers[2].cels[0].vector?.elements.count, 1)
     }
 
     func testAnEditMadeWhileASaveIsInFlightIsCarriedByTheNextSave() throws {
@@ -275,21 +324,51 @@ final class AutosaveLogicTests: XCTestCase {
         XCTAssertTrue(slots().rolling, "…and the state before the last save is one valid restore point")
     }
 
-    func testAVersionSlotWriteNeitherReusesNorRecords() throws {
+    func testAVersionSlotCopiesProtectedSourcesWithoutChangingTheLiveLedger() throws {
         let manager = makeManager()
         let url = ProjectStore.createNewProjectURL(name: "Autosave")
+        let originalPixels = try (0..<2).map { index in
+            try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(
+                try manager.layers[index].cels[0].raster.renderToUIImage().get().cgImage)))
+        }
         saveAndWait(manager, to: url)
         XCTAssertEqual(manager.packageLedger.landedAt, url)
+        let originalManifest = try Data(contentsOf: url.appendingPathComponent("manifest.json"))
+        let originalPNGs = try (0..<2).map { try XCTUnwrap(rasterBytes(of: manager, layerIndex: $0, in: url)) }
+        let originalDrawing = try XCTUnwrap(drawingBytes(of: manager, layerIndex: 2, in: url))
+        for index in 0..<2 {
+            let source = try XCTUnwrap(manager.layers[index].cels[0].raster.snapshot())
+            let checkpoint = try source.prepareForSave().get()
+            XCTAssertFalse(checkpoint.encoded, "PREMISE: observing an already durable source must not encode a checkpoint")
+            let backing = checkpoint.backing
+            XCTAssertFalse(backing.url.standardizedFileURL.path.hasPrefix(url.standardizedFileURL.path + "/"))
+            XCTAssertEqual(try Data(contentsOf: backing.url), originalPNGs[index])
+        }
 
-        // A damaged, unanswered document: an automatic save goes to the version history, and must
-        // not clone out of the live package it is leaving alone — nor claim to describe it.
+        // A damaged, unanswered document writes a standalone version without borrowing or replacing the live ledger.
         var damage = ProjectLoadDamage()
         damage.add(ProjectLoadDamage.LayerDamage(layerName: "Ink", brushStrokes: 1))
         manager.loadDamage = damage
         saveAndWait(manager, to: url, intent: .automatic)
         let profile = try XCTUnwrap(profile())
-        XCTAssertEqual(profile.pngsEncoded, 2, "A version slot is written whole")
-        XCTAssertEqual(profile.pngsReused, 0)
+        XCTAssertEqual(profile.pngsEncoded, 0, "Protected immutable sources need no new PNG encode for a version slot")
+        XCTAssertEqual(profile.pngsReused, 2, "The complete version copies both protected PNG resources")
         XCTAssertTrue(ProjectBackupManager.listBackups(forProjectAt: url).contains { $0.label == "Unsaved changes" })
+        let version = try XCTUnwrap(ProjectBackupManager.listBackups(forProjectAt: url).first { $0.label == "Unsaved changes" })
+        XCTAssertNotEqual(version.url, url)
+        XCTAssertTrue(ProjectBackupManager.validateProject(at: version.url))
+        XCTAssertEqual(manager.packageLedger.landedAt, url, "Writing aside does not publish a version-slot URL into the live ledger")
+        XCTAssertEqual(try Data(contentsOf: url.appendingPathComponent("manifest.json")), originalManifest)
+        XCTAssertEqual(try XCTUnwrap(drawingBytes(of: manager, layerIndex: 2, in: url)), originalDrawing)
+        let saved = try XCTUnwrap(ProjectStore.load(from: version.url))
+        for index in 0..<2 {
+            XCTAssertEqual(try XCTUnwrap(rasterBytes(of: manager, layerIndex: index, in: url)), originalPNGs[index],
+                           "A version save leaves the live package's raster bytes untouched")
+            XCTAssertEqual(try XCTUnwrap(rasterBytes(of: saved, layerIndex: index, in: version.url)), originalPNGs[index])
+            let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(
+                try saved.layers[index].cels[0].raster.renderToUIImage().get().cgImage)))
+            XCTAssertEqual(pixels, originalPixels[index], "The standalone version reopens with the original drawing")
+        }
+        XCTAssertEqual(saved.layers[2].cels[0].vector?.elements.count, 1)
     }
 }

@@ -648,7 +648,7 @@ final class PoseBakeLogicTests: XCTestCase {
                                       "the actual transferred stroke, fill and text keep the current picture")
                         let payload = VectorCanvasData(from: transferred, imageFileNames: [:])
                         let decoded = try JSONDecoder().decode(VectorCanvasData.self, from: JSONEncoder().encode(payload))
-                        let reopened = decoded.canvasSpaceElements(resolvingImages: { _ in nil },
+                        let reopened = try decoded.canvasSpaceElements(resolvingImages: { _ in nil },
                                                                    resolvingVideos: { _ in nil })
                         manager.layers[2].cels[0].vector = VectorCanvas(size: size, elements: reopened)
                         XCTAssertTrue(try compositeBytes(manager, atFrame: 4).elementsEqual(original),

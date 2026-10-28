@@ -43,6 +43,10 @@ Test package is still unanswered; continue simulator/source work without restart
   Layout38 plus whole Gallery5:40pass/3expected opt-in skips. Both separate cold Gallery cases pass:
   damaged A refused; B's complete files unchanged before B opens and visibly draws its own blue.
   Root inspected both landscape pictures. Final combined gates and old-format retirement remain.
+- Integrate the independently checked package2905 source through the reviewed17-file patch,
+  including permanent Gallery tests and stronger existing saving witnesses. All17 paths are unchanged
+  in integration since their common ancestor; no unrelated fix is overwritten. Temporary capture
+  hooks and source-branch notes are excluded. Final assembled tests remain required before merge.
 - Automatic renewal source protection is activated and verified: renew installed6fb while main is
   older instead of downgrading it. Existing successful-install state is atomic and records the source;
   no current device/build/daemon change. Future manual installs update that state only after success.

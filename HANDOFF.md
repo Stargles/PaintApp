@@ -90,6 +90,12 @@ originals. Never weaken committed-model pixel parity to pass. Rebuild normal the
 controls and all affected public classes. No harvest or physical latency/crash claim. Mode3 remains
 asynchronous/unchanged from6fb; its source/evidence limits are in `mode3-current-source-map.md`.
 
+Root authorized source-only package2905 harvest using reviewed17-file patch SHA3443facc. All17
+allowlisted integration paths are unchanged since common19e; no intervening integration fix to
+restore/overwrite. The final endpoint excludes temporary capture hooks and branch notes. Component
+qualification remains scoped; assembled source requires new fast/UI gates. Eraser649 native reads
+its separate frozen tree, so this integration edit does not mutate its build inputs.
+
 ### Saved files — current package boundary and next cold Gallery gates
 
 Tree `PaintApp-s54-package-address`, source2905abd5. Whole14classes293 GREEN/root730exact.

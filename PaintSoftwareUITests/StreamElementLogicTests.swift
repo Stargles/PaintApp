@@ -70,7 +70,7 @@ final class StreamElementLogicTests: XCTestCase {
                       "The payload must decode clean: \(reloaded.decodeReport)")
         XCTAssertEqual(reloaded.streams.count, 1,
                        "It has to come back under the `stream` discriminator, not as an unknown kind")
-        let rebuilt = reloaded.canvasSpaceElements(resolvingImages: { _ in nil },
+        let rebuilt = try reloaded.canvasSpaceElements(resolvingImages: { _ in nil },
                                                    resolvingVideos: { _ in nil })
         return (try XCTUnwrap(rebuilt.compactMap(\.stream).first,
                               "The stream did not come back as a stream element"), data)

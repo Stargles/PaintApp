@@ -83,7 +83,7 @@ final class ProjectStorageIntegrityLogicTests: XCTestCase {
         let manifest = try JSONDecoder().decode(ProjectManifest.self,
             from: Data(contentsOf: package.appendingPathComponent("manifest.json")))
         let cel = try XCTUnwrap(manifest.layers.first?.cels.first)
-        return ProjectPackageLayout.existingURL(named: try XCTUnwrap(cel.interpolationFileName),
+        return try ProjectPackageLayout.existingURL(named: try XCTUnwrap(cel.interpolationFileName),
             role: .interpolation, cel: cel.id, in: package)
     }
 
@@ -91,7 +91,7 @@ final class ProjectStorageIntegrityLogicTests: XCTestCase {
         let manifest = try JSONDecoder().decode(ProjectManifest.self,
             from: Data(contentsOf: package.appendingPathComponent("manifest.json")))
         let cel = try XCTUnwrap(manifest.layers.flatMap(\.cels).first { $0.vectorFileName != nil })
-        return ProjectPackageLayout.existingURL(named: try XCTUnwrap(cel.vectorFileName),
+        return try ProjectPackageLayout.existingURL(named: try XCTUnwrap(cel.vectorFileName),
             role: .drawing, cel: cel.id, in: package)
     }
 

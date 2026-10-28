@@ -196,7 +196,7 @@ final class VideoElementLogicTests: XCTestCase {
         XCTAssertEqual(reloaded.videos.count, 1,
                        "It has to come back under the `video` discriminator, not as an unknown kind "
                        + "the report quietly dropped — `isClean` above is true of an empty payload too")
-        let rebuilt = reloaded.canvasSpaceElements(resolvingImages: { _ in nil },
+        let rebuilt = try reloaded.canvasSpaceElements(resolvingImages: { _ in nil },
                                                    resolvingVideos: { _ in url })
         return try XCTUnwrap(rebuilt.compactMap(\.video).first,
                              "The video did not come back as a video element")
@@ -271,9 +271,9 @@ final class VideoElementLogicTests: XCTestCase {
                                              .stroke(stroke())])
         let payload = VectorCanvasData(from: canvas, imageFileNames: [:])
 
-        let kept = payload.canvasSpaceElements(resolvingImages: { _ in nil },
+        let kept = try payload.canvasSpaceElements(resolvingImages: { _ in nil },
                                                resolvingVideos: { _ in url(for: asset) })
-        let dropped = payload.canvasSpaceElements(resolvingImages: { _ in nil },
+        let dropped = try payload.canvasSpaceElements(resolvingImages: { _ in nil },
                                                   resolvingVideos: { _ in nil })
 
         XCTAssertEqual(kept.count, 3, "fixture precondition: with a resolver the video comes back")

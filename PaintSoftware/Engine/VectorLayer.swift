@@ -7890,6 +7890,26 @@ final class VectorCanvas {
 /// `ProjectStore`, since `UIImage` isn't `Codable`); strokes and fills are stored inline.
 struct VectorCanvasData: Codable {
     static let currentGeometryVersion = 1
+
+    /// Validate address-bearing media fields while their owning vector slot is still intact.
+    /// Metadata-only package readers call the same routine so they retain the decoder's error order.
+    static func validateResourceAddress(from decoder: Decoder) throws {
+        guard let package = decoder.userInfo[ProjectPackageLayout.packageURLUserInfoKey] as? URL else { return }
+        enum Key: String, CodingKey { case kind, image, video, stream, fileName, lastFrameFileName }
+        guard let slot = try? decoder.container(keyedBy: Key.self),
+              let kind = try? slot.decode(String.self, forKey: .kind) else { return }
+        let reference: (payload: Key, name: Key, role: ProjectPackageLayout.Role)
+        switch kind {
+        case "image": reference = (.image, .fileName, .placedImage)
+        case "video": reference = (.video, .fileName, .video)
+        case "stream": reference = (.stream, .lastFrameFileName, .placedImage)
+        default: return
+        }
+        guard let fields = try? slot.nestedContainer(keyedBy: Key.self, forKey: reference.payload),
+              let fileName = try? fields.decode(String.self, forKey: reference.name) else { return }
+        _ = try ProjectPackageLayout.existingURL(named: fileName, role: reference.role, in: package)
+    }
+
     /// **The three stage-3c keys are optional, and that is the smaller code rather than a migration.**
     /// A `VectorImageElement`'s stored shape (`aspect`, `stretchAxis`, `mirrored`) is absent from the
     /// payload for a placement a similarity can hold — which is every image nobody has stretched or
@@ -8026,6 +8046,7 @@ struct VectorCanvasData: Codable {
         private enum CodingKeys: String, CodingKey { case kind, stroke, fill, image, text, video, stream }
 
         init(from decoder: Decoder) throws {
+            try VectorCanvasData.validateResourceAddress(from: decoder)
             let c = try decoder.container(keyedBy: CodingKeys.self)
             // Decoded as `String`, not as `Kind`: `Kind`'s synthesized decoder answers the same
             // `dataCorrupted` for "no such case" as for "not a string at all", and those are the two
@@ -8133,6 +8154,8 @@ struct VectorCanvasData: Codable {
         init(from decoder: Decoder) throws {
             do {
                 outcome = .decoded(try ElementData(from: decoder))
+            } catch let error as ProjectPackageLayout.AddressError {
+                throw error
             } catch let error as VectorGeometryCodingError {
                 throw error
             } catch ElementData.Failure.unknownKind(let raw) {
@@ -8327,12 +8350,12 @@ struct VectorCanvasData: Codable {
     /// answers nil leaves the element on its placeholder until the laptop answers, and drops
     /// nothing. So a caller with no package directory loses no element by omitting it, which is not
     /// true of the two above.
-    func canvasSpaceElements(resolvingImages resolveImage: (ImageRef) -> UIImage?,
-                             resolvingVideos resolveVideo: (VideoRef) -> URL?,
-                             resolvingStreamFrames resolveStreamFrame: (StreamRef) -> UIImage? = { _ in nil })
-        -> [VectorElement] {
+    func canvasSpaceElements(resolvingImages resolveImage: (ImageRef) throws -> UIImage?,
+                             resolvingVideos resolveVideo: (VideoRef) throws -> URL?,
+                             resolvingStreamFrames resolveStreamFrame: (StreamRef) throws -> UIImage? = { _ in nil })
+        rethrows -> [VectorElement] {
         let stored = affineTransform
-        let rebuilt = localElements(resolvingImages: resolveImage, resolvingVideos: resolveVideo,
+        let rebuilt = try localElements(resolvingImages: resolveImage, resolvingVideos: resolveVideo,
                                     resolvingStreamFrames: resolveStreamFrame)
         guard !stored.isIdentity else { return rebuilt }
         return rebuilt.map { VectorCanvas.mapping($0, throughSimilarity: stored) }
@@ -8340,16 +8363,16 @@ struct VectorCanvasData: Codable {
 
     /// The display list as the file literally holds it, before `affineTransform` is baked in. Private
     /// to the accessor above — nothing outside this type has any business with layer-local geometry.
-    private func localElements(resolvingImages resolveImage: (ImageRef) -> UIImage?,
-                               resolvingVideos resolveVideo: (VideoRef) -> URL?,
-                               resolvingStreamFrames resolveStreamFrame: (StreamRef) -> UIImage?) -> [VectorElement] {
-        elements.compactMap { data in
+    private func localElements(resolvingImages resolveImage: (ImageRef) throws -> UIImage?,
+                               resolvingVideos resolveVideo: (VideoRef) throws -> URL?,
+                               resolvingStreamFrames resolveStreamFrame: (StreamRef) throws -> UIImage?) rethrows -> [VectorElement] {
+        try elements.compactMap { data in
             switch data {
             case .stroke(let stroke): return .stroke(stroke)
             case .fill(let fill): return .fill(fill)
             case .text(let text): return .text(text)
             case .image(let ref):
-                guard let image = resolveImage(ref) else { return nil }
+                guard let image = try resolveImage(ref) else { return nil }
                 return .image(VectorImageElement(image: image,
                                                  transform: LayerTransform(position: CGPoint(x: ref.x, y: ref.y),
                                                                            scale: ref.scale, rotation: ref.rotation),
@@ -8362,7 +8385,7 @@ struct VectorCanvasData: Codable {
                 // A video whose asset is not in the package is dropped exactly as a placed image
                 // whose PNG is missing is — the resolver is the only thing that knows a package
                 // directory, and `ProjectStore` counts the loss where it answers nil.
-                guard let url = resolveVideo(ref) else { return nil }
+                guard let url = try resolveVideo(ref) else { return nil }
                 return .video(VectorVideoElement(
                     assetURL: url, assetFileName: ref.fileName,
                     naturalSize: CGSize(width: ref.width, height: ref.height),
@@ -8386,7 +8409,7 @@ struct VectorCanvasData: Codable {
                                               scale: ref.scale, rotation: ref.rotation),
                     aspect: CGFloat(ref.aspect), stretchAxis: CGFloat(ref.stretchAxis),
                     mirrored: ref.mirrored, animationGroupID: ref.animationGroupID)
-                if ref.lastFrameFileName != nil { element.picture = StreamPicture(frame: resolveStreamFrame(ref)) }
+                if ref.lastFrameFileName != nil { element.picture = StreamPicture(frame: try resolveStreamFrame(ref)) }
                 return .stream(element)
             }
         }

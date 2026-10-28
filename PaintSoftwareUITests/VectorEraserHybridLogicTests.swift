@@ -795,7 +795,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
             let data = try JSONEncoder().encode(VectorCanvasData(from: canvas, imageFileNames: [:]))
             let decoded = try JSONDecoder().decode(VectorCanvasData.self, from: data)
             XCTAssertTrue(decoded.decodeReport.isClean, "PREMISE: the current saved display list decodes cleanly")
-            let restored = VectorCanvas(size: Self.canvasSize, elements: decoded.canvasSpaceElements(
+            let restored = VectorCanvas(size: Self.canvasSize, elements: try decoded.canvasSpaceElements(
                 resolvingImages: { _ in nil }, resolvingVideos: { _ in nil }))
             XCTAssertEqual(restored.strokes.first { $0.composite == .erase }?.seed, seed,
                            "Save/load retains the gesture field")

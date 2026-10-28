@@ -198,7 +198,7 @@ final class VectorTextPersistenceLogicTests: XCTestCase {
             XCTAssertEqual(result.decodeReport.malformedKinds, ["text"], damage)
             XCTAssertEqual(kinds(result.elements), ["stroke", "fill"], damage)
             let surviving = VectorCanvas(size: Self.canvasSize,
-                elements: result.canvasSpaceElements(resolvingImages: { _ in nil }, resolvingVideos: { _ in nil }))
+                elements: try result.canvasSpaceElements(resolvingImages: { _ in nil }, resolvingVideos: { _ in nil }))
             XCTAssertEqual(try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(surviving.render()?.cgImage))),
                            expected, "\(damage) must not discard or alter surrounding ink")
         }
@@ -267,7 +267,7 @@ final class VectorTextPersistenceLogicTests: XCTestCase {
                                  elements: [.fill(fill()), .text(element), .stroke(stroke())])
         let payload = try reload(VectorCanvasData(from: saved, imageFileNames: [:]))
         let loaded = VectorCanvas(size: Self.canvasSize,
-                                  elements: payload.canvasSpaceElements(resolvingImages: { _ in nil },
+                                  elements: try payload.canvasSpaceElements(resolvingImages: { _ in nil },
                                                                         resolvingVideos: { _ in nil }))
 
         // 1. It came back as a text object, not as pixels, and as the same one.

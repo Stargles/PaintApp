@@ -46,6 +46,10 @@ import os
 /// as `ProjectBackupManager` and `ProjectLocation` do.
 nonisolated enum ProjectPackageLayout {
 
+    /// Decoder context identifying the package that owns relative resource names inside vector data.
+    /// Keep the raw spelling stable: existing writers/readers exchange this only within one decode.
+    static let packageURLUserInfoKey = CodingUserInfoKey(rawValue: "projectPackageURL")!
+
     private static let log = Logger(subsystem: "Starg.PaintSoftware", category: "ProjectLayout")
 
     // MARK: - Roles
@@ -115,13 +119,48 @@ nonisolated enum ProjectPackageLayout {
         }
     }
 
-    /// Appends a package-relative path one component at a time.
-    ///
-    /// Not `appendingPathComponent(name)` with the slash left in: that API's treatment of an embedded
-    /// separator is a platform detail, and every address in this file is load-bearing enough that
-    /// "probably does the right thing" is not good enough.
-    static func resolve(_ relative: String, in package: URL) -> URL {
-        relative.split(separator: "/").reduce(package) { $0.appendingPathComponent(String($1)) }
+    enum AddressError: Error {
+        case invalidPath(String)
+        case unsupportedEntry(URL)
+    }
+
+    /// POSIX components are literal names, never URL-decoded or silently standardized.
+    private static func components(of relative: String) throws -> [Substring] {
+        let components = relative.split(separator: "/", omittingEmptySubsequences: false)
+        guard !relative.contains("\0"), components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+            throw AddressError.invalidPath(relative)
+        }
+        return components
+    }
+
+    /// The one package address authority. Missing suffixes are legal; existing entries must be
+    /// ordinary files/directories of the requested kind. This is not a hostile-TOCTOU guarantee.
+    static func resolve(_ relative: String, in package: URL, isDirectory: Bool = false) throws -> URL {
+        let parts = try components(of: relative)
+        func entry(at url: URL) throws -> ProjectFileTree.Entry? {
+            do { return try ProjectFileTree.entry(at: url) }
+            catch {
+                let error = error as NSError
+                if (error.domain == NSCocoaErrorDomain &&
+                    (error.code == NSFileNoSuchFileError || error.code == NSFileReadNoSuchFileError)) ||
+                    (error.domain == NSPOSIXErrorDomain && error.code == Int(ENOENT)) { return nil }
+                throw AddressError.unsupportedEntry(url)
+            }
+        }
+        guard try entry(at: package) == .directory else { throw AddressError.unsupportedEntry(package) }
+        var url = package
+        var missing = false
+        for (index, part) in parts.enumerated() {
+            let wantsDirectory = index < parts.count - 1 || isDirectory
+            url.appendPathComponent(String(part), isDirectory: wantsDirectory)
+            guard !missing else { continue }
+            guard let kind = try entry(at: url) else { missing = true; continue }
+            switch (kind, wantsDirectory) {
+            case (.directory, true), (.file, false): break
+            default: throw AddressError.unsupportedEntry(url)
+            }
+        }
+        return url
     }
 
     // MARK: - Writing
@@ -129,13 +168,14 @@ nonisolated enum ProjectPackageLayout {
     /// The package-relative path `name` is **written** at. A slashed name already is one; a bare one
     /// goes in the role's own directory. `ProjectStore.PackageLedger` records this string per file,
     /// which is what lets a later save clone the file out of the live package by the same address.
-    static func writePath(named name: String, role: Role) -> String {
-        name.contains("/") ? name : "\(role.directory)/\(name)"
+    static func writePath(named name: String, role: Role) throws -> String {
+        _ = try components(of: name)
+        return name.contains("/") ? name : "\(role.directory)/\(name)"
     }
 
     /// Where to **write** `name` — `writePath` resolved against the package.
-    static func writeURL(named name: String, role: Role, in package: URL) -> URL {
-        resolve(writePath(named: name, role: role), in: package)
+    static func writeURL(named name: String, role: Role, in package: URL) throws -> URL {
+        try resolve(writePath(named: name, role: role), in: package)
     }
 
     /// Creates exactly the content directories a document needs, once, **before** the per-cel
@@ -143,10 +183,10 @@ nonisolated enum ProjectPackageLayout {
     ///
     /// Lazily, which is the point: a pure-vector document (the owner's own) used to ship an empty
     /// `images/` folder beside its content, which is the next question they would have asked.
-    static func createDirectories(_ roles: Set<Role>, in package: URL) {
+    static func createDirectories(_ roles: Set<Role>, in package: URL) throws {
         let fm = FileManager.default
         for directory in Set(roles.map(\.directory)).sorted() {
-            try? fm.createDirectory(at: package.appendingPathComponent(directory, isDirectory: true),
+            try fm.createDirectory(at: resolve(directory, in: package, isDirectory: true),
                                     withIntermediateDirectories: true)
         }
     }
@@ -173,10 +213,10 @@ nonisolated enum ProjectPackageLayout {
     /// launch: three syscalls that fail instantly against the one manifest read the pass already
     /// pays. `ENOTEMPTY` and `ENOENT` are both the ordinary answer and neither is logged.
     @discardableResult
-    static func pruneEmptyContentDirectories(in package: URL) -> [String] {
+    static func pruneEmptyContentDirectories(in package: URL) throws -> [String] {
         var removed: [String] = []
-        for directory in contentDirectories {
-            let url = package.appendingPathComponent(directory, isDirectory: true)
+        let directories = try contentDirectories.map { try resolve($0, in: package, isDirectory: true) }
+        for (directory, url) in zip(contentDirectories, directories) {
             let status = url.withUnsafeFileSystemRepresentation { path -> Int32 in
                 guard let path else { return -1 }
                 return rmdir(path)
@@ -195,25 +235,29 @@ nonisolated enum ProjectPackageLayout {
     ///
     /// Returns `primary` when neither address exists, so a caller's "missing file" diagnostics name
     /// the address the file is supposed to be at.
-    static func existingURL(named name: String, role: Role, cel: UUID? = nil, in package: URL) -> URL {
-        let fm = FileManager.default
-        let primary: URL
-        let alternate: URL?
+    static func existingURL(named name: String, role: Role, cel: UUID? = nil, in package: URL) throws -> URL {
+        _ = try components(of: name)
+        let primaryPath: String
+        let alternatePath: String?
         if name.contains("/") {
-            primary = resolve(name, in: package)
-            alternate = nil
+            primaryPath = name
+            alternatePath = nil
         } else if role.isMoved {
-            primary = package.appendingPathComponent("images", isDirectory: true).appendingPathComponent(name)
-            alternate = cel.map { resolve(recordedName(for: role, cel: $0), in: package) }
+            primaryPath = "images/\(name)"
+            alternatePath = cel.map { recordedName(for: role, cel: $0) }
         } else if role == .video {
-            primary = package.appendingPathComponent("videos", isDirectory: true).appendingPathComponent(name)
-            alternate = package.appendingPathComponent("images", isDirectory: true).appendingPathComponent(name)
+            primaryPath = "videos/\(name)"
+            alternatePath = "images/\(name)"
         } else {
-            primary = package.appendingPathComponent(role.directory, isDirectory: true).appendingPathComponent(name)
-            alternate = nil
+            primaryPath = "\(role.directory)/\(name)"
+            alternatePath = nil
         }
-        if fm.fileExists(atPath: primary.path) { return primary }
-        if let alternate, fm.fileExists(atPath: alternate.path) { return alternate }
+        let primary = try resolve(primaryPath, in: package)
+        if FileManager.default.fileExists(atPath: primary.path) { return primary }
+        if let alternatePath {
+            let alternate = try resolve(alternatePath, in: package)
+            if FileManager.default.fileExists(atPath: alternate.path) { return alternate }
+        }
         return primary
     }
 
@@ -396,6 +440,11 @@ nonisolated enum ProjectPackageLayout {
     }
 
     private static func tidy(packageAt url: URL, migrating: Bool) -> PackagePass {
+        do { return try tidyChecked(packageAt: url, migrating: migrating) }
+        catch { return PackagePass(outcome: .skippedDamaged) }
+    }
+
+    private static func tidyChecked(packageAt url: URL, migrating: Bool) throws -> PackagePass {
         let fm = FileManager.default
         // Reassigned by the directory rename in step 5, so every path below is derived from it rather
         // than captured before it.
@@ -403,7 +452,8 @@ nonisolated enum ProjectPackageLayout {
 
         // 1. One manifest read, which is all a package already in the new layout ever costs. It is
         //    used by the work scan, by the move walk, and as the compare-and-swap's baseline.
-        guard let originalBytes = try? Data(contentsOf: url.appendingPathComponent("manifest.json")),
+        let manifestURL = try resolve("manifest.json", in: url)
+        guard let originalBytes = try? Data(contentsOf: manifestURL),
               let skeleton = try? JSONDecoder().decode(ProjectBackupManager.ManifestSkeleton.self,
                                                        from: originalBytes) else {
             return PackagePass(outcome: .skippedDamaged)
@@ -414,14 +464,28 @@ nonisolated enum ProjectPackageLayout {
         //    that check stats and PNG-sniffs every file the package names and `repairCorruptedProjects`
         //    has already paid for exactly that walk moments earlier. Every launch after the first
         //    would otherwise double the launch's I/O over the whole library to accomplish nothing.
-        let imagesDir = url.appendingPathComponent("images", isDirectory: true)
+        // Check named addresses before even the work/no-work sweep can mutate this package.
+        if let table = skeleton.brushTableFileName { _ = try resolve(table, in: url) }
+        for layer in skeleton.layers {
+            for cel in layer.cels {
+                let names: [(String?, Role)] = [(cel.rasterFileName, .raster), (cel.bakedImageFileName, .baked),
+                    (cel.vectorFileName, .drawing), (cel.animationFileName, .animation),
+                    (cel.interpolationFileName, .interpolation)]
+                for (name, role) in names {
+                    if let name {
+                        _ = try existingURL(named: name, role: role, cel: cel.id, in: url)
+                    }
+                }
+            }
+        }
+        _ = try resolve("images", in: url, isDirectory: true)
         var work: [(cel: UUID, role: Role, recorded: String)] = []
         for layer in skeleton.layers {
             for cel in layer.cels {
                 guard let celID = cel.id else { continue }
                 for role in [Role.drawing, .animation, .interpolation] {
                     guard let recorded = cel.fileName(for: role), !recorded.contains("/"),
-                          fm.fileExists(atPath: imagesDir.appendingPathComponent(recorded).path) else { continue }
+                          fm.fileExists(atPath: try resolve("images/\(recorded)", in: url).path) else { continue }
                     work.append((celID, role, recorded))
                 }
             }
@@ -448,7 +512,7 @@ nonisolated enum ProjectPackageLayout {
             // it then failed to fill is exactly the package that reaches here, and it is the one
             // holding the empty folder. Gated on `migrating` like every other mutation in this pass,
             // even though removing an empty directory cannot lose a byte — one gate, one argument.
-            let emptied = migrating ? pruneEmptyContentDirectories(in: url) : []
+            let emptied = migrating ? try pruneEmptyContentDirectories(in: url) : []
             return PackagePass(outcome: emptied.isEmpty ? .unchanged : .tidied(url),
                                projectID: projectID, emptied: emptied)
         }
@@ -458,6 +522,31 @@ nonisolated enum ProjectPackageLayout {
         //    package whose manifest we could not read has no title either, so it must not be renamed.
         guard ProjectBackupManager.validateProject(at: url) else {
             return PackagePass(outcome: .skippedDamaged, projectID: projectID)
+        }
+
+        // Every generated address belongs to one migration plan. Resolve the whole plan before the
+        // package directory can be renamed or any sidecar can move, so an obstruction on a later
+        // cel cannot leave earlier cels at their new addresses. A regular file is a valid file-leaf
+        // kind to the resolver, but an already occupied generated address has another owner and is
+        // not ours to adopt or replace.
+        for item in work {
+            let relative = recordedName(for: item.role, cel: item.cel)
+            do {
+                let destination = try resolve(relative, in: url)
+                guard !fm.fileExists(atPath: destination.path) else {
+                    log.error("""
+                        Tidy refused the whole sidecar migration: generated destination is already occupied: \
+                        \(relative, privacy: .public)
+                        """)
+                    return PackagePass(outcome: .skippedDamaged, projectID: projectID)
+                }
+            } catch {
+                log.error("""
+                    Tidy refused the whole sidecar migration: generated destination is unsupported: \
+                    \(relative, privacy: .public): \(String(describing: error), privacy: .public)
+                    """)
+                return PackagePass(outcome: .skippedDamaged, projectID: projectID)
+            }
         }
 
         // 5. Rename the directory to follow the title. **Through `PackageRenameGate`**, which refuses
@@ -497,32 +586,13 @@ nonisolated enum ProjectPackageLayout {
         var rewrites: [(old: String, new: String)] = []
         var madeDrawingsDirectory = false
         for item in work {
-            let source = url.appendingPathComponent("images", isDirectory: true)
-                .appendingPathComponent(item.recorded)
+            let source = try resolve("images/\(item.recorded)", in: url)
             let relative = recordedName(for: item.role, cel: item.cel)
-            let destination = resolve(relative, in: url)
-            // **Both addresses occupied means something outside this flow wrote one of them**,
-            // because a rename cannot leave both. The conservative answer is to touch neither and
-            // say so.
-            //
-            // **`moveItem` would refuse an occupied destination anyway**, which a mutation proved:
-            // deleting this branch entirely leaves every assertion green, because the throw below
-            // produces the same "nothing moved, nothing rewritten" outcome. It stays because the
-            // difference is what gets *said* — a sentence naming the file and the reason, rather
-            // than an opaque `NSFileWriteFileExists` in a log nobody is reading — and because the
-            // wrong repair for that error is the plausible one: removing the destination first. That
-            // is the mutation the test does catch.
-            if fm.fileExists(atPath: destination.path) {
-                log.error("""
-                    \(item.recorded, privacy: .public) exists at both its old and its new address in \
-                    \(url.lastPathComponent, privacy: .public) — a rename cannot leave both, so \
-                    neither is touched and the manifest is left naming the old one
-                    """)
-                continue
-            }
+            // Resolve relative to the current root again after a successful package rename; the
+            // preflight intentionally retained no absolute URLs from the old root.
+            let destination = try resolve(relative, in: url)
             if !madeDrawingsDirectory {
-                try? fm.createDirectory(at: url.appendingPathComponent(Role.drawing.directory,
-                                                                      isDirectory: true),
+                try fm.createDirectory(at: resolve(Role.drawing.directory, in: url, isDirectory: true),
                                         withIntermediateDirectories: true)
                 madeDrawingsDirectory = true
             }
@@ -542,7 +612,7 @@ nonisolated enum ProjectPackageLayout {
             // A rename with no sidecars to move is still a pass that changed the library. The sweep
             // runs here too: `madeDrawingsDirectory` above can have created a `drawings/` that every
             // move then failed to put anything in.
-            let emptied = pruneEmptyContentDirectories(in: url)
+            let emptied = try pruneEmptyContentDirectories(in: url)
             let changed = renamedTo != nil || !emptied.isEmpty
             return PackagePass(outcome: changed ? .tidied(url) : .unchanged,
                                projectID: projectID, renamedTo: renamedTo, emptied: emptied)
@@ -552,14 +622,14 @@ nonisolated enum ProjectPackageLayout {
         //    files already resolve through `existingURL` whether or not it lands. **Resolved against
         //    the post-rename `url`**, which is the whole reason step 5 reassigns it rather than
         //    keeping two variables.
-        rewriteManifest(at: url.appendingPathComponent("manifest.json"), in: url,
+        rewriteManifest(at: try resolve("manifest.json", in: url), in: url,
                         originalBytes: originalBytes, rewrites: rewrites)
 
         // 8. The sweep. **After the manifest rewrite, not before**: the moves above are what can
         //    empty `images/`, and a vector-only package written before (57) is exactly the one whose
         //    `images/` held nothing but the sidecars that just left. Leaving it standing would put an
         //    empty folder beside `drawings/` at the one launch the artist opens Files to look.
-        let emptied = pruneEmptyContentDirectories(in: url)
+        let emptied = try pruneEmptyContentDirectories(in: url)
         return PackagePass(outcome: .tidied(url), projectID: projectID,
                            movedFiles: rewrites.count, renamedTo: renamedTo, emptied: emptied)
     }

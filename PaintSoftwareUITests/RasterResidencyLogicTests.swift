@@ -957,7 +957,7 @@ final class RasterResidencyLogicTests: XCTestCase {
             let cel = opened.layers[0].cels[at]
             for (suffix, role) in [("raster", ProjectPackageLayout.Role.raster), ("baked", .baked)] {
                 let name = "\(cel.id.uuidString)_\(suffix).png"
-                let file = ProjectPackageLayout.resolve(ProjectPackageLayout.writePath(named: name, role: role), in: renamed)
+                let file = try ProjectPackageLayout.resolve(ProjectPackageLayout.writePath(named: name, role: role), in: renamed)
                 XCTAssertEqual(try Data(contentsOf: file), png, "Unchanged resources must retain their exact compressed bytes")
             }
             try autoreleasepool {
@@ -995,7 +995,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         try await save(manager, to: url, freezing: owner)
         let manifest = try Data(contentsOf: url.appendingPathComponent("manifest.json"))
         let celID = manager.layers[0].cels[0].id
-        let savedRaster = ProjectPackageLayout.resolve(ProjectPackageLayout.writePath(
+        let savedRaster = try ProjectPackageLayout.resolve(ProjectPackageLayout.writePath(
             named: "\(celID.uuidString)_raster.png", role: .raster), in: url)
         let savedPixels = try Data(contentsOf: savedRaster)
         let blocker = root.appendingPathComponent("not-a-source-directory")

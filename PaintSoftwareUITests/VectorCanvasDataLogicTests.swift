@@ -218,7 +218,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
 
         let placed = solidImage(.green)
         let canvas = VectorCanvas(size: Self.canvasSize,
-                                  elements: decoded.canvasSpaceElements(resolvingImages: { _ in placed },
+                                  elements: try decoded.canvasSpaceElements(resolvingImages: { _ in placed },
                                                                         resolvingVideos: { _ in nil }))
 
         XCTAssertEqual(kinds(canvas.elements), ["fill", "image", "erase"])
@@ -403,7 +403,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
         XCTAssertEqual(decoded.affineTransform.tx, 12, "fixture precondition: the file says +12")
 
         let placed = solidImage(.green)
-        let baked = decoded.canvasSpaceElements(resolvingImages: { _ in placed },
+        let baked = try decoded.canvasSpaceElements(resolvingImages: { _ in placed },
                                                 resolvingVideos: { _ in nil })
         let canvas = VectorCanvas(size: Self.canvasSize, elements: baked)
 

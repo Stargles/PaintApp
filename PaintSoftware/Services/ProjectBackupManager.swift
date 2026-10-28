@@ -914,14 +914,16 @@ nonisolated enum ProjectBackupManager {
     /// references (raster/fill/baked PNGs, vector JSON) both exists and — for PNGs — starts with the
     /// 8-byte PNG signature (catches crash-truncated writes, not just missing files).
     static func validateProject(at url: URL) -> Bool {
-        guard let data = try? Data(contentsOf: url.appendingPathComponent("manifest.json")) else { return false }
+        guard let manifestURL = try? ProjectPackageLayout.resolve("manifest.json", in: url),
+              let data = try? Data(contentsOf: manifestURL) else { return false }
         return validateProjectFiles(at: url, manifestData: data) && ProjectRecipeMetadata.validate(in: url, manifestData: data)
     }
 
     /// Restores require a strictly readable current manifest as well as intact referenced files and
     /// ink metadata. Validation never rewrites the source version or loads its cel pictures.
     static func validateProjectForRestore(at url: URL) -> Bool {
-        guard let data = try? Data(contentsOf: url.appendingPathComponent("manifest.json")),
+        guard let manifestURL = try? ProjectPackageLayout.resolve("manifest.json", in: url),
+              let data = try? Data(contentsOf: manifestURL),
               currentManifestIsReadable(data) else { return false }
         return validateProjectFiles(at: url, manifestData: data)
             && ProjectRecipeMetadata.validate(in: url, manifestData: data)
@@ -933,45 +935,47 @@ nonisolated enum ProjectBackupManager {
         guard let skeleton = try? JSONDecoder().decode(ManifestSkeleton.self, from: manifestData) else {
             return false
         }
-        // **Resolved through `ProjectPackageLayout`, not joined to `images/`** — TODO (57). The
-        // address of a sidecar is a question with one answer, and this is the third place that asks
-        // it. Without this the validator would call a package mid-migration damaged — a file moved to
-        // `drawings/` while the manifest still names it bare is *exactly* the state a crash between
-        // the move and the manifest rewrite leaves — `repairCorruptedProjects` would restore over it,
-        // and `tidy`'s own step-0 guard would refuse to finish the migration that would fix it.
-        func fileIntact(_ name: String, isPNG: Bool, role: ProjectPackageLayout.Role, cel: UUID?) -> Bool {
-            let fileURL = ProjectPackageLayout.existingURL(named: name, role: role, cel: cel, in: url)
-            guard fm.fileExists(atPath: fileURL.path) else { return false }
-            guard isPNG else { return true }
-            guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return false }
-            let head = try? handle.read(upToCount: pngMagic.count)
-            try? handle.close()
-            guard let head else { return false }
-            return head.count == pngMagic.count && [UInt8](head) == pngMagic
-        }
-
-        // In the package root beside `brushes/`, not in `images/`, so it gets its own existence check
-        // rather than `fileIntact`'s.
-        if let brushTable = skeleton.brushTableFileName,
-           !fm.fileExists(atPath: url.appendingPathComponent(brushTable).path) { return false }
-
-        for layer in skeleton.layers {
-            for cel in layer.cels {
-                // **Absent-because-omitted and absent-because-lost stay different states**, and
-                // telling them apart is the entire job of this line. A cel that says `rasterOmitted`
-                // never had a PNG and must validate; a cel that names one and cannot produce it is
-                // damaged exactly as it always was — `BackupManagerLogicTests` pins both directions.
-                if cel.rasterOmitted != true,
-                   !fileIntact(cel.rasterFileName, isPNG: true, role: .raster, cel: cel.id) { return false }
-                if let baked = cel.bakedImageFileName,
-                   !fileIntact(baked, isPNG: true, role: .baked, cel: cel.id) { return false }
-                if let vector = cel.vectorFileName,
-                   !fileIntact(vector, isPNG: false, role: .drawing, cel: cel.id) { return false }
-                if let animation = cel.animationFileName,
-                   !fileIntact(animation, isPNG: false, role: .animation, cel: cel.id) { return false }
+        do {
+            // **Resolved through `ProjectPackageLayout`, not joined to `images/`** — TODO (57). The
+            // address of a sidecar is a question with one answer, and this is the third place that asks
+            // it. Without this the validator would call a package mid-migration damaged — a file moved to
+            // `drawings/` while the manifest still names it bare is *exactly* the state a crash between
+            // the move and the manifest rewrite leaves — `repairCorruptedProjects` would restore over it,
+            // and `tidy`'s own step-0 guard would refuse to finish the migration that would fix it.
+            func fileIntact(_ name: String, isPNG: Bool, role: ProjectPackageLayout.Role, cel: UUID?) throws -> Bool {
+                let fileURL = try ProjectPackageLayout.existingURL(named: name, role: role, cel: cel, in: url)
+                guard fm.fileExists(atPath: fileURL.path) else { return false }
+                guard isPNG else { return true }
+                guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return false }
+                let head = try? handle.read(upToCount: pngMagic.count)
+                try? handle.close()
+                guard let head else { return false }
+                return head.count == pngMagic.count && [UInt8](head) == pngMagic
             }
-        }
-        return true
+
+            // In the package root beside `brushes/`, not in `images/`, so it gets its own existence check
+            // rather than `fileIntact`'s.
+            if let brushTable = skeleton.brushTableFileName,
+               !fm.fileExists(atPath: try ProjectPackageLayout.resolve(brushTable, in: url).path) { return false }
+
+            for layer in skeleton.layers {
+                for cel in layer.cels {
+                    // **Absent-because-omitted and absent-because-lost stay different states**, and
+                    // telling them apart is the entire job of this line. A cel that says `rasterOmitted`
+                    // never had a PNG and must validate; a cel that names one and cannot produce it is
+                    // damaged exactly as it always was — `BackupManagerLogicTests` pins both directions.
+                    if cel.rasterOmitted != true,
+                       !(try fileIntact(cel.rasterFileName, isPNG: true, role: .raster, cel: cel.id)) { return false }
+                    if let baked = cel.bakedImageFileName,
+                       !(try fileIntact(baked, isPNG: true, role: .baked, cel: cel.id)) { return false }
+                    if let vector = cel.vectorFileName,
+                       !(try fileIntact(vector, isPNG: false, role: .drawing, cel: cel.id)) { return false }
+                    if let animation = cel.animationFileName,
+                       !(try fileIntact(animation, isPNG: false, role: .animation, cel: cel.id)) { return false }
+                }
+            }
+            return true
+        } catch { return false }
     }
 
     /// The project ID from a package's manifest, or nil if the manifest is missing/unreadable.
