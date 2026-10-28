@@ -1,202 +1,160 @@
-# Handoff — active owner-resumed work (Oct 28)
+# Handoff — active owner-resumed work (October 28)
 
-Read this file, then `AGENTS.md`, `CLAUDE.md`, `TODO.md`, `BUGS.md`, and the relevant spec. Kevin
-resumed: **continue; do not park**. The full live ask list and deferred tasks remain in `TODO.md`;
-items leave only in a qualified merge. Preserve quality/architecture and use one native/compiler
-lease at a time. Historical technical detail remains in Git at `63e871d3` and evidence packets.
-Before native work, check authoritative lease/status files, including
-`/Users/juliapark/PaintWork/s54-final-qualification/root-next-gates.json`; do not infer a PID or
-future lease from this handoff.
+Kevin resumed: **continue; do not park**. Read this file, `AGENTS.md`, `CLAUDE.md`, `TODO.md`,
+`BUGS.md`, and the relevant specification. TODO is the complete owner-ask queue; items leave only
+in a qualified merge. Preserve architecture, artwork, evidence, and one-native-lease-at-a-time rules.
+Historical technical detail and raw results remain in Git and the external packets cited below.
 
-**New active owner bug:** streamed screen sometimes moves to a different position than its Move
-box. Timing question pending; investigate shared stream-window/float placement and late-frame
-ownership using existing current/installed-source workflows. No offset/state workaround; preserve
-all earlier queue tasks. Recorded in TODO/BUGS before source work.
+## Integration, install, and protected data
 
-## Current integration and device boundary
-
-- Integration tree: `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`,
-  branch `tmp/s54-qualified-integration`. Current product includes runtime4cce1817/fixture8ea6a254
-  plus package harveste4f9c8fa. Frozen inventory730; staticfast5424/full6023 at e4f9c8fa. This new
-  assembled source is not natively qualified. The older sourcec63497f1's85green scope remains historical.
-- At recorded HEAD `63e871d3`, `main`/`origin/main` remain at `afd2030c`; no merge or push had occurred.
-  A qualified merge is authorized once the remaining gates pass. Do not treat the separately
-  qualified component pins as a qualified assembled integration.
-- Installed Release remains source `6fb979f4` (UUID
-  `AE3F2323-9760-3783-BB5A-0756F9828CCA`), profile expiry `2026-10-30T00:18:54Z`. It opened
-  normally without arguments for at least 20 seconds. No physical gesture test or fresh restart.
-  Fresh saved/unlocked export readiness is unanswered; do not restart or install without it.
-- Protected original package export:
+- Integration worktree: `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch
+  `tmp/s54-qualified-integration`, documentation HEAD `e4f6a15a`. Current package harvest is
+  `e4f9c8fa`, with 730 source entries, fast static count 5,424 and full count 6,023. These are
+  static counts only: this assembled source has **not** passed its final native gates.
+- Main/origin remain `afd2030c`; no merge or push. A qualified merge is authorized after remaining
+  gates pass. Component qualification and harvested source do not qualify the assembled integration.
+- Installed Release is still source `6fb979f442f4d3da1299785de2a077a2058a4dfe`, UUID
+  `AE3F2323-9760-3783-BB5A-0756F9828CCA`, profile expiry `2026-10-30T00:18:54Z`. It launched
+  normally without arguments for at least 20 seconds; no physical gesture run is established.
+  No fresh saved/unlocked export readiness has been given. Do not restart or install on that basis.
+- The 250-package export at
   `/Users/juliapark/PaintWork/s54-final-qualification/device-install-current-20261025/library-backup/package-export`
-  (250 packages; 10 Projects, 221 Backups, 19 Trash; 3,127 files / 544,516,496 bytes). Preserve it
-  unchanged. It is pre-conversion data, not a current-format decoder baseline. Older protected copy:
+  is protected and unchanged: 10 Projects, 221 Backups, 19 Trash, 3,127 files / 544,516,496 bytes.
+  It is pre-conversion data, not a current-format decoder baseline. Older protected copy:
   `/Users/juliapark/PaintWork/s51-cleanup/current-library/Export`.
-- Auto-renewal source protection is **activated**, script SHA `655acf67`; it retains verified
-  installed source `6fb979f4` while main is older and refuses missing/unrelated ancestry. This is a
-  source-only operational change: no device install or daemon change. After any successful manual
-  install, atomically update verified source SHA, artifact path, profile expiry/creation and import
-  needed private commits into the managed clone. Never advance state before install succeeds. See
-  `CLAUDE.md` and `docs/bug-evidence/auto-resign-source-2026-10-28.md`.
+- Auto-renewal source protection is activated at script SHA `655acf67`, retaining verified installed
+  `6fb979f4` while main is older. Update its source/profile state only after a successful manual
+  install. No device or daemon change was made by this source protection. See
+  `docs/bug-evidence/auto-resign-source-2026-10-28.md`.
 
-## Active regression queue and exact next boundaries
+The stroke-landing runtime `4cce1817` plus fixture `8ea6a254` passed its 85-check component run at
+source `c63497f1` (source730, reconciled). Filled/Undo captures are portrait; Guide/Move captures are
+owner-landscape. This is integrated component evidence, not installed or final assembled qualification.
 
-The owner's saved evidence is separate: selection→Move in `Test` / 2048², and drawing/erasing lag
-plus crash in `Test1` / 4096². Preserve the recordings and do not conflate causes. The owner says
-only the Move-button problem is canvas-specific. Evidence:
+## Current gates and exact next boundaries
 
-- `/Users/juliapark/PaintWork/s54-final-qualification/owner-selection-move-recording-20261028-005920Z/`
-  recording SHA `c5f892fe…`; source/build provenance unavailable in header.
-- `/Users/juliapark/PaintWork/s54-final-qualification/owner-latency-recording-20261026-214541/`
-  recording SHA `94e42359…`; header says Test1/4096², v1.0.43(1), Oct 25 build; exact source not
-  verified. Crash/allocation cause remains unproved.
+Before native/compiler work, re-read `/Users/juliapark/PaintWork/s54-final-qualification/root-next-gates.json`
+and the live lease/status files. Do not infer or reuse a PID. The latest reported native assignment is
+eraser normal291 at source `d034036f` in packet
+`/Users/juliapark/PaintWork/s55-recorded-regressions/eraser-native-preview-normal291-d034036f/`;
+root owns that lease. The preceding `649c1dd6` attempt built zero tests because a benchmark call had
+out-of-order argument labels; `d034036f` corrects that call. Check the live state before any action.
+No one else should build, compile, or use the simulator concurrently.
 
-### Stroke landing and filled Undo
+### Stream screen and Move box
 
-Source/runtime `4cce1817` was harvested and fixture `8ea6a254` composed. Original ten whole classes
-ran **85/85 GREEN** at source `c63497f1`, root reconciled. Filled/Undo pictures are **portrait**:
-four retained outline edges, frame 1, above dock. Guide/Move pictures are owner-landscape. Runtime correction waits only when
-interactive edits are pending; no stored policy/cache/service was added. TEMP recorder/delay fixture
-was fully retired. This is integrated and simulator-qualified at that exact source; not installed.
+The new owner report is recorded in TODO/BUGS: a streamed screen can move somewhere different from its
+Move box. Timing (held drag, release, or Set Down) is still unanswered; independent work continues.
+Installed6fb and integration source have no stream-specific placement change. Do not add offsets or
+duplicate transform state.
 
-### Fill window
+At old source `0a9461e4`, selected OLD tests produced 2/2 intended RED in both placement modes after
+dock clearance and healthy-frame premises. Root reviewed the whole videos: On Top showed the green
+stream displaced from the red Move box; In Place picture and box aligned, with a green rotation handle
+causing a false-positive pixel probe. This is a real On Top discrepancy, not a qualification pass.
+The newer source test `6c6ff97f` uses blue as the new frame, proves no blue is present before arrival,
+and checks the whole capture before arrival plus pixel/box parity. It is **not run**. Next: root
+reviews that witness and tests the existing post-gesture frame/model-write boundary in the current
+stream owner map. Crash evidence traces a post-GESTURE-END model write against the canonical
+shown/written map before the fix; confirm this boundary against the new witness before attribution.
+Do not infer a product fix or device cause from the old tests.
 
-Fixture `995677c5` is **47/47 GREEN**, independently reconciled; actual source count was 731 because
-`LayerFillView.swift` was extracted. Keep original grant 730 intact and use corrected census receipt.
-The separate 85-check drawing/Move integration has 730 entries; it does not yet include this
-extraction. Remaining in the fill packet: public growth 1 and fault controls 4, then retirement/final gates. Existing
-256×255 and 120×119 fixture stays within the 705600-byte budget and retains output assertions.
-Evidence: `/Users/juliapark/PaintWork/s55-recorded-regressions/fill-owner-window47-995677c5/`.
+Evidence and trace: `/Users/juliapark/PaintWork/s55-recorded-regressions/stream-move-old2-0a9461e4/`,
+`stream-move-owner-bug-map.md`, and `crash-evidence/` in the recorded-regressions directory. The
+separate Test/2048² repeated-tap Move recording and Test1/4096² latency/crash recording remain
+preserved; source/build provenance is not established for either recording. Do not conflate them.
 
-LayerFillView candidate995 still caches render/clip identity before a refused surface mint with no
-completion. Source-only audit and followup survive extraction; root recorded in TODO/BUGS before
-work. Add an OLD owner-level deterministic refusal→same-request pixel witness; no speculative retry
-service/new cache. hcompact owns source-only reproduction, no native until root grants.
+### Eraser preview
 
-### Eraser preview — reference qualification in progress
+The previous `bfd95b4e` slice (normal176 plus nine controls) does not qualify the new preview. At
+`535a0adf`, two selected native failures came from stale test construction/probe premises; `1a` fixes
+those while retaining committed-model parity and adding posed backing, held-picture, growth and
+performance coverage. `649c1dd6` reached zero tests (compile-only argument-label error); corrected
+source is `d034036f`. The root-reported normal291 run on that source is the next current gate; check
+its packet/status before acting. Do not modify the eraser worktree. No assembled-source eraser
+qualification, merge, or physical Mode3-crash cause is established. Independent source review found
+no concrete blocker but identified coverage gaps; see
+`s55-recorded-regressions/eraser-window-source-review-535a0adf.md` and
+`eraser-window-peer-review-1a4937a7.md`.
 
-Tree `PaintApp-s55-eraser-window`. Earlierbfd95b4e normal176/controls9 qualified only the older
-slice; root LOOKed six whole owner-landscape pictures. Stronger current-preview versus actual
-committed-picture matrices then reproduced missing references (Mode1 six rows, Modes2/4 eight).
-Candidate535a0adf removes flat cut/restamp preview APIs and unused replacement raster allocation;
-preview/commit share canonical ordered vector geometry and one admitted native window. Independent
-review: no concrete source blocker, but posed backing/held-picture, geometric growth and latency
-coverage gaps remain. Report `s55-recorded-regressions/eraser-window-source-review-535a0adf.md`.
+### Layer fill
 
-First535 native selected2 compiled/ran2RED, root730/method/device/argvexact. Review traced those
-failures to stale test construction (Mode1 still used reference-free backdrop) and incorrect reference
-probe/z-order premises. Source1a corrects fixtures while retaining exact committed-model parity and
-adds growth/pose/held/opacity/performance coverage. Cleanup649's broad291 attempt built0tests: new
-benchmark freezeDisplay arguments were out of declaration order; source-only d034036f corrects that
-call, no oracle/runtimechange. Next normal291 atd034 still unrun. No eraserharvest/physicalclaim.
-The 291 includes280logic (Perf59) plus11actualUI classes; class selectors neveruse sourcefilename.
-Eraser tree canedit onlyoutside its actual lease; new10control machine map pinned d034 is being
-prepared and needs a matching positivebaseline first. Oldbfd proofs do not qualify newarchitecture.
+Fill-window fixture `995677c5` is independently 47/47 GREEN. Its extracted `LayerFillView` means that
+candidate's source count is 731; current integration package `e4f9c8fa` remains 730. Do not mix the
+censuses. The staged source `393c10ef` adds a default-equivalent surface factory seam and three
+selected OLD controls in `WindowSurfaceViewLogicTests` (class count 21): identical render/clip retry
+RED; zero-area refusal callback RED; partial second-allocation Set Down lifecycle GREEN. Packet
+`fill-owner-refusal-old3-393c10ef` is **PREPARED, not run**. No completion/retry behavior fix has been
+authorized yet. Peer review found the key teardown trap: a refusal callback that clears `shownFill`
+can make the existing identity-before-nil guard reject Set Down and retain the partial surface. Root
+must run selected OLD controls and review that result before authorizing the minimal behavior fix.
 
-Root authorized source-only package2905 harvest using reviewed17-file patch SHA3443facc. All17
-allowlisted integration paths are unchanged since common19e; no intervening integration fix to
-restore/overwrite. The final endpoint excludes temporary capture hooks and branch notes. Component
-qualification remains scoped; assembled source requires new fast/UI gates. Eraser649 native reads
-its separate frozen tree, so this integration edit does not mutate its build inputs.
+The separate reduced-budget manager test that failed to produce `fillLastRender` is still unresolved;
+it does not exercise `LayerFillView` and is not proof of user-visible failure. No extra wait, retry, or
+weaker assertion. Fixture and receipts: `s55-recorded-regressions/fill-owner-window47-995677c5/` and
+`fill-owner-refusal-old3-393c10ef/`.
 
-### Saved files — current package boundary and next cold Gallery gates
+### Saved-file package boundary and cold Gallery
 
-Tree `PaintApp-s54-package-address`, source2905abd5. Whole14classes293 GREEN/root730exact.
-One checked address owner rejects traversal, links and wrong entry types before IO, while preserving
-literal names/URL kind/probe order. Tidy preflights all generated destinations before any move/rename.
-No schema or legal-old-spelling change. Three obsolete PNG-encode counts reuse existing qualified
-protected-source/byte/pixel witnesses; no production change in that fixture adaptation.
+Package source `2905abd5` passed its 293-class component run and Layout38 + Gallery5 (40 passed, 3
+expected named skips) at source730. The two separate cold Gallery workflows also passed: damaged A
+was refused; B's complete files were verified before B opened and B drew its own blue. Root reviewed
+both owner-landscape pictures. This is component evidence, not final combined qualification.
 
-Original17 controls stopped at10: first9 accepted at10 actual assertions, old10 threw insetup and
-gets zero. Narrowed successor8 all assertion_red/restored730; seven premapped targets accepted.
-For linked destination, title-rename1094 stayed healthy while direct sidecar-preservation1099 failed.
-The observed1099 classification is explicitly post-run, original1094 uncredited. Raw results/maps
-unchanged; generic derived extraction was overwritten once, then original-map extraction regenerated
-and saved separately beside the observed-map extraction. Root causal receipt states exact limits.
+The earlier 17-control batch stopped at ten: first nine accepted, case ten threw during setup and
+gets zero credit. The narrowed successor eight produced intended assertion RED/restoration; linked
+sidecar preservation was observed after the run, while the earlier title-rename assertion remains
+unproved. Preserve original plans/results and derived extractions. Strict old-format cleanup still
+requires a real previous-writer MotionGroup package before changing the four-field decoder boundary:
+source `28c08b26`, previous-writer package 729 / PBX1329, prepared three-control launch, nonce
+`B2BAF2AC-3B98-4DEE-95F0-7FD07268E811` remains unconsumed. Do not regenerate or consume it without
+the existing one-shot protocol. Cold Gallery packet: `package-address-cold-ui-2905abd5`.
 
-NORMAL Layout38+ordinary Gallery5 passed40/3expected namedskips at exact2905/source730. The older
-unchanged293positive is retained. Fresh owned iPad9simE15D8434-9A95-4996-8C47-B1F18E731621 then ran
-A-refusal1 and B-open1 GREEN each, root methods/device/argv/source730exact and LOOKed both whole
-landscape pictures. Bcomplete3files matched stage/capture AFTER Arefusal BEFORE Bopen. NativeA changed
-app-container UUID84833→64CA; original verifier rejected that change. Root's successor read-only proof
-uses a fresh authoritative bundle lookup, fixedowned device/nonlinkdirectorychain, projectUUID and
-all Bhashes. No stagingreceipt/path edit or assumedrelocationcause. Packet
-`package-address-cold-ui-2905abd5` retains all results. Same device now shutdown with data retained;
-no reset or physicalinstall. Finalcombined/fast/old-format-retirement gates remain.
+## Remaining owner queue
 
-**Current native:** newstreamMove selected2 atsource0a9461e4, root operator86087, packet
-`stream-move-old2-0a9461e4`. Earlierbe compile0: nestedgrid typecheck; corrected1d cachesAXframe once
-and builds same41²grid in typedloops. Actual1d2RED beforedrag, both onlyinitialbottom mismatch
-0.64375vs0.725; rootreconciled730/method/device/argv. Fixture couldbeoccludedbydock;7146 collapses
-publictimeline andchecksmeasureddockclear;0a placeswholeframescreenshots BEFORE visibilitypremises.
-No productstreamchange or sourcebugattribution. Eraser d034normal291 next afterjoin. New source
-harveste4f's finalcombined checks remain; no mainmerge/push/install.
+Keep every unfinished TODO item. Immediate source/native queue after checking the lease: eraser normal291
+result; stream witness review and post-gesture placement ownership; fill OLD selected3 result and then
+root review. Also retain these exact boundaries:
 
-Stream Move owner report source map is `stream-move-owner-bug-map.md`: relevant placement/frame
-code unchanged6fb→integration; default OnTop shares floatView, InPlace composite is asynchronous.
-Agent is preparing drawn stream bounds versus Move hull tests for both modes and all landing phases.
-No confirmed defect/source change or native run; pending timing answer is not a blocker.
+- Autosave `4c`: inventory and deliberate failure/reopen controls remain in
+  `/Users/juliapark/PaintWork/s55-recorded-regressions/autosave-next-native.md`.
+- Export `694bdf49`: ToolPanels class count is 20. Drive actual Share dismissal/close-return and
+  cancel → drawing/gesture checks. Fresh saved/unlocked export readiness is unanswered.
+- Gradient `8e5d100e`: whole15 plus public1 are prepared, native unrun. Check current packet/gates.
+- Resize `ac`: use the corrected drawn/Undo premise and complete visible-progress checks.
+- Source cleanup, architecture review, final assembled Debug/Release/UI gates, and owner-device
+  workflows remain. Do not remove finished owner asks from TODO before a qualified merge.
+- Windows DNS/resource/clipboard/keep-awake/awaited-Quit work remains. The last single probe on
+  October28 timed out at `PC@100.104.85.111`; Desktop Commander was offline. Do not repoll until an
+  external state changes. Real-link stage needs the owner/laptop. Map:
+  `/Users/juliapark/PaintWork/s55-recorded-regressions/windows-next-native-map.md`.
 
-Cold pair real-writer provenance remains packet `package-cold-writer-ff62580e` (seven files, nonce
-9D151F05-6036-4457-8D63-0E87F8F25F59). Temporary writer hook retired2c921; no regeneration. The two
-permanent Gallery methods are now qualified as above. MotionGroup previous-writer3 remains separate,
-prepared/unconsumed.
+Previous-writer strict-decoder capture, one-shot repair and protection of Projects/Backups/Trash remain
+required. Preserve the prepared MotionGroup data above. Fresh saved/unlocked export readiness and any
+physical restart remain unanswered. Test1 respring needs fresh physical evidence. Do not touch the
+protected export during inventory.
 
-Owned56 cache housekeeping completed:4.33GBactualfreed, whole9446Container entries unchanged across
-clean, archive60012349Bverified. After boot2840existingPaint/Runner entries exact; onlyone584B new
-OS SplashBoard downscaled snapshot (AAPLheader,ktxextension), specifically reviewed/retained. Same56
-booted, ~18GiBfree. Evidence `s55-recorded-regressions/owned56C-cache-cleanup-20261028`. Other devices,
-iPad/artwork, sharedProducts and installed6fb release untouched.
+Deferred exactly as TODO records: interpolation overhaul, multi-cel selection, linear-light blending,
+audio/video editor and dropped brush importers. Do not reopen them without owner direction.
 
-## Other prepared work and still-open owner asks
+## Qualification and safety boundary
 
-Keep every queue item in TODO, including autosave `4c`, export `694`, gradient `8e`, resize `ac`,
-source cleanup, end-to-end/device checks, Windows work and explicitly deferred tasks. Useful current
-packets:
+Keep **source-only**, **integrated**, **installed**, and **qualified** distinct. A component green does
+not qualify assembled source; installation does not prove physical workflow. Record exact source,
+class/method counts, device, argv, and which assertions were actually reached. XCTest can catch a
+thrown assertion and continue into later assertions, so later execution is not itself proof of a
+healthy premise. Preserve original evidence and result bundles.
 
-- Autosave inventory: `/Users/juliapark/PaintWork/s55-recorded-regressions/autosave-next-native.md`.
-- Previous-writer provenance, strict decoding and one-shot package repair remain governed by TODO
-  and specs: preserve the real previous-writer package; current decoder fails loudly; saved-format
-  changes need one-shot repair across Projects, Backups and Trash, deleted after owner confirmation.
-  Do not mutate protected artwork during inventory.
-- Export `694bdf49`: source-only; current `ToolPanels` count is 20 (not 13). Actual Share
-  dismissal/close-return and cancel→drawing/gesture checks remain. Fresh saved/unlocked export
-  question unanswered.
-- Gradient `8e5d100e`: whole 15 + public 1 prepared, native unrun; inspect current packet/gates.
-- Resize `ac`: corrected drawn/Undo premise and visible progress checks remain.
-- Source cleanup, full architecture review, Windows DNS/resource/Quit and real-link owner/laptop
-  checks remain. Device Test1 respring needs fresh physical evidence. Interpolation overhaul,
-  multi-cel selection, linear-light blending, audio/video editor and dropped brush importers remain
-  deferred exactly as TODO records; do not research/reopen without owner direction.
-- TODO contains the complete live owner ask list, historical qualifications, and exact remaining
-  gates. Do not copy stale historical “park” prompts forward as current instructions.
-
-## Lease, evidence, and safety rules
-
-- Before native/compiler work, read live `root-next-gates.json` and confirm current lease owner/status;
-  recheck immediately before starting. Do not infer a PID or future lease from this document.
-- Keep native work serialized; root owns the native lease. No overlapping build/test/compiler or
-  simulator. Preserve result bundles, originals and source pins. Do not reset a shared ref, stash,
-  mutate protected artwork, or run cleanup against unowned scenes.
-- Source-only, integrated, installed, and qualified are different states. A green component pin does
-  not qualify the assembled source; an install does not prove physical workflows. Record exact source,
-  methods/device/argv and actual assertions reached. Inspect which assertions execute: XCTest catches thrown assertion autoclosures and can continue,
-  while uncaught throws stop a method. Later execution alone does not prove a discriminating oracle.
-- Follow `AGENTS.md`/`CLAUDE.md`: own simulator per run, `tools/simlock.sh`, serial testing, fast tier
-  verbatim in Debug and Release, reconcile `totalTestCount`, lints/PBX/graph checks, affected UI
-  classes, mutation-test new assertions after commit, and look at owner-landscape screenshots. Say
-  what was not run. Never claim a full suite per item.
-- A qualified merge is authorized once remaining gates are met; push status remains unchanged. Before
-  any install: fresh owner readiness, protected library, old-scene drives (playback, pan from
-  grey, Move box, graph drag/release, stroke), signed clean Release and profile-life checks. After
-  successful install update renewal state atomically. Use existing repo merge rules for the qualified
-  merge; no new install or restart authorization is implied.
+Follow `AGENTS.md`/`CLAUDE.md`: own simulator, `tools/simlock.sh`, serial testing, fast tier verbatim in
+Debug and Release, reconcile `totalTestCount`, lint identifiers/helpers, check PBX/graph, run affected
+UI classes, mutation-test after commit, and inspect owner-landscape captures. Report what was not run.
+Before any install, require the fresh owner readiness, protected library, old-scene drives (playback,
+pan from grey, Move box, graph drag/release, stroke), clean signed Release and profile-life check; only
+after successful installation advance renewal state atomically. A merge is authorized once all gates
+pass; push status is unchanged.
 
 ## Reporting
 
-Keep reports short and artist-facing: root cause; changed/deleted files and symbols; exact merged SHA;
-Debug/Release fast counts; UI classes added/run; what was driven and seen; what Kevin does next; any
-refuted premise; and anything not run. Ask only a concrete owner decision when a ruling is required.
-
-Windows refreshed once October28: SSHPC@100.104.85.111 timedout, DesktopCommanderoffline; no further
-probe/runtime/build/deploy. Queuemap `s55-recorded-regressions/windows-next-native-map.md`. Artist UI
-remaining map `artist-ui-gates-map-20261028.md`, autosave map `autosave-next-native-packet-map.md`.
+Keep the report short and artist-facing: root cause; changed/deleted files and symbols; exact merged
+SHA; Debug/Release fast counts; UI classes added/run; what was driven and seen; what Kevin does next;
+refuted premises; and anything not run. Ask only a concrete owner decision when a ruling is required.

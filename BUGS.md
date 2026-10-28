@@ -4,21 +4,29 @@
 
 Owner: “if i have a stream screen and i move it, sometimes the screen moves to a different place
 to where the move box is.” Observed behavior is authoritative; root cause and exact timing unknown.
-Compare installed6fb and current stream-window/float placement ownership. Reproduce drawing versus
-box positions through existing stream/Move workflows, including late frame delivery and Set Down.
-No speculative coordinate offset, retry or duplicate transform state. Record whether the discrepancy
-is during drag, after release or after Set Down when the owner replies. No device restart authorized.
+Compare installed6fb and current stream-window/float placement ownership. OLD selected2 at0a9461e4
+failed both intended new-frame comparisons after healthy visibility/dock premises. Root inspected the
+whole videos: On Top showed the green stream displaced from its red Move box; In Place image aligned,
+with a green rotation handle causing a false-positive pixel probe. This is evidence for an On Top
+discrepancy in that witness, not a confirmed source cause. Source6c6ff97 changes the new frame to blue,
+checks no blue pixels before arrival, and captures whole-frame/pixel parity; it is unrun. Root traced a
+post-GESTURE-END model-write versus canonical shown/written-map boundary before a fix. Continue through
+the existing owners and distinguish held, released, and Set Down. No speculative offset, retry, or
+duplicate transform state. Timing answer remains pending; no device restart authorized.
 
 ## Adjustable fill can cache a preview that never drew — October 28
 
-Read-only source audit found a conditional owner gap in LayerHostView and the pending extracted
-LayerFillView candidate995677c5: showFill records the render/clip identity before presentation; a
-WindowSurfaceView surface-mint refusal returns without completion, so an identical subsequent
-request is skipped forever by the owner. Existing lower-level refusal/retry test explicitly asks
-again and does not prove the host does so. Native reproduction is pending. Add one deterministic
-owner-level failed-mint→identical-request→visible-pixels witness before changing source. Reuse the
-existing completion/result and owner identity; no polling service, arbitrary retry or new cache.
-Reports: s55-recorded-regressions/layerhost-fill-preview-retry-review-cd393bf.md and followup995.
+Read-only source audit found a conditional owner gap in extracted LayerFillView candidate995677c5:
+showFill records render/clip identity before presentation; a surface-mint refusal returns without
+completion, so a later identical request is skipped. Source `393c10ef` adds a default-equivalent
+allocator seam and selected OLD packet `fill-owner-refusal-old3-393c10ef`, PREPARED but not run: same
+render/clip retry (intended RED), zero-area refusal completion (intended RED), and partial second
+allocation followed by Set Down (expected GREEN on OLD). No behavior fix is authorized before root
+reviews these OLD outcomes. Peer review identified the lifecycle trap: clearing shownFill on refusal
+can make the existing identity-before-nil check reject Set Down and retain the child/surface. The
+reduced-budget manager test failure is separate; it does not instantiate LayerFillView. No arbitrary
+retry/cache/service or increased wait. Reports: s55-recorded-regressions/layerhost-fill-preview-
+retry-review-cd393bf.md, followup995, and fill-owner-refusal-old3-393c10ef/.
 
 ## Brush response-curve drag loses its selected key on clamped ticks — 2026-10-24
 
@@ -36,14 +44,13 @@ before implementation on tmp/s54-response-curve; no native/compiler/device run b
 
 Move recording: each of three candidate toolbar taps creates vectorFloat then removes it within
 0–140ms. Source candidate4dbffaea7's unconditional blanked-host guard in StrokeCanvasView.refreshDisplay
-bypasses DeferredVectorRender's explicit waitingForTheRender exception; beginVectorFloat can then
-refuse and cancel the new float. Run existing GuideUnderLassoMoveUITests unchanged before a fix.
-Preserve ordinary hidden-host allocation protection and all earlier image-admission guarantees.
-Component4413a846 now reproduces OLD refusal2, passes normal77 and fails original Move-box85
-again when the old guard is restored. Root LOOKed both current whole owner-landscape terminal
-drawings. Required vector acquisition now follows the existing DeferredVectorRender exception;
-bulk refresh uses authoritative hostIsBlanked to retain both artist-hidden/composite suppression.
-Harvested integration13ab86df; current Test/device confirmation and final combined gates remain.
+bypassed DeferredVectorRender's explicit waitingForTheRender exception; beginVectorFloat could refuse
+and cancel the new float. Existing correction component4413a846 reproduces OLD refusal2, passes normal77
+and fails original Move-box85 when the old guard is restored. Required vector acquisition follows the
+existing DeferredVectorRender exception; bulk refresh uses authoritative hostIsBlanked. Root inspected
+whole owner-landscape terminal drawings; integration13ab86df retains the correction. Current Test/device
+confirmation and final combined gates remain. This repeated-tap issue is separate from the newer
+stream-picture/Move-box disagreement above.
 
 Latency recording: hardware touch-end3.23 is delivered after the main/recognizer gap to3.97. An
 aggregate window contains a main vector-render entry and ~1.13s mainBusy; it does not distinguish

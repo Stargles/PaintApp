@@ -24,19 +24,19 @@ Test package is still unanswered; continue simulator/source work without restart
   Existing85 checks pass after correcting three test drawings that previously hit the timeline.
   All source entries reconcile and root inspected filled/Undo pictures (portrait). Temporary
   recorder/delay changes were retired whole. Integrated; no physical latency/crash claim.
-- Erasing: earlier176 checks and11 public workflows passed, but stronger reference-picture
-  comparisons then found gaps. Candidate535 removes the flat cut/restamp preview and shares the
-  committed ordered vector geometry in one bounded window. First2 native failures traced to stale
-  test construction and incorrect probe/z-order premises;1a corrects those while retaining exact
-  committed parity and adds posed backing/held/growth/performance coverage. Broad649 attempt built
-  0tests on a new benchmark call-label error; corrected d034 awaits normal291.
-  Independent review found no concrete source blocker; that is not a test pass or physical proof.
-  Mode3 remains asynchronous/unchanged from6fb; iPad crash cause remains unproved.
-- Fill-window fixture47 is independently green; actual source count731 includes the extracted
-  existing LayerFillView. Audit found the owner may cache an undrawn preview after surface creation
-  refuses, so identical later requests never ask again. This also exists in candidate995; record an
-  actual owner-level refusal/retry pixel witness before a root-cause change. Public growth/fault
-  and final integration checks remain.
+- Erasing: earlier176 checks and11 public workflows qualify only the old preview slice. Candidate535
+  shares committed ordered vector geometry in one bounded window. First2 native failures traced to
+  stale test/probe premises;1a corrects those and adds posed backing/held/growth/performance coverage.
+  The broad649 run built0tests on an argument-label error; corrected d034 has a root-reported normal291
+  run in progress/awaiting result. Check the live packet and lease. No new-architecture qualification
+  or physical Mode3 crash cause is established.
+- Fill-window fixture995 is independently47/47 green (source731 with extracted LayerFillView; current
+  integration e4f9 remains source730). Staged source393c adds a default-equivalent surface-factory
+  seam and three selected OLD controls, class21: same render/clip retry RED; refusal completion RED;
+  partial second-allocation Set Down lifecycle GREEN. Packet
+  `fill-owner-refusal-old3-393c10ef` is PREPARED, not run. No behavior fix is authorized until root
+  reviews OLD. Peer review found a nil-teardown trap if refusal clears shownFill before Set Down.
+  Public growth/fault and final integration checks remain.
 - Saved-file tidy now preflights every generated destination before any rename/move and rejects
   escaping resource addresses through one checked owner. Whole14classes293 pass at2905abd5;
   deliberate controls expose all17 mutated contracts (one observed sidecar target was classified
@@ -56,11 +56,14 @@ The cold Gallery pair is captured/verified7files and temporary capture code is r
 changed the disposable simulator's app-container UUID; the original path-strict verifier refused.
 Root retained that result and separately verified the actual freshly queried app container and all
 B bytes against staging/capture before opening B. Protected artwork was never used.
-The streamed-screen/Move-box report is recorded separately; placement source is unchanged since6fb.
-First actual2 tests stopped beforedrag at the same bottom-edge mismatch, plausibly dock occlusion.
-Corrected fixture collapses the timeline and verifies both picture/box clear the dock, with whole
-screenshots before premises; selected2 now running at0a9461e4. No product change or cause claim.
-Owner timing answer is optional and still pending.
+The streamed-screen/Move-box report is recorded separately. OLD selected2 at0a9461e4 failed both
+intended new-frame checks after dock clearance and healthy-picture premises. Root reviewed the whole
+videos: On Top's green picture was displaced from the red Move box; In Place picture aligned, while a
+green rotation handle caused a false-positive probe. This establishes an On Top discrepancy in that
+test, not its cause. Source6c6ff97 changes the next frame to blue, proves no blue exists before its
+arrival, and captures whole-frame/pixel parity; it is unrun. Root also traced a possible post-gesture
+frame/model-write boundary in `crash-evidence`; use the existing stream ownership map, not an offset
+or second transform. Owner timing answer remains pending; independent work continues.
 
 Simulator cache cleanup reclaimed4.33GB at a joined native boundary, preserving and verifying all
 containers and existing Paint/Runner data. Only two exact generated cache paths were removed. Full
