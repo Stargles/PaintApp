@@ -1,6 +1,12 @@
 # TODO
 
-## Current owner-facing status — October 26
+## Current owner-facing status — October 28
+
+**Resumed October28. Priority now:** investigate the owner-recorded drawing/erasing latency and new
+crash, and selection→Move requiring repeated taps. Owner says it seems limited to one canvas;
+clarification of which report/scene is pending. Preserve the separate Test1/4096² and Test/2048²
+evidence. Establish affected build and cause before changing code; use agents and keep all earlier
+unfinished tasks queued. No fresh authorization to restart an unsaved physical scene.
 
 October27 limited request: owner circles a selection, then Move sometimes does nothing until
 repeated taps. Latest iPad recording contains this reported regression. Copy that recording and
@@ -19,8 +25,7 @@ Recording retrieval completed: `recording-20261026-213750.jsonl` (55,035B), pres
 Test1/4096², v1.0.43(1), buildOctober25; exact source unverified. Latency/crash analysis remains
 outstanding and takes priority when the owner resumes. Parked again; original left on the iPad.
 
-**Parked at Kevin's explicit request. Resume only when he asks.** Kevin is asleep until10a.m.
-tomorrow. Conserve usage and use
+Kevin resumed after the retrieval-only park. Conserve usage and use
 agents for independent work. Architecture, correctness and performance take priority over speed.
 No question is pending. Old iPad readiness is consumed; do not restart it overnight.
 

@@ -2,11 +2,21 @@
 
 Start at AGENTS.md, then CLAUDE.md, TODO.md, BUGS.md and the relevant spec/PERFORMANCE.md.
 Verify origin, worktrees and every tmp branch: main's handoff is behind. Kevin permits useful agents;
-conserve usage and prioritize quality/architecture. Latest instruction: checkpoint and park; wait
-for Kevin to resume. Preserve real
+conserve usage and prioritize quality/architecture. Kevin resumed October28; continue with the
+recorded owner regressions first. Preserve real
 artwork and record findings/rulings before code. One Mac native lease; source work may proceed beside it.
 
-## Parked checkpoint — October26
+## Resumed — October28
+
+Kevin says the problem seems limited to one canvas and authorizes starting. Investigate both
+preserved recordings first: selection→Move in Test/2048² and drawing/erasing latency/new crash in
+Test1/4096². Do not conflate the scenes or assume which report the new canvas-specific observation
+qualifies; clarification is pending while independent evidence work proceeds. Root-cause changes,
+clean shared ownership and no regression/band-aid workaround remain the priorities. Use source/
+recording agents; root owns native work. No fresh physical restart readiness has been given.
+Old park notes below are historical; they do not block this explicit resume.
+
+## Previous parked checkpoint — October26–27
 
 October27 limited request: retrieve latest iPad recording of selection→Move requiring repeated
 taps, then park again. Record the evidence; do not start diagnosis, replay, build, install or fix.
