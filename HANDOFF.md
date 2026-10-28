@@ -8,6 +8,11 @@ Before native work, check authoritative lease/status files, including
 `/Users/juliapark/PaintWork/s54-final-qualification/root-next-gates.json`; do not infer a PID or
 future lease from this handoff.
 
+**New active owner bug:** streamed screen sometimes moves to a different position than its Move
+box. Timing question pending; investigate shared stream-window/float placement and late-frame
+ownership using existing current/installed-source workflows. No offset/state workaround; preserve
+all earlier queue tasks. Recorded in TODO/BUGS before source work.
+
 ## Current integration and device boundary
 
 - Integration tree: `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`,

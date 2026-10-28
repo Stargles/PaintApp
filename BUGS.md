@@ -1,4 +1,14 @@
 Response-curve correction prepared: landed frame travels with the moved curve, replacing post-move
+
+## Streamed screen can separate from its Move box — October 28
+
+Owner: “if i have a stream screen and i move it, sometimes the screen moves to a different place
+to where the move box is.” Observed behavior is authoritative; root cause and exact timing unknown.
+Compare installed6fb and current stream-window/float placement ownership. Reproduce drawing versus
+box positions through existing stream/Move workflows, including late frame delivery and Set Down.
+No speculative coordinate offset, retry or duplicate transform state. Record whether the discrepancy
+is during drag, after release or after Set Down when the owner replies. No device restart authorized.
+
 nearest-key reacquisition. Two continuation/ownership logic methods plus one cold drawn control
 are integrated; logic passed in normal1cf422 and separate cold continuation/portrait controls each
 passed1/1. Final assembled-source whole classes and assertion faults remain pending.

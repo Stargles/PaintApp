@@ -2,6 +2,14 @@
 
 ## Current owner-facing status — October 28
 
+**New owner report, October28:** with a streamed screen present, moving it sometimes places the
+screen picture somewhere different from its Move box. Treat as an active stream/Move correctness
+bug; exact drag/release/Set Down timing and scene are not established. Trace image and box through
+the same coordinate/pose and asynchronous frame ownership; do not compensate with offsets or
+extra state. Optional timing question pending; independent source/reproduction work continues.
+Current installed6fb is the known build boundary; do not attribute this to uninstalled source.
+
+
 **Active: Kevin resumed; continue independently.** Prioritize the recorded drawing/erasing lag,
 new crash in **Test1 / 4096²**, and repeated-tap Move failure in **Test / 2048²**. Kevin clarified
 that only the Move problem is canvas-specific. Preserve the separate recordings and real artwork;
