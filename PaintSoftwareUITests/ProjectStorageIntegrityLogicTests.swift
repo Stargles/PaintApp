@@ -112,6 +112,121 @@ final class ProjectStorageIntegrityLogicTests: XCTestCase {
         return result
     }
 
+    private var malformedAnimationGroupFields: [(name: String, field: String, value: Any?)] {
+        [("missing-name", "displayName", nil), ("null-name", "displayName", NSNull()),
+         ("typed-name", "displayName", 17), ("missing-colour", "tagColor", nil),
+         ("null-colour", "tagColor", NSNull()), ("typed-colour", "tagColor", 17)]
+    }
+
+    private func replacingAnimationGroupField(in manifest: [String: Any], field: String,
+                                             with value: Any?) throws -> Data {
+        var damaged = manifest
+        var groups = try XCTUnwrap(damaged["animationGroups"] as? [[String: Any]])
+        let first = try XCTUnwrap(groups.indices.first, "PREMISE: the writer emitted a real group to damage")
+        groups[first][field] = value
+        damaged["animationGroups"] = groups
+        return try JSONSerialization.data(withJSONObject: damaged)
+    }
+
+    func testAnimationGroupFullManifestRequiresBothFieldsAndPreservesExplicitValuesAndRegistryOmission() throws {
+        let groups = [
+            AnimationGroup(displayName: "Arm", tagColor: CodableColor(red: 1, green: 0, blue: 0, alpha: 1)),
+            AnimationGroup(displayName: "", tagColor: CodableColor(red: 0, green: 1, blue: 0, alpha: 1)),
+            AnimationGroup(displayName: "  Existing  ", tagColor: CodableColor(red: 1, green: 1, blue: 0, alpha: 1))
+        ]
+        let package = try package("Projects/group-fields.paintproj") { $0.animationGroups = groups }
+        let manifestURL = package.appendingPathComponent("manifest.json")
+        let current = try object(manifestURL)
+        let originalBytes = try fileBytes(package)
+        let decoded = try JSONDecoder().decode(ProjectManifest.self, from: Data(contentsOf: manifestURL))
+        XCTAssertEqual(decoded.animationGroups, groups, "Explicit current names, including empty/spacing, and colours remain literal")
+        let encoded = try JSONEncoder().encode(decoded)
+        XCTAssertEqual(try JSONDecoder().decode(ProjectManifest.self, from: encoded).animationGroups, groups,
+                       "Current manifest re-encoding preserves every explicitly stored group value")
+        XCTAssertEqual(try XCTUnwrap(ProjectStore.load(from: package)).animationGroups, groups,
+                       "The normal package loader preserves the valid writer's exact group metadata")
+
+        for row in malformedAnimationGroupFields {
+            let damaged = try replacingAnimationGroupField(in: current, field: row.field, with: row.value)
+            XCTAssertThrowsError(try JSONDecoder().decode(ProjectManifest.self, from: damaged),
+                                 "Malformed current \(row.name) must fail the full manifest instead of inventing group metadata")
+        }
+
+        var older = current
+        older.removeValue(forKey: "animationGroups")
+        let omitted = try JSONSerialization.data(withJSONObject: older)
+        XCTAssertNoThrow(try JSONDecoder().decode(ProjectManifest.self, from: omitted),
+                         "An older manifest can legitimately omit the entire group collection")
+        XCTAssertTrue(try JSONDecoder().decode(ProjectManifest.self, from: omitted).animationGroups.isEmpty)
+        older["animationGroups"] = []
+        let explicitEmpty = try JSONSerialization.data(withJSONObject: older)
+        XCTAssertTrue(try JSONDecoder().decode(ProjectManifest.self, from: explicitEmpty).animationGroups.isEmpty,
+                      "The current writer's explicit empty collection remains valid")
+        XCTAssertEqual(try fileBytes(package), originalBytes, "All manifest/ordinary-load checks are read-only")
+    }
+
+    func testMalformedAnimationGroupMetadataRecoversExactBackupAndPreservesDamagedPackages() throws {
+        for row in malformedAnimationGroupFields {
+            let group = AnimationGroup(displayName: "Arm", tagColor: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+            let package = try package("Projects/group-\(row.name).paintproj") { $0.animationGroups = [group] }
+            let manifestURL = package.appendingPathComponent("manifest.json")
+            let current = try object(manifestURL)
+            let original = try JSONDecoder().decode(ProjectManifest.self, from: Data(contentsOf: manifestURL))
+            XCTAssertEqual(original.animationGroups, [group], "PREMISE: actual current writer emitted the intended group")
+            let goodBytes = try fileBytes(package)
+            let latest = ProjectBackupManager.latestSnapshotURL(
+                directory: ProjectBackupManager.backupsDirectory(projectID: original.id))
+            XCTAssertEqual(try fileBytes(latest), goodBytes, "PREMISE: the recovery source is the exact intact package")
+            try replacingAnimationGroupField(in: current, field: row.field, with: row.value)
+                .write(to: manifestURL, options: .atomic)
+            let damagedBytes = try fileBytes(package)
+
+            XCTAssertTrue(ProjectBackupManager.validateProject(at: package),
+                          "PREMISE: the lightweight resource check does not decode typed group values")
+            XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: package),
+                           "Full current-format readability rejects malformed group \(row.name)")
+            XCTAssertNil(ProjectStore.load(from: package), "Malformed group fields cannot open as default name/colour")
+            XCTAssertEqual(try fileBytes(package), damagedBytes, "Refused validation/load preserves all original damaged bytes")
+
+            ProjectBackupManager.repairCorruptedProjects()
+
+            XCTAssertEqual(try fileBytes(package), goodBytes, "Recovery restores every intact backup byte")
+            XCTAssertEqual(try XCTUnwrap(ProjectStore.load(from: package)).animationGroups, [group],
+                           "The recovered group keeps its actual name and colour")
+            let preserved = try XCTUnwrap(ProjectBackupManager.listTrash().first {
+                $0.displayName == package.deletingPathExtension().lastPathComponent
+            })
+            XCTAssertEqual(try fileBytes(preserved.url), damagedBytes, "Every malformed original package file survives exactly in Trash")
+        }
+    }
+
+    func testMalformedAnimationGroupMetadataWithoutBackupPreservesOriginalAndDamagedGalleryEntry() throws {
+        for row in malformedAnimationGroupFields {
+            let group = AnimationGroup(displayName: "Arm", tagColor: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+            let package = try package("Projects/group-no-backup-\(row.name).paintproj") { $0.animationGroups = [group] }
+            let manifestURL = package.appendingPathComponent("manifest.json")
+            let current = try object(manifestURL)
+            let original = try JSONDecoder().decode(ProjectManifest.self, from: Data(contentsOf: manifestURL))
+            XCTAssertEqual(original.animationGroups, [group], "PREMISE: the valid package contains its current writer's group")
+            try FileManager.default.removeItem(at: ProjectBackupManager.backupsDirectory(projectID: original.id))
+            try replacingAnimationGroupField(in: current, field: row.field, with: row.value)
+                .write(to: manifestURL, options: .atomic)
+            let damagedBytes = try fileBytes(package)
+
+            ProjectBackupManager.repairCorruptedProjects()
+
+            XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: package),
+                           "A group field without a backup must still fail current readability")
+            XCTAssertNil(ProjectStore.load(from: package), "No backup cannot make malformed fields default to a valid group")
+            XCTAssertEqual(try fileBytes(package), damagedBytes, "Without an intact backup every original package byte remains in place")
+            let gallery = try XCTUnwrap(ProjectStore.listProjects(in: package.deletingLastPathComponent()).first {
+                $0.url == package
+            })
+            XCTAssertTrue(gallery.isCorrupted, "The exact original package remains visible as damaged in Gallery")
+            XCTAssertTrue(ProjectBackupManager.listTrash().isEmpty, "A damaged package with no replacement is never displaced into Trash")
+        }
+    }
+
     func testMissingSidecarFailsBothMetadataPreflights() throws {
         let package = try package(), recipe = try recipeURL(package)
         try FileManager.default.removeItem(at: recipe)

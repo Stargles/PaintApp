@@ -36,16 +36,6 @@ struct AnimationGroup: Identifiable, Codable, Equatable {
         self.tagColor = tagColor
     }
 
-    private enum CodingKeys: String, CodingKey { case id, displayName, tagColor }
-
-    /// Hand-written to the repo's usual rule: a group saved before a field existed still loads.
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decode(UUID.self, forKey: .id)
-        displayName = try c.decodeIfPresent(String.self, forKey: .displayName) ?? ""
-        tagColor = try c.decodeIfPresent(CodableColor.self, forKey: .tagColor)
-            ?? CodableColor(red: 0.2, green: 0.6, blue: 1, alpha: 1)
-    }
 }
 
 // MARK: - Membership
