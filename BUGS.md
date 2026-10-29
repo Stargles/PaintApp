@@ -3134,11 +3134,13 @@ through the existing SpringBoard permission pattern, preserving the input and al
 
 Whole-body/caller review confirms DrawingView owns PerfHUD as StateObject and is removed on return
 to Gallery. PerfHUD starts its PerfMonitor, whose CADisplayLink strongly retains its target monitor;
-the monitor also owns the link. PerfMonitor.deinit cannot break that cycle, and the HUD currently
-has no owner-release stop. Thus an enabled HUD can leave per-frame callbacks after editor exit.
-Correct cleanup at the existing HUD ownership boundary; avoid a second display-link service,
-persistent counter or generic proxy for this single owner. Audit receipt:
-`s55-recorded-regressions/runtime-lifetimes-8-740e.md` in PaintWork. No physical crash attribution.
+the monitor also owns the link. PerfMonitor.deinit could not break that cycle. Cleanup now runs
+from the existing PerfHUD owner before releasing the monitor; ineffective monitor-deinit cleanup
+was removed. No second service, persistent counter or proxy. Release/public checks passed; restoring
+old cleanup failed the intended weak-reference assertion; clean restored whole-menu/release9 passed.
+Four source paths are integrated, with root source/count/appearance review. Final assembled gates
+remain; no physical crash attribution. Evidence: `s55-recorded-regressions/perfhud-lifecycle-62ff6735/`
+and `perfhud-harvest-71ee/root-acceptance.json` in PaintWork.
 
 ## Placed-picture PNG save loses its intrinsic scale — October29
 

@@ -190,9 +190,24 @@ final class TopBarMenusUITests: PaintUITestCase {
     /// "the same grey over the same grey" means and what keeps the backdrop under the paper opaque.
     func testPaddingOnTopVeilsInkDrawnIntoTheMarginAndTurningItOffShowsItBare() throws {
         let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        // `canvas.host` fills the canvas column beneath the expanded timeline. The old portrait probe
+        // at y=0.8 landed around 766 pt, in that covered area, and read the timeline's black pixels.
+        // Collapse the public timeline control and wait for its measured frame before sampling or drawing.
+        let timeline = app.otherElements["timeline.panel"]
+        XCTAssertTrue(timeline.waitForExistence(timeout: 5), "the fresh editor shows its timeline")
+        let collapse = app.buttons["timeline.collapseButton"]
+        XCTAssertTrue(collapse.waitForExistence(timeout: 5), "the expanded timeline can be collapsed")
+        collapse.tap()
+        let collapseDeadline = Date().addingTimeInterval(5)
+        while Date() < collapseDeadline, timeline.frame.height > 70 {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        XCTAssertLessThan(timeline.frame.height, 70,
+                          "the timeline is collapsed before the paper pixels are sampled")
 
         app.buttons["toolbar.settingsButton"].tap()
         let padding = app.sliders["settings.paddingSlider"]
@@ -215,6 +230,10 @@ final class TopBarMenusUITests: PaintUITestCase {
         let marginSamples = [0.04, 0.05, 0.06, 0.07]
         let artworkSamples = [0.14, 0.16, 0.18]
         let untouchedMargin = (fx: 0.05, fy: 0.8)
+
+        assertAboveTheDock(app, canvas, dy: onHost(paper, untouchedMargin.fx, untouchedMargin.fy).dy,
+                           "the untouched-margin baseline sample")
+        assertAboveTheDock(app, canvas, dy: 0.5, "the stroke row")
 
         let plainGrey = red(atPaper: untouchedMargin.fx, untouchedMargin.fy)
         XCTAssertTrue((205...229).contains(plainGrey),
@@ -284,5 +303,46 @@ final class TopBarMenusUITests: PaintUITestCase {
             attachScreenshot(app, "perf-hud-switch-beside-\(menu.name)")
             app.buttons[menu.button].tap() // close it
         }
+    }
+
+    /// The optional readout is off by default, updates while enabled, and belongs to the editor
+    /// that showed it. Leaving for Gallery and reopening the saved scene creates a fresh, hidden HUD.
+    func testPerfHUDUpdatesAndReturnsToDefaultOffAfterGalleryReopen() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+
+        let toggle = app.buttons["perfHUD.toggle"]
+        let stats = app.descendants(matching: .any)["perfHUD.stats"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(toggle.label, "Performance HUD: off", "new editor starts with the optional HUD hidden")
+        XCTAssertFalse(stats.exists, "hidden HUD does not publish its readout")
+
+        toggle.tap()
+        XCTAssertEqual(toggle.label, "Performance HUD: on")
+        XCTAssertTrue(stats.waitForExistence(timeout: 5), "the enabled HUD exposes its readout")
+        let fps = app.staticTexts.matching(identifier: "perfHUD.stats")
+            .matching(NSPredicate(format: "label ENDSWITH %@", " fps")).element
+        let runningFPS = XCTNSPredicateExpectation(
+            predicate: NSPredicate { object, _ in
+                guard let label = (object as? XCUIElement)?.label else { return false }
+                return (Double(label.replacingOccurrences(of: " fps", with: "")) ?? 0) > 0
+            },
+            object: fps)
+        wait(for: [runningFPS], timeout: 5)
+        XCTAssertGreaterThan(Double(fps.label.replacingOccurrences(of: " fps", with: "")) ?? 0, 0,
+                             "the displayed frame-rate value updates while the HUD is enabled")
+        attachScreenshot(XCUIScreen.main, "perf-hud-enabled-before-gallery")
+
+        let tile = saveEditorAndReturnToGallery(app)
+        tile.tap()
+        XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 10))
+
+        let reopenedToggle = app.buttons["perfHUD.toggle"]
+        let reopenedStats = app.descendants(matching: .any)["perfHUD.stats"]
+        XCTAssertTrue(reopenedToggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(reopenedToggle.label, "Performance HUD: off",
+                       "the new editor starts hidden after returning from Gallery")
+        XCTAssertFalse(reopenedStats.exists, "the previous editor's readout is no longer shown")
+        attachScreenshot(XCUIScreen.main, "perf-hud-hidden-after-gallery-reopen")
     }
 }

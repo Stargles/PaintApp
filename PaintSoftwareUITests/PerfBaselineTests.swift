@@ -29,6 +29,24 @@ final class PerfBaselineTests: XCTestCase {
     /// what a ~2s Pencil stroke delivers at 240 Hz with coalescing.
     private static let sampleCount = 500
 
+    /// The display link retains its target, so cleanup at `PerfMonitor.deinit` cannot break the
+    /// link/monitor cycle. `PerfHUD` owns the monitor and must stop it before releasing that owner.
+    @MainActor
+    func testPerfHUDReleaseInvalidatesDisplayLinkAndReleasesMonitor() {
+        weak var releasedMonitor: PerfMonitor?
+
+        autoreleasepool {
+            var hud: PerfHUD? = PerfHUD()
+            hud?.isVisible = true
+            XCTAssertTrue(hud?.monitor.isRunning == true, "turning on the HUD starts its display link")
+            releasedMonitor = hud?.monitor
+            hud = nil
+        }
+
+        XCTAssertNil(releasedMonitor,
+                     "releasing the HUD must stop the link so its target monitor can deallocate")
+    }
+
     // MARK: - Measurement plumbing
 
     /// Resident size of this process, in bytes. `phys_footprint` is what iOS actually holds a

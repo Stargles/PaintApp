@@ -45,13 +45,13 @@ final class PerfMonitor: ObservableObject {
         fps = smoothed
         frameTimeMS = delta * 1000
     }
-
-    deinit { stop() }
 }
 
 /// **The HUD's state: whether it is showing, and the monitor that runs only while it is.** Held by
 /// `DrawingView`, which hands it to the two places the HUD appears — the toggle at the head of the side
-/// rail and the readout over the canvas — so neither owns the other's lifetime.
+/// rail and the readout over the canvas — so neither owns the other's lifetime. On editor teardown
+/// this owner stops the monitor before releasing it; the display link retains its target, so the
+/// monitor cannot be responsible for breaking that cycle from `deinit`.
 ///
 /// Default OFF; while hidden `PerfMonitor` is fully stopped (no `CADisplayLink`, no per-frame work
 /// whatsoever) — see `PerfMonitor.start`/`stop`. So "don't make it slow and intensive" can actually be
@@ -64,6 +64,8 @@ final class PerfHUD: ObservableObject {
         }
     }
     let monitor = PerfMonitor()
+
+    deinit { monitor.stop() }
 }
 
 /// The HUD's switch. **It lives in the side rail's empty head, not over the canvas**: it used to be

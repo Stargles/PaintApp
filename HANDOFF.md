@@ -7,15 +7,13 @@ has been established. Do not request device interaction before he is back unless
 
 ## Current state and next action
 
-1. **Continue; do not park.** Kevin confirms rapid To Cross erasing and is asleep until noon Toronto
-   (16:00UTC). No fresh disruptive iPad action is authorized by prior consumed readiness. Current
-   native owner/scope is authoritative in `~/PaintWork/s54-final-qualification/root-next-gates.json`.
-   It now delegates the PerfHUD old-cycle control and conditional restored normal9 to
-   `/root/eraser_window_source`. All other agents are source-only.
-2. **Integration:** `~/PaintWork/PaintApp-s54-qualified-integration`, `tmp/s54-qualified-integration`,
-   documentation HEAD28caa250 before this update; runtime source is byte-identical to b381f2dc.
-   Source731, fast5448/full6062. Main/origin afd2030c and installed6fb are unchanged. No new source
-   harvest, merge, push or iPad install in this continuation.
+1. **Continue; do not park.** Kevin resumed after noon Toronto. Root delegates source work to E
+   (precise Mode3/all-owner instrumentation) and H (PNG/Bake public fixture). CR owns one Debug
+   whole66 brush run at9221b0f9; no other native work. Authority is in root-next-gates.json.
+2. **Integration:** `~/PaintWork/PaintApp-s54-qualified-integration`, `tmp/s54-qualified-integration`.
+   HUD's four reviewed paths from71ee are now harvested atop085b3dae. Source731,
+   fast5449/full6064. Other727 tracked source/PBX entries are exact. Main/origin afd2030c and
+   installed6fb are unchanged; no merge, push or new iPad install.
 3. **To Cross:** integrated window candidate passed112, four mapped controls and clean35 at740e.
    Real Test1 Release A1da7e and B101ab each passed1/rootstrict731. B1 used seven native windows,
    then missing measurements for newly-ID'd cut fragments caused `.everything` atv8. Local full
@@ -38,12 +36,12 @@ has been established. Do not request device interaction before he is back unless
    schema/key/decoder change is proposed. Preserve physical quad/pixels, not a raw local scalar.
    Old lost runtime scale cannot be inferred. Permanent package matrix and public Paste→Bake→
    Gallery/reopen checks are being prepared; no current-source runtime qualification yet.
-7. **PerfHUD:** source62ff6735 in `PaintApp-s55-perfhud-lifecycle` moves stop to the existing HUD
-   owner's deinit and removes unreachable monitor-deinit cleanup. Root added existing PerfHUD.swift
-   to shared UITest sources. Normal2 passed2/2/rootstrict731; root inspected enabled55fps and hidden
-   afterGallery. Earliercccf compile0 and999/98f ambiguous inherited AX-id failures are preserved;
-   final source selects unique visible FPS text and removes the TEMP AX dump. E now runs old-cycle
-   control then, only if exact intendedRED/source restored, cleanDebug normal9 (wholeTopBar8+logic1).
+7. **PerfHUD:** source71ee fixes teardown at the existing HUD owner, removing unreachable monitor
+   deinit cleanup. Normal2 passed; restoring the old cycle failed the intended weak-release check.
+   A clean restored normal9 (allTopBar8+release1) passed9/9,0skip; root strict/source731 verified.
+   Root inspected full enabled/hidden HUD pictures and the visible padding/veil patch; app-attached
+   padding PNGs are clipped, so no full-screen padding claim. Earlier compile/AX/occluded-premise
+   failures stay preserved. Four paths harvested; assembled qualification remains.
 8. **Diagnostics:** `PaintApp-s55-two-temp-diagnostics` b437 selected2Debug failed2/2 as described
    above, source731 exact. These methods are unharvestable TEMP diagnostics. Old0a/7b sources remain
    frozen. Renderer/PNG evidence: `~/PaintWork/s55-recorded-regressions/two-temp-diagnostics-b4377638/`.

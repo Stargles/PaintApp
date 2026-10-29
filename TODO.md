@@ -2,8 +2,8 @@
 
 ## Current owner-facing status — October 29
 
-**Active: continue; do not park.** Kevin is asleep until noon Toronto time. Work that needs no
-response continues. Overall completion is approximately **75%**: most implementation is present,
+**Active: continue; do not park.** Kevin resumed after noon Toronto time. Work continues; a new disruptive device
+workflow still requires fresh saved/unlocked readiness. Overall completion is approximately **75%**: most implementation is present,
 but combined checks, remaining audit work and physical confirmation are still open. This is an
 estimate of the whole queue, not a measured percentage of code.
 
@@ -34,9 +34,10 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
 
 ### Current evidence and decisions
 
-- **Current check:** the HUD release and public Gallery/reopen checks passed. Its old-cycle control
-  and restored whole-menu checks are next. New picture-save and tiny-brush fixes remain isolated
-  source work; none is installed. The Test1 eraser comparison saved seven local full-render
+- **Current check:** the HUD release and public Gallery/reopen checks passed; restoring the old
+  cleanup failed the release assertion, then all eight menu checks and the release check passed.
+  This four-path component is integrated. New picture-save and tiny-brush fixes remain isolated;
+  the whole66 small-brush class is running. None of this newer work is installed. The Test1 eraser comparison saved seven local full-render
   requests before a conservative fallback; all-owner work and input variability still need checks.
 
 - **Picture saving audit:** an actual save/reload showed a scale2 placed picture doubling in drawn
@@ -47,8 +48,9 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
 
 - **Architecture/performance audit:** the optional performance readout can leave its frame counter
   running after returning to Gallery. Its display link retains its monitor, so monitor-deinit
-  cleanup is unreachable. Move teardown to the existing HUD owner; logic release proof, public
-  HUD/Gallery check and final qualification are pending. No crash-cause claim.
+  cleanup is unreachable. Teardown now belongs to the existing HUD owner; release/public checks and the old-code
+  control passed their intended outcomes. The correction is integrated; final combined gates
+  remain. No crash-cause claim.
 
 - **Bake audit:** a pasted picture could lose its rotation when baked. OLD drawn-pixel reproduction
   failed as expected; the one-line orientation-preserving candidate passed25 logic checks. Public
