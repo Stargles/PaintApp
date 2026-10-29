@@ -34,6 +34,38 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
 
 ## New audit findings — recorded October 29 before implementation
 
+- [ ] Remove measured avoidable cost in the unshipped small-dab candidate before final qualification.
+  Identical Release5×4000 batches: old/candidate1pt boundary0.517/1.344µs, center0.503/0.776;
+  5.9pt0.687/11.444 (~16.66×);20pt2.127/2.208 (small difference not attributed beyond noise).
+  Source265 andoldb3d eachpassed1/rootstrict731. Probe a narrower smooth area-to-native transition
+  covering only the undersampled footprint; keep existing energy/geometry/thin-axis/pixel tests
+  strict, add the actual new handoff boundary, no radius inflation/cache/state/flags or pixel-oracle
+  relaxation. A1–1.5device-pixel transition is a hypothesis for measurement, not a fixed product rule.
+- [ ] Resolve the valid fractional-projective Parallax resize blocker before qualifying52424454.
+  Independent review proves Fit100²→400×200, share0.5, perspective quad gives a point~20pt too far
+  right. Existing added Parallax test used share1/pure translation and misses it. Add a drawn finite
+  regression; inspect existing blend's global projective factorization. Do not add persistent resize
+  basis/per-framebaking or silently change unresized artwork/interpolation behavior. Prepare A/B
+  pictures before any appearance choice; future interpolation overhaul remains deferred.
+- [ ] Fix image-insertion Redo through existing ordered-element undo. Current snapshots keep only
+  vector.images; [imageA,fill]→appendB→Undo→Redo can become[A,B,fill]. Use full ordered elements,
+  preserve object identity and copied source handles; verify rendered occlusion and Undo/Redo.
+- [ ] Stop looping recording when a catch-up tick crosses its endpoint before wrapping. Current
+  tickPlayback checks only the final wrapped frame, so a late tick can continue another lap.
+  Prove with an existing fake-clock/recording fixture; preserve ordinary looping playback semantics.
+- [ ] Delete write-only fillGestureBaseBaked and all three writes. Full CanvasManager audit finds no
+  reader; prepared fill commit uses the actual staged cel's before.bakedImage. No replacement state.
+- [ ] Audit/retire real inline saved-format migrations (known compositor slot and pre-group-property
+  marker) through the required one-shot package repair/current-library gate. Preserve old-writer
+  packages and Projects/Backups/Trash/order; remove corresponding decoder branches/flags only once
+  migrated and confirmed. This is separate from strict current-node payload validation, whose17
+  actual historical encoders always emitted required op/Mix mode. No new permissive decoder route.
+- [ ] Video-time numeric ruling: preserve existing working-timescale selection, once-per-frame
+  fractional rounding and finite90k fallback. Use checked wide comparison/span/tick expansion and
+  safe endpoint clamping; reject truly unrepresentable required map/inverse through existing recovery
+  and atomic live-edit refusal. Do not introduce an exact-rational speed engine, coarser new policy,
+  arbitrary caps, huge saturated framecounts or scans. Retain all prior nontrapping current cases.
+
 - [ ] Correct/calibrate the shared private touch synthesizer's screen coordinate contract. Combined409
   passed407; the held-Shape workflow reached adjustable state but the actual final video shows a
   vertical clipped line where the test requested a horizontal line in landscape. The common
