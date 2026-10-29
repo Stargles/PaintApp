@@ -3211,7 +3211,7 @@ final class CanvasManager: ObservableObject {
     }
 
     /// Advances the playhead `count` frames of playback. Returns false when playback has run off the
-    /// end and should stop — which only ever happens with looping off.
+    /// end and should stop — with looping off, or while a recording must end at the boundary.
     ///
     /// `count` is a number of *frames of elapsed time*, not a number of ticks — see `PlaybackClock`.
     /// A tick that arrives two frame intervals late passes 2 and the animation skips a frame, which
@@ -3229,7 +3229,9 @@ final class CanvasManager: ObservableObject {
         // where the playhead is.
         let start = playbackStartFrame
         let end = playbackEndFrame
-        let looping = isLoopEnabled
+        // A take ends at its first endpoint, including a tick that crosses it by many frames.
+        // Periodic folding must not consume that boundary before tickPlayback can stop the take.
+        let looping = isLoopEnabled && !isRecording
         var remaining = max(count, 0)
         var frame = currentFrame
         var taken = 0

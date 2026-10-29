@@ -909,6 +909,72 @@ final class RecordingLogicTests: XCTestCase {
                        "The take ends at the boundary rather than wrapping into a second lap")
     }
 
+    /// Catch-up must notice the first endpoint it crosses, before periodic playback folds the
+    /// elapsed frames into a second lap. The same take and key product apply with looping off.
+    func testALateRecordingTickStopsBeforeWrappingAndCommitsTheOriginalKeyRange() throws {
+        let cases: [(looping: Bool, firstTick: Double?, catchUp: Double)] = [
+            (true, 2.5, 6.5), // From frame 5, cross 7 and wrap to 4 on the old path.
+            (true, nil, 10.5), // Two complete five-frame loops used to fold straight back to 3.
+            (false, nil, 10.5)
+        ]
+        for row in cases {
+            let (manager, clock) = self.manager(frames: 16)
+            defer { manager.stopPlayback() }
+            manager.fps = 24
+            manager.setLoopStart(3)
+            manager.setLoopEnd(7)
+            manager.isLoopEnabled = row.looping
+            let tgt = target(manager)
+            let original = storedValue(manager, tgt, brightnessID)
+            let before = manager.history.undoStack.count
+            XCTAssertNil(manager.startRecording(target: tgt))
+            XCTAssertEqual(manager.recordingTake?.startFrame, 3, "setup: take starts at the marked range")
+            let epoch = clock.now
+            let rate = Double(manager.fps)
+            // Twice the document rate: the intake must keep the complete source stream, then
+            // resample/simplify only when the existing stop owner commits the take.
+            for sample in 0...8 {
+                drag(manager, clock, tgt, brightnessID, to: 0.2 + Double(sample) * 0.2,
+                     at: epoch + Double(sample) * 0.5 / rate)
+                if sample == 4, let firstTick = row.firstTick {
+                    clock.now = epoch + firstTick / rate
+                    manager.tickPlayback()
+                    XCTAssertEqual(manager.currentFrame, 5, "setup: an ordinary in-range tick advances")
+                    XCTAssertTrue(manager.isRecording, "an in-range tick must keep the take open")
+                }
+            }
+            XCTAssertEqual(manager.recordingTake?.channels[brightnessID]?.samples.count, 9,
+                           "Every source-rate sample survives until the take ends")
+            clock.now = epoch + row.catchUp / rate
+            manager.tickPlayback()
+
+            XCTAssertEqual(manager.currentFrame, 7, "A late recording tick parks at the first endpoint")
+            XCTAssertFalse(manager.isRecording, "A late tick ends the take before a second lap")
+            XCTAssertFalse(manager.isPlaying, "The take's existing stop owner stops its playback too")
+            // Stop at the meaningful boundary failure on old source, before unwrapping a curve
+            // that cannot exist while the take is still open. defer closes its timer on that path.
+            guard !manager.isRecording else { return }
+            XCTAssertNil(manager.recordingTake)
+            XCTAssertEqual(manager.isLoopEnabled, row.looping, "Recording does not change the loop preference")
+            let curve = try XCTUnwrap(manager.keyframeState(of: tgt).tracks[brightnessID])
+            XCTAssertEqual(curve.keys.map(\.frame), [3, 7], "The linear take keeps its original marked key range")
+            XCTAssertEqual(curve.keys.last?.value ?? .nan, 1.8, accuracy: 1e-9,
+                           "The endpoint key keeps the artist's last value")
+            XCTAssertEqual(storedValue(manager, tgt, brightnessID), original, "The base stays on its original value")
+            XCTAssertEqual(manager.history.undoStack.count, before + 1, "The stopped take records exactly one step")
+            XCTAssertEqual(manager.history.undoStack.last?.label, .recordAnimation)
+            XCTAssertEqual(manager.structureGestureDepth, 0, "The take closes its existing gesture bracket")
+
+            manager.undo()
+            XCTAssertNil(manager.keyframeState(of: tgt).tracks[brightnessID], "One Undo removes the entire take")
+            XCTAssertEqual(storedValue(manager, tgt, brightnessID), original)
+            manager.redo()
+            XCTAssertEqual(manager.keyframeState(of: tgt).tracks[brightnessID]?.keys, curve.keys,
+                           "One Redo restores the exact committed keys and endpoint value")
+            XCTAssertEqual(manager.history.undoStack.count, before + 1)
+        }
+    }
+
     /// The other branch that can end a take mid-tick: running off the end **without** looping, which
     /// stops through the ordinary `stopPlayback` path rather than the boundary-landing one above.
     func testARecordingIsStoppedWhenPlaybackRunsOffTheEndWithoutLooping() {
