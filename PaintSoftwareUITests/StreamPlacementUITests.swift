@@ -222,7 +222,7 @@ final class StreamPlacementUITests: StreamUITestCase {
         let destination = CGVector(dx: initialHull.midX + 0.06, dy: initialHull.midY + 0.06)
         let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: initialHull.midX, dy: initialHull.midY))
         let end = canvas.coordinate(withNormalizedOffset: destination)
-        start.press(forDuration: 0.6, thenDragTo: end, withVelocity: .slow)
+        start.press(forDuration: 0.6, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.1)
         let movedHull = try XCTUnwrap(settledMoveBox(app), "the stream's Move hull settles at its new position")
         XCTAssertGreaterThan(movedHull.midX - initialHull.midX, 0.025, "the Move box actually travelled right")
         XCTAssertGreaterThan(movedHull.midY - initialHull.midY, 0.04, "the Move box actually travelled down")
@@ -246,7 +246,7 @@ final class StreamPlacementUITests: StreamUITestCase {
         Thread.sleep(forTimeInterval: 5.5)
         let during = sampler.stop()
         attachScreenshot(XCUIScreen.main, "On Top Move to Brush during delayed window draw")
-        let green = waitForStreamBounds(.green, on: canvas, inside: movedHull)
+        let green = try waitForStreamBounds(.green, on: canvas, inside: movedHull)
         attachScreenshot(XCUIScreen.main, "On Top Move to Brush after new window draw")
 
         // Keep every exit-phase image before assertions, including the eventual green front.
@@ -254,7 +254,7 @@ final class StreamPlacementUITests: StreamUITestCase {
         XCTAssertNotNil(green, "the new host surface eventually presents the green stream at the moved location")
         XCTAssertGreaterThanOrEqual(during.count, 3, "the delayed window draw produced multiple screen samples")
         XCTAssertTrue(during.allSatisfy { sample in
-            guard let pixel = sample.pixels.first else { return false }
+            guard let first = sample.pixels.first, let pixel = first else { return false }
             return Colour.red.matches(pixel) || Colour.green.matches(pixel)
         }, "the moved On Top picture stays visible until the new surface presents; no blank base frame appears")
         XCTAssertTrue(immediateVisible,

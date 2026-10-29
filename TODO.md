@@ -20,6 +20,7 @@ full landscape phase pictures. It retains the existing image/transform through U
 shared live-picture callback. No extra render/cache/timer. Combined tests and physical confirmation
 remain. A separate On Top stream-window lifetime boundary is being checked below; keep it distinct
 from ordinary vector ink and the already corrected stream-position jump.
+OLD1 against integration7f7231df stopped at compile with 0 tests: the UI fixture omitted required `thenHoldForDuration`, unwrapped one optional pixel only once, and omitted `try` for the throwing bounds wait. This test-call-site failure is not a runtime or continuity result. Preserve the OLD packet and fix only those three expressions before preparing a fresh pin.
 
 
 **New owner report, October28:** with a streamed screen present, moving it sometimes places the
