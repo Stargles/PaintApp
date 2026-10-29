@@ -1,4 +1,5 @@
 # TODO
+<!-- 2026-10-29: HANDOFF compaction recorded before editing. Prior byte-exact handoff: /Users/juliapark/PaintWork/s55-recorded-regressions/HANDOFF-before-compaction-1a7772c3.md (SHA-256 62f34678e68b7b39066cfe1a609d63e9e5fea544ea1b286e2c301ba2b89e508e). No owner ask is closed by this documentation pass. -->
 
 ## Current owner-facing status — October 28
 
