@@ -96,7 +96,7 @@ that the final combined audit build has passed.
 | Mend inside/attached vector strokes and Mend All Fills | Installed; public workflows and deliberate-failure checks passed | Current Release cost/memory comparison; preserve outside edges and uncertain joins |
 | Smart father–grandfather saving | Newest clock-bucket versions implemented and installed | Retry/safe-exit correction harvested; combined checks and real storage-cost confirmation remain |
 | Erasing crash in Test1 | Logs preserved; app/system allocation cause remains unproved | Finish window-renderer checks and fresh physical evidence |
-| Drawing/erasing lag and Move regression | Earlier Move/drawing-wait corrections and bounded eraser preview integrated; Move-exit gap reproduced | Qualify and integrate Move-exit handoff; combined tests and device confirmation remain |
+| Drawing/erasing lag and Move regression | Earlier Move/drawing-wait corrections and bounded eraser preview integrated; Move-exit gap reproduced | Move-exit handoff integrated; combined tests and device confirmation remain |
 | Architecture, cleanup and bug audit | In progress; several corrections separately tested and integrated | Remaining source review, findings below, combined checks and performance |
 | Development disk cleanup | About59GB reclaimed across passes; about19GB currently free | Continue bounded cache housekeeping between test batches |
 | Undo on an edited cel | Correction integrated; model/public/fault checks passed | Final combined checks |
@@ -770,20 +770,23 @@ green. No periodic fake-frame loop. The test-only source373 is prepared/unrun; n
 global acknowledgement state before actual evidence. Prefer retaining each original window's front
 through its existing presentation completion rather than mixing two retirement lifetimes.
 
-StreamPlacement c897 whole9 is joined and strictly reconciled:7pass/2fail. OnTop visibility checks
-all pass; its final green bounds include the green Live label. Root inspected both whole pictures;
-dominant red/green rectangles match within1pixel. Use the existing blue-frame convention from the
-other stream-Move test, and delete the four unnecessary screen-coordinate helpers added during the
-false coordinate diagnosis. Keep every continuity/position predicate and delay unchanged.
-Mode1 held erase probes the gesture endpoint; moved samples can stop short before the raw endpoint
-is guaranteed at lift. Source matches qualifiedcf in the eraser path. Drive the same eraser across
-the existing .50 probe to .56 (within the already-painted mark), preserving .70 outside probe, all
-pixel predicates and4second hold. These are fixture corrections, with no runtime fix.
+**Current qualification snapshot — October29, integration `0d4b2b3e`.** The recording four-path
+harvest is integrated; Debug75/Release75, two intended copy controls, and `RecordingUITests` 4/4
+passed at their component pins, with both landscape captures reviewed. Stream placement and Move-exit
+corrections are integrated; `StreamPlacementUITests` 9/9 and the normal1 rebuild passed at the
+recorded component pin. Assembled-source and device confirmation remain for both.
 
-Current qualification update: the recording copy removal is harvested through four exact endpoints;
-Debug75/Release75, two intended copy faults, public4 and root-looked graph captures pass. Stream
-whole9, one intended live-scratch fault and a normal1 rebuild pass. Final assembled checks remain.
-Export/Resize/Gradient are privately composed at21979024; root179 baseline is active, no result yet.
-Disk maintenance recovered3.116GB with12,578 archived app-data entries preserved. The white notch
-review found no confirmed new reference defect; existing full display-versus-commit logic covers
-coverage/z-order, so no speculative runtime mechanism or duplicate UI probe is added.
+The private Export/Resize/Gradient candidate `219790247dc684df1ec1182a7a45c0c2cd3daa95` has a
+strict731-source baseline of179/179 and nine root-reviewed pictures. Controls1–6 have been reviewed;
+the remaining eight controls are active under the root native lease. No harvest or assembled-green
+claim yet. Follow the live lease and grant files; do not repeat completed component gates.
+
+The fresh Test diagnostic is being repinned after source494. Until the root updates it, use
+`/Users/juliapark/PaintWork/s54-final-qualification/root-next-gates.json` as the locator for the
+current diagnostic map; do not freeze an older diagnostic pin as latest. Keep the fresh Test and older
+Test1 inputs immutable and preserve the copy-flight evidence before teardown. Test1/Mode3 physical
+cause remains unproved and needs fresh readiness.
+
+The historical Mend-cap result is superseded by the connected-stroke/Mend All Fills work. Exact
+canonical square-hole verification remains pending; do not credit the older cap pictures as proof of
+that case. Disk maintenance recovered3.116GB with12,578 archived app-data entries preserved.

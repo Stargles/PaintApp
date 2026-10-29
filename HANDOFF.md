@@ -7,7 +7,7 @@ history and original evidence remain in Git and the named packets.
 ## Current state and next action
 
 - Integration: `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch
-  `tmp/s54-qualified-integration`, current base `1a7772c3d1eb9689086a5f1de6dc118eaf41801`; 731
+  `tmp/s54-qualified-integration`, source-bearing baseline `0d4b2b3e4c5c71b432dce8fea6130cc0425cf44f`; 731
   source entries.
 
 - Recording's four-path harvest is integrated. Component evidence: Debug75 and Release75 green; two
@@ -16,11 +16,10 @@ history and original evidence remain in Git and the named packets.
   byte-exact. Receipt:
   `/Users/juliapark/PaintWork/s55-recorded-regressions/recording-cow-harvest-6210-to-e981/`.
 
-- Stream placement and Move-exit corrections are integrated. At `e98168c8`, whole
-  `StreamPlacementUITests` 9/9 passed, the public Mode1 held-scratch control reached its intended
-  assertion, and normal1 rebuilt green. Root reviewed live-reference and red-to-blue continuity
-  pictures. No additional On Top runtime state was added. Separate Test replay and Test1 lag/crash
-  asks remain.
+- Stream placement and Move-exit corrections are integrated. Whole `StreamPlacementUITests` 9/9,
+  normal1 passed at their recorded component pins; the public Mode1 held-scratch control reached its intended assertion. Root
+  reviewed live-reference and red-to-blue continuity pictures. No additional On Top runtime state
+  was added. Assembled-source and device confirmation remain.
 
 - Next, join and reconcile the private combined candidate at
   `/Users/juliapark/PaintWork/PaintApp-s55-export-resize-gradient-compose`, source
@@ -30,14 +29,14 @@ history and original evidence remain in Git and the named packets.
   public UI methods (`ToolPanelsUITests` 15, `FillObjectUITests` 15). Credit only reached
   assertions, then follow root's next run order. Evidence:
   `/Users/juliapark/PaintWork/s55-recorded-regressions/compose-normal179-21979024/` and
-  `/Users/juliapark/PaintWork/s55-recorded-regressions/compose-candidate-21979024/`. No result is
-  claimed here.
+  `/Users/juliapark/PaintWork/s55-recorded-regressions/compose-candidate-21979024/`. Baseline179/179
+  and nine root-reviewed pictures are complete; controls1–6 were reviewed and the remaining eight
+  controls are active under the root lease. No harvest or assembled-green claim yet.
 
 - `/Users/juliapark/PaintWork/s54-final-qualification/root-next-gates.json` is the live lease/status
-  file. At this compaction its `integration.head` still said `e98168c8` (before the recording
-  harvest), while `nativeLease` named candidate219. Reconcile the integration pin before any new
-  grant. Do not infer a running PID or start overlapping native/compiler/simulator work; root owns
-  the lease.
+  file. Its integration pin is `0d4b2b3e`; the root owns the active remaining-eight-controls lease
+  for candidate219. Re-read that file before any new grant. Do not infer or invent a running PID or
+  start overlapping native/compiler/simulator work.
 
 - No main merge, push, or new install. Main/origin remains
   `afd2030c831db7a746271fe306e8b5a5b9b02df6`. Merge only after all required gates pass.
@@ -74,10 +73,10 @@ history and original evidence remain in Git and the named packets.
    substitute historical “Export87” shorthand or rerun component work already qualified.
 
 2. **Test replay and Test1 lag/crash.** Fresh Test export is 535,004 bytes; older Test1 input is
-   12,305,349 bytes. Corrected temporary diagnostic map:
-   `/Users/juliapark/PaintWork/s55-recorded-regressions/test-replay-combined-diagnostic-corrected-fresh-Test-05684966/README.md`
-   (source `0568496684b72d9c84075346b8b2de81ce2ea9e2`). Its build/stage/selectors are unrun.
-   Preserve original inputs and copy flight evidence before teardown. Mode3 cause is unproved; use
+   12,305,349 bytes. The Test diagnostic is being repinned after source494; use
+   `/Users/juliapark/PaintWork/s54-final-qualification/root-next-gates.json` for the current map
+   pointer rather than treating an older `056` or `949` pin as latest. Preserve both original inputs
+   and copy flight evidence before teardown. Mode3 cause is unproved; use
    `/Users/juliapark/PaintWork/s55-recorded-regressions/mode3-current-source-map.md`. Physical
    evidence needs fresh readiness; do not claim a Backboard cause.
 
