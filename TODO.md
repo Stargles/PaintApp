@@ -1,7 +1,7 @@
 # TODO
 <!-- 2026-10-29: HANDOFF compaction recorded before editing. Prior byte-exact handoff: /Users/juliapark/PaintWork/s55-recorded-regressions/HANDOFF-before-compaction-1a7772c3.md (SHA-256 62f34678e68b7b39066cfe1a609d63e9e5fea544ea1b286e2c301ba2b89e508e). No owner ask is closed by this documentation pass. -->
 
-## Current owner-facing status — October 28
+## Current owner-facing status — October29
 
 **New owner evidence, October29:** the crash seems to occur when erasing many brushstrokes quickly.
 The existing copied-Test1 capture had20 gestures but only3 actual cuts (77 centerline misses), so it
@@ -9,14 +9,14 @@ does not cover that burst. Measure actual successful erasures, queued renders an
 on the real copied scene. The eraser-option clarification is pending; independent tracing continues.
 No crash cause is established.
 
-**October29 qualification update:** Export/Resize/Gradient are integrated after a179/179 baseline,
-13 intended-failure controls, one first-target-only deadline control with downstream timeout, nine
-reviewed pictures, and a normal49/49 rebuild. All717 unrelated source entries stayed exact. Final
-assembled checks remain. The exact current-support square-hole Mend test is now integrated and
-unrun; it is a verification gap, not a confirmed current defect. Next is the copied Test/Test1
-simulator diagnostic at e05770a3; no device readiness has been reused. The protected olderTest1
-input has no required geometry version and is withheld from staging; locate its verified converted
-copy or run the original one-shot repair on a copy. Freshly exported Test proceeds independently.
+**Current qualification status:** Export/Resize/Gradient are integrated after179/179,13 intended
+fault controls plus one first-target-only deadline control, nine inspected pictures and normal49/49.
+The copied Test scene passed a cold single-Move replay. The current-support square-hole Mend witness
+passed1/1; whole29 and its classifier control remain. Separate small-Move body/grip correction7522
+passed65/65 with three inspected pictures; its three controls are active. Text’s Select All route
+has not reached its color assertions because the small fixture overlaps transform handles; a
+test-only enlarged, clearance-qualified fixture is prepared. Final assembled Debug/Release, whole
+affected UI, performance and device confirmation remain. No new main merge, push or install.
 
 **Operational report:** Kevin sees repeated macOS prompts asking ChatGPT to access OneDrive or
 other app/cloud data. Keep work scoped to explicit repository, PaintWork and owned-simulator paths;

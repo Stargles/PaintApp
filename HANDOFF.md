@@ -11,7 +11,7 @@ that is insufficient burst coverage. Actual cut counts and queued-picture lifeti
 The eraser-option question is pending; no physical crash cause is established.
 
 - Integration: `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch
-  `tmp/s54-qualified-integration`, source-bearing baseline `0d4b2b3e4c5c71b432dce8fea6130cc0425cf44f`; 731
+  `tmp/s54-qualified-integration`, assembled source through `ea8608e59013070176d91ec408ce4556bc37b498` (later commits are queue records); 731
   source entries.
 
 - Recording's four-path harvest is integrated. Component evidence: Debug75 and Release75 green; two
@@ -34,18 +34,26 @@ The eraser-option question is pending; no physical crash cause is established.
   `/Users/juliapark/PaintWork/s55-recorded-regressions/compose-harvest-prep-21979024-to-0d4b2b3e/root-applied-receipt.json`.
   Final assembled fast tiers/UI/performance gates remain.
 
-- The current-support square-hole Mend test is integrated but unrun. It replaces no algorithm:
-  the old cap/square-hole reports concern the retired distance-wave implementation. Qualify the
-  actual canonical-support96-square/448-ring/Reach40 case before crediting preservation.
+- Current-support square-hole Mend witness050 passed1/1:96-square/448-ring/Reach40; ambiguous
+  x18 refused, clear auxiliary x70 mended. Only its permanent test was harvested atea860; product
+  unchanged. WholeFillMend29 and one classifier control remain. Historical cap reports concern the
+  retired distance-wave algorithm.
 
-- Next: fresh isolated Test/Test1 diagnostic at `e05770a3bcd12379f4ef7fc12d11fe85ce905eb8`,
-  `/Users/juliapark/PaintWork/s55-recorded-regressions/test-replay-current-recording-e05770a3/`.
-  Product matches integration0d4 except explicit temporary Mode3 recorder notes; it includes the
-  recording copy correction and public Study-folder navigation. Build is active on fresh simulator
-  `15B8A35F-F71A-4CB4-B037-A01E8A42E1D6`; no stage/launch yet. OlderTest1 lacks required
-  geometry-version keys: withhold it until a verified converted copy is located or the original
-  one-shot repair runs on a copy. Fresh Test may proceed independently.
-  Root owns the sole native slot; consult `root-next-gates.json` before any lifecycle action.
+- Fresh copied Test passed a cold lasso → one Move tap → Set Down → visible drawing replay. The
+  older Test1 was converted on a verified copy by its original repair; all31 original files stayed
+  exact. Its current Mode3 capture passed the public route, but20 gestures/80 calls made only3 cuts
+  and77 centerline misses. Two4096² worker pictures landed, one was refused. This does not cover
+  Kevin’s rapid-erasing crash clue or establish a physical cause. Evidence:
+  `/Users/juliapark/PaintWork/s55-recorded-regressions/test1-Mode3-current-303790c7/`.
+
+- Separate small-Move body/grip arbitration fix7522 passed65/65 with three inspected pictures.
+  Deliberate controls3 are active; root owns the sole native slot. This is separate from repeated
+  Move taps and Move-exit picture retirement. Consult `root-next-gates.json` before lifecycle work.
+
+- Text’s stronger Select All witness has not reached its color assertions: the small editor box
+  places the intended caret tap within22pt transform-grip reach. No product Text defect is proved.
+  A test-only fixture897 enlarges through the normal size control and measures grip clearance
+  before requesting UIKit’s menu. Native check pending.
 
 - No main merge, push, or new install. Main/origin remains
   `afd2030c831db7a746271fe306e8b5a5b9b02df6`. Merge only after all required gates pass.
@@ -81,13 +89,12 @@ The eraser-option question is pending; no physical crash cause is established.
    identifier/helper checks, and mapped Resize/Gradient controls from the same source. Do not
    substitute historical “Export87” shorthand or rerun component work already qualified.
 
-2. **Test replay and Test1 lag/crash.** Fresh Test export is 535,004 bytes; older Test1 input is
-   12,305,349 bytes. The Test diagnostic is being repinned after source494; use
-   `/Users/juliapark/PaintWork/s54-final-qualification/root-next-gates.json` for the current map
-   pointer rather than treating an older `056` or `949` pin as latest. Preserve both original inputs
-   and copy flight evidence before teardown. Mode3 cause is unproved; use
-   `/Users/juliapark/PaintWork/s55-recorded-regressions/mode3-current-source-map.md`. Physical
-   evidence needs fresh readiness; do not claim a Backboard cause.
+2. **Test1 lag/crash and rapid erasing.** Fresh Test replay and copied Test1 Mode3 diagnostic
+   are complete as bounded above; physical latency/crash is unresolved. The most recent read-only
+   device crash listing adds no newer relevant report than the preserved October26 reports.
+   Preserve the original inputs and capture flight evidence before teardown. Use
+   `/Users/juliapark/PaintWork/s55-recorded-regressions/mode3-current-source-map.md`; no Backboard
+   cause claim. Meaningful burst work must count actual cuts, queued renders and retained pictures.
 
 3. **Previous-writer format and one-shot repair.** Capture the real previous-writer MotionGroup
    package before strict four-field decoder cleanup: source `28c08b26`, previous-writer package729 /
