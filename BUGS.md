@@ -7,17 +7,21 @@ cloud paths; that alone does not establish the initiating process. Audit bounded
 and relevant OS logs, avoid broad home/cloud scans, and leave TCC/privacy settings unchanged. This
 is an operational investigation, not an identified PaintApp defect; app work continues.
 
-## Move exit briefly hides the placed drawing — October 28
+## Move exit briefly hides the placed drawing — October28
 
-Owner reports a visible gap when a selected/moved object is placed down by changing to Brush or
-Eraser. Theory: the float preview is removed before the background compositor's new frame lands.
-Owner authorizes retaining the same lifted picture, even temporarily uncomposited, until the finished
-base is actually displayed. Trace endVectorFloat/raster float settlement versus existing UnlandedInk,
-held edit/derived pictures and content/base revisions. OLD9649 now reproduces the immediate blank
-after all moved-ink premises pass; its delayed/final assertions were unreached. The source-only
-correction transfers the existing image/transform and actual On Top surfaces to UnlandedInk, using
-its installed-base retirement; no delay/new cache/render. Independent review found a test image-size
-mismatch being corrected before native gates. History, cel/scene and late-result checks remain.
+Root cause for vector ink: ending Move cleared its already-shown float before the asynchronous base
+containing it arrived. The correction keeps the existing image and transform in UnlandedInk until
+installed-content revision retirement. The shared typed landing callback replaces the fill-only
+callback; no extra pixels, render, timer or cache. Whole72 at447 passed, three faults reached their
+rendered-pixel/callback targets, and normal26 rebuilt green with all731 source entries exact. Root
+inspected six full landscape immediate/during/final pictures; original failed setup and compiler
+packets remain preserved. The12-path correction is harvested; final combined/device checks remain.
+
+On Top references need separate lifetime proof: the ordinary ink base excludes the live stream,
+but currently retires the group that holds its frozen window before the new host window necessarily
+presents. Source ordering is reachable; a cold test-only373 witness with the existing window delay
+is prepared/unrun. No physical or public blank-frame claim yet, and no global ack/cache was added.
+In Place stays on its existing retained display owner. This is separate from the placement jump below.
 
 ## Streamed screen can separate from its Move box — October 28
 

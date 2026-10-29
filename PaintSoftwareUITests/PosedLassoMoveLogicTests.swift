@@ -383,6 +383,35 @@ final class PosedLassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(try celMap(manager, layerIndex).tx, 40, accuracy: 1e-6, "and so is keyframe B")
     }
 
+    func testSuccessfulMoveLandingCallbackRunsOnceBeforeTheDisplayedLatchIsReleased() throws {
+        let (manager, _, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 6, y: 30), to: CGPoint(x: 22, y: 30)))
+        defer { manager.onLivePictureWillLand = nil }
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        manager.nudgeVectorFloat(to: movedBy(manager, dx: 9, dy: 0))
+        let movedXs = sampleXs(vector.elements)
+        var callbacks = 0
+        manager.onLivePictureWillLand = { landing in
+            guard case .vectorFloat(let float) = landing else {
+                XCTFail("a Move commit reports its live picture")
+                return
+            }
+            callbacks += 1
+            XCTAssertNotNil(manager.vectorFloat, "the view can capture the displayed latch synchronously")
+            XCTAssertTrue(float.parts.contains { part in
+                part.insideIDs == Set(vector.elements.map(\.id))
+            })
+            XCTAssertTrue(vector.suppressedElementIDs.isEmpty,
+                          "the base recipe already includes the unsuppressed moved elements")
+            XCTAssertEqual(self.sampleXs(vector.elements), movedXs,
+                           "all final geometry writes precede the picture handoff")
+        }
+
+        XCTAssertTrue(manager.commitVectorFloatIfNeeded())
+        XCTAssertEqual(callbacks, 1)
+        XCTAssertNil(manager.vectorFloat, "the latch is released after the picture callback")
+    }
+
     /// The whole of it end to end, in the owner's own order: animate A→B, scrub to an in-between,
     /// move the object, and it is still one animation — three keys, one channel, one drawing.
     ///

@@ -348,8 +348,19 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.canvasManager.onHeldPictureMoved = { [weak coordinator = context.coordinator] in
             coordinator?.heldPictureMoved()
         }
-        context.coordinator.canvasManager.onLiveFillWillLand = { [weak coordinator = context.coordinator] layerID, celID, preview in
-            coordinator?.prepareLiveFillLanding(preview, layerID: layerID, celID: celID)
+        context.coordinator.canvasManager.onLivePictureWillLand = { [weak coordinator = context.coordinator] landing in
+            guard let coordinator else { return }
+            switch landing {
+            case .fill(let layerID, let celID, let preview):
+                coordinator.prepareLiveFillLanding(preview, layerID: layerID, celID: celID)
+            case .vectorFloat(let float):
+                for part in float.parts where part.isShown {
+                    guard let host = coordinator.layerHosts[part.layerID],
+                          let vector = coordinator.canvasManager.vectorCanvas(of: part),
+                          host.strokeView.isShowingVectorFloat(for: vector, celID: part.celID) else { continue }
+                    host.strokeView.holdVectorFloatUntilBaseLands(for: vector, celID: part.celID)
+                }
+            }
         }
 
         // One undo step per whole move/scale/rotate drag, not per intermediate value — see

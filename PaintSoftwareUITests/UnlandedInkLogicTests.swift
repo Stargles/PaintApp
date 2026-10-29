@@ -25,6 +25,49 @@ final class UnlandedInkLogicTests: XCTestCase {
                       "brush pictures keep UIImage's scale and orientation handling without a copy")
     }
 
+    func testTransformedGroupKeepsItsImagePlacementAndClipsUnderNewerReplacement() throws {
+        let size = Self.canvasSize
+        let image = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
+            UIColor.red.setFill()
+            context.cgContext.fill(CGRect(x: 12, y: 12, width: 12, height: 10))
+        }
+        let transform = CATransform3DMakeTranslation(4, 0, 0)
+        let contents = UnlandedInk.Picture.Contents.transformedGroup(image: image, canvasSize: size,
+                                                                      transform: transform, windows: [])
+        let shown = contents.makeView()
+        XCTAssertTrue(CATransform3DEqualToTransform(shown.layer.transform, transform))
+        XCTAssertTrue((shown.subviews.first as? UIImageView)?.image === image,
+                      "the held group aliases the bitmap that was already on screen")
+
+        let picture = UnlandedInk.Picture(id: 1, version: 1,
+            windowRect: CGRect(origin: .zero, size: size), alpha: 1,
+            replacesBase: false, contents: contents)
+        var ink = UnlandedInk()
+        ink.hold(picture)
+        let patch = CGRect(x: 20, y: 12, width: 12, height: 10)
+        let blue = UIGraphicsImageRenderer(size: patch.size, format: PixelOps.transparentFormat()).image { context in
+            UIColor.blue.setFill()
+            context.cgContext.fill(CGRect(x: patch.width - 2, y: 0, width: 2, height: patch.height))
+        }
+        ink.hold(.init(id: 2, version: 2, windowRect: patch,
+                       replacing: CGPath(rect: patch, transform: nil), contents: .image(blue)))
+        let plan = ink.displayPlan(placement: .identity, coveringPaths: [])
+        XCTAssertNotNil(plan.baseHole, "the newer replacement still punches only its own footprint")
+        XCTAssertNotNil(plan.pictures.first?.clip,
+                        "the older transformed picture is clipped beneath a later replacement")
+
+        let actual = Self.plannedPicture(plan)
+        let expected = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
+            UIColor.black.setFill()
+            context.cgContext.fill(CGRect(origin: .zero, size: size))
+            image.draw(in: CGRect(x: 4, y: 0, width: size.width, height: size.height))
+            context.cgContext.clear(patch)
+            blue.draw(in: patch)
+        }
+        XCTAssertEqual(try Self.worstChannelDifference(Self.bytes(of: actual), Self.bytes(of: expected)), 0,
+                       "the translated group keeps its placement, remains additive over the base, and yields to newer replacement ink")
+    }
+
     // MARK: - The defect
 
     /// **The whole defect, as five steps.** Stroke *n* is finished and its render is in flight;
@@ -341,9 +384,7 @@ final class UnlandedInkLogicTests: XCTestCase {
         }
         root.addSubview(base)
         for visible in plan.pictures {
-            let view = visible.picture.contents.makeView()
-            view.frame = visible.picture.windowRect
-            view.alpha = visible.picture.alpha
+            let view = visible.picture.makeCanvasView(size: canvasSize, placement: .identity)
             visible.applyClip(to: view)
             root.addSubview(view)
         }

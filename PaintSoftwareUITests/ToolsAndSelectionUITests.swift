@@ -505,9 +505,12 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        // One horizontal line across the upper canvas, on the default vector layer — on `rowAboveTheDock`,
-        // above the Select and Move bars that stand over the lower paper.
-        let row = rowAboveTheDock(canvas)
+        // Put the source near the top of the paper that is actually exposed above the timeline. The
+        // later Move bar covers more of the lower paper, so a quarter-paper row can put the moved
+        // half's +0.26 probe under that bar even though the original stroke was visible.
+        let exposedPaper = visiblePaperRect(app, in: canvas)
+        let row = Double(exposedPaper.minY + exposedPaper.height * 0.20)
+        assertBelowTheToolbar(app, canvas, dy: row - 0.08, "The selection's upper edge")
         dragOnCanvas(app, from: CGVector(dx: 0.2, dy: row), to: CGVector(dx: 0.85, dy: row))
         app.buttons["toolbar.layersButton"].tap()   // the marker lives in the layer panel
         XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1, "one stroke to start with")
@@ -518,7 +521,7 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
         rectangleMode.tap()
-        dragOnCanvas(app, from: CGVector(dx: 0.6, dy: row - 0.10), to: CGVector(dx: 0.95, dy: row + 0.10))
+        dragOnCanvas(app, from: CGVector(dx: 0.6, dy: row - 0.08), to: CGVector(dx: 0.95, dy: row + 0.08))
 
         // Move lifts the lassoed half. Nothing visibly changes yet — the float sits exactly over the
         // hole it came out of — so the assertions worth making are about where it *lands*.
@@ -540,6 +543,164 @@ final class SelectionAndMoveUITests: PaintUITestCase {
         app.buttons["toolbar.layersButton"].tap()
         XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 2,
                        "the stroke the loop crossed became two independent strokes")
+    }
+
+    /// Switching out of Move must not uncover the unrendered source hole. The slow render seam gives
+    /// the existing floating picture a visible interval in which to hand off to the committed base.
+    func testMoveExitToBrushKeepsMovedInkVisibleUntilBaseRender() throws {
+        try exerciseMoveExitAndCheckDrawnInk(toolIdentifier: "toolbar.brushButton", route: "brush")
+    }
+
+    func testMoveExitToEraserKeepsMovedInkVisibleUntilBaseRender() throws {
+        try exerciseMoveExitAndCheckDrawnInk(toolIdentifier: "toolbar.eraserButton", route: "eraser")
+    }
+
+    private func exerciseMoveExitAndCheckDrawnInk(toolIdentifier: String, route: String) throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-uiTestSlowVectorRenderMillis", "5000",
+                               "-uiTestSlowBakeMillis", "5000"]
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let window = app.windows.element(boundBy: 0).frame
+        XCTAssertGreaterThan(window.width, window.height, "the whole editor window is landscape")
+
+        // The separated horizontal strokes establish a substantial hull. The diagonal gives the
+        // pixel oracle ink strictly inside it, away from the cyan perimeter, center bar, and grips.
+        let drawPaper = paperRect(in: canvas)
+        func visibleInkRow(in paper: CGRect, x: Double, rows: ClosedRange<Double>, timeout: TimeInterval) -> Double? {
+            let deadline = Date().addingTimeInterval(timeout)
+            repeat {
+                let image = canvas.screenshot().image
+                if let pixels = ScreenshotPixels(image) {
+                    let normalizedStep = 0.5 / (Double(pixels.height) * Double(paper.height))
+                    if let row = stride(from: rows.lowerBound, through: rows.upperBound, by: normalizedStep).first(where: { row in
+                        let point = onHost(paper, x, row)
+                        return isInk(pixels.pixel(normalizedX: Double(point.dx), normalizedY: Double(point.dy)))
+                    }) { return row }
+                }
+                if Date() < deadline { Thread.sleep(forTimeInterval: 0.25) }
+            } while Date() < deadline
+            return nil
+        }
+        for row in [0.24, 0.58] {
+            dragOnCanvas(app, from: onHost(drawPaper, 0.28, row), to: onHost(drawPaper, 0.72, row))
+        }
+        dragOnCanvas(app, from: onHost(drawPaper, 0.32, 0.30), to: onHost(drawPaper, 0.68, 0.52))
+        attachScreenshot(XCUIScreen.main, "move-exit-\(route)-before-move-premises")
+        let expectedSourceSamples: [(x: Double, row: Double)] = [
+            (0.40, 0.24), (0.40, 0.58), (0.37, 0.33)
+        ]
+        let sourceSamples = try expectedSourceSamples.map { sample -> (x: Double, row: Double) in
+            let row = try XCTUnwrap(visibleInkRow(in: drawPaper, x: sample.x,
+                                                  rows: (sample.row - 0.025)...(sample.row + 0.025), timeout: 10),
+                                    "PREMISE: an actual dark stroke landed near paper (\(sample.x), \(sample.row))")
+            return (sample.x, row)
+        }
+        for sample in sourceSamples {
+            XCTAssertTrue(isInk(rgbaPixel(of: canvas, at: onHost(drawPaper, sample.x, sample.row))),
+                          "PREMISE: source stroke at observed paper (\(sample.x), \(sample.row)) is dark")
+        }
+        // Let the deliberately slowed initial vector and raster bases finish before exercising exit.
+        Thread.sleep(forTimeInterval: 5.5)
+
+        app.buttons["toolbar.moveButton"].tap()
+        let moveDone = app.buttons["moveBar.doneButton"]
+        XCTAssertTrue(moveDone.waitForExistence(timeout: 10), "PREMISE: whole-cel Move raises its controls")
+        let beforeBox = try XCTUnwrap(settledMoveBox(app), "PREMISE: the Move hull is published")
+        let beforePaper = paperRect(in: canvas)
+        attachScreenshot(XCUIScreen.main, "move-exit-\(route)-move-controls-premise")
+        let interiorSample = sourceSamples[2]
+        let preMoveHostPoint = onHost(beforePaper, interiorSample.x, interiorSample.row)
+        XCTAssertGreaterThan(preMoveHostPoint.dx, beforeBox.minX + beforeBox.width * 0.15,
+                             "PREMISE: the sampled diagonal is inside the Move hull's left edge")
+        XCTAssertLessThan(preMoveHostPoint.dx, beforeBox.maxX - beforeBox.width * 0.15,
+                          "PREMISE: the sampled diagonal is inside the Move hull's right edge")
+        XCTAssertGreaterThan(preMoveHostPoint.dy, beforeBox.minY + beforeBox.height * 0.15,
+                             "PREMISE: the sampled diagonal is inside the Move hull's top edge")
+        XCTAssertLessThan(preMoveHostPoint.dy, beforeBox.maxY - beforeBox.height * 0.15,
+                          "PREMISE: the sampled diagonal is inside the Move hull's bottom edge")
+        XCTAssertGreaterThan(abs(preMoveHostPoint.dx - beforeBox.midX), beforeBox.width * 0.12,
+                             "PREMISE: the sampled diagonal is away from the center pivot")
+        XCTAssertGreaterThan(abs(preMoveHostPoint.dy - beforeBox.midY), beforeBox.height * 0.12,
+                             "PREMISE: the sampled diagonal is away from the center pivot")
+        XCTAssertTrue(isInk(rgbaPixel(of: canvas, at: preMoveHostPoint)),
+                      "PREMISE: the diagonal ink remains drawn inside the Move hull")
+        // Drag the interior of the actual hull, offset from endpoint grips and the cyan middle bar.
+        // The screen may refit after the Move dock appears, so all coordinates use current host data.
+        let dragStart = CGVector(dx: beforeBox.minX + beforeBox.width * 0.35,
+                                 dy: beforeBox.minY + beforeBox.height * 0.25)
+        let dragEnd = CGVector(dx: dragStart.dx, dy: dragStart.dy + 0.10)
+        dragOnCanvas(app, from: dragStart, to: dragEnd)
+        XCTAssertTrue(moveDone.exists, "PREMISE: the Move box remains up until the tool switch")
+        let afterBox = try XCTUnwrap(settledMoveBox(app), "PREMISE: the translated Move hull settles")
+        let translationY = afterBox.midY - beforeBox.midY
+        XCTAssertGreaterThan(abs(translationY), 0.04, "PREMISE: the Move hull actually changed position")
+        let afterPaper = paperRect(in: canvas)
+        attachScreenshot(XCUIScreen.main, "move-exit-\(route)-before-exit-premises")
+        let expectedHostY = Double(onHost(beforePaper, interiorSample.x, interiorSample.row).dy) + translationY
+        let expectedPaperY = Double((expectedHostY - Double(afterPaper.minY)) / Double(afterPaper.height))
+        let sourceClearedPoint = onHost(afterPaper, interiorSample.x, interiorSample.row)
+        assertAboveTheDock(app, canvas, dy: Double(sourceClearedPoint.dy), "the cleared diagonal source probe")
+        assertBelowTheToolbar(app, canvas, dy: Double(sourceClearedPoint.dy), "the cleared diagonal source probe")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: sourceClearedPoint)),
+                      "PREMISE: whole-cel Move cleared the visible diagonal source stroke")
+        let landed = visibleInkRow(in: afterPaper, x: interiorSample.x,
+                                   rows: (expectedPaperY - 0.025)...(expectedPaperY + 0.025), timeout: 7)
+        XCTAssertNotNil(landed,
+                        "PREMISE: translated diagonal ink is drawn inside the hull, away from cyan controls")
+        let landedRow = try XCTUnwrap(landed)
+        let movedHostPoint = onHost(afterPaper, interiorSample.x, landedRow)
+        let edgeInsetX = afterBox.width * 0.15
+        let edgeInsetY = afterBox.height * 0.15
+        XCTAssertGreaterThan(movedHostPoint.dx, afterBox.minX + edgeInsetX,
+                             "PREMISE: the sampled ink is inside the hull, away from its left edge")
+        XCTAssertLessThan(movedHostPoint.dx, afterBox.maxX - edgeInsetX,
+                          "PREMISE: the sampled ink is inside the hull, away from its right edge")
+        XCTAssertGreaterThan(movedHostPoint.dy, afterBox.minY + edgeInsetY,
+                             "PREMISE: the sampled ink is inside the hull, away from its top edge")
+        XCTAssertLessThan(movedHostPoint.dy, afterBox.maxY - edgeInsetY,
+                          "PREMISE: the sampled ink is inside the hull, away from its bottom edge")
+        XCTAssertGreaterThan(abs(movedHostPoint.dx - afterBox.midX), afterBox.width * 0.12,
+                             "PREMISE: the sample is away from the center pivot")
+        XCTAssertGreaterThan(abs(movedHostPoint.dy - afterBox.midY), afterBox.height * 0.12,
+                             "PREMISE: the sample is away from the center pivot")
+        let samplePaperPoint = (x: interiorSample.x, y: landedRow)
+        app.buttons[toolIdentifier].tap()
+        attachScreenshot(XCUIScreen.main, "move-exit-\(route)-immediate-whole-screen")
+        let exitPaper = paperRect(in: canvas)
+        let exitPixel = onHost(exitPaper, samplePaperPoint.x, samplePaperPoint.y)
+        assertAboveTheDock(app, canvas, dy: Double(exitPixel.dy), "the moved ink probe")
+        assertBelowTheToolbar(app, canvas, dy: Double(exitPixel.dy), "the moved ink probe")
+        let immediate = rgbaPixel(of: canvas, at: exitPixel)
+        let immediateVisible = isInk(immediate)
+
+        let frame = canvas.frame
+        let screenProbe = CGPoint(x: frame.minX + frame.width * exitPixel.dx,
+                                  y: frame.minY + frame.height * exitPixel.dy)
+        let sampler = MidGestureSampler(points: [screenProbe], interval: 0.2)
+        sampler.start()
+        Thread.sleep(forTimeInterval: 1.5)
+        let duringDelay = sampler.stop()
+        attachScreenshot(XCUIScreen.main, "move-exit-\(route)-during-render-whole-screen")
+
+        // The five-second delay is now past; the second drawn-pixel check confirms the committed
+        // position is visible after the asynchronous base render has had time to land.
+        Thread.sleep(forTimeInterval: 4.0)
+        let finalPaper = paperRect(in: canvas)
+        let finalPixel = onHost(finalPaper, samplePaperPoint.x, samplePaperPoint.y)
+        attachScreenshot(XCUIScreen.main, "move-exit-\(route)-after-render-whole-screen")
+        let finalVisible = isInk(rgbaPixel(of: canvas, at: finalPixel))
+
+        // Capture every phase before asserting. In particular, a failed immediate handoff must not
+        // hide whether the delayed committed picture eventually appeared in this same run.
+        XCTAssertTrue(finalVisible, "PREMISE: the moved drawing is visible after the delayed base render")
+        XCTAssertGreaterThanOrEqual(duringDelay.count, 2,
+                                    "the delayed interval produced multiple actual ink samples")
+        XCTAssertTrue(duringDelay.allSatisfy { $0.pixels.first.map(isInk) == true },
+                      "the moved drawing must stay visible in every sample while the new base is rendering")
+        XCTAssertTrue(immediateVisible,
+                      "the moved drawing must remain visible immediately after exiting Move to \(route)")
     }
 
     /// **The Move menu replaces the Select menu while a lassoed piece is floating, and hands it back

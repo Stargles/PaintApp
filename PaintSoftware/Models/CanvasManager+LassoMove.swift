@@ -1612,8 +1612,6 @@ extension CanvasManager {
     @discardableResult
     func commitVectorFloatIfNeeded() -> Bool {
         guard let float = vectorFloat else { return false }
-        vectorFloat = nil
-        selection = nil
         for part in float.parts {
             guard let vector = vectorCanvas(of: part) else { continue }
             vector.suppressedElementIDs = []
@@ -1632,6 +1630,11 @@ extension CanvasManager {
         // takes the `.storedValue` arm, which does nothing at all, so the ordinary Move is byte-for-byte
         // what it was.
         commitPoseFromFloat(float)
+        // Keep the displayed latch alive until the view has retained its already-shown picture.
+        // This callback is specific to successful commit; cancel and history undo never enter here.
+        onLivePictureWillLand?(.vectorFloat(float))
+        vectorFloat = nil
+        selection = nil
         refreshUndoRedoState()
         return true
     }

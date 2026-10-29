@@ -19,46 +19,30 @@ import UIKit
 /// one thing and *"ink the base does not have yet"* is another; the live scratch is the first, this
 /// is the second, and a stroke moves from one to the other at pen-up.
 ///
-/// **It allocates no pixels.** A held picture is the `UIImage` the live scratch was already showing
-/// or the frozen `IOSurface` a held edit was already presenting
-/// — windowed to the stroke's own box (`StrokeScratch`), never canvas-sized — so holding it retains
-/// a bitmap that existed a moment ago and would otherwise have been released. It is in fact *less*
-/// than the shipped code held: that kept the whole `StrokeScratch`, including its
-/// `RasterLayerTexture` window and both of its memoized composites, until the render landed.
+/// **It allocates no pixel storage.** It retains an already-shown `UIImage` or `IOSurface` by
+/// reference. Ordinary stroke and edit pictures stay windowed; a transformed group can be
+/// canvas-sized because that is the existing Move latch being kept on screen until its base lands.
+/// Its lifetime is governed by the installed-content revision below.
 ///
-/// **And it is bounded by pen travel rather than by canvas area.** A picture is held from its
-/// stroke's pen-up until a base containing it is installed — one render, MEASURED at 14.4 ms on
-/// Test1 at 4096² and 27.3 ms at 6000² (`StrokeHandoffBench`) — so the set holds the strokes an
-/// artist finished inside one render. A stroke's window is proportional to its own length and a long
-/// stroke takes long enough to draw that its render lands first, which is why the sum does not grow
-/// with the canvas: it grows with how far a pen can travel in one render, and that is the same few
-/// hundred points at 512² as at 6000².
-///
-/// **Why a value type in `Views/` rather than state inside the view.** `StrokeCanvasView.swift` is
-/// not a member of the UI-test target — it drags in `StrokeGestureRecognizer` and the rest of the
-/// touch stack — so nothing nested inside it can be asserted headlessly, which is exactly why this
-/// defect went two months without a test. `VectorPreviewPlan` and `DeferredVectorRender` are the two
-/// existing members of that family and this is the third; the view holds one of these and obeys it.
+/// **Why a value type in `Views/` rather than state inside the view.** The picture and retirement
+/// plan can be tested without loading `StrokeCanvasView`'s touch stack; the view retains and presents
+/// the decisions made here.
 struct UnlandedInk {
 
-    /// One finished stroke's picture, exactly as the live scratch was showing it a moment before.
-    ///
-    /// The three display fields are the same three `StrokeCanvasView.showOverlays` reads off a live
-    /// `StrokeScratch`, and they are copied rather than referenced for one reason: the scratch is
-    /// released at pen-up now, so the picture has to outlive it.
+    /// A retained presentation of content not yet in the installed base. Contents keep their
+    /// existing bitmap or surface storage; transformed groups also retain their shown placement.
     struct Picture {
         /// Identity, monotonic per view. Present so a test can say *which* picture without
         /// comparing bitmaps, and so the view can tell "the same held set" from "a set that happens
         /// to be the same length" when it decides whether to rebuild its layers.
         let id: Int
-        /// **The `VectorCanvas.version` this ink is in.** A base rasterized at this version or later
-        /// contains it, which is the whole of `retire(upTo:)`.
+        /// The host's committed-content revision this ink is in. A base installed at this revision
+        /// or later contains it, which is the whole of `retire(upTo:)`.
         let version: Int
-        /// Where the picture goes, in canvas points — `StrokeScratch.windowRect`.
+        /// The picture's window in canvas points; transformed groups use the full canvas bounds.
         let windowRect: CGRect
-        /// What the picture is shown at — `StrokeScratch`'s own display alpha, which is the stroke's
-        /// opacity for `.additive` and 1 for the two roles that have already applied it inside their
-        /// pixels. BRUSH.md §2.11's cap, on the display side.
+        /// Display alpha. Ordinary additive scratch pictures preserve stroke opacity; replacement
+        /// pictures have already applied it inside their pixels.
         let alpha: CGFloat
         /// Whether the picture *stands in for* the base inside its window rather than sitting over
         /// it — a vector eraser or an element edit. The base is punched out underneath, exactly as it
@@ -76,9 +60,16 @@ struct UnlandedInk {
         enum Contents {
             case image(UIImage)
             case surface(WindowSurfaceView.FrozenWindow)
+            case transformedGroup(image: UIImage, canvasSize: CGSize, transform: CATransform3D,
+                                  windows: [WindowSurfaceView.FrozenWindow])
 
-            /// Preserve UIImage's scale/orientation handling for strokes, while a frozen window
-            /// hands its existing surface straight to Core Animation. Neither arm copies pixels.
+            var ownsPlacement: Bool {
+                if case .transformedGroup = self { return true }
+                return false
+            }
+
+            /// Preserve UIImage's scale/orientation handling for strokes, while frozen windows
+            /// hand their existing surfaces straight to Core Animation. No arm copies pixels.
             func makeView() -> UIView {
                 let view: UIView
                 switch self {
@@ -88,6 +79,19 @@ struct UnlandedInk {
                     view.layer.contents = frozen.surface
                     view.layer.contentsScale = 1
                     view.layer.contentsGravity = .resize
+                case .transformedGroup(let image, let canvasSize, let transform, let windows):
+                    view = UIView(frame: CGRect(origin: .zero, size: canvasSize))
+                    view.layer.transform = transform
+                    let imageView = UIImageView(image: image)
+                    imageView.frame = view.bounds
+                    imageView.contentMode = .scaleToFill
+                    imageView.isUserInteractionEnabled = false
+                    imageView.layer.magnificationFilter = .nearest
+                    imageView.layer.minificationFilter = .trilinear
+                    view.addSubview(imageView)
+                    for frozen in windows {
+                        view.addSubview(frozen.makeView())
+                    }
                 }
                 view.layer.magnificationFilter = .nearest
                 view.layer.minificationFilter = .trilinear
@@ -117,7 +121,10 @@ struct UnlandedInk {
 
         func footprint(placement: CelContentPlacement) -> CGPath {
             if case .celContent(let path) = mode { return path }
+            // A transformed group may extend beyond its origin rect. The full-canvas path is a
+            // conservative clipping footprint; only replacement pictures contribute base holes.
             let local = CGPath(rect: windowRect, transform: nil)
+            if contents.ownsPlacement { return local }
             return placement.ink?.mapped(local) ?? local
         }
 
@@ -126,11 +133,15 @@ struct UnlandedInk {
         func makeCanvasView(size: CGSize, placement: CelContentPlacement) -> UIView {
             let wrapper = UIView(frame: CGRect(origin: .zero, size: size))
             let image = contents.makeView()
-            image.frame = windowRect
             image.contentMode = .scaleToFill
             image.isUserInteractionEnabled = false
-            if case .celContent = mode { wrapper.addSubview(image) }
+            if case .celContent = mode {
+                image.frame = windowRect
+                wrapper.addSubview(image)
+            }
+            else if contents.ownsPlacement { wrapper.addSubview(image) }
             else {
+                image.frame = windowRect
                 let local = UIView(frame: wrapper.bounds)
                 local.layer.anchorPoint = .zero
                 local.layer.position = .zero

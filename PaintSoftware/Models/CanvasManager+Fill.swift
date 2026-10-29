@@ -165,7 +165,9 @@ extension CanvasManager {
     private func endLiveFill(landing preview: FillPreview? = nil) {
         guard let fill = liveFill else { return }
         endLiveEdit {
-            if let preview { onLiveFillWillLand?(fill.layerID, fill.celID, preview) }
+            if let preview {
+                onLivePictureWillLand?(.fill(layerID: fill.layerID, celID: fill.celID, preview: preview))
+            }
         }
     }
 

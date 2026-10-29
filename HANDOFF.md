@@ -4,14 +4,14 @@ New active owner Move handoff report: after moving a selection, switching to Bru
 hides the placed drawing. Owner's theory is early preview retirement; explicit preference is keep
 same lifted picture until composited base actually lands, accepting temporary raw overlay. Recorded
 in TODO/BUGS before investigation; reuse existing held-content/revision retirement, no timer/newcache.
-OLD9649 now reproduces the immediate gap: the drawing is visible in its moved position, then the
-first post-exit ink check fails. Its delayed/final checks were unreached; earlier21b/5f/b99 packets
-failed setup and get no gap credit. A source-only correction reuses UnlandedInk to retain the same
-transformed picture and actual On Top surfaces until installed-base retirement. At7ef, whole72 ran
-71pass/1oldlasso-dock-premise failure: both new Brush/Eraser exit workflows and all logic passed;
-root inspected all six immediate/during/final landscape pictures. Test-only447 fixes the older
-fixture's dock clearance; fresh whole72 is active. Three deliberate controls remain. No Move-exit
-harvest or assembled-source qualification yet.
+OLD9649 reproduces the immediate ink gap. The vector-image correction is now harvested after whole72
+GREEN at447, three actual target-failing controls and normal26 GREEN; all731 component source entries
+reconcile. Root inspected six full landscape immediate/during/final pictures (7ef, same runtime).
+Earlier test-size/compiler/old-dock-premise failures remain preserved. The shared typed callback and
+UnlandedInk hold the existing transformed image; no new pixels/cache/timer/render. A separate On Top
+window/base lifetime boundary is now source-traced and has a test-only373 OLD witness pending. The
+ink base excludes that reference, so its landing must not release a window still awaiting replacement.
+No On Top runtime correction or global acknowledgement state before actual evidence.
 This adds to (does not replace) stream offset, Test Move/lag/crash and the rest of TODO.
 
 Kevin resumed: **continue; do not park**. Read this file, `AGENTS.md`, `CLAUDE.md`, `TODO.md`,
@@ -22,9 +22,9 @@ Historical technical detail and raw results remain in Git and the external packe
 ## Integration, install, and protected data
 
 - Integration worktree: `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch
-  `tmp/s54-qualified-integration`, source HEAD `45167735` before this documentation reconciliation.
-  Package harvest is `e4f9c8fa`, stream `a97f3f47`, eraser `66c15482`, fill `4381c457`, autosave `45167735`.
-  Current static census:731 source entries / fast5,429 / full6,033.
+  `tmp/s54-qualified-integration`; autosave source harvest is45167735, followed by the Move-image
+  harvest in this commit. Package e4f9, stream a97, eraser66c and fill4381 remain preserved.
+  Pre-Move static census at451:731 entries / fast5,429 / full6,033; refresh after Move harvest.
   These are static counts only: this assembled source has **not** passed its final native gates.
 - Main/origin remain `afd2030c`; no merge or push. A qualified merge is authorized after remaining
   gates pass. Component qualification and harvested source do not qualify the assembled integration.
@@ -138,8 +138,8 @@ the existing one-shot protocol. Cold Gallery packet: `package-address-cold-ui-29
 
 ## Remaining owner queue
 
-Keep every unfinished TODO item. Immediate queue: finish Move-exit qualification and harvest;
-Export/Gradient/Resize/decoder/public effect gates; then final assembled checks. Autosave, stream and
+Keep every unfinished TODO item. Immediate queue: On Top reference handoff OLD1; Export return/
+cancellation; Gradient/Resize/decoder/public effect gates; then final assembled checks. Autosave, stream and
 fill component controls/rebuilds/harvest are complete. Also retain these boundaries:
 
 - Autosave e3 is now harvested through34 reviewed paths: normal154 green, ordinary UI1pass/1namedskip
@@ -202,13 +202,19 @@ Owner reports repeated macOS OneDrive/app-data approval prompts. Explicit worktr
 simulator scope is enforced; cause is unassigned. No privacy settings changed. Saved logical cache
 manifests and bounded logs can be audited without traversing cloud folders; continue app tasks.
 
-Current Move7ef whole72 ran71pass/1oldfixtureRED: both new Brush/Eraser exit cases and all logic passed.
-Root inspected six full landscape immediate/during/final pictures with the moved ink visible. The old
-lasso-half test stopped at its dock-clearance premise before its drag; no product failure is inferred.
-Test-only447 raises its source into the exposed paper; the fresh72 rerun and three faults remain.
-Separate Export active-cancel1 atc1 stopped at its Cancel-visibility premise; whole14 remains pending.
+Move447 whole72 GREEN and three faults plus post-fault26 GREEN are component-qualified and harvested.
+Original7ef71/72 retains its old-dock-fixture failure. Exportc1 stopped before Cancel; test-only143 then
+actually cancelled/closed/returned to gray video, but failed the white post-return stroke. It is
+strictly reconciled730; author is diagnosing layer/tool/overlap before editing. Whole14 remains pending.
 
 Latest owned56C cleanup recovered5,058,568,192bytes after native16 joined. All10,403 archived entries
 were exact immediately after deletion; boot added49/changed81 Apple paths and removed none. Peer
 saved-receipt review found no PaintApp/runner data or artwork/bundle delta. About19.8GB free after boot.
 Only the two reviewed generated caches were deleted.
+
+Fresh owner readiness was consumed for the affected Test export. The installed6fb app copied live
+Projects/Misc/Test (535,004B) and10 saved versions:57 files/4,337,206B including index/log, Mac hashes and
+all package sizes checked against export log. Packet: s55-recorded-regressions/device-Test-export-20261029T0048Z.
+The expendable device export was cleared through index-only mode, then PaintApp launched normally.
+No new install/physical gesture test. Original250-package backup remains untouched. Owner also
+clarifies stream displacement occurs after release or Set Down.

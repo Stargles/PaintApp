@@ -1160,10 +1160,13 @@ final class CanvasManager: ObservableObject {
     /// `onTimingStrokeFrameAdvanced`'s reason; installed by `CanvasView.Coordinator`, nil headless.
     var onHeldPictureMoved: (() -> Void)?
 
-    /// Called after a fill is written and its model hold cleared, before its preview surface is released.
-    /// The canvas transfers vector previews to `UnlandedInk` or installs a new raster base here so
-    /// the old base is never exposed between the preview and its committed replacement.
-    var onLiveFillWillLand: ((UUID, UUID, FillPreview) -> Void)?
+    /// A live picture is transferred immediately before its existing display owner is released.
+    /// The receiver retains the already-shown representation until an installed base covers it.
+    enum LivePictureLanding {
+        case fill(layerID: UUID, celID: UUID, preview: FillPreview)
+        case vectorFloat(VectorFloat)
+    }
+    var onLivePictureWillLand: ((LivePictureLanding) -> Void)?
 
     /// **Holds `curves` — whole-curve replacements of `target`'s pose components — as the pose under
     /// the finger**: shown by the canvas and the band, written nowhere. Each call replaces the last,

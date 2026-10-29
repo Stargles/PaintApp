@@ -173,7 +173,11 @@ final class FillWindowLogicTests: XCTestCase {
         var vectorLandingObserved = false
         var expectedPreviewRect: CGRect?
         var events: [String] = []
-        vectorManager.onLiveFillWillLand = { layerID, celID, preview in
+        vectorManager.onLivePictureWillLand = { landing in
+            guard case .fill(let layerID, let celID, let preview) = landing else {
+                XCTFail("the fill callback keeps its typed payload")
+                return
+            }
             events.append("landing")
             vectorLandingObserved = vectorManager.liveFill == nil
                 && vectorCanvas.version > initialVectorVersion
@@ -198,7 +202,8 @@ final class FillWindowLogicTests: XCTestCase {
         rasterManager.brushColor = Self.red
         let oldRaster = rasterManager.layers[0].cels[0].raster
         var rasterLandingObserved = false
-        rasterManager.onLiveFillWillLand = { _, _, _ in
+        rasterManager.onLivePictureWillLand = { landing in
+            guard case .fill = landing else { XCTFail("raster fills use the fill landing arm"); return }
             rasterLandingObserved = rasterManager.liveFill == nil
                 && rasterManager.layers[0].cels[0].raster !== oldRaster
         }
@@ -214,7 +219,9 @@ final class FillWindowLogicTests: XCTestCase {
         let cancelledManager = CanvasFixture.manager()
         cancelledManager.brushColor = Self.red
         var cancelledLandingObserved = false
-        cancelledManager.onLiveFillWillLand = { _, _, _ in cancelledLandingObserved = true }
+        cancelledManager.onLivePictureWillLand = { landing in
+            if case .fill = landing { cancelledLandingObserved = true }
+        }
         cancelledManager.beginInteractiveFill(at: CGPoint(x: 32, y: 32))
         cancelledManager.endInteractiveFill()
         cancelledManager.fillQueue.sync {}

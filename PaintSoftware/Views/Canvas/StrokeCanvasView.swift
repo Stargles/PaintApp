@@ -1346,6 +1346,31 @@ final class StrokeCanvasView: CanvasPlaneView {
         refreshDisplay()
     }
 
+    /// Transfers the exact already-shown Move picture before the model latch is removed. The image
+    /// and transform are retained as-is; On Top stream children transfer their presented surfaces
+    /// by reference, in their current subview order. In Place references remain owned by the global
+    /// composite and are deliberately not captured here.
+    func isShowingVectorFloat(for canvas: VectorCanvas, celID: UUID) -> Bool {
+        vectorCanvas === canvas && contentRevisions.celID == celID && !floatView.isHidden
+    }
+
+    func holdVectorFloatUntilBaseLands(for canvas: VectorCanvas, celID: UUID) {
+        guard isShowingVectorFloat(for: canvas, celID: celID), let image = floatView.image else { return }
+        var streams: [WindowSurfaceView.FrozenWindow] = []
+        for child in floatView.subviews {
+            guard let surface = child as? WindowSurfaceView else { continue }
+            if let frozen = surface.freezePresented() { streams.append(frozen) }
+            surface.removeFromSuperview()
+        }
+        let revision = contentRevisions.committed(canvas)
+        unlandedInk.hold(UnlandedInk.Picture(id: nextUnlandedInkID, version: revision,
+            windowRect: bounds, alpha: 1, replacesBase: false,
+            contents: .transformedGroup(image: image, canvasSize: bounds.size,
+                                        transform: floatView.layer.transform, windows: streams)))
+        nextUnlandedInkID += 1
+        showOverlays(scratch)
+    }
+
     /// **Puts both overlays above the base where this refresh wants them** — the live stroke's
     /// scratch at its own window rect, and every held picture `unlandedInk` still owns.
     ///

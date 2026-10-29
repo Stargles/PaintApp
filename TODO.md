@@ -14,10 +14,13 @@ prefers keeping the existing lifted drawing visible, temporarily uncomposited, u
 frame is actually shown. Treat separately from repeated-tap Move and streamed-frame placement.
 Test that theory first; reuse existing held-picture/base-revision retirement ownership, no timeout,
 blocking render or parallel Move cache. Record cold exit-to-Brush/Erase drawn evidence and stale/
-cancel/Undo/cel-switch boundaries; continue all earlier tasks. OLD9649 reached the immediate gap after healthy moved-ink premises. Earlier setup failures remain
-uncredited. The source-only fix reuses UnlandedInk and the actual displayed picture; an independent
-review found a test image-size mismatch being corrected before native qualification. Cancel/Undo/
-cel-switch boundaries and cold Brush/Erase exit checks remain; no harvest or installation yet.
+cancel/Undo/cel-switch boundaries; continue all earlier tasks. OLD9649 reached the immediate gap after healthy moved-ink premises. The vector-image correction is
+harvested after whole72 green, three actual fault controls and a normal26 rebuild; root inspected six
+full landscape phase pictures. It retains the existing image/transform through UnlandedInk and the
+shared live-picture callback. No extra render/cache/timer. Combined tests and physical confirmation
+remain. A separate On Top stream-window lifetime boundary is being checked below; keep it distinct
+from ordinary vector ink and the already corrected stream-position jump.
+
 
 **New owner report, October28:** with a streamed screen present, moving it sometimes places the
 screen picture somewhere different from its Move box. Treat as an active stream/Move correctness
@@ -732,6 +735,20 @@ against a transcript this audit does not have.
   arms and no raster-float arm.
 - **Freeform text's minimum-size exemption** is still unruled.
 
+**Recording-cost audit follow-up — source hypothesis, October29:** raw input-rate history is an
+explicit recording requirement; linear sample retention alone is not a bug. The current scalar and
+Move-box capture methods copy the `RecordingTake` value, mutate its dictionaries/arrays and write it
+back, which may force a full sample-buffer copy per event. Investigate actual backing-buffer changes
+at unchanged capacity with the existing injected clock before any optimization. Preserve source-rate
+capture, timestamps, eight pose channels, rotation unwrapping and target/stop ownership; no frame-rate
+downsampling, new cache/counter/service or latency/crash attribution without evidence.
+
+**Fresh owner readiness and stream timing, October28 evening:** owner confirms current work saved
+and iPad unlocked NOW, authorizing restart/export of affected Test through installed PaintApp's
+existing ProjectExport. Prioritize this unlocked window; no install/build is requested by this
+readiness. Owner clarifies streamed picture separates after release or Set Down, matching the
+prepared placement-correction timing. Record export provenance and preserve all originals.
+
 **Conditional OnTop Move handoff, October28:** source trace finds a mixed-lifetime risk, not yet a
 measured visible failure. Successful vector Move commit holds the already-shown float together with
 its OnTop stream surface; the vector base can land without that stream, retire the held picture by
@@ -740,3 +757,13 @@ continuity witness using the existing 5000 ms window-draw seam and normal vector
 Place's global composite ownership unchanged. No runtime lifetime change until the witness proves a
 gap; then reuse the surface's existing presentation completion/ownership boundary rather than a
 global acknowledgement cache.
+
+**On Top reference handoff boundary — October29:** source tracing shows the new held Move group
+contains both vector ink and frozen On Top stream windows, while its retirement currently follows
+the reference-free ink base alone. A fresh host stream surface may still be drawing when that base
+lands. In Place has its own retained global display and is outside this path. Add one cold existing-
+stream-helper witness with a fixed5000ms window draw seam and normal vector base; require real red
+pixels at the moved hull before tool exit, capture every phase before asserting, and require final
+green. No periodic fake-frame loop. The test-only source373 is prepared/unrun; no new runtime fix or
+global acknowledgement state before actual evidence. Prefer retaining each original window's front
+through its existing presentation completion rather than mixing two retirement lifetimes.

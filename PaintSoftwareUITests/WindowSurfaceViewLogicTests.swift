@@ -468,7 +468,14 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
             view!.presentFirst(.init(window: window, placement: .identity, draw: { _ in window }))
             var frozen = try XCTUnwrap(view!.freezePresented()) as WindowSurfaceView.FrozenWindow?
             let bytes = frozen!.surface.allocationSize
-        let surface = frozen!.surface
+            let surface = frozen!.surface
+            let movedImage = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 4),
+                                                       format: PixelOps.transparentFormat()).image { _ in }
+            let movedGroup = UnlandedInk.Picture.Contents.transformedGroup(
+                image: movedImage, canvasSize: CGSize(width: 8, height: 4),
+                transform: CATransform3DIdentity, windows: [frozen!]).makeView()
+            XCTAssertTrue(movedGroup.subviews.last?.layer.contents as? IOSurface === surface,
+                          "the Move group retains the exact On Top surface, not a rerender or copy")
             var ink = UnlandedInk()
             ink.hold(.init(id: 1, version: 7, windowRect: window, alpha: 1,
                            replacesBase: true, contents: .surface(frozen!)))

@@ -61,6 +61,19 @@ final class WindowSurfaceView: UIView {
         let window: CGRect
         let placement: CGAffineTransform
         var surface: IOSurface { storage.surface }
+
+        func makeView() -> UIView {
+            let view = UIView()
+            view.layer.anchorPoint = .zero
+            WindowSurfaceView.placeLayer(view.layer, in: window, by: placement)
+            view.layer.contents = surface
+            view.layer.contentsScale = 1
+            view.layer.contentsGravity = .resize
+            view.layer.magnificationFilter = .nearest
+            view.layer.minificationFilter = .trilinear
+            view.isUserInteractionEnabled = false
+            return view
+        }
     }
 
     /// Both surfaces, once `size(for:)` has made them; empty before the first present.
@@ -77,6 +90,14 @@ final class WindowSurfaceView: UIView {
     /// (`-uiTestSlowWindowDrawMillis`, simulator only), so a test can stage the iPad's draw time. Read
     /// at the mint, with the rest of the frame's values.
     static var drawDelay: TimeInterval = 0
+
+    fileprivate static func placeLayer(_ layer: CALayer, in window: CGRect,
+                                       by placement: CGAffineTransform) {
+        layer.bounds = CGRect(origin: .zero, size: window.size)
+        layer.position = window.origin.applying(placement)
+        layer.setAffineTransform(CGAffineTransform(a: placement.a, b: placement.b,
+            c: placement.c, d: placement.d, tx: 0, ty: 0))
+    }
 
     /// **The bytes every view's surfaces hold, process-wide** — what a live picture costs in memory
     /// while it is up (two canvas-sized surfaces for a held frame, PERFORMANCE.md §30), including
@@ -225,11 +246,7 @@ final class WindowSurfaceView: UIView {
                 }
                 self.layer.contents = target.surface
                 self.presented = FrozenWindow(storage: target, window: window, placement: placement)
-                self.layer.bounds = CGRect(origin: .zero, size: window.size)
-                self.layer.position = window.origin.applying(placement)
-                self.layer.setAffineTransform(CGAffineTransform(a: placement.a, b: placement.b,
-                                                                c: placement.c, d: placement.d,
-                                                                tx: 0, ty: 0))
+                Self.placeLayer(self.layer, in: window, by: placement)
                 self.isHidden = false
                 self.back = 1 - self.back
                 self.presentedCount += 1
