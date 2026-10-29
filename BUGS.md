@@ -9,14 +9,15 @@ The scene includes a Recolour layer. Trace whether the after frame is still an u
 overlay or whether effect ownership/settlement was lost. The setup-only UI test passed; this
 color discrepancy does not have appearance qualification or physical crash attribution.
 
-## Freeze-repair notice during a successful text workflow — October29
+## Freeze-repair notice during successful text selection — October29
 
-Root inspected the495 public Select All/menu/color test pictures: the native-menu frame shows the
-freeze-repair notice, while the test reaches its actual red/no-black glyph assertions and passes.
-The two new simulator flights031933/031935 were copied before further lifecycle work, under
-`/Users/juliapark/PaintWork/s55-recorded-regressions/text-SelectAll-handle-clearance2-495d8da4/root-flight-copy/`.
-Trace actual recognizer state/lifetime before claiming a false positive or real artist-visible
-freeze. This is audit evidence, not an established regression or a timeout-tuning request.
+Two preserved simulator flights identify canvas.textPress ending while UIKit text selection is
+still active. The existing touch owner was checked too late, after the canvas recognizer began.
+The harvested correction applies that same owner at touch-down. OLD count0→2; fixed whole34
+passed before/after2controls, three direct assertion targets reached, and root inspected native
+Select All and red words with no notice. Existing watchdog timings/recovery code stay on their
+original path. This proves premature text-recognizer repair, not an artist-visible freeze.
+Packet: `/Users/juliapark/PaintWork/s55-recorded-regressions/text-owner-harvest-f2-to-a6/`.
 
 ## macOS cloud-access prompts during agent work — October 28
 

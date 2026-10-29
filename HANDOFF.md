@@ -53,10 +53,11 @@ Kevin confirms **To Cross** and is asleep until12pm; no physical crash cause is 
   Root owns the sole native slot. This is separate from repeated
   Move taps and Move-exit picture retirement. Consult `root-next-gates.json` before lifecycle work.
 
-- Text’s stronger Select All witness has not reached its color assertions: the small editor box
-  places the intended caret tap within22pt transform-grip reach. No product Text defect is proved.
-  A test-only fixture897 enlarges through the normal size control and measures grip clearance
-  before requesting UIKit’s menu. Native check pending.
+- Text/owner correction is harvested through three paths: the existing touch-down owner gate now
+  excludes a canvas placement recognizer from live UITextView touches. OLD repair count0→2; fixed
+  whole34 passed before/after2faults (3actual targets), with root-looked native menu/red-word pictures.
+  No timer/newstoredstate. Menu-continuity test correction is separate: selectedb0491 passed; whole8
+  is running. Do not claim an induced stranded-repair positive; the old simulator trigger is gone.
 
 - No main merge, push, or new install. Main/origin remains
   `afd2030c831db7a746271fe306e8b5a5b9b02df6`. Merge only after all required gates pass.

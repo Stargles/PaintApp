@@ -4796,8 +4796,8 @@ struct CanvasView: UIViewRepresentable {
             canvasManager.moveBoxLifted()
         }
 
-        /// **Whether the Move box's tap-away is offered this touch at all — decided where the touch
-        /// lands, against the chrome as it stands at that instant.**
+        /// **Whether the Move tap-away or text-placement recognizer is offered this touch — decided
+        /// where it lands, against the chrome and owner as they stand at that instant.**
         ///
         /// The owner, 2026-09-07: *"I click a node on the box to resize. When I let go of the node
         /// after I am done, the move unexpectedly bakes."* And again on 2026-09-15, twice recorded:
@@ -4812,33 +4812,37 @@ struct CanvasView: UIViewRepresentable {
         /// reach and 36 pt clear of the box's body, and `canvasChrome(at:)` answers `.none` — which
         /// this app spells "the artist tapped away".
         ///
-        /// So the question is asked once, at touch-down, and asked of the one function that answers
-        /// it for every container recognizer: `CanvasTouchOwner.owner(in:)`, fed the chrome at the
-        /// point the touch landed. A touch the owner model gives to anyone else — the transform
-        /// overlay for a grip or the body, a text handle, a guide grip — is refused, and UIKit never
-        /// binds it to the tap, so no amount of travel can turn a grab into a tap-away. The handler
-        /// keeps only what is still its own to decide at release: the pencil-only gate.
+        /// So the Move question is asked at touch-down through the shared `CanvasTouchOwner`, not at
+        /// release against a box that has moved. The text recognizer uses the same owner gate: a tap
+        /// inside a live text box belongs to its `UITextView`, which may still be processing
+        /// selection after the canvas touch count reaches zero. Letting `canvas.textPress` begin and
+        /// reject the touch later leaves it ended during that UIKit sequence, where the recognizer
+        /// repair check can mistake it for a stranded canvas. Refusing it here keeps the live text
+        /// interaction on its existing owner and leaves plain-canvas text placement available.
         ///
-        /// Every other recognizer receives every touch, as before; this is the one whose meaning is
-        /// position-dependent and whose position is stale by the time it recognizes.
+        /// The rest of the container recognizers keep their existing admission behavior. These two
+        /// use the owner's position-dependent answer at touch-down; the text route must not start a
+        /// canvas placement recognizer on the live editor's selection touch.
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-            guard gestureRecognizer === moveBoxCommitRecognizer, let container = containerView else {
+            guard gestureRecognizer === moveBoxCommitRecognizer || gestureRecognizer === textTapRecognizer,
+                  let container = containerView else {
                 return true
             }
             let canvasPoint = touch.location(in: container)
             let inputs = canvasTouchInputs(chrome: canvasChrome(at: canvasPoint))
-            return CanvasTouchOwner.owner(in: inputs) == .moveBoxCommit
+            let owner = CanvasTouchOwner.owner(in: inputs)
+            if gestureRecognizer === textTapRecognizer { return owner == .textPress }
+            return owner == .moveBoxCommit
         }
 
         /// The text tool's tap on the canvas: with no box open, put one where the artist tapped and
         /// raise the keyboard; with one open, put it down and place nothing
         /// (`CanvasManager.textToolTapped(at:)`).
         ///
-        /// **A tap that lands on the live box does nothing here**, and the guard is the whole
-        /// subtlety: `TextOverlayView` has already taken that touch (its `hitTest` claims the box and
-        /// the band), but this recognizer sits on the *container* with `cancelsTouchesInView = false`
-        /// and therefore sees it too. Without the guard, tapping into your own text to move the caret
-        /// would put that text down.
+        /// A tap on the live box belongs to `TextOverlayView` and is refused by this recognizer's
+        /// `shouldReceive` owner gate. Keep the action-time guard as well: the owner may change
+        /// between touch-down and this callback, and a caret/selection tap must never put the text
+        /// down.
         ///
         /// **Gated on pencil-only drawing** like the fill and the eyedropper, and for the same
         /// reason stated there: placing text changes what the artist's next action does, and a

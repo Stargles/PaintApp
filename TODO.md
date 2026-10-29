@@ -13,9 +13,10 @@ No crash cause is established.
 fault controls plus one first-target-only deadline control, nine inspected pictures and normal49/49.
 The copied Test scene passed a cold single-Move replay. The current-support square-hole Mend witness
 passed1/1; whole29 passed, its classifier control exposed both the448-ring and uncertain-join targets, and normal1 rebuilt green. Separate small-Move body/grip correctionf33 is harvested after77/77 (64model+whole13public),
-three direct fault targets and normal64/64; current pictures inspected. Text’s Select All route
-has not reached its color assertions because the small fixture overlaps transform handles; a
-test-only enlarged, clearance-qualified fixture is prepared. Final assembled Debug/Release, whole
+three direct fault targets and normal64/64; current pictures inspected. Text’s native Select All/color and touch ownership now pass whole34 before/after two fault controls.
+The false repair count was2 on old code and unchanged on the correction; three exact fault targets
+failed as intended. The three-path correction is harvested; the separate old menu fixture is being
+qualified through real dismissal→next-pan/pinch behavior. Final assembled Debug/Release, whole
 affected UI, performance and device confirmation remain. No new main merge, push or install.
 
 **Rapid To Cross diagnostic:**13d real copied Test1 run completed36 actual cuts in about14s
@@ -31,10 +32,13 @@ separate audit found present-null parent registries still decode as empty; prese
 and reject null in the next small validation change. No current writer emits null and no migration
 is justified by the250-package archive/current writer evidence.
 
-**Audit evidence:** the successful495 Text Select All test shows a freeze-repair notice while
-the public menu/color workflow completes. The two new031933/031935 simulator flights are preserved
-in its `root-flight-copy` packet. Check recognizer ownership before treating this as a real freeze
-or adjusting watchdog thresholds; no product change is assumed.
+**Text repair-notice audit:** source and two simulator flights showed the canvas text recognizer
+starting on live UITextView touches, then being mistaken for stranded while UIKit still selected
+text. Touch-down now uses the existing CanvasTouchOwner gate. OLD durable count changed0→2; fixed
+whole34 stayed unchanged, deliberate black-glyph/owner faults reached three targets, and normal34
+rebuilt green. Root inspected the native menu and both red words. No timer/state/cache added.
+The older menu-drag test’s first pan and hidden-rail premises were unsupported; its test-only
+correction checks actual menu dismissal and the next pan/pinch. Selected1 passed; whole8 is running.
 
 **Operational report:** Kevin sees repeated macOS prompts asking ChatGPT to access OneDrive or
 other app/cloud data. Keep work scoped to explicit repository, PaintWork and owned-simulator paths;

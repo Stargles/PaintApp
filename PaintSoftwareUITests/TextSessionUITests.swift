@@ -134,10 +134,34 @@ final class TextSessionUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
         XCTAssertGreaterThan(app.windows.firstMatch.frame.width, app.windows.firstMatch.frame.height,
                              "PREMISE: the owner colour workflow is actually landscape")
+        func currentRepairCount() throws -> Int {
+            app.buttons["toolbar.settingsButton"].tap()
+            let caught = app.staticTexts["recorder.freezesCaught"]
+            XCTAssertTrue(caught.waitForExistence(timeout: 5), "PREMISE: Settings exposes the durable repair count")
+            let number = caught.label.components(separatedBy: ": ").last ?? ""
+            let count = try XCTUnwrap(Int(number), "PREMISE: the durable repair count is numeric (\(caught.label))")
+            app.buttons["toolbar.settingsButton"].tap()
+            return count
+        }
+        let repairsBefore = try currentRepairCount()
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let host = canvas.frame
-        _ = writeWords("Hello", app, canvas)
+        app.buttons["toolbar.addButton"].tap()
+        let addText = app.buttons["add.addTextRow"]
+        XCTAssertTrue(addText.waitForExistence(timeout: 5), "PREMISE: Add offers a text box")
+        addText.tap()
+        XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5),
+                      "PREMISE: the Text panel is up before placement")
+        let size = app.sliders["textPanel.sizeSlider"]
+        XCTAssertTrue(size.waitForExistence(timeout: 5), "PREMISE: the existing Text size control is available")
+        size.adjust(toNormalizedSliderPosition: 0.30)
+        let topLeft = CGPoint(x: host.minX + Self.wordsOffset.dx * host.width,
+                              y: host.minY + Self.wordsOffset.dy * host.height)
+        canvas.coordinate(withNormalizedOffset: Self.wordsOffset).tap()
+        XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: the public placement opens text editing")
+        typeIntoTextBox("Hello", app,
+                        at: CGPoint(x: topLeft.x + 0.01 * host.width, y: topLeft.y + 0.01 * host.height))
         let space = app.keys["space"]
         XCTAssertTrue(space.waitForExistence(timeout: 5), "PREMISE: the live software keyboard exposes Space")
         space.tap()
@@ -205,8 +229,17 @@ final class TextSessionUITests: PaintUITestCase {
         let gapColumn = (gap.lowerBound + gap.upperBound) / 2
         let gapX = sample.minX + sample.width * Double(gapColumn) / 320
         let caretPoint = CGPoint(x: host.minX + gapX * host.width, y: box.midY)
-        XCTAssertTrue(box.insetBy(dx: 4, dy: 4).contains(caretPoint),
-                      "PREMISE: the measured interword caret point is inside the text box, clear of its grips")
+        XCTAssertGreaterThan(box.width, 48, "PREMISE: the enlarged text box spans beyond two horizontal grip radii")
+        XCTAssertGreaterThan(box.height, 48, "PREMISE: the enlarged text box spans beyond two vertical grip radii")
+        let gripCenters = [
+            CGPoint(x: box.minX, y: box.minY), CGPoint(x: box.midX, y: box.minY), CGPoint(x: box.maxX, y: box.minY),
+            CGPoint(x: box.maxX, y: box.midY), CGPoint(x: box.maxX, y: box.maxY), CGPoint(x: box.midX, y: box.maxY),
+            CGPoint(x: box.minX, y: box.maxY), CGPoint(x: box.minX, y: box.midY),
+            CGPoint(x: box.midX, y: box.minY - 36)
+        ]
+        let nearestGrip = gripCenters.map { hypot(caretPoint.x - $0.x, caretPoint.y - $0.y) }.min() ?? 0
+        XCTAssertGreaterThan(nearestGrip, 22,
+                             "PREMISE: the measured interword caret point clears all eight resize grips and the 36pt rotation grip; nearest is \(nearestGrip)pt")
         assertAboveTheDock(app, canvas, dy: (caretPoint.y - host.minY) / host.height,
                            "the public caret placement")
         let caret = app.coordinate(withNormalizedOffset: .zero)
@@ -220,10 +253,16 @@ final class TextSessionUITests: PaintUITestCase {
         XCTAssertTrue(selectAll.waitForExistence(timeout: 5),
                       "PREMISE: the caret's native edit menu offers Select All")
         guard selectAll.exists else { return }
+        XCTAssertTrue(selectAll.isHittable, "PREMISE: Select All is visible and hittable in the native edit menu")
+        attachScreenshot(XCUIScreen.main, "text-select-all-native-menu-open")
         selectAll.tap()
         XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: Select All leaves the text editor active")
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5),
                       "PREMISE: Select All keeps the same software keyboard available")
+        XCTAssertFalse(app.staticTexts["recorder.flightNotice"].waitForExistence(timeout: 3),
+                       "PREMISE: no stranded-recognizer repair notice appears during its four-second display window")
+        XCTAssertGreaterThan(try count(isBlackInk), 40,
+                             "PREMISE: Select All leaves the words visibly drawn while editing remains active")
         attachScreenshot(XCUIScreen.main, "text-select-all-before-colour")
 
         let swatch = app.buttons["textPanel.colorSwatch"]
@@ -259,6 +298,8 @@ final class TextSessionUITests: PaintUITestCase {
         XCTAssertGreaterThan(red, 40, "the whole selected text window shows the picked colour (red pixels \(red))")
         XCTAssertLessThan(try count(isBlackInk), black / 5, "…and no selected words remain black")
         attachScreenshot(XCUIScreen.main, "text-drawn-in-the-picked-colour")
+        XCTAssertEqual(try currentRepairCount(), repairsBefore,
+                       "the durable canvas repair count did not change during text selection and recolouring")
     }
 
     /// A public selection survives a live colour change: the next key replaces the word, rather

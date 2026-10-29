@@ -719,11 +719,14 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
     /// landed in a live text box, or on one of its grips, is not also a request to place a new box.
     /// Without it, tapping into your own text to move the caret would commit that text and open a
     /// fresh empty box on top of it.
-    func testATapOnALiveTextBoxDoesNotAlsoPlaceANewOne() {
+    func testALiveTextBoxOwnsTouchBeforeCanvasPlacementRecognizerBegins() {
         for chrome in [CanvasTouchChrome.textBoxOrBand, .textHandle] {
             let inputs = CanvasTouchInputs(tool: .text, activeLayer: .raster, chrome: chrome)
+            let expectedOwner: CanvasTouchOwner = chrome == .textBoxOrBand ? .textOverlay : .textTransformOverlay
+            XCTAssertEqual(CanvasTouchOwner.owner(in: inputs), expectedOwner,
+                           "the editor or its handle owns the touch before canvas text placement can begin")
             XCTAssertFalse(CanvasTouchOwner.contenders(in: inputs).contains(.textPress),
-                           "chrome \(chrome.rawValue)")
+                           "the unowned canvas text recognizer must not start for \(chrome.rawValue)")
         }
         // On plain canvas beside the box, the placement tap is live again — that is what lets one
         // tap commit this box and place the next.
