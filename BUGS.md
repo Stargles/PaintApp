@@ -1,5 +1,26 @@
 # Known Issues
 
+## Bake to Images keeps the entire block’s decoded pictures resident — October29
+
+Whole-body source audit3ccd67be (same bodies atd7984858): `CanvasManager+VideoBake.swift:157–200` turns every successful block-frame decode into `VectorImageElement.image: UIImage` (`VectorLayer.swift:1017–1040`). `DecodedFrame.makeImage` retains the decoded Data through its CGDataProvider (`DecodedFrameRing.swift:70–93`), so decoder-ring eviction, pressure trimming or client close cannot reclaim the document’s output images. No output byte admission/durable backing is present; the menu only confirms count/save cost, and import clips initial length to the existing scene. Conditional arithmetic:300 distinct2048×1024 BGRA pictures retain2.34GiB before other owners,1000 retain7.81GiB. This is a narrowed mechanism behind the already excluded placed-image/video ownership boundary, not measured RSS or the cause of the artist’s erasing crash. Root must first record a finite small ownership/pixel reproduction; reuse existing RasterSource/checkpoint/serializer ownership rather than another cache. No product source/test change made.
+
+## Scale artwork resizes the drawing but leaves keyed movement in old coordinates — October29
+
+Whole-body source audit3ccd67be (same bodies atd7984858): `CanvasManager+Document.swift:832–849` maps vector geometry and interpolation recipes but preserves Cel.transformTracks and pendingPoseBaselines. `TransformTrack.box` and keyed x/y are canvas coordinates (`TransformTrack.swift:71–83,237–243`; `PoseComponents.swift:399–425`). Current formulas render P·M(p), while Resize → Scale artwork requires M·P(p). Finite inferred witness:100×100→200×200, padding0, rectangle starting(20,20), box(0,0,100,100), x=60/y=50: old rendered origin(30,20), expected scaled origin(60,40), current formulas(50,40). The pure translation and opaque fill avoid stroke-width/floor ambiguity; Keep Stroke Width is Move-only. No native/drawn reproduction, Undo/Redo or save/reopen run yet. This is separate from the old Canvas Padding/held-Move issue: the witness has settled keyed content. Scope the first witness to Scale artwork and a cel pose; do not claim all crop/container cases or a new full-affine design from it. Root records before implementation through the existing resize/pose owners.
+
+## Malformed current node metadata can quietly turn into a plain group — October29
+
+At d798, FolderManifest wraps CompositorRole.decodeIfSupported in try? and substitutes nil. A current {kind:node,op:mix,mixMode:17} fails its known payload decoder but opens as an ordinary folder; full ProjectManifest readability succeeds, so startup recovery does not recognize damage. Assembly carries nil role and a later save omits it. Different compositing pixels are inferred, not run. This is separate from the deliberately recognized retired slot tag, which preserves child operand order, and from an ordinary absent role. Current owner instructions require unreadable current data to fail loudly. Root must record/qualify a bounded correction; no source change or native result yet.
+
+## Accepted video timing values can overflow before their crop clamp — October29
+
+At d798, VideoRef accepts current finite speed and SourceTime accepts any Int64 numerator with positive timescale. VideoFrameMap then performs unchecked tick multiplication/addition and floating-to-integer narrowing before sourceTime clamps to the crop; frameCount similarly narrows the inverse. Finite examples are start=(Int64.max-1)/1 at fps24, speed1e300 with one elapsed frame, and inverse speed1e-300. The loaded video map caller reaches these values before decoder access. Runtime witnesses are unrun; fixed public speed choices are not claimed to trigger this or explain Kevin’s crash.
+
+## A cel-pose live band transports stored backing with editable ink — October29
+
+At d798, .cel graph edits choose the entire pixel-holding leaf as a live run. The moving map comes from inkPose; the sandwich image includes both editable ink and the cel’s stored raster/baked backing. CanvasView applies that ink delta to the whole band. Normal FrozenCel/CelContentPlacement applies cel channels only to ink and container pose to backing, so mixed-tier preview and final placement disagree by source formula. A blue backing at(8,8) and red fill at(24,8), with held x+8, predicts blue moves to(16,8) live then returns to(8,8) while red stays(32,8). No drawn witness has run. Distinct from prior Move/stream placement and held-picture fixes.
+
+
 ## Copied Test1 changes ink color after To Cross burst — October29
 
 The temporary13d public diagnostic made36 actual cuts in about14s. Its before picture shows red

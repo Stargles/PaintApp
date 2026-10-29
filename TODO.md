@@ -32,6 +32,32 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
 | Windows streaming | Earlier transport checks passed | DNS/resource/clipboard/keep-awake/Quit gates; real-link work waits for reachable Windows host/owner laptop |
 | Install latest qualified build | Existing installed version preserved by automatic-renewal source protection | Qualify next build, drive old workflows, verify signing, then install with fresh saved/unlocked readiness |
 
+## New audit findings — recorded October 29 before implementation
+
+The combined409 native baseline remains frozen atd798 in the integration worktree. This records-only
+branch is the live queue so new root-cause work can proceed independently; merge these records back
+only after the native/source extraction boundary. None of these findings is physical crash proof.
+
+- [ ] Simplify the fresh-fragment eraser correction before final qualification. Source review proves
+  a cut piece emits a subset of the same original dab lattice, including recursively cut pieces:
+  no re-anchoring or extra endpoint/cap dabs. Keep measured fresh-ID insertion in the existing map,
+  remove redundant arriving-bounds union/flags/new-child fallback branches, and retain the existing
+  departing-bound/unknown-victim fallback. An unseeded child uses that same fallback on its next cut.
+  Trim duplicated scratch/window/Undo test work already covered by the existing component; retain
+  consecutive cuts without an interim render and final full-picture parity. The union mutant has no
+  valid sensitivity and earns no credit. Evidence: root-next-gates + eraser source proof messages.
+- [ ] Reject malformed current compositor-node metadata through the existing manifest error/recovery owner. Source d798 FolderManifest catches current node/mix decode errors into an ordinary folder, bypassing full-manifest recovery and omitting the role on resave. Add finite wrong-type op/mixMode and actual-package preservation/recovery regressions beside valid stack/mix. Preserve absent-role and known retired-slot semantics as explicit separate cases; do not infer a new future-format policy. Source-only finding; no native reproduction or implementation yet.
+- [ ] Bound accepted video timing arithmetic at the existing VideoFrameMap/VideoRef boundary. Positive-timescale decoding and finite saved Double speed do not guarantee Int64 tick products/sums or Double-to-integer conversion fit; source d798 can trap before its crop clamp. Add finite current-decode-to-map rows for extreme ticks, large/small finite speeds and exact valid boundary neighbors, preserving ordinary fractional/frame-for-frame/held-end semantics. No owner crash attribution, large allocation or new timing policy; source-only until root records and grants proof.
+- [ ] Preserve independent backing and ink placement during a cel-pose graph drag. At d798 LiveTransformEdit selects the whole leaf as a moving band but applies the cel ink delta to it; that band also holds stored raster/baked pixels, whose normal renderer follows only the container. Add a finite blue-backing/red-vector-fill drawn comparison through the actual live-band owner and a cold public mixed-tier graph witness. Prefer existing CelContentPicture/Placement ownership; no parallel cache/state or special transform. Source facts confirmed, visible release jump inferred/unrun; separate from Move/stream fixes.
+- [ ] Bound Bake to Images’ retained output through the existing source/residency owners. Current `bakeVideoToCels` keeps a source-sized UIImage for every distinct decoded frame in the document; the64MiB decoder ring’s eviction/close cannot reclaim those image aliases. The public count/save-time confirmation and import’s initial scene-length clamp impose no output byte budget. This narrows the existing placed-image/video ownership exclusion. Record a small distinct-frame ownership/pixel witness, then reuse existing RasterSource/checkpoint/package-serializer seams where appropriate; do not add a parallel cache or flatten/change placement. No RSS measurement, device crash cause or qualification claimed.
+- [ ] Preserve keyed movement when Resize Canvas → Scale artwork changes coordinate space. `applyCanvasResize` maps vector geometry but retains cel TransformTrack.box/curves/baselines in old canvas coordinates. For resize M and pose P, require P_new·M=M·P at the drawn frames. A100→200 canvas with a10pt keyed translation currently gives a50pt position where the scaled original is60pt. Prove with an opaque rectangle, then root-cause transport through existing pose/resize owners, Undo/Redo and save/reopen; crop/rotation/container cases retain separate limits. Move’s Keep Stroke Width is unrelated to this translation witness. No native reproduction yet; this is separate from the older held-Move/padding issue. Resize uses one uniform Fit/Fill factor, and no broader affine design is authorized by this report.
+- [ ] Delete uncalled TransformKeyframes.clearPoseKeys whole and its obsolete KeyframeControl
+  comment. The existing poseDeltaClearing undo owner is the only live path; repository symbol search
+  finds no invocation of the old in-place clearer. Reuse existing clear-key tests; add no helper/state.
+- [ ] Reconcile the already documented Flip Canvas vector omission/history clear and derived-thumbnail
+  backfill identity mismatch against existing rulings/queue. Do not duplicate the separate derived
+  thumbnail full-size-render cost issue or reopen owner-deferred behavior without checking its ruling.
+
 ### Current evidence and decisions
 
 - **Eraser/brush source assembly:** root reviewed the fragment-bounds source and bounded tiny-dab

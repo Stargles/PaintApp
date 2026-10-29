@@ -7,54 +7,37 @@ saved/unlocked readiness is still needed for physical work. No physical crash ca
 
 ## Current state and next action
 
-1. **Continue; do not park.** Root owns native scheduling and completion metadata. The frozen normal
-   wrapper may write its start lease; agents report completion by message. Actual authority lives in
-   `~/PaintWork/s54-final-qualification/root-next-gates.json`. One Debug public Paste/Bake/save/reopen
-   check is running atf422 under image_audit_fresh. No parallel compiler/simulator lifecycle.
-2. **Integration:** `~/PaintWork/PaintApp-s54-qualified-integration`, `tmp/s54-qualified-integration`.
-   Source731, fast5449/full6064 before isolated tests are harvested. HUD teardown, measured opaque
-   cold-recovery fixture, photo-import notice and UI-test-only Release active architecture setting
-   are integrated. Main/origin afd2030c and installed6fb are unchanged; no merge, push or new install.
-3. **To Cross:** the integrated window component passed112, four controls and restored35. Actual
-   A2 Release completed1/1/rootstrict731:36cuts,27full4096²outputs,6reduced480²outputs,
-   11superseded and1empty. Those are completed pictures, not allocations or crash causality.
-   New fragment-bounds candidateff3535c9 measures arriving pieces through the existing geometry walk,
-   reuses the existing map and unions old/new damage; focused124 and mapped controls remain unrun.
-   A1/B1 RoughInk interval variability still requires full-precision input review; B2 is unrun.
-4. **Tiny brushes:** absolute bitmap sentinel65ef passed1/rootstrict731 and established the correct
-   Y oracle. Direct-area8a5 passed65/66; only the strict actual-gradient handoff assertion failed.
-   Failed evidence is preserved. Fresh candidate7a400 uses bounded area coverage plus a smooth
-   transition into the actual cached gradient, with alpha/eraser composition checks. Whole67 and
-   matched Release cost proposals are validated but unrun; no tiny-dab source harvested. The saved
-   original1pt zero-red witness remains, and public cold1pt reachability still needs a test.
-5. **Placed pictures:** Bake25+PackageLayout39 and old3BakeUI passed. The added public method twice
-   stopped on optional Move/Set Down premises before Bake, so those failures qualify no Bake pixels.
-   f422 removes that irrelevant optional detour and keeps all six-cell appearance/save/reopen checks.
-   Controls and final whole68 remain pending. The PNG coefficient corrects scale units without a
-   schema/decoder/repair; the direct package matrix, not runner pasteboard metadata, owns that proof.
-6. **Remaining source candidates:** Shapes136ed37b reuses one guarded scale (whole83 unrun).
-   Export21f85d7a uses the existing clamped frame range for actual output and advertised filename
-   (selected2/whole67 and six controls unrun). Fresh cold strict-text recovery uses the measured
-   larger opaque mark but Cancel/Versions/Restore/Trash remains unrun on a fresh simulator.
-7. **Source audit:** all153 former unknown files were reviewed whole. Current accepted/proposed
-   receipts cover189 of346 original runtime bodies plus new LayerFillView;157 original partial,
-   caller-only or changed bodies still need renewal. Do not repeat old whole reviews or count
-   partial work as complete. Keep interpolation's future overhaul deferred.
-8. **Storage:** old-log compression trial passed with byte/metadata checks. The26-frame dedup trial
-   preserved bytes/permissions but stopped on an OS-created provenance-token change; initial failure
-   stays failed. Root permits a narrow independent revalidation of those old derived nonexecutable
-   PNGs with only the exact old/new token, never manual security-xattr writes. Prepare durable
-   directory timestamp journaling before further mutation; no full batch is approved yet. Artwork,
-   packages, original videos, current54/55 evidence, Products and worktrees remain protected.
-   No timing benchmarks while cleanupIO runs. Older owned56/15B cache cleanup remains qualified.
-9. **Next:** finish these isolated checks/controls and harvest only reviewed source, then assembled
-   Debug/Release fast tiers, affected whole UI classes/full phase, existing UI47/mask/graph controls,
-   stream OnTop Move-exit witness and Release Mend/Liquify/full-raster measurements. Reuse earlier
-   component proofs. Windows host availability was asked; no reply yet. Physical confirmation needs
-   fresh saved/unlocked readiness. All unfinished owner asks remain in TODO until qualified merge.
-
-Detailed active state is the live root-next-gates JSON and its byte-exact archived predecessors.
-Keep source-only, integrated, qualified and installed distinct. No physical crash cause is proved.
+- **Continue; do not park.** This records-only worktree is the current TODO/HANDOFF owner:
+  `~/PaintWork/PaintApp-s55-audit-queue-records`, tmp/s55-audit-queue-records. It branches from
+  frozen integrationd798 and changes docs only. Root alone schedules native work; see live
+  `~/PaintWork/s54-final-qualification/root-next-gates.json`. Do not edit the integration tree or
+  advance its HEAD until root extracts the running combined409 source/result.
+- Integration `~/PaintWork/PaintApp-s54-qualified-integration` is frozen at
+  d7984858bf72376fc95e7d942b8bdd703960bb12. One Debug whole17-class409 run is active under E,
+  owned56, source731/fast5457/full6074. It includes the source-reviewed Shape/Export/PNG/Bake,
+  fresh-fragment-map and tiny-dab candidates. Source assembly is not main merge or install.
+- Independent public Paste/Multiply/Bake/save/reopen passed1/source731; root inspected all3 full
+  landscape captures. Tiny-dab whole67 passed/rootstrict731, including strict3px transition and
+  normal/eraser/alpha. Its public1pt test and11control proposals are source-only at2658367b.
+- Source audit has found additional bounded work, now explicitly recorded in TODO/BUGS before
+  implementation: strict current node-role decoding, video-time integer safety, uniform resize of
+  keyed poses, mixed-tier cel-pose preview placement, video-bake output residency, and dead
+  clearPoseKeys. Reports under lifecycle-audit-current, pose-coordinate-audit and media-source-audit
+  in s55-recorded-regressions. Known Flip Canvas/backfill issues stay distinct and require ruling
+  reconciliation. No physical crash cause is established.
+- The eraser's precautionary arrival-union premise was refuted by exact preserved-lattice source.
+  Prune those redundant flags/branches after recording; keep only exact fresh-ID bounds seeding and
+  the original fallback owner. Do not run/count the insensitive arrival-union mutant. The current
+  frozen409 still contains that soon-to-be-pruned branch; no final qualification claim.
+- Old generated PNG cleanup completed and IO joined: observedvolume+1,271,578,624B, all16603frame
+  paths and3originalMP4bytes/metadata/linkcounts/directory times verified. Initial trial failure
+  remains preserved; exact-token amendment is recorded. No DSC mutation. Current54/55 evidence,
+  packages, original recordings, Products and worktrees remain protected. No timing alongside IO.
+- Next: let409 finish and extract/look. Run source-bound pending controls and drive public1pt,
+  prune redundant eraser paths, prove new audit findings through existing owners. Finish remaining
+  whole-body review and final Debug/Release fast tiers/affectedUI/fullphase, UI47/mask/graph,
+  streamOnTop Move-exit, Release costs/Mend/Liquify/raster and device checks. Windows host readiness
+  was asked; no reply. Physical operations require fresh saved/unlocked readiness.
 
 ## Installed build and protected originals
 
