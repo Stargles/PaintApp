@@ -62,8 +62,8 @@ Kevin confirms **To Cross** and is asleep until12pm; no physical crash cause is 
 - Text/owner correction is harvested through three paths: the existing touch-down owner gate now
   excludes a canvas placement recognizer from live UITextView touches. OLD repair count0→2; fixed
   whole34 passed before/after2faults (3actual targets), with root-looked native menu/red-word pictures.
-  No timer/newstoredstate. Menu-continuity test correction is separate: selectedb0491 passed; whole8
-  is running. Do not claim an induced stranded-repair positive; the old simulator trigger is gone.
+  No timer/newstoredstate. Menu-continuity test correction is separate: portrait selectedb0491 and whole8 passed. Owner-landscape3e389 selected1 is RED at the
+  next pan, with Lens Blur settings card visible over the canvas; fixture occlusion assessment next. Do not claim an induced stranded-repair positive; the old simulator trigger is gone.
 
 - No main merge, push, or new install. Main/origin remains
   `afd2030c831db7a746271fe306e8b5a5b9b02df6`. Merge only after all required gates pass.
@@ -149,3 +149,5 @@ audio/video editing, and dropped brush importers. Do not reopen without owner di
 The previous complete handoff is byte-exact at
 `/Users/juliapark/PaintWork/s55-recorded-regressions/HANDOFF-before-compaction-1a7772c3.md` (SHA-256
 `62f34678e68b7b39066cfe1a609d63e9e5fea544ea1b286e2c301ba2b89e508e`).
+
+Joined-phase owned56C cache cleanup preserved11,112 container entries and reclaimed4,287,086,592bytes; retained artwork/active bundles exact after boot. Receipt: `~/PaintWork/s55-recorded-regressions/owned56C-cache-cleanup-before-final-gates-20261029/`.

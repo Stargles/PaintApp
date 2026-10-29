@@ -3,6 +3,8 @@
 
 ## Current owner-facing status — October29
 
+**Joined-phase housekeeping completed:** exact owned56C symbolication/dead-bundle cleanup reclaimed4,287,086,592bytes after archiving/hash-verifying11,112 container entries. Retained artwork and active bundles were verified after boot; no protected library deletion. Receipt: `~/PaintWork/s55-recorded-regressions/owned56C-cache-cleanup-before-final-gates-20261029/`.
+
 **New owner evidence, October29:** the crash seems to occur when erasing many brushstrokes quickly.
 The existing copied-Test1 capture had20 gestures but only3 actual cuts (77 centerline misses), so it
 does not cover that burst. Measure actual successful erasures, queued renders and picture lifetimes
@@ -54,7 +56,7 @@ text. Touch-down now uses the existing CanvasTouchOwner gate. OLD durable count 
 whole34 stayed unchanged, deliberate black-glyph/owner faults reached three targets, and normal34
 rebuilt green. Root inspected the native menu and both red words. No timer/state/cache added.
 The older menu-drag test’s first pan and hidden-rail premises were unsupported; its test-only
-correction checks actual menu dismissal and the next pan/pinch. Selected1 passed; whole8 is running.
+correction checks actual menu dismissal and the next pan/pinch. Portrait selected1 and whole8 passed. Owner-landscape selected1 stopped at the next-pan assertion; the Lens Blur settings card is still visible over the gesture area in the failing frame. Inspect fixture occlusion before claiming a product failure. No watchdog change is authorized by that result.
 
 **Operational report:** Kevin sees repeated macOS prompts asking ChatGPT to access OneDrive or
 other app/cloud data. Keep work scoped to explicit repository, PaintWork and owned-simulator paths;
