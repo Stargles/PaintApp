@@ -1,224 +1,101 @@
 # TODO
-<!-- 2026-10-29: HANDOFF compaction recorded before editing. Prior byte-exact handoff: /Users/juliapark/PaintWork/s55-recorded-regressions/HANDOFF-before-compaction-1a7772c3.md (SHA-256 62f34678e68b7b39066cfe1a609d63e9e5fea544ea1b286e2c301ba2b89e508e). No owner ask is closed by this documentation pass. -->
 
-## Current owner-facing status — October29
+## Current owner-facing status — October 29
 
-**Joined-phase housekeeping completed:** exact owned56C symbolication/dead-bundle cleanup reclaimed4,287,086,592bytes after archiving/hash-verifying11,112 container entries. Retained artwork and active bundles were verified after boot; no protected library deletion. Receipt: `~/PaintWork/s55-recorded-regressions/owned56C-cache-cleanup-before-final-gates-20261029/`.
+**Active: continue; do not park.** Kevin is asleep until noon Toronto time. Work that needs no
+response continues. Overall completion is approximately **75%**: most implementation is present,
+but combined checks, remaining audit work and physical confirmation are still open. This is an
+estimate of the whole queue, not a measured percentage of code.
 
-**New owner evidence, October29:** the crash seems to occur when erasing many brushstrokes quickly.
-The existing copied-Test1 capture had20 gestures but only3 actual cuts (77 centerline misses), so it
-does not cover that burst. Measure actual successful erasures, queued renders and picture lifetimes
-on the real copied scene. Kevin confirms **To Cross** and will be asleep until12pm; independent work continues.
-No crash cause is established.
+The installed iPad version is still Release `6fb979f4`. Kevin confirmed it opens and his usual
+scenes look right. The newer audit work is assembled in an isolated branch; it is **not installed,
+merged or pushed**. Separate passing checks do not qualify that complete build.
 
-**Current qualification status:** Export/Resize/Gradient are integrated after179/179,13 intended
-fault controls plus one first-target-only deadline control, nine inspected pictures and normal49/49.
-The copied Test scene passed a cold single-Move replay. The current-support square-hole Mend witness
-passed1/1; whole29 passed, its classifier control exposed both the448-ring and uncertain-join targets, and normal1 rebuilt green. Separate small-Move body/grip correctionf33 is harvested after77/77 (64model+whole13public),
-three direct fault targets and normal64/64; current pictures inspected. Text’s native Select All/color and touch ownership now pass whole34 before/after two fault controls.
-The false repair count was2 on old code and unchanged on the correction; three exact fault targets
-failed as intended. The three-path correction is harvested; the separate old menu fixture is being
-qualified through real dismissal→next-pan/pinch behavior. Final assembled Debug/Release, whole
-affected UI, performance and device confirmation remain. No new main merge, push or install.
-
-**Cost-witness harvest scope, before action:** review and harvest only the opt-in
-`FillFootprintBench.swift` and `LiquifyBench.swift` cases from the reviewed component pin
-`eca8200dc47cc2030ce0f22d0c17ed6c607e28e5`. The new tests will be permanent but remain
-uncompiled and unqualified until a later Release run. Mend All uses an explicitly light72² fixture
-at300/1000 cels; it is not a dense real-scene or device-peak claim. Keep the established
-`PAINTAPP_BENCH=1` environment opt-in in the selected `.xctestrun` only. Preserve every other source
-entry and record the exact source-count change.
-
-**Cost-witness harvest completed, unqualified:** the two reviewed test files are now permanent.
-They add three opt-in methods: interactive vector Mend, 300/1000-cel Mend All, and point-only
-vector Liquify. The static XCTest count is6061 (+3 from6058); the fast tier remains5447 because
-no fast-tier source changed. The 300/1000-cel Mend All data is a light synthetic72² fixture, not a
-dense real-scene or device-peak result. These cases have not been compiled or run. A later Release
-run must set `PAINTAPP_BENCH=1` only in the selected `.xctestrun` runner environment and verify
-drawn output/premises before interpreting reported time or footprint.
-
-**Rapid To Cross diagnostic:**13d real copied Test1 run completed36 actual cuts in about14s
-(868calls:817missed,15unchanged), and its flight/pictures are preserved. Root observed remaining
-ink changing red→black in the after picture. Trace display settlement/Recolour ownership before
-calling this correct appearance or a persistent defect; physical crash cause remains unproved.
-
-**Saved-file audit:** strict MotionGroup decoding is harvested by removing its custom decoder
-entirely. Actual installed-writer package passed load→save→reload; all groups/memberships and source
-bytes matched. Whole29 passed, restoring the old decoder caused6 direct malformed-field failures,
-and normal29 rebuilt green. The99-line temporary test, opt-in and staged copy are removed. A
-separate audit found present-null parent registries still decode as empty; preserve legal omission
-and reject null in the next small validation change. No current writer emits null and no migration
-is justified by the250-package archive/current writer evidence.
-
-**Text repair-notice audit:** source and two simulator flights showed the canvas text recognizer
-starting on live UITextView touches, then being mistaken for stranded while UIKit still selected
-text. Touch-down now uses the existing CanvasTouchOwner gate. OLD durable count changed0→2; fixed
-whole34 stayed unchanged, deliberate black-glyph/owner faults reached three targets, and normal34
-rebuilt green. Root inspected the native menu and both red words. No timer/state/cache added.
-The older menu-drag test’s first pan and hidden-rail premises were unsupported; its test-only
-correction checks actual menu dismissal and the next pan/pinch. Portrait selected1 and whole8 passed. Owner-landscape selected1 stopped at the next-pan assertion; the Lens Blur settings card is still visible over the gesture area in the failing frame. Inspect fixture occlusion before claiming a product failure. No watchdog change is authorized by that result.
-
-**Operational report:** Kevin sees repeated macOS prompts asking ChatGPT to access OneDrive or
-other app/cloud data. Keep work scoped to explicit repository, PaintWork and owned-simulator paths;
-audit process/path attribution without traversing cloud folders or changing privacy settings. Cause
-is not established; continue the app tasks.
-
-**New owner report/ruling — Move Set Down gap:** selecting/moving an object, then switching to Brush
-or Eraser (exiting Move), briefly makes the moved drawing disappear before its baked/composited
-picture arrives. Owner suspects the preview is retired before the compositor finishes and explicitly
-prefers keeping the existing lifted drawing visible, temporarily uncomposited, until the finished
-frame is actually shown. Treat separately from repeated-tap Move and streamed-frame placement.
-Test that theory first; reuse existing held-picture/base-revision retirement ownership, no timeout,
-blocking render or parallel Move cache. Record cold exit-to-Brush/Erase drawn evidence and stale/
-cancel/Undo/cel-switch boundaries; continue all earlier tasks. OLD9649 reached the immediate gap after healthy moved-ink premises. The vector-image correction is
-harvested after whole72 green, three actual fault controls and a normal26 rebuild; root inspected six
-full landscape phase pictures. It retains the existing image/transform through UnlandedInk and the
-shared live-picture callback. No extra render/cache/timer. Combined tests and physical confirmation
-remain. A separate On Top stream-window lifetime boundary is being checked below; keep it distinct
-from ordinary vector ink and the already corrected stream-position jump.
-OLD1 against integration7f7231df stopped at compile with 0 tests: the UI fixture omitted required `thenHoldForDuration`, unwrapped one optional pixel only once, and omitted `try` for the throwing bounds wait. This test-call-site failure is not a runtime or continuity result. Preserve the OLD packet and fix only those three expressions before preparing a fresh pin. The corrected OLD1 at369761 then passed immediate visibility, all delayed samples and eventual green; only final box parity was RED because the witness compared a Move hull normalized in the pre-tool host with bounds normalized from a later canvas screenshot. Root-reviewed whole-screen captures show red before exit and green after presentation at the same physical rectangle. Source tracing also confirms the committed vector render draws `.stream` elements from their `displayFrame` after Move unsuppresses them, so base red can cover while the replacement surface draws. This is not an observed runtime gap; retain the existing frozen-window path. Correct only the final screen-coordinate oracle and rerun OLD.
-
-
-**New owner report, October28:** with a streamed screen present, moving it sometimes places the
-screen picture somewhere different from its Move box. Treat as an active stream/Move correctness
-bug; Kevin confirms it happens after release or choosing Set Down; scene is not established. Trace image and box through
-the same coordinate/pose and asynchronous frame ownership; do not compensate with offsets or
-extra state. This timing fits the already recorded placement correction; combined/device verification remains.
-Current installed6fb is the known build boundary; do not attribute this to uninstalled source.
-
-
-**Active: Kevin resumed; continue independently.** Prioritize the recorded drawing/erasing lag,
-new crash in **Test1 / 4096²**, and repeated-tap Move failure in **Test / 2048²**. Kevin clarified
-that only the Move problem is canvas-specific. Preserve the separate recordings and real artwork;
-use useful agents, conserve usage, and fix shared root causes. Historical retrieval-only park
-instructions are superseded by this resume. Fresh saved/unlocked readiness was used to export Test plus10 saved versions to the Mac.
-All57 downloaded files are inventoried/hashed; PaintApp reopened normally. No new build installed.
-
-- Move's required vector picture acquisition is corrected through the existing render contract;
-  ordinary hidden-layer suppression remains. Its77 focused checks and old-fault control passed,
-  and root inspected owner-landscape pictures. Integrated; current Test/device confirmation remains.
-- Ordinary drawing now waits for a current base only when interactive edits actually need landing.
-  Existing85 checks pass after correcting three test drawings that previously hit the timeline.
-  All source entries reconcile and root inspected filled/Undo pictures (portrait). Temporary
-  recorder/delay changes were retired whole. Integrated; no physical latency/crash claim.
-- Erasing: native geometry/window componentcf is now harvested, removing the old flat erase/restamp
-  machinery. Corrected selected11 passed before/after13 actual target failures; earlier291 passed all11
-  prior public routes and bounded output/cost check, with three subsequently corrected fixture failures.
-  Root inspected whole pictures. Mutation metadata hash correction is explicitly post-run; no extra
-  collateral assertions credited. Final assembled tests and physical Mode3 crash evidence remain.
-- Fill preview recovery is harvested: failed allocation now clears only its matching cached request,
-  and Set Down releases the preview even after refusal. Component normal50/51 and four faults plus
-  a stronger owner-alive release fault passed their intended checks. The6000² public fill stayed
-  inside its square; root inspected complete landscape before/after pictures. Final combined gates
-  remain; no new iPad install or physical-performance claim.
-- Saved-file tidy now preflights every generated destination before any rename/move and rejects
-  escaping resource addresses through one checked owner. Whole14classes293 pass at2905abd5;
-  deliberate controls expose all17 mutated contracts (one observed sidecar target was classified
-  after the run; its original title-rename assertion remains unproved). A normal rebuild then ran
-  Layout38 plus whole Gallery5:40pass/3expected opt-in skips. Both separate cold Gallery cases pass:
-  damaged A refused; B's complete files unchanged before B opens and visibly draws its own blue.
-  Root inspected both landscape pictures. Final combined gates and old-format retirement remain.
-- The independently checked package2905 source is harvested atintegratione4f9c8fa through the reviewed17-file patch,
-  including permanent Gallery tests and stronger existing saving witnesses. All17 paths are unchanged
-  in integration since their common ancestor; no unrelated fix is overwritten. Temporary capture
-  hooks and source-branch notes are excluded. Final assembled tests remain required before merge.
-- Automatic renewal source protection is activated and verified: renew installed6fb while main is
-  older instead of downgrading it. Existing successful-install state is atomic and records the source;
-  no current device/build/daemon change. Future manual installs update that state only after success.
-
-The cold Gallery pair is captured/verified7files and temporary capture code is retired. A native test
-changed the disposable simulator's app-container UUID; the original path-strict verifier refused.
-Root retained that result and separately verified the actual freshly queried app container and all
-B bytes against staging/capture before opening B. Protected artwork was never used.
-The streamed-screen/Move-box correction is harvested into integrationa97f3f47. On Top had applied
-already-written movement again inside the still-transformed float. The correction returns live child
-frames to the existing bitmap latch, with no additional stored transform. All7 public stream routes
-passed at214 (whole146=145pass/1 new-unit convention failure); test-only131 corrected that convention
-and focused2 passed. Two deliberate faults were assertionRED with source730 restored; normal post-fault2
-then passed. Root inspected aligned blue-frame pictures for both placements. Assembled-source tests
-and device confirmation remain. Source-specific evidence is retained externally; no main merge/install.
-
-Simulator cache cleanup recovered another4.7GB after eraser controls joined; all11,831 app-data
-entries remained exact through reboot. Only two exact generated cache paths were deleted. Current
-free space is about19GB; prior cleanup receipts and protected artwork remain unchanged.
-
-Items leave this file only in the qualified merge. “Installed” and “tested separately” do not mean
-that the final combined audit build has passed.
-
-| Owner task | Current status | What remains |
+| Owner task | Done so far | Still outstanding |
 |---|---|---|
-| Simplify vector Liquify and remove the complex version | Point-only version is installed and owner-confirmed; old vector material path removed | Final combined checks and performance boundaries |
-| Mend inside/attached vector strokes and Mend All Fills | Installed; public workflows and deliberate-failure checks passed | Current Release cost/memory comparison; preserve outside edges and uncertain joins |
-| Smart father–grandfather saving | Newest clock-bucket versions implemented and installed | Retry/safe-exit correction harvested; combined checks and real storage-cost confirmation remain |
-| Erasing crash in Test1 | Logs preserved; app/system allocation cause remains unproved | Finish window-renderer checks and fresh physical evidence |
-| Drawing/erasing lag and Move regression | Earlier Move/drawing-wait corrections and bounded eraser preview integrated; Move-exit gap reproduced | Move-exit handoff integrated; combined tests and device confirmation remain |
-| Architecture, cleanup and bug audit | In progress; several corrections separately tested and integrated | Remaining source review, findings below, combined checks and performance |
-| Development disk cleanup | About59GB reclaimed across passes; free space varies with native runs (13.5GiB at the latest boundary) | Continue bounded cache housekeeping between test batches |
-| Undo on an edited cel | Correction integrated; model/public/fault checks passed | Final combined checks |
-| Very large curve coordinates | Safe narrowing integrated; model/archive/fault checks passed | Final combined checks; no crash-cause claim |
-| Library relocation and Trash ownership | Corrections integrated and separately checked | Final combined checks |
-| Background work and stale callbacks | Earlier corrections integrated; current resize/Export findings being addressed | Public appearance/ownership checks and final combined tests |
-| Colour, text and effects interactions | Backend corrections and successful Text/Chroma source integrated | Remaining public slider/Mix/Glare workflows and complete affected classes |
-| Windows streaming | Earlier transport passed its tests | DNS/resource/Quit findings; Windows host is currently unreachable; real-link check needs owner/laptop |
-| Install latest qualified iPad build | Installed Release6fb opens and usual scenes “Look right” | Install the next qualified build after fresh readiness; preserve the current library |
+| Simple vector Liquify | Point-only version installed and owner-confirmed; complex vector material path removed | Final combined checks and current performance measurements |
+| Mend interior/attached vector strokes and Mend All Fills | Installed; public fill/Mend All workflows, outline and uncertain-join checks passed | Current Release cost/memory checks, including whole-layer work |
+| Smart father–grandfather saving | Newest clock-bucket retention installed; failed-save retry/safe-exit correction integrated | Combined checks and real-scene storage/device confirmation |
+| Test1 rapid-erasing crash | Crash reports/recordings preserved; owner confirms To Cross and rapid removal of many strokes | Determine actual allocation/latency cause; current installed-build physical evidence |
+| Drawing/erasing lag | Unnecessary ordinary drawing wait removed; native bounded eraser window integrated | Combined/Release checks, Mode3 follow-up and new iPad confirmation |
+| Move needs repeated taps in Test | Required vector-picture acquisition corrected; copied Test passed one-tap Move | Final combined checks and device confirmation |
+| Small Move boxes | Reachable body/grip arbitration corrected and separately checked | Final combined checks |
+| Move Set Down drawing gap | Old gap reproduced; existing lifted-picture owner now lasts until finished frame is shown | Final combined checks and device confirmation |
+| Stream picture separates from Move box | Shared placement correction integrated; public stream routes passed | Final combined/device checks, including release and Set Down |
+| Undo shows wrong edited-cel thumbnail | Correction integrated; model/public/fault checks passed | Final combined checks |
+| Huge curve coordinates | Checked narrowing integrated; logic/archive/fault checks passed | Final combined checks; no crash-cause claim |
+| Library relocation, Trash and damaged saved data | Shared checked addresses/ownership and strict fields integrated; old-writer roundtrip passed | Final assembled/current-format recovery checks |
+| Export, Resize and Gradient | Root-cause corrections integrated; painted public workflows separately passed | Combined checks and remaining performance boundaries |
+| Text, colour, effects and gesture interaction | Text touch-owner correction integrated; native Select All/colour passes without false repair | Remaining effects, opacity, masks, menu and whole-class checks |
+| Architecture, cleanup and performance audit | Several shared-owner corrections tested and integrated; retired paths removed | Remaining file review, documented assertion gaps, combined checks and performance |
+| Development disk cleanup | Repeated bounded cleanups; latest recovered about4GB with artwork/app files verified | Keep generated storage bounded between native batches |
+| Windows streaming | Earlier transport checks passed | DNS/resource/clipboard/keep-awake/Quit gates; real-link work waits for reachable Windows host/owner laptop |
+| Install latest qualified build | Existing installed version preserved by automatic-renewal source protection | Qualify next build, drive old workflows, verify signing, then install with fresh saved/unlocked readiness |
 
-**Work in progress and queue:**
+### Current evidence and decisions
 
-1. Saving: the failed-save correction keeps the drawing open, preserves newer edits and retries
-   through the existing timer. The model checks and cold failure → automatic save → reopen workflow
-   pass. Currente3 normal154 and ordinary UI (1pass/1namedoptinskip) pass. Six data faults reached7
-   intended statements and16 clock/driver/landing faults reached21;8 collateral issues get no credit.
-   All source restored and post-fault normal154 passed. The reviewed34-path successor is harvested,
-   including41 required callback-argument adaptations omitted from the unapplied10-path candidate.
-   Finish combined checks and physical confirmation; preserve original packets and limits.
-2. Gradient movement: the two-point representation and corrected affine colour field are integrated.
-   Whole FillObject15 and model checks pass in the179 baseline; the public original-formula control
-   reaches the off-axis colour assertion after healthy setup, and normal output rebuilt green.
-   Final assembled checks remain.
-3. Resize: one operation phase, existing worker and atomic landing are integrated. Whole ToolPanels15,
-   Resize47 and painted resize/Undo pass. Direct public output-loss and Undo-placement controls reach
-   their pixel assertions; normal49 rebuilt green. Final assembled checks and visible-progress cost
-   check remain; no artificial delay or growing fixture.
-4. Tap selection: canonical brush geometry correction is integrated. Its model, public drawing and
-   deliberate-failure checks passed separately. Final combined checks remain.
-5. Export: the immutable finished-file owner and unique output directory are integrated. Destination
-   ownership checks, actual system Share close/return, active Cancel → idle → Close → drawing/pan,
-   and bottom-docked Add Text checks pass in the179 baseline; root inspected their pictures.
-   The historical87 packet retains its original scope/count. Final assembled checks remain.
-6. Saved data: implement one shared checked package-address boundary before reads and writes. The
-   old code reproduces required-raster, brush-table/texture, nested-media, link and write failures.
-   Preserve legal old spellings until the separate one-shot Projects/Backups/Trash repair. The
-   captured previous-writer group package passed actual load/save/reload with group fields,
-   memberships, package bytes and index retained. The default-empty manifest arrays now all preserve
-   omitted→empty and `[]`, while rejecting present `null`; no protected manifest had null among the
-   six arrays. Whole30 including the actual package witness passed, the former decoder hit six direct
-   null assertions, the TEMP test/opt-in/copy were removed, and clean Debug normal29 passed29/29 with
-   0 failures/skips. Exact component evidence is in
-   `/Users/juliapark/PaintWork/s55-recorded-regressions/motion-null-strict-6ba1e0c5/` (run pins6ba
-   and68f5). Only `ProjectManifest.swift` and `InterpolationModelLogicTests.swift` were harvested to
-   this integration. Package-address failures, remaining saved-data cases and final assembled gates
-   remain open; no migration or format version change is indicated.
-7. Windows: complete DNS limits, clipboard filename collisions, keep-awake lifetime and awaited Quit
-   teardown when the host is reachable. No repeated connection polling. The real-link check needs
-   the owner/laptop; previous transport tests retain their actual source pins.
-8. Complete the remaining colour/effect/recovery workflows, relevant whole UI classes and mask
-   checks. Cold recovery must preserve the exact displaced original; setup failures prove no drawing.
-9. Run the exact fast tier in Debug and Release, reconcile counts and check identifiers/helpers/
-   project structure, affected UI classes and the full phase gate. Then run paired Release fill/
-   effect measurements with correct-output checks and whole-memory limits.
-10. Finish the architecture review and integrate qualified changes, then merge/push and check the
-    device with fresh readiness. The fill preview owner, refusal/teardown and public growth checks are now qualified separately
-    and harvested; preserve them through the combined gates. The earlier reduced-budget fixture
-    failure is corrected in that component; no retry or enlarged wait was added. The Test1 erasing respring
-    still needs fresh physical evidence.
-    Remove finished items whole at merge. October29 automatic renewal's old-main risk is corrected
-    and live: retain verified installed6fb until main contains it, with atomic source/profile state.
-    Preserve the signing/lifetime/user boundaries and advance this state after every successful
-    future manual install (CLAUDE.md).
+- **Crash and lag:** Test1 is4096²; Kevin says rapid To Cross erasing triggers the failure. The
+  black screen/spinner returned to Home Screen. System reports show display-server memory pressure,
+  but no confirmed allocation origin. A first copied-scene capture made only3 cuts; the stronger
+  capture made36. It triggered16 full4096² picture assignments. This is simulator work, not a
+  physical crash diagnosis. Immediate remaining ink looked black rather than the Recolour red;
+  the next diagnostic checks the settled result and actual index-rebuild work. Protected input,
+  flight, unique Test1 route and save-stage evidence are preserved.
+- **Move and stream:** only repeated-tap Move was reported as specific to Test. Stream displacement
+  occurs after release or Set Down. For the brief Move-exit gap, Kevin explicitly prefers the
+  existing lifted drawing remain visible until the compositor's finished picture is shown.
+  Current corrections reuse those owners; no timeout or parallel Move cache was added.
+- **Text/menu:** source and two flights tied false repair notices to the canvas recognizer accepting
+  live text-view touches. Existing touch ownership now excludes it at touch-down; no timer/state
+  added. Whole owner/text34 passed before/after deliberate controls and inspected red-word/menu
+  pictures. Portrait menu continuity1+whole8 passed. Owner-landscape1 stopped at the next-pan
+  assertion with Lens Blur settings visible over the canvas; inspect fixture occlusion first.
+- **Saved files:** synthesized MotionGroup decoding removed its custom defaults. One typed array
+  helper preserves omitted/empty registries while rejecting explicit null. Real previous-writer
+  load/save/reload and whole30 passed; six null assertions failed under the old helper; temporary
+  witness/staged copy removed; final whole29 passed. No null files in the250-package inventory and
+  no current writer emits null, so no new repair/schema is justified.
+- **Performance:** three opt-in Mend/Liquify cost tests are now harvested but **not compiled or run**.
+  The300/1000-cel Mend All fixture is light synthetic72² data, not dense artwork. The actual
+  copy-only week-of-saving APFS measurement is already qualified; do not repeat or extrapolate it
+  into a physical300–1000-cel claim. Exact metrics/pins live in HANDOFF and evidence packets.
+- **Storage:** latest owned56C cleanup archived/hash-verified11,112 container entries, removed only
+  two generated cache roots, reclaimed4,287,086,592bytes and verified artwork/active bundles after
+  boot. Receipt: `~/PaintWork/s55-recorded-regressions/owned56C-cache-cleanup-before-final-gates-20261029/`.
+- **macOS prompts:** Kevin sees requests for ChatGPT access to OneDrive/other app data. Cause is
+  unproved. Scope work to explicit repository, PaintWork and owned-simulator paths; do not scan cloud
+  folders or change privacy settings.
+- **Artwork/readiness:** original library exports, fresh Test export, recordings and copied Test1
+  are hashed/protected. Earlier saved/unlocked readiness was consumed exporting Test; obtain fresh
+  readiness before a further device restart. Automatic renewal must preserve installed6fb while
+  main is older and advance its source/artifact/profile state only after a successful install.
 
-Future interpolation overhaul, multi-cel selection, linear-light blending, audio/video editing and
-other explicitly deferred features stay written down. Dropped brush importers are not reopened.
-Technical authority and original evidence: HANDOFF.md and `~/PaintWork/s54-final-qualification/root-next-gates.json`.
+### Work queue
+
+1. Finish copied-Test1 Mode3 diagnosis and review the existing shared-window presentation seam.
+   Do not attribute the crash or claim an iPad speedup from simulator observations.
+2. Complete remaining colour/effect/mask/graph/recovery workflows and actual drawn/owner-size
+   evidence. A fixture setup failure proves no product outcome; preserve original results.
+3. Finish genuine architecture/file-review gaps and remaining source findings through existing
+   owners. Keep coherent compiler-isolation candidates out until their whole boundary is reviewed.
+4. Qualify the exact assembled source: static/lint/project checks, complete fast tier in Debug and
+   Release, affected UI classes, required deliberate controls, and the full phase gate. Count actual
+   methods; new cost tests bring static full count6061, fast5447.
+5. Run paired Release fill/effect and current Mend/Liquify measurements with correct output and
+   honest memory limits. Never call counted cache bytes whole process/device memory.
+6. Complete Windows gates once its external state changes; no repeated unreachable-host polling.
+7. Drive existing playback, grey-area pan, Move/graph drag-release and strokes; verify Release
+   signature/profile/library protection; install qualified source after fresh device readiness.
+   Confirm the recorded drawing, erasing, Move and stream behaviors on that build.
+8. Remove each completed item whole only in the qualified main merge; push and update HANDOFF.
+   Preserve original evidence/pins and name anything that could not be run.
+
+Deferred interpolation overhaul, multi-cel selection, linear-light blending, audio/video editing and
+other explicitly later features stay written down. Dropped brush importers are not reopened.
+Detailed task sections below remain unchanged. Technical authority: HANDOFF.md and
+`~/PaintWork/s54-final-qualification/root-next-gates.json`.
+
+<!-- Status-preamble compaction only. Original bytes retained at ~/PaintWork/s55-recorded-regressions/status-preamble-compaction-17c00484/TODO-before.md and in Git. No task was closed. -->
 
 ## How to read and keep this file
 
@@ -560,13 +437,12 @@ Inventory-only files are not reviewed code. New source is not called complete be
       is larger and no runtime defect is proved. Keep the source triage; the two dead-local
       deletions are harvested alone ate88a25ab. Finish drawn-workflow gates before considering a wider isolation migration.
       No automatic cascade, blanket namespace opt-out, new locks or actor hops.
-- [ ] Finish reproduced Tap corner correction through existing canonical brush geometry. Old native
-      witness confirms visible corner/outline loss; isolated e2 logic37 and wholeUI6+benchmark1 pass.
-      Root LOOKed3actual whole square stages. Original landscaped test-row failure was card occlusion,
-      corrected through existing dock helpers with unchanged outcomes. All14captures reached.
-      New coldDebug image miss costs~1.48s for120strokes/165480dabs; Release baseline and minimal
-      lazy-derived geometry admission review are needed before acceptance. Keep exact local body/gap
-      semantics; no new cache/index/service or duplicate brush math. Controls15 remain unrun.
+- [ ] Finish current-source Tap combined checks. The canonical correction3219c8b4 is integrated;
+      historical logic37 and UI6+benchmark1 passed at75607279, root inspected three pictures,
+      and17 actual mutations exposed23 accepted logic assertions. Release evidence is one benchmark,
+      not a whole tier. Later relevant files changed; current normal/Release gates remain. Do not
+      rerun the historical15-control proposal as though it never executed. Reconciliation:
+      `~/PaintWork/s55-recorded-regressions/menu-card-and-tap-status-20261029.md`.
 - [ ] Qualify source-integrated removalec62d712 of geometry repair and converter-only UI/tests/fixtures/PBX paths: Kevin
       confirmed current scenes “Looks right” after the preserved250-package export and signed6fb
       install/normal launch. Keep permanent startup maintenance scheduling, truthful gallery readiness
@@ -635,12 +511,13 @@ Inventory-only files are not reviewed code. New source is not called complete be
 - [ ] Newly traced Mode1 eraser handoff: preserve the already-minted gesture seed through existing
       VectorCanvas.erase/hybrid punch and universal commit. Actual pixel/undo/archive qualify at260/seed5; new coldMode1 source59a3 is harvested,
       public runtime/wholepictures pending. Do not attribute the owner's Mode3 respring to this independent issue.
-- [ ] Text style update: reviewed minimal direct full UTF-16 range restoration is integrated17026caf;
-      actual-view class31 and2reverse faults qualify within260/seed-selection5; cold route remains pending. Add one cold TextSession method using measured
-      one-glyph/old-word far band, public Select All, actual text-colour change and same software key.
-      Read drawn replacement while editing, before keyboard/commit can move the canvas; no hidden AX,
-      app.typeText, post-style refocus/paste or product/helper changes. Normal/reverse/LOOK required.
-- [ ] Resolve actual UI10 graph gesture delivery and text-colour safe-dismissal premise without
+- [ ] Finish text final combined checks. Full UTF-16 style restoration is integrated;31 actual-view
+      checks and two reverse faults qualified earlier. The cold public Select All/colour route now
+      passes with a grip-clear fixture. Touch-down ownership fixfccc06db removes false repair notices
+      without timers/state; wholeowner29+Text5 passed before/after two controls (three direct targets),
+      with native menu and both red words inspected. Actual induced stranded-repair recovery is not
+      claimed; landscape menu-continuity fixture remains separate.
+- [ ] Resolve actual current graph gesture delivery and landscape menu continuity without
       weakening product oracles, then fresh whole-class runs and whole owner pictures.
 - [ ] Current saved text omission/null defaults: source reportb6582fb1/receipt133f2e95 shows a
       required string can become empty without existing text-damage/save gating. Peer/scope accepted;

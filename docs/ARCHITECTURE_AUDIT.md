@@ -69,12 +69,11 @@ original component directories. Historical results are not retagged to current c
   Release Fill/Lens cost with process-memory/device limits stated. Five original assertion limits
   remain unqualified: stale decoder-error arrangement, two topology checks, packed header metadata,
   and shared slot-array comparisons. They are not five demonstrated unfixed product defects.
-- Finish the independently reproduced Tap corner correction through canonical geometry. It is still
-  isolated from root: e2 logic37 and publicUI6+benchmark1 passed, and root inspected the three whole
-  square-selection pictures. The earlier6pass/1fail was actual card occlusion; the existing exposed-row
-  helper corrected only fixture positioning, preserving every outcome. Debug image-manager cold miss
-  costs1484.8ms for120strokes/165480dabs. Measure Release, then qualify any minimal local-geometry
-  admission and the pending15controls before harvesting or claiming smooth selection.
+- Finish current-source Tap combined checks. Canonical correction3219c8b4 is integrated. Historical
+  normal37 logic +6 UI +1 benchmark passed,17 actual controls exposed23 accepted assertions, and
+  Release1 benchmark passed at75607279. Later relevant files changed; final current-source normal/
+  Release checks remain. Do not reopen the stale unrun15-control proposal. Reconciliation:
+  `~/PaintWork/s55-recorded-regressions/menu-card-and-tap-status-20261029.md`.
 - Finish the native opacity-gesture experiment and subsequent colour workflows without loosening
   outcomes. Existing observations establish a native slider setup miss, not a blend-product defect.
 - Finish current-format damaged-text cold recovery, consumer UI and final integration. Qualified
