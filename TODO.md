@@ -34,6 +34,11 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
 
 ### Current evidence and decisions
 
+- **Picture component assembly:** f422 public Paste/Multiply/Bake/save/reopen passed1/1; root
+  verified source731 and inspected all three owner-landscape captures. The six-cell arrangement
+  stays correct. Its five source/test paths are now assembled into the integration candidate;
+  whole68, mapped controls and final combined checks still remain. No install or main merge.
+
 - **Assembly efficiency:** root has source-reviewed and assembled the small Shape scale and export
   frame-range corrections into the integration candidate before their native checks. Their original
   pins and control proposals stay frozen. This is unqualified source assembly, not completion, main

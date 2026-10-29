@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 /// **Can an artist reach Bake on an effect, blend or transformation layer, and get what the layer made
 /// into the drawings beneath it?** — TODO (131), driven the way the artist drives it, from a fresh
@@ -19,6 +20,137 @@ import XCTest
 /// the colours moved into the strokes is the *paper*: the layer multiplied it grey while it was there, and
 /// the bake leaves it white (Bake changes the drawings only).
 final class LayerBakeUITests: PaintUITestCase {
+
+    func testPastingAndBakingKeepsAnOrientationTaggedPictureDrawnTheSame() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let raw = UIGraphicsImageRenderer(size: CGSize(width: 3, height: 2), format: format).image { context in
+            let colours: [UIColor] = [.red, .green, .blue, .blue, .red, .green]
+            for row in 0..<2 {
+                for column in 0..<3 {
+                    context.cgContext.setFillColor(colours[row * 3 + column].cgColor)
+                    context.cgContext.fill(CGRect(x: CGFloat(column), y: CGFloat(row), width: 1, height: 1))
+                }
+            }
+        }
+        let rawCGImage = try XCTUnwrap(raw.cgImage)
+        UIPasteboard.general.image = UIImage(cgImage: rawCGImage, scale: 2, orientation: .right)
+        let roundTrip = try XCTUnwrap(UIPasteboard.general.image,
+                                      "PREMISE: the runner can put a picture on the shared pasteboard")
+        XCTAssertEqual(roundTrip.imageOrientation, .right,
+                       "PREMISE: the runner pasteboard preserves the image's right orientation")
+        XCTAssertEqual(roundTrip.scale, 2,
+                       "PREMISE: the runner pasteboard preserves the scale-2 source")
+        XCTAssertEqual(roundTrip.size, CGSize(width: 1, height: 1.5),
+                       "PREMISE: the pasteboard exposes the oriented display size")
+
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetGallery", "-uiTestNoticeSeconds", "120"]
+        XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 96, height: 96),
+                                       orientationBeforeCreatingCanvas: .landscapeLeft))
+        XCTAssertEqual(app.windows.firstMatch.frame.size, CGSize(width: 1080, height: 810),
+                       "PREMISE: the public image route is drawn at the owner's landscape size")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let collapseTimeline = app.buttons["timeline.collapseButton"]
+        XCTAssertTrue(collapseTimeline.waitForExistence(timeout: 5),
+                      "PREMISE: the public editor exposes the timeline collapse control")
+        collapseTimeline.tap()
+        XCTAssertTrue(collapseTimeline.waitForNonExistence(timeout: 5),
+                      "PREMISE: the timeline finishes collapsing before image placement")
+        let timeline = app.otherElements["timeline.panel"]
+        XCTAssertTrue(timeline.waitForExistence(timeout: 5))
+        XCTAssertLessThan(timeline.frame.height, 70,
+                          "PREMISE: the collapsed timeline leaves the lower paper exposed")
+
+        app.buttons["toolbar.actionsButton"].tap()
+        let paste = app.buttons["actions.pasteRow"]
+        XCTAssertTrue(paste.waitForExistence(timeout: 5), "Actions exposes its public Paste row")
+        paste.tap()
+        // Pasteboard privacy is mediated by SpringBoard. The app's synchronous paste read can wait
+        // for this first-use prompt, so answer it through SpringBoard before asking the app for AX.
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let allowPaste = springboard.alerts.buttons["Allow Paste"]
+        if allowPaste.waitForExistence(timeout: 5) { allowPaste.tap() }
+        let actions = app.buttons["toolbar.actionsButton"]
+        XCTAssertTrue(actions.isSelected, "PREMISE: Paste leaves the Actions dropdown open")
+        let pasteRow = app.buttons["actions.pasteRow"]
+        // The toolbar toggle closes Actions and commits any interactive pasted picture before Bake.
+        actions.tap()
+        XCTAssertTrue(pasteRow.waitForNonExistence(timeout: 5),
+                      "The toolbar toggle dismisses the Actions dropdown")
+
+        openLayerPanel(app)
+        addValueLayerFromAddMenu(app)
+        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5),
+                      "PREMISE: the value layer was added above the pasted picture")
+        app.buttons["toolbar.layersButton"].tap()
+        setBlendMode(app, layerIndex: 1, to: "multiply")
+        XCTAssertTrue(waitForSandwichState(app, "rest"), "PREMISE: the Multiply layer has settled")
+
+        func sampleImage() throws -> [[Int]] {
+            let paper = paperRect(in: canvas, canvasSize: CGSize(width: 96, height: 96))
+            // The 3×2 source is `.right`: a 2×3 set of equal coloured cells centred in the paper,
+            // fitted by insertImage to 80% of the canvas's long dimension.
+            let points = [0.3667, 0.6333].flatMap { x in
+                [0.2333, 0.5, 0.7667].map { y in onHost(paper, x, y) }
+            }
+            for (index, point) in points.enumerated() {
+                assertAboveTheDock(app, canvas, dy: Double(point.dy),
+                                   "oriented image cell probe \(index) must clear the timeline and any dock card")
+            }
+            let screen = try XCTUnwrap(ScreenshotPixels(canvas.screenshot().image))
+            return points.map { point in
+                let rgba = screen.pixel(normalizedX: Double(point.dx), normalizedY: Double(point.dy))
+                return [Int(rgba.r), Int(rgba.g), Int(rgba.b), Int(rgba.a)]
+            }
+        }
+
+        let before = try settled(timeout: 10) { try sampleImage() }
+        XCTAssertEqual(before.count, 6)
+        XCTAssertTrue(before.allSatisfy { $0[3] > 240 },
+                      "PREMISE: all six oriented source cells are drawn opaquely: \(before)")
+        XCTAssertGreaterThanOrEqual(Set(before.map { "\($0[0]),\($0[1]),\($0[2])" }).count, 3,
+                                    "PREMISE: the asymmetric source's red, green and blue cells are exposed")
+        attachScreenshot(XCUIScreen.main, "orientation-paste-before-bake")
+
+        openLayerPanel(app)
+        let row = app.staticTexts["layerPanel.row.1"]
+        row.tap()
+        row.tap()
+        let bake = app.buttons["layerOptions.bake"]
+        XCTAssertTrue(bake.waitForExistence(timeout: 5), "The value layer offers its public Bake action")
+        bake.tap()
+        XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForNonExistence(timeout: 10),
+                      "Bake removes the value layer after carrying its effect into the image")
+        app.buttons["toolbar.layersButton"].tap()
+
+        let after = try settled(timeout: 10) { try sampleImage() }
+        XCTAssertEqual(after, before, "The pasted image's visible oriented cells survive Bake")
+        XCTAssertGreaterThanOrEqual(Set(after.map { "\($0[0]),\($0[1]),\($0[2])" }).count, 3,
+                                    "The baked red, green and blue cells remain drawn")
+        attachScreenshot(XCUIScreen.main, "orientation-paste-after-bake")
+
+        let tile = saveEditorAndReturnToGallery(app)
+        tile.tap()
+        XCTAssertTrue(canvas.waitForExistence(timeout: 15), "The saved picture project reopens in the editor")
+        let reopenedTimelineCollapse = app.buttons["timeline.collapseButton"]
+        if reopenedTimelineCollapse.waitForExistence(timeout: 2) {
+            reopenedTimelineCollapse.tap()
+            XCTAssertTrue(reopenedTimelineCollapse.waitForNonExistence(timeout: 5),
+                          "PREMISE: the reopened picture's timeline finishes collapsing")
+        }
+        let reopenedTimeline = app.otherElements["timeline.panel"]
+        XCTAssertLessThan(reopenedTimeline.frame.height, 70,
+                          "PREMISE: the reopened picture leaves its lower paper exposed")
+        let reopened = try settled(timeout: 10) { try sampleImage() }
+        XCTAssertEqual(reopened, after,
+                       "The pasted picture's six drawn cells survive Bake, Gallery save and reopen")
+        XCTAssertGreaterThanOrEqual(Set(reopened.map { "\($0[0]),\($0[1]),\($0[2])" }).count, 3,
+                                    "All three asymmetric source colours remain visible after reopen")
+        attachScreenshot(XCUIScreen.main, "orientation-paste-after-gallery-reopen")
+    }
 
     func testBakingAMultiplyLayerColoursBothDrawingsBeneathItAndOneUndoBringsItBack() throws {
         let app = XCUIApplication()

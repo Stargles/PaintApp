@@ -457,6 +457,107 @@ final class ProjectPackageLayoutLogicTests: XCTestCase {
         return try ProjectPackageLayout.resolve(name, in: package)
     }
 
+    func testPlacedImagePNGAndReferenceKeepTheDrawnPixelsAcrossSaveLoad() throws {
+        let rawSize = CGSize(width: 3, height: 2)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let upright = UIGraphicsImageRenderer(size: rawSize, format: format).image { context in
+            let colours: [UIColor] = [.red, .green, .blue, .cyan, .magenta, .yellow]
+            for row in 0..<2 {
+                for column in 0..<3 {
+                    context.cgContext.setFillColor(colours[row * 3 + column].cgColor)
+                    context.cgContext.fill(CGRect(x: CGFloat(column), y: CGFloat(row), width: 1, height: 1))
+                }
+            }
+        }
+        let raw = try XCTUnwrap(upright.cgImage)
+        let orientations: [UIImage.Orientation] = [
+            .up, .down, .left, .right, .upMirrored, .downMirrored, .leftMirrored, .rightMirrored
+        ]
+        let manager = CanvasFixture.manager()
+        manager.projectName = "PlacedImageUnits"
+        XCTAssertTrue(manager.addVectorLayer(name: "Photos"), "PREMISE: the package accepts a vector image layer")
+        let vector = try XCTUnwrap(manager.layers[manager.currentLayerIndex].cels[0].vector)
+        for (index, orientation) in orientations.enumerated() {
+            for (scaleIndex, scale) in [CGFloat(1), 2].enumerated() {
+                let image = UIImage(cgImage: raw, scale: scale, orientation: orientation)
+                let column = index % 4
+                let row = (index / 4) * 2 + scaleIndex
+                let element = VectorImageElement(
+                    image: image,
+                    transform: LayerTransform(position: CGPoint(x: CGFloat(8 + column * 16),
+                                                                  y: CGFloat(8 + row * 16)),
+                                              scale: 4, rotation: 0))
+                vector.addImage(element)
+            }
+        }
+
+        let originals = vector.images
+        XCTAssertEqual(originals.count, orientations.count * 2,
+                       "PREMISE: each orientation is represented at source scales 1 and 2")
+        XCTAssertTrue(originals.allSatisfy {
+            $0.image.cgImage?.width == raw.width && $0.image.cgImage?.height == raw.height
+        }, "PREMISE: all orientations and scales retain the same full-resolution source pixels")
+        let originalCanvas = try XCTUnwrap(vector.render()?.cgImage)
+        let expectedCanvas = try XCTUnwrap(CanvasFixture.rgbaBytes(originalCanvas),
+                                           "PREMISE: the placed image matrix renders")
+        for image in originals {
+            let x = Int(image.transform.position.x), y = Int(image.transform.position.y)
+            let alpha = expectedCanvas[(y * originalCanvas.width + x) * 4 + 3]
+            XCTAssertGreaterThan(alpha, 0,
+                                 "PREMISE: orientation \(image.image.imageOrientation.rawValue), "
+                                 + "scale \(image.image.scale) draws at its placed center")
+        }
+
+        func assertSavedImageGeometry(_ loaded: CanvasManager,
+                                      expectedImages: [VectorImageElement],
+                                      expectedCanvas: [UInt8], named pass: String) throws {
+            XCTAssertFalse(loaded.loadDamage.isDamaged, "PREMISE: \(pass) package loads without damage")
+            let loadedVector = try XCTUnwrap(loaded.layers.flatMap(\.cels).compactMap(\.vector).first,
+                                             "PREMISE: \(pass) retains the vector layer")
+            let reopened = loadedVector.images
+            XCTAssertEqual(reopened.count, expectedImages.count, "PREMISE: \(pass) retains all placed images")
+            for index in expectedImages.indices {
+                let source = expectedImages[index]
+                let actual = reopened[index]
+                XCTAssertEqual(actual.image.imageOrientation, source.image.imageOrientation,
+                               "\(pass) preserves orientation at image \(index)")
+                XCTAssertEqual(actual.image.scale, 1,
+                               "The package PNG's UIImage is decoded at scale 1 for image \(index)")
+                XCTAssertEqual(actual.corners, source.corners,
+                               "\(pass) keeps the same physical canvas quad at image \(index)")
+                let sourcePixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(source.image.cgImage)))
+                let actualPixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(actual.image.cgImage)))
+                XCTAssertEqual(actualPixels, sourcePixels,
+                               "\(pass) preserves every asymmetric source pixel at image \(index)")
+            }
+            let rendered = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(loadedVector.render()?.cgImage)))
+            XCTAssertEqual(rendered, expectedCanvas, "\(pass) draws the complete same canvas pixels")
+        }
+
+        let firstPackage = ProjectStore.createNewProjectURL(name: "PlacedImageUnitsA")
+        saveAndWait(manager, to: firstPackage)
+        let firstLoad = try XCTUnwrap(ProjectStore.load(from: firstPackage), "PREMISE: the package reopens")
+        try assertSavedImageGeometry(firstLoad, expectedImages: originals,
+                                     expectedCanvas: expectedCanvas, named: "first save/load")
+
+        let resaveVector = try XCTUnwrap(firstLoad.layers.flatMap(\.cels).compactMap(\.vector).first)
+        resaveVector.addStroke(VectorStroke(brush: TestBrushes.hardRound,
+            color: CodableColor(red: 0.1, green: 0.2, blue: 0.3, alpha: 1),
+            size: 2, opacity: 1,
+            samples: [VectorSample(x: 3, y: 16, pressure: 1), VectorSample(x: 61, y: 16, pressure: 1)]))
+        let resavedImages = resaveVector.images
+        let resavedCanvas = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(resaveVector.render()?.cgImage)))
+        XCTAssertNotEqual(resavedCanvas, expectedCanvas,
+                          "PREMISE: a visible vector edit makes the second save re-encode its image references")
+        let secondPackage = ProjectStore.createNewProjectURL(name: "PlacedImageUnitsB")
+        saveAndWait(firstLoad, to: secondPackage)
+        let secondLoad = try XCTUnwrap(ProjectStore.load(from: secondPackage), "PREMISE: the resaved package reopens")
+        try assertSavedImageGeometry(secondLoad, expectedImages: resavedImages,
+                                     expectedCanvas: resavedCanvas, named: "second save/load")
+    }
+
     func testOutsideBrushTableAddressesAreRefusedByValidationAndLoading() throws {
         let a = try addressPackage("TableA", color: .red, expected: [255, 0, 0, 255], elements: [addressStroke()])
         let b = try addressPackage("TableB", color: .blue, expected: [0, 0, 255, 255], elements: [addressStroke()])

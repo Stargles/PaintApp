@@ -7736,6 +7736,7 @@ struct VectorCanvasData: Codable {
         var fileName: String
         var x: Double
         var y: Double
+        /// The affine coefficient for the paired PNG's scale-1 natural-size coordinates.
         var scale: Double
         var rotation: Double
         /// Absent means 1 — `VectorImageElement.aspect`.
@@ -8042,8 +8043,11 @@ struct VectorCanvasData: Codable {
                 // An image whose PNG was never written has no name to reference, so it is dropped
                 // rather than persisted as a dangling ref.
                 guard let name = el.fileName ?? imageFileNames[el.id] else { return nil }
+                // The paired PNG reloads as scale 1; express placement in those point units so its
+                // larger decoded natural size does not enlarge the picture on the next open.
                 return .image(ImageRef(fileName: name, x: el.transform.position.x, y: el.transform.position.y,
-                                       scale: el.transform.scale, rotation: el.transform.rotation,
+                                       scale: Double(el.transform.scale / el.image.scale),
+                                       rotation: el.transform.rotation,
                                        aspect: el.aspect == 1 ? nil : Double(el.aspect),
                                        stretchAxis: el.stretchAxis == 0 ? nil : Double(el.stretchAxis),
                                        mirrored: el.mirrored ? true : nil,

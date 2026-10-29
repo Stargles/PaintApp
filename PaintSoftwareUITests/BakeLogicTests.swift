@@ -286,6 +286,79 @@ final class BakeLogicTests: XCTestCase {
         XCTAssertEqual(baked.image.size, picture.size, "…at the size it was placed at")
     }
 
+    /// A pasted UIImage's orientation is part of the picture the vector layer draws. Baking that
+    /// picture must leave the visible result where it was, not only leave its raw CGImage pixels.
+    func testBakingAnOrientedPlacedImagePreservesItsDrawnPixels() throws {
+        let rawSize = CGSize(width: 3, height: 2)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let upright = UIGraphicsImageRenderer(size: rawSize, format: format).image { context in
+            let colours: [UIColor] = [.red, .green, .blue, .blue, .red, .green]
+            for row in 0..<2 {
+                for column in 0..<3 {
+                    context.cgContext.setFillColor(colours[row * 3 + column].cgColor)
+                    context.cgContext.fill(CGRect(x: CGFloat(column), y: CGFloat(row), width: 1, height: 1))
+                }
+            }
+        }
+        let raw = try XCTUnwrap(upright.cgImage)
+        let orientations: [(UIImage.Orientation, String)] = [
+            (.up, "up"), (.down, "down"), (.left, "left"), (.right, "right"),
+            (.upMirrored, "up mirrored"), (.downMirrored, "down mirrored"),
+            (.leftMirrored, "left mirrored"), (.rightMirrored, "right mirrored")
+        ]
+        let probePoints = (8..<56).flatMap { y in (8..<56).map { x in (x, y) } }
+
+        for scale in [CGFloat(1), 2] {
+            var uprightPixels: [[Int]]?
+            for (orientation, name) in orientations {
+                let picture = UIImage(cgImage: raw, scale: scale, orientation: orientation)
+                XCTAssertEqual(picture.imageOrientation, orientation,
+                               "PREMISE: the placed image keeps its \(name) metadata")
+
+                let manager = document()
+                manager.addVectorLayer(name: "Photo")
+                let photo = manager.layers[manager.currentLayerIndex].id
+                manager.layers[index(photo, manager)].cels[0].vector!.addImage(VectorImageElement(
+                    image: picture,
+                    transform: LayerTransform(position: CGPoint(x: 32, y: 32), scale: 8 * scale, rotation: 0)))
+                let grade = addEffect(manager, Self.hueRotate)
+                XCTAssertNotNil(manager.layers[index(grade, manager)].layerEffect,
+                                "PREMISE: the top value layer grades the \(name) image")
+
+                let beforeRegion = try XCTUnwrap(composite(manager),
+                                                 "PREMISE: the \(name) picture renders under its grade")
+                let beforePixels = probePoints.map { pixel(beforeRegion, $0.0, $0.1) }
+                XCTAssertTrue(beforePixels.contains { $0[3] > 0 },
+                              "PREMISE: the \(name) picture contributes visible pixels")
+                let solidColours = Set(beforePixels.filter { $0[3] == 255 }
+                    .map { ($0[0] << 16) | ($0[1] << 8) | $0[2] })
+                XCTAssertGreaterThanOrEqual(solidColours.count, 3,
+                                            "PREMISE: the asymmetric \(name) image's three cells are drawn")
+                if orientation == .up {
+                    uprightPixels = beforePixels
+                } else if let uprightPixels {
+                    XCTAssertNotEqual(beforePixels, uprightPixels,
+                                      "PREMISE: \(name) visibly differs from the upright source")
+                }
+
+                XCTAssertNotNil(bakePlan(manager.bakeLayer(id: grade)),
+                                "The ordinary Bake of the \(name) image should complete")
+                let afterRegion = try XCTUnwrap(composite(manager),
+                                                "The baked \(name) picture still renders")
+                let afterPixels = probePoints.map { pixel(afterRegion, $0.0, $0.1) }
+                XCTAssertEqual(afterPixels, beforePixels,
+                               "Baking preserves the asymmetric \(name) image's drawn pixels at scale \(scale)")
+                let bakedImage = try XCTUnwrap(manager.layers[index(photo, manager)].cels[0].vector?.images.first)
+                XCTAssertEqual(bakedImage.image.imageOrientation, orientation,
+                               "The baked image retains its \(name) orientation metadata")
+                XCTAssertEqual(bakedImage.image.scale, scale,
+                               "The baked image retains its image scale")
+            }
+        }
+    }
+
     /// **A video and a stream have no colour to take and no asset to write one to**, so the operation
     /// says so rather than guessing — and the colour route is exhaustive over the element kinds, so a
     /// kind added later has to decide.

@@ -62,7 +62,7 @@ enum BakeOperation: Equatable {
             result = blendedKeepingCoverage(of: cgImage, width: width, height: height)
         }
         guard let result else { return image }
-        return UIImage(cgImage: result, scale: image.scale, orientation: .up)
+        return UIImage(cgImage: result, scale: image.scale, orientation: image.imageOrientation)
     }
 
     private func blendedKeepingCoverage(of image: CGImage, width: Int, height: Int) -> CGImage? {
