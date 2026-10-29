@@ -97,13 +97,14 @@ Kevin confirms **To Cross** and is asleep until12pm; no physical crash cause is 
    `/Users/juliapark/PaintWork/s55-recorded-regressions/mode3-current-source-map.md`; no Backboard
    cause claim. Meaningful burst work must count actual cuts, queued renders and retained pictures.
 
-3. **Previous-writer format and one-shot repair.** Capture the real previous-writer MotionGroup
-   package before strict four-field decoder cleanup: source `28c08b26`, previous-writer package729 /
-   PBX1329, prepared three-control launch, nonce `B2BAF2AC-3B98-4DEE-95F0-7FD07268E811` still
-   unconsumed. Follow
-   `/Users/juliapark/PaintWork/s55-recorded-regressions/motion-group-writer-next-map.md` exactly; do
-   not regenerate or consume outside its one-shot protocol. Repair Projects, Backups, and Trash
-   once; unsupported data must fail loudly.
+3. **Previous-writer format cleanup.** Actual28c capture is complete: selected3 yielded2 legal-empty
+   passes and1 strict-decoder failure with exactly6 missing/null field assertions, after every real
+   writer/save/reload/field/membership premise passed. Copy5files/36,532bytes (including index) is at
+   `/Users/juliapark/PaintWork/s54-final-qualification/motion-group-previous-writer-28c08b26-capture01/`.
+   NonceB2BAF2AC is consumed; do not repeat its protocol. Remove custom MotionGroup defaults using
+   synthesized strict decoding, preserve legal empty parent registries, then round-trip a verified
+   copy of this real writer package. It emitted all4fields: no schema migration or invented repair
+   is justified by this evidence. Strict cleanup/qualification remains.
 
 4. **Windows real-link work.** DNS/resource/clipboard filename collisions, keep-awake lifetime, and
    awaited Quit teardown remain. Last bounded probe timed out October28 at `PC@100.104.85.111`; do

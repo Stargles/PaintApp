@@ -18,6 +18,11 @@ has not reached its color assertions because the small fixture overlaps transfor
 test-only enlarged, clearance-qualified fixture is prepared. Final assembled Debug/Release, whole
 affected UI, performance and device confirmation remain. No new main merge, push or install.
 
+**Saved-file audit:** real28c previous-writer MotionGroup package retained (5files/36,532bytes
+with index). Its writer emitted all4fields; legal empty parent registries passed. OLD decoder
+accepted6 missing/null malformed values. Strict synthesized decoding and real old-package
+round-trip are now in progress; no schema migration or repair is implied.
+
 **Audit evidence:** the successful495 Text Select All test shows a freeze-repair notice while
 the public menu/color workflow completes. The two new031933/031935 simulator flights are preserved
 in its `root-flight-copy` packet. Check recognizer ownership before treating this as a real freeze
