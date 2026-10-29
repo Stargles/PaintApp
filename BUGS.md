@@ -3167,3 +3167,13 @@ returns when transfer/decode or primeImage fails. The adjacent video path report
 its existing notice. The existing view-owned notice now reports the photo failure, with the same picker-reset/retry
 behaviour. No new state/service/import path. Existing Add-menu and assembled gates remain; this
 low-impact feedback change adds no new test-only hook or abstraction. Finding receipt: `s55-recorded-regressions/source-review-next8-bdf43c61.md`.
+
+## Shape overlay dimensions divide by a transient nonpositive scale — October29
+
+Whole-body review atbdf43c61 found ShapeOverlayView.canvasScale preserves zero/nonpositive values
+while didSet skips its side effects. bodyReach uses a0.01 floor, but handleReach, handleSize,
+rotationHandleSize/Offset and both line widths divide by the raw value. CanvasView forwards the
+live fit/committed/pinch product before the final commit clamp. The sibling object overlay guards
+all equivalent derived dimensions. Correct the shared scale policy within the existing shape
+owner, with finite geometry/hit checks and the public shape workflow; no new gesture state and no
+attribution to the owner's drawing/erasing crash.

@@ -43,6 +43,11 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
   None of this newer work is installed. The Test1 eraser comparison saved seven local full-render
   requests before a conservative fallback; all-owner work and input variability still need checks.
 
+- **Shape handles during a tiny pinch:** source review found that ShapeOverlayView skips update
+  side effects for nonpositive canvas scale but still stores it; several handle/chrome dimensions
+  divide by that value. Reuse the consistent scale guard already used by the sibling object overlay,
+  then check finite hit/chrome geometry and public shape manipulation. No crash attribution.
+
 - **Photo-import feedback audit:** `AddMenu.primePhoto` silently discarded transfer/decode/priming
   failure while the adjacent video path reports it. Reuse the existing menu notice for photo
   failure; no new state or import abstraction. Existing Add-menu checks and assembled gates remain.
