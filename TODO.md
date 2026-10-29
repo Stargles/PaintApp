@@ -83,6 +83,14 @@ fixture-only correction is in progress in the isolated composed tree; it is not 
 Release copied-Test1 baselinec62 passed1/1 with36 cuts and25 full picture landings. Point-index
 rebuild body timing is much smaller in Release; no index redesign or physical crash claim follows.
 
+**Composed d30a result:** normal146 ran145pass/1fail/0skip with source731 exact. Sole recorded
+failure is an obstructed effect-bar pan: the second finger crossed the still-open Duplicate/Bake
+layer-options popup. Repair that fixture through its existing close control; no product pan rejection
+is established. Separately, root LOOK found the Mode3 after-three-cuts whole-screen PNG black where
+white paper was expected, while its blank-pixel checks passed and Undo screenshot restored white
+paper/three lines. Preserve the result and investigate capture/oracle/empty-vector handoff before
+accepting any drawn-output or performance claim. Candidate remains unharvested; no new install.
+
 ### Work queue
 
 1. Finish copied-Test1 Mode3 diagnosis and review the existing shared-window presentation seam.
