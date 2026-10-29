@@ -37,7 +37,10 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
 - **Current check:** the HUD release and public Gallery/reopen checks passed; restoring the old
   cleanup failed the release assertion, then all eight menu checks and the release check passed.
   This four-path component is integrated. New picture-save and tiny-brush fixes remain isolated;
-  the whole66 small-brush class is running. None of this newer work is installed. The Test1 eraser comparison saved seven local full-render
+  the corrected whole66 small-brush class is running after a quantified sub-byte test correction.
+  PNG/Bake normal68 reached67pass/1test-setupfailure: the test reopened Actions and committed
+  its own pasted float before checking Set Down. No Bake pixel assertion was reached in that method.
+  None of this newer work is installed. The Test1 eraser comparison saved seven local full-render
   requests before a conservative fallback; all-owner work and input variability still need checks.
 
 - **Picture saving audit:** an actual save/reload showed a scale2 placed picture doubling in drawn
@@ -57,8 +60,12 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
   UI1 stopped on an unanswered iOS Paste prompt before Bake; a test-only prompt correction, controls
   and assembled qualification remain. This is part of the architecture/effects audit.
 - **Recovery gate:** the fresh strict-text run stopped at its new red-ink drawing premise before
-  Cancel/Restore. Its inputs and outputs are preserved; the failure is being traced rather than
-  counted as a recovery pass.
+  Cancel/Restore. Its exact saved1pt stroke reproduced missing ink independently; the shared-dab
+  candidate now renders it and passed its strict dedicated saved-stroke method. Keep that regression.
+  The recovery test itself needs a reliably opaque larger mark and the existing measured slider
+  helper, because native low-position adjustment produced1pt instead of the requested size. Preserve
+  the red-core assertion, then restage a fresh simulator for actual Cancel/Versions/Restore/Trash
+  proof; no recovery pass is claimed yet.
 
 - **Crash and lag:** Test1 is4096²; Kevin confirms rapid To Cross erasing triggers the failure. The
   crash cause remains unproved. The simulator Test1 capture made36 cuts and produced25 full4096²

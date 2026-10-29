@@ -253,7 +253,14 @@ final class GalleryRecoveryUITests: PaintUITestCase {
         XCTAssertTrue(opaque.waitForExistence(timeout: 5))
         if !opaque.isSelected { tapWhenHittable(opaque, "The ordinary opaque brush") }
         XCTAssertTrue(opaque.isSelected)
-        setBrushSize(app, normalized: 4.0 / 199)
+        // This is a recovery workflow: give its strict red-core oracle opaque ink. Tiny dab
+        // coverage has its own renderer regression; native low-position slider adjustment had
+        // silently selected 1pt here. Measure the public thumb position before leaving the editor.
+        openBrushEditor(app)
+        let sizeSlider = app.sliders["brushPanel.sizeSlider"]
+        XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5))
+        adjustSlider(sizeSlider, to: 11.0 / 199, tolerance: 2.0 / 199)
+        closeBrushEditor(app)
         app.buttons["toolbar.brushButton"].tap()
         XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5))
         setBrushColor(app, hex: "FF0000")
