@@ -234,8 +234,21 @@ final class TextSessionUITests: PaintUITestCase {
         XCTAssertTrue(app.menuItems["Cut"].waitForExistence(timeout: 5),
                       "PREMISE: the native edit menu selected the measured first word")
         let selectAll = app.menuItems["Select All"]
-        XCTAssertTrue(selectAll.waitForExistence(timeout: 5),
-                      "PREMISE: the native edit menu offers Select All beyond the selected word")
+        let menuDeadline = Date().addingTimeInterval(5)
+        if !selectAll.exists {
+            let forward = app.buttons["Forward"]
+            let remaining = max(0, menuDeadline.timeIntervalSinceNow)
+            guard forward.waitForExistence(timeout: remaining) else {
+                XCTFail("PREMISE: the native edit menu offers its next action page")
+                return
+            }
+            forward.tap()
+        }
+        let selectAllIsAvailable = selectAll.waitForExistence(
+            timeout: max(0, menuDeadline.timeIntervalSinceNow))
+        XCTAssertTrue(selectAllIsAvailable,
+                      "PREMISE: the native edit menu offers the real Select All action")
+        guard selectAllIsAvailable else { return }
         selectAll.tap()
         XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: Select All leaves the text editor active")
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5),
