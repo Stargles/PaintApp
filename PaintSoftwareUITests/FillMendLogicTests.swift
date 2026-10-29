@@ -891,57 +891,104 @@ final class FillMendLogicTests: XCTestCase {
     func testCanonicalSupportPreservesTheSquareHoleAtWideReach() throws {
         // Keep the original 96-square geometry, but pass real canonical vector support into the
         // same GPU mend mask used by current fills. Two closed square-tip strokes make the
-        // 448-pixel ring and enclosing frame; a separate body stroke proves the result is not an
-        // all-zero refusal. The hole itself is absent from the supplied fill region.
+        // 448-pixel ring and enclosing frame. The hole itself is absent from the supplied fill region.
         let squareBrush = Brush(name: "Square mend fixture", tip: .stamp(.builtIn(.square)), size: 4,
             dab: BrushDabSettings(flow: 1, spacing: 0.1, hardness: 1))
-        let frame = supportStroke([CGPoint(x: 10, y: 10), CGPoint(x: 86, y: 10),
-            CGPoint(x: 86, y: 86), CGPoint(x: 10, y: 86), CGPoint(x: 10, y: 10)], size: 4, brush: squareBrush)
-        let ring = supportStroke([CGPoint(x: 30, y: 26), CGPoint(x: 56, y: 26),
-            CGPoint(x: 56, y: 56), CGPoint(x: 30, y: 56), CGPoint(x: 30, y: 26)], size: 4, brush: squareBrush)
-        let body = supportStroke([CGPoint(x: 18, y: 34), CGPoint(x: 18, y: 50)], size: 4, brush: squareBrush)
-        let reference = try supportReference([frame, ring, body])
-        let ink = stride(from: 3, to: reference.rgba.count, by: 4).map { reference.rgba[$0] != 0 }
+        let framePoints = [CGPoint(x: 10, y: 10), CGPoint(x: 86, y: 10),
+            CGPoint(x: 86, y: 86), CGPoint(x: 10, y: 86), CGPoint(x: 10, y: 10)]
+        let ringPoints = [CGPoint(x: 30, y: 26), CGPoint(x: 56, y: 26),
+            CGPoint(x: 56, y: 56), CGPoint(x: 30, y: 56), CGPoint(x: 30, y: 26)]
+        let frame = supportStroke(framePoints, size: 4, brush: squareBrush)
+        let ring = supportStroke(ringPoints, size: 4, brush: squareBrush)
         let ringPixels = (0..<96 * 96).filter { index in
             let x = index % 96, y = index / 96
             return (28..<58).contains(x) && (24..<58).contains(y)
                 && !((32..<54).contains(x) && (28..<54).contains(y))
         }
         XCTAssertEqual(ringPixels.count, 448, "PREMISE: retain the original 30×34 ring minus its 22×26 hole")
-        XCTAssertTrue(ringPixels.allSatisfy { ink[$0] }, "PREMISE: all original protected ring pixels are actual vector ink")
         let framePixels = (0..<96 * 96).filter { index in
             let x = index % 96, y = index / 96
             return (8..<88).contains(x) && (8..<88).contains(y)
                 && (!(12..<84).contains(x) || !(12..<84).contains(y))
         }
-        XCTAssertTrue(framePixels.allSatisfy { ink[$0] }, "PREMISE: the original enclosing frame is actual vector ink")
 
-        let source = (0..<96 * 96).map { index -> UInt8 in
-            let x = index % 96, y = index / 96
-            let insideFrame = (12..<84).contains(x) && (12..<84).contains(y)
-            let hole = (32..<54).contains(x) && (28..<54).contains(y)
-            return insideFrame && !hole && !ink[index] ? 255 : 0
+        func edgeEnvelopes(_ points: [CGPoint]) -> [CGRect] {
+            zip(points, points.dropFirst()).map { start, end in
+                dabImageBounds(at: start, diameter: 4, angle: 0)
+                    .union(dabImageBounds(at: end, diameter: 4, angle: 0))
+            }
         }
-        let engine = try XCTUnwrap(MetalFillEngine.shared)
-        let session = try XCTUnwrap(engine.makeMendSession(referenceRGBA: reference.rgba,
-            width: 96, height: 96, sourceMask: source).session)
-        session.installVectorReference(reference.support)
-        let additions = try XCTUnwrap(session.mendMask(sourceMask: source, threshold: 0,
-            artworkRect: nil, reach: 40))
+        func bodyEnvelope(centerX: CGFloat) -> CGRect {
+            dabImageBounds(at: CGPoint(x: centerX, y: 34), diameter: 4, angle: 0)
+                .union(dabImageBounds(at: CGPoint(x: centerX, y: 50), diameter: 4, angle: 0))
+        }
+        func sourceMask(for ink: [Bool]) -> [UInt8] {
+            ink.indices.map { index in
+                let x = index % 96, y = index / 96
+                let insideFrame = (12..<84).contains(x) && (12..<84).contains(y)
+                let hole = (32..<54).contains(x) && (28..<54).contains(y)
+                return insideFrame && !hole && !ink[index] ? 255 : 0
+            }
+        }
+        func runMend(reference: CanvasManager.FillReference, source: [UInt8]) throws -> [UInt8] {
+            let engine = try XCTUnwrap(MetalFillEngine.shared)
+            let session = try XCTUnwrap(engine.makeMendSession(referenceRGBA: reference.rgba,
+                width: 96, height: 96, sourceMask: source).session)
+            session.installVectorReference(reference.support)
+            return try XCTUnwrap(session.mendMask(sourceMask: source, threshold: 0, artworkRect: nil, reach: 40))
+        }
+        func bodyPixels(centerX: Int, ink: [Bool]) -> [Int] {
+            ink.indices.filter { index in
+                let x = index % 96, y = index / 96
+                return ((centerX - 2)..<(centerX + 2)).contains(x) && (32..<52).contains(y)
+            }
+        }
+        func assertOriginalContours(_ ink: [Bool], additions: [UInt8]) {
+            XCTAssertTrue(ringPixels.allSatisfy { ink[$0] },
+                          "PREMISE: all original protected ring pixels are actual vector ink")
+            XCTAssertTrue(framePixels.allSatisfy { ink[$0] },
+                          "PREMISE: the original enclosing frame is actual vector ink")
+            XCTAssertTrue(additions.indices.allSatisfy { additions[$0] == 0 || ink[$0] },
+                          "mending adds only pixels drawn by the actual vector reference")
+            XCTAssertTrue(ringPixels.allSatisfy { additions[$0] == 0 },
+                          "Reach 40 preserves all 448 pixels of the original square-hole contour")
+            XCTAssertTrue(framePixels.allSatisfy { additions[$0] == 0 },
+                          "wide Reach does not repaint the enclosing true boundary")
+        }
 
-        XCTAssertTrue(additions.contains(255), "PREMISE: wide Reach still mends a fully owned interior stroke")
-        XCTAssertTrue(additions.indices.allSatisfy { additions[$0] == 0 || ink[$0] },
-                      "mending adds only pixels drawn by the actual vector reference")
-        let bodyPixels = ink.indices.filter { index in
-            let x = index % 96, y = index / 96
-            return (16..<20).contains(x) && (32..<52).contains(y)
+        let frameEdges = edgeEnvelopes(framePoints), ringEdges = edgeEnvelopes(ringPoints)
+        let ambiguousBodyEnvelope = bodyEnvelope(centerX: 18)
+        XCTAssertTrue(frameEdges.contains { $0.intersects(ambiguousBodyEnvelope) },
+                      "PREMISE: x=18 body overlaps the frame's intentional spill-expanded dab envelopes")
+        let ambiguousBody = supportStroke([CGPoint(x: 18, y: 34), CGPoint(x: 18, y: 50)], size: 4, brush: squareBrush)
+        let ambiguousReference = try supportReference([frame, ring, ambiguousBody])
+        let ambiguousInk = stride(from: 3, to: ambiguousReference.rgba.count, by: 4).map {
+            ambiguousReference.rgba[$0] != 0
         }
-        XCTAssertTrue(bodyPixels.contains { additions[$0] == 255 },
-                      "Reach 40 adds actual ink on the detached interior body")
-        XCTAssertTrue(ringPixels.allSatisfy { additions[$0] == 0 },
-                      "Reach 40 preserves all 448 pixels of the original square-hole contour")
-        XCTAssertTrue(framePixels.allSatisfy { additions[$0] == 0 },
-                      "wide Reach does not repaint the enclosing true boundary")
+        let ambiguousSource = sourceMask(for: ambiguousInk)
+        let ambiguousAdditions = try runMend(reference: ambiguousReference, source: ambiguousSource)
+        let ambiguousBodyPixels = bodyPixels(centerX: 18, ink: ambiguousInk)
+        XCTAssertTrue(ambiguousBodyPixels.contains { ambiguousInk[$0] }, "PREMISE: x=18 body is actual vector ink")
+        assertOriginalContours(ambiguousInk, additions: ambiguousAdditions)
+        XCTAssertTrue(ambiguousBodyPixels.allSatisfy { ambiguousAdditions[$0] == 0 },
+                      "the deliberately overlapping support envelopes remain protected as an uncertain join")
+
+        let usefulBodyEnvelope = bodyEnvelope(centerX: 70)
+        XCTAssertTrue((frameEdges + ringEdges).allSatisfy { !$0.intersects(usefulBodyEnvelope) },
+                      "PREMISE: x=70 body's complete spill-expanded envelopes clear frame and ring")
+        let usefulBody = supportStroke([CGPoint(x: 70, y: 34), CGPoint(x: 70, y: 50)], size: 4, brush: squareBrush)
+        let usefulReference = try supportReference([frame, ring, usefulBody])
+        let usefulInk = stride(from: 3, to: usefulReference.rgba.count, by: 4).map {
+            usefulReference.rgba[$0] != 0
+        }
+        let usefulSource = sourceMask(for: usefulInk)
+        let usefulBodyPixels = bodyPixels(centerX: 70, ink: usefulInk)
+        XCTAssertTrue(usefulBodyPixels.contains { usefulInk[$0] }, "PREMISE: x=70 body is actual vector ink")
+        let usefulAdditions = try runMend(reference: usefulReference, source: usefulSource)
+        assertOriginalContours(usefulInk, additions: usefulAdditions)
+        XCTAssertTrue(usefulAdditions.contains(255), "PREMISE: Reach 40 finds a certified, fully owned body")
+        XCTAssertTrue(usefulBodyPixels.contains { usefulAdditions[$0] == 255 },
+                      "Reach 40 adds actual ink on the detached, envelope-separated body")
     }
 
     /// The control, and the reason the rest mean anything: with the option off, two fills either side
