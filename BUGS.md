@@ -3159,3 +3159,11 @@ vector renderer. Both earlier blue strokes render, but the kept64² PNG has zero
 anywhere (root rawRGBA scan and actual picture inspection). This rules out a display-handoff-only
 explanation; trace the shared small-brush renderer/culling/coverage before changing the fixture or
 adding minimum-width inflation. No physical crash attribution.
+
+## Failed photo transfer returns without feedback — October29
+
+Whole-body review atbdf43c61 confirmed AddMenu.primePhoto clears its picker selection and silently
+returns when transfer/decode or primeImage fails. The adjacent video path reports failure through
+its existing notice. The existing view-owned notice now reports the photo failure, with the same picker-reset/retry
+behaviour. No new state/service/import path. Existing Add-menu and assembled gates remain; this
+low-impact feedback change adds no new test-only hook or abstraction. Finding receipt: `s55-recorded-regressions/source-review-next8-bdf43c61.md`.

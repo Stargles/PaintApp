@@ -217,7 +217,10 @@ struct AddMenu: View {
         let image = (try? await item.loadTransferable(type: Data.self)).flatMap(UIImage.init(data:))
         await MainActor.run {
             photoPickerItem = nil
-            guard let image, canvasManager.primeImage(image) else { return }
+            guard let image, canvasManager.primeImage(image) else {
+                notice = "That photo could not be read."
+                return
+            }
             activePanel = .none
         }
     }

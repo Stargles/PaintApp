@@ -43,6 +43,10 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
   None of this newer work is installed. The Test1 eraser comparison saved seven local full-render
   requests before a conservative fallback; all-owner work and input variability still need checks.
 
+- **Photo-import feedback audit:** `AddMenu.primePhoto` silently discarded transfer/decode/priming
+  failure while the adjacent video path reports it. Reuse the existing menu notice for photo
+  failure; no new state or import abstraction. Existing Add-menu checks and assembled gates remain.
+
 - **Picture saving audit:** an actual save/reload showed a scale2 placed picture doubling in drawn
   size. Its PNG keeps rotation but reloads at scale1; the placement needs correct image-unit
   conversion. Fix and package round-trip checks are pending; no new saved format is proposed.
