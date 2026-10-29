@@ -66,7 +66,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 5),
                       "PREMISE: the effect settings bar is up the moment the effect layer is current, with no tap")
         XCTAssertEqual(title.label, "Brightness / Contrast")
-        attachScreenshot(app, "effect-bar-up")
+        attachScreenshot(XCUIScreen.main, "effect-bar-up")
 
         // The effect settings card belongs to the selected value layer, but its separate options
         // popover still covers the canvas. Dismiss only that popover before asking two fingers to pan;
@@ -79,7 +79,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
                       "PREMISE: the layer-options popover closed")
         XCTAssertTrue(title.waitForExistence(timeout: 5),
                       "PREMISE: closing layer options leaves the effect settings card visible")
-        attachScreenshot(app, "effect-bar-up-options-closed-landscape")
+        attachScreenshot(XCUIScreen.main, "effect-bar-up-options-closed-landscape")
 
         try assertTheMenuSurvivesTheTransforms(app, canvas, "the effect settings bar") { title.exists }
 
@@ -119,7 +119,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 5), "PREMISE: the node's effect settings bar is up")
         XCTAssertFalse(app.tables["layerPanel.list"].exists,
                        "PREMISE: a node's bar is raised from the rail's options, so the rail stands down for it")
-        attachScreenshot(app, "node-effect-bar-up")
+        attachScreenshot(XCUIScreen.main, "node-effect-bar-up")
 
         try assertTheMenuSurvivesTheTransforms(app, canvas, "the node's effect settings bar") { title.exists }
 
@@ -147,7 +147,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         XCTAssertTrue(app.buttons["selectPanel.mode.lasso"].waitForExistence(timeout: 5), "PREMISE: the Select panel is up")
         XCTAssertTrue(title.waitForNonExistence(timeout: 5),
                       "Select opened over an effect layer's bar: the two stack in the dock instead of one yielding")
-        attachScreenshot(app, "select-over-effect-layer")
+        attachScreenshot(XCUIScreen.main, "select-over-effect-layer")
 
         app.buttons["toolbar.selectButton"].tap()
         XCTAssertTrue(app.buttons["selectPanel.mode.lasso"].waitForNonExistence(timeout: 5), "PREMISE: Select closed")
@@ -178,7 +178,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         settings.tap()
         let title = app.staticTexts["layerOptions.subMenuTitle"]
         XCTAssertTrue(title.waitForExistence(timeout: 5), "PREMISE: the mode's settings are docked at the bottom")
-        attachScreenshot(app, "transform-settings-bar-up")
+        attachScreenshot(XCUIScreen.main, "transform-settings-bar-up")
 
         try assertTheMenuSurvivesTheTransforms(app, canvas, "the transform mode's settings bar") { title.exists }
     }
@@ -197,7 +197,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         addText.tap()
         let font = app.buttons["textPanel.fontButton"]
         XCTAssertTrue(font.waitForExistence(timeout: 5), "PREMISE: Add Text opened the text panel")
-        attachScreenshot(app, "text-panel-up")
+        attachScreenshot(XCUIScreen.main, "text-panel-up")
 
         try assertTheMenuSurvivesTheTransforms(app, canvas, "the text panel") { font.exists }
     }
@@ -270,7 +270,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         XCTAssertNotEqual(readTransform(app), before, "PREMISE: the pinch zoomed the canvas")
         XCTAssertEqual(play.label, playingLabel, "THE BUG: a pinch stopped playback")
         XCTAssertTrue(playheadIsAdvancing(app), "THE BUG: a pinch stopped the playhead")
-        attachScreenshot(app, "still-playing-after-pan-and-pinch")
+        attachScreenshot(XCUIScreen.main, "still-playing-after-pan-and-pinch")
 
         // The control that keeps the fix honest: a single touch on the canvas is an edit, and still
         // ends playback.
@@ -302,7 +302,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
         XCTAssertNotEqual(readTransform(app), before, "PREMISE: the pinch zoomed the canvas",
                           file: file, line: line)
         XCTAssertTrue(stillOnScreen(), "THE BUG: a pinch closed \(what)", file: file, line: line)
-        attachScreenshot(app, "\(what)-after-pan-and-pinch")
+        attachScreenshot(XCUIScreen.main, "\(what)-after-pan-and-pinch")
     }
 
     /// Whether the playhead is moving: the frame label takes more than one value across a run of reads.
