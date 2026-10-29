@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 import UIKit
 
 /// Pure-logic tests for CANVAS_RESIZE.md's "Resize Canvas" — stages 1, 2 and 3.
@@ -1247,14 +1248,9 @@ final class CanvasResizeLogicTests: XCTestCase {
         XCTAssertFalse(ScenePhaseSaveGate.shouldSave(from: .inactive, to: .active))
     }
 
-    /// **The busy state is announced only when the walk would actually be felt** — the thing that
-    /// stops a 0.27 s resize putting a modal on screen for a quarter of a second and taking it away
-    /// again.
-    ///
-    /// The numbers are §2's measured per-cel costs. What this pins is the *shape* of the decision:
-    /// a small document is silent, the owner's real one is announced, and a raster-heavy document
-    /// crosses sooner than a blank one because it costs 5–10× as much per cel.
-    func testTheBusyStateIsAnnouncedOnlyWhenTheWalkWouldBeFelt() {
+    /// The historical per-cel estimate selects known costly work for early announcement; the
+    /// presenter's deadline separately handles a slower-than-predicted background preparation.
+    func testTheAuditAnnouncesKnownCostlyWalksBeforeTheyStart() {
         let small = CanvasResizeAudit(blankCels: 32, inkedCels: 0)
         XCTAssertFalse(small.needsAnnouncing(scaling: false), "32 blank cels is 29 ms — a flicker")
         XCTAssertFalse(small.needsAnnouncing(scaling: true))
@@ -1297,34 +1293,48 @@ final class CanvasResizeLogicTests: XCTestCase {
         XCTAssertEqual(withBaked.audit.celCount, 2)
     }
 
-    /// **A resize small enough to be imperceptible never raises the busy state at all**, and that is
-    /// what stops a 0.27 s operation putting a modal on screen and taking it away again.
-    ///
-    /// The mechanism is worth stating because it is not a timer: the fast path never suspends, so the
-    /// whole resize is one main-actor turn, SwiftUI never lays out with `isResizing` set, and there is
-    /// no frame in which the overlay could be drawn. The flag is free; only the *yield* costs
-    /// anything.
-    func testASmallResizeNeverRaisesTheBusyStateAtAll() throws {
+    /// Predicted-short raster work locks without immediate announcement. Holding the real worker
+    /// makes preparation and atomic landing independently observable; this is not a UI timing test.
+    func testASmallResizeLocksUntilCompletionWithoutImmediateAnnouncement() async throws {
         let manager = Self.documentWithEveryTierPopulated()
         let plan = try XCTUnwrap(manager.planResize(to: CGSize(width: 96, height: 96)))
         XCTAssertFalse(plan.audit.needsAnnouncing(scaling: false), "PREMISE: five cels is 22 ms")
+        let queue = DispatchQueue(label: "resize.small.worker")
+        let release = DispatchSemaphore(value: 0)
+        queue.async { release.wait() }
+        defer { release.signal() }
+        manager.canvasPixelTransforms = LatestWins(queue: queue)
 
         manager.resizeCanvasAnnouncingProgress(to: CGSize(width: 96, height: 96))
 
-        XCTAssertFalse(manager.isResizing, "nothing to flash: the flag was never observable")
-        XCTAssertEqual(manager.canvasSize, CGSize(width: 96, height: 96),
-                       "and the resize is already finished, on the same turn as the tap")
+        let id = try XCTUnwrap(manager.canvasUpdatePhase.operationID)
+        XCTAssertEqual(manager.canvasUpdatePhase, .preparing(id), "predicted-short work starts without immediate announcement")
+        XCTAssertTrue(manager.isResizing, "preparing already locks edits and saves")
+        XCTAssertFalse(ScenePhaseSaveGate.mayStartSave(screenIsEditor: true, hasCanvas: true,
+                                                       isResizing: manager.isResizing))
+        XCTAssertEqual(manager.canvasSize, CanvasFixture.canvasSize, "no partial landing while the worker waits")
+        manager.flipCanvasAnnouncingProgress(horizontal: true)
+        XCTAssertEqual(manager.canvasUpdatePhase, .preparing(id), "a second canvas operation cannot replace the locked job")
+        let finished = expectation(description: "small resize lands")
+        var sizeWhenUnlocked: CGSize?
+        let terminal = manager.$canvasUpdatePhase.first(where: { $0 == .idle }).sink { _ in
+            sizeWhenUnlocked = manager.canvasSize
+            finished.fulfill()
+        }
+        defer { terminal.cancel() }
+        release.signal()
+        await fulfillment(of: [finished], timeout: 30)
+
+        XCTAssertFalse(manager.isResizing, "landing releases the safety lock")
+        XCTAssertEqual(sizeWhenUnlocked, CGSize(width: 96, height: 96), "the lock releases only after the document lands")
+        XCTAssertEqual(manager.canvasSize, CGSize(width: 96, height: 96), "the requested size is committed")
+        let image = try XCTUnwrap(manager.layers[0].cels[0].bakedImage?.resolveImage().get().cgImage)
+        XCTAssertEqual(Self.paintedBounds(image), CGRect(x: 40, y: 24, width: 12, height: 20),
+                       "the worker's real blue pixels land with the new extent")
     }
 
-    /// **The announced path raises the busy state before it blocks and lowers it after** — §5 rule
-    /// 15's whole requirement, and rule 12's gate riding on the same flag.
-    ///
-    /// The two assertions taken *between* the call and the awaits are the load-bearing ones: the flag
-    /// is set synchronously, before the `Task`, so there is no window in which a `scenePhase` change
-    /// could start a save; and the canvas has not moved yet, which is what says the spinner precedes
-    /// the work rather than following it. Without the `await Task.yield()` inside
-    /// `resizeCanvasAnnouncingProgress` the artist would get the freeze *and* no spinner, which is
-    /// strictly worse than today.
+    /// Known expensive work announces before dispatch, while the same phase closes the save gate.
+    /// Wait for the actual landing, not a fixed number of main-actor yields.
     func testTheAnnouncedResizeRaisesTheBusyStateBeforeItBlocks() async throws {
         let manager = Self.documentWithManyInkedCels(count: 25)
         let newSize = CGSize(width: 32, height: 32)
@@ -1332,18 +1342,26 @@ final class CanvasResizeLogicTests: XCTestCase {
         XCTAssertTrue(plan.audit.needsAnnouncing(scaling: true),
                       "PREMISE: 25 inked cels scaling is 0.22 s — over the line")
         XCTAssertFalse(manager.isResizing)
+        let queue = DispatchQueue(label: "resize.announced.worker")
+        let release = DispatchSemaphore(value: 0)
+        queue.async { release.wait() }
+        defer { release.signal() }
+        manager.canvasPixelTransforms = LatestWins(queue: queue)
 
         manager.resizeCanvasAnnouncingProgress(to: newSize, mode: .scaleToFit)
 
         XCTAssertTrue(manager.isResizing, "set synchronously, so no save can slip in behind it")
+        XCTAssertTrue(manager.canvasUpdatePhase.isAnnounced, "the audit announces before the worker starts")
         XCTAssertFalse(ScenePhaseSaveGate.mayStartSave(screenIsEditor: true, hasCanvas: true,
                                                        isResizing: manager.isResizing),
                        "and rule 12's gate is closed for the whole of it")
         XCTAssertEqual(manager.canvasSize, CanvasFixture.canvasSize,
                        "the walk has not started: the overlay gets its frame first")
-
-        var spins = 0
-        while manager.isResizing, spins < 500 { await Task.yield(); spins += 1 }
+        let finished = expectation(description: "announced resize lands")
+        let terminal = manager.$canvasUpdatePhase.first(where: { $0 == .idle }).sink { _ in finished.fulfill() }
+        defer { terminal.cancel() }
+        release.signal()
+        await fulfillment(of: [finished], timeout: 30)
 
         XCTAssertFalse(manager.isResizing, "and it is lowered again when the walk returns")
         XCTAssertEqual(manager.canvasSize, newSize)
@@ -1351,8 +1369,59 @@ final class CanvasResizeLogicTests: XCTestCase {
                        "the announced path records the same one step the direct one does")
     }
 
+    func testACompletedUpdatesDeadlineCannotAnnounceTheNextUpdate() async throws {
+        let manager = Self.documentWithManyInkedCels(count: 1)
+        let queue = DispatchQueue(label: "resize.identity.worker")
+        manager.canvasPixelTransforms = LatestWins(queue: queue)
+        manager.resizeCanvasAnnouncingProgress(to: CGSize(width: 96, height: 96))
+        let firstID = try XCTUnwrap(manager.canvasUpdatePhase.operationID)
+        let firstFinished = expectation(description: "first update lands")
+        let firstTerminal = manager.$canvasUpdatePhase.first(where: { $0 == .idle }).sink { _ in firstFinished.fulfill() }
+        defer { firstTerminal.cancel() }
+        await fulfillment(of: [firstFinished], timeout: 30)
+        manager.announceCanvasUpdate(firstID)
+        XCTAssertEqual(manager.canvasUpdatePhase, .idle, "a completed deadline cannot reopen progress")
+
+        let release = DispatchSemaphore(value: 0)
+        queue.async { release.wait() }
+        defer { release.signal() }
+        manager.flipCanvasAnnouncingProgress(horizontal: true)
+        let secondID = try XCTUnwrap(manager.canvasUpdatePhase.operationID)
+        XCTAssertNotEqual(secondID, firstID, "consecutive jobs have distinct presentation deadlines")
+        manager.announceCanvasUpdate(firstID)
+        XCTAssertEqual(manager.canvasUpdatePhase, .preparing(secondID), "an old deadline cannot announce the new job")
+        manager.announceCanvasUpdate(secondID)
+        XCTAssertEqual(manager.canvasUpdatePhase, .announced(secondID), "the pending job's own deadline announces it")
+        XCTAssertTrue(manager.isResizing, "announcement does not release the safety lock")
+        let secondFinished = expectation(description: "flip lands")
+        let secondTerminal = manager.$canvasUpdatePhase.first(where: { $0 == .idle }).sink { _ in secondFinished.fulfill() }
+        defer { secondTerminal.cancel() }
+        release.signal()
+        await fulfillment(of: [secondFinished], timeout: 30)
+        XCTAssertEqual(manager.canvasUpdatePhase, .idle, "flip uses the same terminal phase")
+        XCTAssertEqual(manager.canvasSize, CGSize(width: 96, height: 96))
+    }
+
+    func testASmallNativeGeometryResizeFinishesWithoutAnnouncing() throws {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.addVectorLayer()
+        let vector = try XCTUnwrap(manager.layers[0].cels[0].vector)
+        vector.addStroke(Self.stroke(at: [CGPoint(x: 4, y: 8), CGPoint(x: 20, y: 24)], size: 4))
+        let plan = try XCTUnwrap(manager.planResize(to: CGSize(width: 96, height: 96)))
+        XCTAssertEqual(plan.audit.inkedCels, 0, "PREMISE: no raster preparation is needed")
+        XCTAssertFalse(plan.audit.needsAnnouncing(scaling: false), "PREMISE: the geometry walk is short")
+
+        manager.resizeCanvasAnnouncingProgress(to: CGSize(width: 96, height: 96))
+
+        XCTAssertEqual(manager.canvasUpdatePhase, .idle, "a short native-only walk never suspends or flashes")
+        XCTAssertEqual(manager.canvasSize, CGSize(width: 96, height: 96))
+        let moved = try XCTUnwrap(manager.layers[0].cels[0].vector?.strokes.first?.samples.first)
+        XCTAssertEqual(moved.point, CGPoint(x: 20, y: 24), "the real geometry lands in the same turn")
+        XCTAssertEqual(manager.history.undoStack.map(\.label), [.resizeCanvas])
+    }
+
     /// The button's own entry point refuses an unmappable document too — rule 11 belongs to the
-    /// operation, not to whichever of the two paths reached it, and the announced path checks it
+    /// operation, and the entry point checks it
     /// *before* putting a modal up for work it is not going to do.
     func testTheAnnouncedPathRefusesWithoutEverShowingTheBusyState() throws {
         let manager = Self.documentWithManyInkedCels(count: 25)

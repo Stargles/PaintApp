@@ -412,22 +412,35 @@ final class CanvasManager: ObservableObject {
     /// to show that something is happening rather than to gate anything.
     @Published var isRegisteringInterpolation: Bool = false
 
-    /// True from the moment a "Resize Canvas" is committed until its walk has finished —
-    /// CANVAS_RESIZE.md §5 rules 12 and 15, and stage 3's items 1 and 2.
-    ///
-    /// **It does two jobs and only one of them is the spinner.** `DrawingView` puts a hit-testing
-    /// overlay up on it, so the artist can see the app is working and cannot draw into a document
-    /// whose extent is changing under them; and `ContentView.saveIfNeeded` refuses to *start* a save
-    /// while it is set, through `ScenePhaseSaveGate.mayStartSave`. The second is the one the owner's
-    /// ruling makes **more** necessary rather than less: a block the artist is told about is still a
-    /// block, and `ScenePhaseSaveGate` fires on `active → !active`, so an app switch during one
-    /// would otherwise write a document that is half old-size and half new.
-    ///
-    /// **Set for the announced path only, and that is why nothing flashes.** A resize small enough
-    /// to be imperceptible never suspends, so SwiftUI never lays out with this true and there is no
-    /// frame in which the overlay could appear — see `resizeCanvasAnnouncingProgress`, which decides
-    /// which path a resize takes and carries the reasoning.
-    @Published var isResizing: Bool = false
+    /// One operation owns both the safety lock and its presentation. Preparing blocks edits and
+    /// saves immediately; only announced draws progress. Each operation has its own deadline ID.
+    enum CanvasUpdatePhase: Equatable {
+        case idle
+        case preparing(UUID)
+        case announced(UUID)
+
+        var operationID: UUID? {
+            switch self {
+            case .idle: return nil
+            case .preparing(let id), .announced(let id): return id
+            }
+        }
+
+        var isAnnounced: Bool {
+            if case .announced = self { return true }
+            return false
+        }
+    }
+
+    @Published var canvasUpdatePhase: CanvasUpdatePhase = .idle
+    var isResizing: Bool { canvasUpdatePhase.operationID != nil }
+
+    /// The presenter may announce only the operation whose deadline it actually waited for.
+    func announceCanvasUpdate(_ id: UUID) {
+        guard canvasUpdatePhase == .preparing(id) else { return }
+        canvasUpdatePhase = .announced(id)
+    }
+
     var canvasPixelTransforms: LatestWins?
 
     /// The motion group a canvas tap assigns to, or nil when tapping does nothing — the retagging
@@ -3501,7 +3514,7 @@ final class CanvasManager: ObservableObject {
     @MainActor
     func closeFrameBaker() {
         canvasPixelTransforms?.cancel()
-        isResizing = false
+        canvasUpdatePhase = .idle
         thumbnailBackfillTask?.cancel()
         thumbnailBackfillTask = nil
         frameBaker.close()

@@ -92,7 +92,7 @@ struct SettingsMenu: View {
             .accessibilityIdentifier("settings.resizeCanvasRow")
 
             Text("Crops or expands the artwork area around what you have drawn, or scales the "
-                 + "drawing with it. This cannot be undone.")
+                 + "drawing with it. You can undo the resize.")
                 .font(.caption)
                 .foregroundColor(.gray)
                 .fixedSize(horizontal: false, vertical: true)
@@ -393,11 +393,8 @@ struct CanvasResizeSheet: View {
                 Spacer()
                 Button("Resize") {
                     guard let width, let height, isValid else { return }
-                    // The announcing entry point, not `resizeCanvas(to:mode:)` itself: on a document
-                    // large enough for the walk to be felt it puts the busy overlay up and gets it a
-                    // frame before the block starts (§5 rule 15), and on one small enough that a
-                    // modal would flicker it runs the resize straight through. It also raises the
-                    // refusal (rule 11) and the resample notice (rule 10).
+                    // Locks edits and saves during durable preparation, and lets the presenter
+                    // announce a wait without flashing progress for a short operation.
                     canvasManager.resizeCanvasAnnouncingProgress(to: CGSize(width: width, height: height),
                                                                  mode: mode)
                     dismiss()

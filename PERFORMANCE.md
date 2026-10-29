@@ -1203,6 +1203,13 @@ translation touches every one of them. (This line read *"`VectorSample` is three
 set; the coordinates are still doubles in memory, which is the part the argument rests on.) **The stored-integer intuition is about the file; the
 cost is in the tier above it.**
 
+**Current ownership note (2026-10-26):** the table below measures the older synchronous walk, not
+current end-to-end resize latency or RSS. The button now prepares durable raster source outputs on
+one serial worker before an atomic main-actor landing. PNG I/O is therefore part of the current
+operation. Historical per-cel coefficients only decide early announcement of known costly work;
+a separate presenter deadline announces preparation still pending after0.2s. No new timing or
+resident-memory measurement is claimed here.
+
 **MEASURED 2026-08-28**, `PerfBaselineTests.testWhereACanvasResizeSpendsItsTimeOnAVectorDocument`.
 4 layers × 8 cels at 2048×1024 ↔ 1024×512, out and back, best of three by the whole figure, Debug,
 simulator, **57.3% idle with no other `xcodebuild` running** — the quietest of three whole-test runs,
@@ -1222,8 +1229,8 @@ on the same cels in the same run. Each cel carries the owner's measured density 
 it exactly; a share slightly over 100% on a noisier run is that, not a bookkeeping error.
 `remainder` — the per-cel `autoreleasepool`, `commitAllInteractiveState()`, the guide walk,
 `history.removeAll()`, nil'ing thumbnails, starting the backfill — is **0–4%** in every row.
-`ProjectStore` and the manifest are not a term at all: nothing is written to disk during a resize,
-and the test asserts that against an empty backup root rather than assuming it.)*
+`ProjectStore` and the manifest were not a term in this measured walk: the test checked an empty
+backup root. That is not a claim that current durable raster preparation writes no files.)*
 
 **Finding 1 — the 3–4 s figure is a raster figure, and the owner's documents are not that shape.**
 Both existing resize measurements (`testWhatTheCanvasPaddingResizeCosts`,

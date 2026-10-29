@@ -730,8 +730,9 @@ Laptop → iPad: on FILE_END, if a document is open, `kind == "image"` → `inse
 reason:"No document is open on the iPad"`. The insert is exactly the picker's, Move-box lift included.
 
 iPad → laptop: `ExportSheet` gains **Send to Computer** beside the existing destination, enabled only
-while a client is connected; it sends the `.finished(url)` file and reports the laptop's FILE_RESULT
-in the sheet.
+while a client is connected; it sends the immutable `.finished` product's file and reports the laptop's
+FILE_RESULT only if that product is still current. Its callback retains the source through completion;
+resetting/re-exporting cannot change the pending sender's bytes or republish its old progress/result.
 
 **iPad half built, stage 4.** `ScreenStreamClient` owns both directions: FILE_BEGIN opens a temp file
 in a new `StreamTransferStore` directory (Application Support, beside `VideoImportStore` — never

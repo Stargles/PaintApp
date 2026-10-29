@@ -21,22 +21,24 @@ history and original evidence remain in Git and the named packets.
   reviewed live-reference and red-to-blue continuity pictures. No additional On Top runtime state
   was added. Assembled-source and device confirmation remain.
 
-- Next, join and reconcile the private combined candidate at
-  `/Users/juliapark/PaintWork/PaintApp-s55-export-resize-gradient-compose`, source
-  `219790247dc684df1ec1182a7a45c0c2cd3daa95`. It combines Export, Resize, and Gradient: 149 logic
-  methods (`FrameExportLogicTests` 19, `FrameExportSessionLogicTests` 31,
-  `ProjectLocationLogicTests` 23, `CanvasResizeLogicTests` 47, `FillObjectLogicTests` 29) and 30
-  public UI methods (`ToolPanelsUITests` 15, `FillObjectUITests` 15). Credit only reached
-  assertions, then follow root's next run order. Evidence:
-  `/Users/juliapark/PaintWork/s55-recorded-regressions/compose-normal179-21979024/` and
-  `/Users/juliapark/PaintWork/s55-recorded-regressions/compose-candidate-21979024/`. Baseline179/179
-  and nine root-reviewed pictures are complete; controls1–6 were reviewed and the remaining eight
-  controls are active under the root lease. No harvest or assembled-green claim yet.
+- Export, Resize, and Gradient are now harvested through 14 source paths and three specification
+  documents. Candidate `219790247dc684df1ec1182a7a45c0c2cd3daa95` passed179/179, with nine
+  root-reviewed pictures. Thirteen deliberate controls reached their intended assertions; the
+  fourteenth reached its first intended deadline assertion before downstream timeout, so its overall
+  verdict remains inconclusive. Normal source rebuilt49/49. All717 other source entries, including
+  recording and stream corrections, stayed exact. Receipt:
+  `/Users/juliapark/PaintWork/s55-recorded-regressions/compose-harvest-prep-21979024-to-0d4b2b3e/root-applied-receipt.json`.
+  Final assembled fast tiers/UI/performance gates remain.
 
-- `/Users/juliapark/PaintWork/s54-final-qualification/root-next-gates.json` is the live lease/status
-  file. Its integration pin is `0d4b2b3e`; the root owns the active remaining-eight-controls lease
-  for candidate219. Re-read that file before any new grant. Do not infer or invent a running PID or
-  start overlapping native/compiler/simulator work.
+- The current-support square-hole Mend test is integrated but unrun. It replaces no algorithm:
+  the old cap/square-hole reports concern the retired distance-wave implementation. Qualify the
+  actual canonical-support96-square/448-ring/Reach40 case before crediting preservation.
+
+- Next: fresh isolated Test/Test1 diagnostic at `e05770a3bcd12379f4ef7fc12d11fe85ce905eb8`,
+  `/Users/juliapark/PaintWork/s55-recorded-regressions/test-replay-current-recording-e05770a3/`.
+  Product matches integration0d4 except explicit temporary Mode3 recorder notes; it includes the
+  recording copy correction and public Study-folder navigation. Build/stage/selectors are unrun.
+  Root owns the sole native slot; consult `root-next-gates.json` before any lifecycle action.
 
 - No main merge, push, or new install. Main/origin remains
   `afd2030c831db7a746271fe306e8b5a5b9b02df6`. Merge only after all required gates pass.

@@ -71,6 +71,7 @@ struct DrawingView: View {
     /// built, or which state it depends on, moves.
     var body: some View {
         PlaybackTrace.span(.bodyDrawing) { bodyContent }
+            .allowsHitTesting(!canvasManager.isResizing)
     }
 
     /// The editor's whole body — every toolbar, the timeline and the layer rail are constructed here
@@ -369,6 +370,14 @@ struct DrawingView: View {
             // TODO (64)'s twin of the line above, for the transform settings bar.
             if showingTransformSettings { showingTransformSettings = false }
         }
+        // Safety locks immediately. Progress is presentation: cancel this deadline on completion
+        // or replacement, then verify the captured operation ID before announcing it.
+        .task(id: canvasManager.canvasUpdatePhase.operationID) {
+            guard case .preparing(let id) = canvasManager.canvasUpdatePhase else { return }
+            try? await Task.sleep(nanoseconds: UInt64(CanvasResizeAudit.announceAboveSeconds * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            canvasManager.announceCanvasUpdate(id)
+        }
         // **The dismissal timer, and why it is the view's.**
         //
         // `CanvasManager.raise` mints a notice and stops; nothing on the model ever clears one. A
@@ -424,28 +433,12 @@ struct DrawingView: View {
     ///
     /// Ordered least-transient first, so the bar the artist is actively dragging a slider in is the one
     /// nearest their hand and the one that does not move when another arrives above it.
-    /// The "Resizing canvas…" modal — CANVAS_RESIZE.md §5 rule 15, and the whole of what the owner
-    /// asked for when they ruled the freeze acceptable: *"as long as the user knows its loading."*
-    ///
-    /// **It is a scrim as much as a spinner.** The resize rewrites every cel's buffers and then
-    /// `canvasSize`, and `setCanvasPadding`'s own comment explains why even a pending shape preview
-    /// has to be baked first — so a touch that reached the canvas across the one suspension the
-    /// announced path takes would be a touch on a document whose extent is about to change. `Color`
-    /// hit-tests, so this swallows it. CANVAS_RESIZE.md §3: *"A resize is modal-busy or it is a
-    /// race."*
-    ///
-    /// **No transition and no animation, deliberately.** The next thing that happens after this view
-    /// is drawn is a multi-second main-thread block, so a fade-in would be a fade that never runs —
-    /// the artist would see the half-way frame frozen. It appears instantly and is gone instantly.
-    ///
-    /// **Indeterminate.** `CanvasResizeAudit` knows the cel count before the first cel, so a
-    /// determinate bar was on the table (§4 stage 3's item 1 asks for one) — but reporting `n / total`
-    /// needs the walk to suspend between cels, which is the interleaved execution the owner's ruling
-    /// demoted *and* what would make a half-resized document observable. `resizeCanvasAnnouncingProgress`
-    /// carries that argument; the count is spent on deciding whether to show this at all instead.
+    /// The announced operation's indeterminate progress. Input is already blocked on the entire
+    /// editor while preparing, independently of this scrim. No transition delays known blocking
+    /// geometry work or leaves a partial fade frozen during the atomic landing.
     @ViewBuilder
     private var canvasResizeBusyOverlay: some View {
-        if canvasManager.isResizing {
+        if canvasManager.canvasUpdatePhase.isAnnounced {
             ZStack {
                 Color.black.opacity(0.6)
                 VStack(spacing: 14) {

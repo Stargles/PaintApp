@@ -389,24 +389,16 @@ struct CanvasResizeAudit: Equatable {
     /// `interpolationQuality`**: forcing `.default` in both primitives measured 2.28×, no cheaper.
     static let inkedScaleCelSeconds: Double = 0.0088
 
-    /// How long the mutation walk will block the main actor for, near enough to decide whether the
-    /// artist needs telling.
+    /// Historical per-cel estimate used to announce known expensive geometry/landing work before
+    /// it starts. Raster preparation now also includes durable off-main PNG work; this estimate is
+    /// not a bound on that worker's duration.
     func predictedSeconds(scaling: Bool) -> Double {
         Double(blankCels) * Self.blankCelSeconds
             + Double(inkedCels) * (scaling ? Self.inkedScaleCelSeconds : Self.inkedCropCelSeconds)
     }
 
-    /// Above this, the block is a wait; below it, a spinner would be on screen for less time than it
-    /// takes to see one.
-    ///
-    /// **The threshold exists because the flag alone is free and only the *yield* costs anything.**
-    /// A resize that never suspends is one main-actor turn, so SwiftUI never renders the busy state
-    /// at all and there is nothing to flash; the announced path suspends first precisely so the
-    /// spinner is committed to the screen before the block starts. So this number is not "when is
-    /// the app busy" — it is "when is a modal worth putting up", and 0.2 s is where a briefly-shown
-    /// one stops reading as a glitch. At the owner's real document size (§2: 0.9 ms a cel, blank
-    /// raster tiers) that is 222 cels; at 300 the resize is announced, and a 32-cel test document is
-    /// silent.
+    /// Known costly work is announced immediately; otherwise the presenter waits this long before
+    /// announcing an operation that is still preparing. The safety lock never waits for this.
     static let announceAboveSeconds: Double = 0.2
 
     func needsAnnouncing(scaling: Bool) -> Bool {
@@ -620,64 +612,35 @@ extension CanvasManager {
         return commitResize(plan)
     }
 
-    /// The Resize button's entry point: `resizeCanvas(to:mode:)` with §5 rule 15's busy state around
-    /// it. CANVAS_RESIZE.md stage 3, item 1.
-    ///
-    /// > *"resize freezing canvas isnt that big of an issue, as long as the user knows its loading.
-    /// > It is a one time thing anyway."* — the owner, 2026-08-28.
-    ///
-    /// **The walk stays one synchronous main-actor turn, and that is the point rather than a
-    /// shortcut.** The ruling makes the busy state the requirement and off-main execution an option;
-    /// what an atomic walk buys is that a half-resized document — some cels at the new extent, some
-    /// at the old, `canvasSize` still the old one — is never observable by anything, which is the
-    /// same property §2's "Failure and partial completion" wants and which §3 states from the other
-    /// end: *"A resize is modal-busy or it is a race."*
-    ///
-    /// ## Why there are two paths, and why the fast one does not flash
-    ///
-    /// **The flag is free; only the suspension costs anything.** A resize that never suspends runs
-    /// inside one main-actor turn, so SwiftUI never lays out with `isResizing == true` and there is
-    /// no frame in which a spinner could appear — the artist sees the sheet close and the canvas
-    /// already resized. §2's split measures the owner's own documents at **0.9 ms a cel**, so a
-    /// 300-cel resize is 0.27 s and a 32-cel one is 29 ms: putting a modal up for the second of those
-    /// is a flicker, and this is what stops it being one.
-    ///
-    /// The announced path sets the flag **before** the `Task`, so the save gate (rule 12) closes with
-    /// no window at all, and then `await Task.yield()` inside it, which is what commits the spinner's
-    /// frame to the screen before the block starts. `GalleryView.open` carries the same yield and the
-    /// same reasoning; without it the flag is set and the block begins in the same turn, so the
-    /// artist gets the freeze *and* no spinner — strictly worse than saying nothing at all.
-    ///
-    /// **Indeterminate, and that is a refutation of §4 stage 3's own item 1 rather than a corner cut.**
-    /// A determinate `n / total` needs the walk to report progress, which needs it to suspend between
-    /// cels, which is the interleaved execution the ruling demoted *and* the thing that makes a
-    /// half-resized document observable. The two are exclusive: an atomic walk or a progress bar, not
-    /// both. The total being known in advance — the reason §4 called determinate progress cheap here —
-    /// is real, and it is spent on deciding whether to show the spinner at all instead.
+    /// The Resize button's entry point. Raster pixels are prepared durably off-main, then all
+    /// document changes land synchronously inside LatestWins. Preparation locks edits and saves
+    /// immediately, while DrawingView delays progress for short jobs. The audit announces known
+    /// expensive geometry/landing work early, including native-only documents.
     func resizeCanvasAnnouncingProgress(to newArtworkSize: CGSize, mode: CanvasResizeMode = .cropExpand) {
-        guard let plan = planResize(to: newArtworkSize, mode: mode) else { return }
+        guard !isResizing, let plan = planResize(to: newArtworkSize, mode: mode) else { return }
         guard plan.audit.canProceed else {
             raise(.resizeRefused(plan.audit.refusal))
             return
         }
+        let announceImmediately = plan.audit.needsAnnouncing(scaling: plan.map.mode.scalesContent)
         if plan.audit.inkedCels > 0 {
-            prepareCanvasPixels(.resize(size: plan.map.newSize, content: plan.map.contentRect)) { [weak self] prepared in
+            prepareCanvasPixels(.resize(size: plan.map.newSize, content: plan.map.contentRect),
+                                announceImmediately: announceImmediately) { [weak self] prepared in
                 guard let self else { return }
                 _ = self.commitResize(plan, preparedPixels: prepared)
             }
         } else {
-            // No PNG work exists in a native-only document. Preserve the existing fast path and
-            // announcement threshold for its geometry walk.
-            guard plan.audit.needsAnnouncing(scaling: plan.map.mode.scalesContent) else { commitResize(plan); return }
-            isResizing = true
+            // Native-only geometry has no PNG work. A small walk finishes in this actor turn.
+            guard announceImmediately else { commitResize(plan); return }
+            let id = UUID()
+            canvasUpdatePhase = .announced(id)
             Task { @MainActor [weak self] in
                 await Task.yield()
-                guard let self else { return }
+                guard let self, self.canvasUpdatePhase.operationID == id else { return }
+                defer { self.canvasUpdatePhase = .idle }
                 self.commitResize(plan)
-                self.isResizing = false
             }
         }
-
     }
 
     /// Decides a resize without performing any of it: the one map, and one walk of the document for
@@ -964,7 +927,7 @@ extension CanvasManager {
     }
 
     func flipCanvasAnnouncingProgress(horizontal: Bool) {
-        guard canvasSize != nil, commitAllInteractiveState() else { return }
+        guard !isResizing, canvasSize != nil, commitAllInteractiveState() else { return }
         prepareCanvasPixels(.flip(horizontal: horizontal)) { [weak self] prepared in
             self?.flipCanvas(horizontal: horizontal, preparedPixels: prepared)
         }
@@ -1006,9 +969,11 @@ extension CanvasManager {
     /// LatestWins already owns cancellation/generation for document jobs. Freeze on main, prepare
     /// only source handles off-main, and reject stale identities before the atomic landing.
     private func prepareCanvasPixels(_ operation: CanvasPixelTransformInput.Operation,
+                                     announceImmediately: Bool = false,
                                      landing: @escaping (CanvasPixelTransformInput.Prepared) -> Void) {
         guard !isResizing else { return }
-        isResizing = true
+        let id = UUID()
+        canvasUpdatePhase = announceImmediately ? .announced(id) : .preparing(id)
         MainActor.assumeIsolated {
             if canvasPixelTransforms == nil {
                 canvasPixelTransforms = LatestWins(queue: DispatchQueue(label: "com.paintapp.canvasPixels", qos: .userInitiated))
@@ -1020,7 +985,7 @@ extension CanvasManager {
                     let result = input.prepare(operation)
                     return { [weak self] in
                         guard let self else { return }
-                        defer { self.isResizing = false }
+                        defer { self.canvasUpdatePhase = .idle }
                         guard input.stillMatches(self) else { self.raise(.drawingSourceUnavailable); return }
                         switch result {
                         case .success(let prepared): landing(prepared)

@@ -25,6 +25,12 @@ final class ToolPanelsUITests: PaintUITestCase {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
 
+        let timelineCollapse = app.buttons["timeline.collapseButton"]
+        XCTAssertTrue(timelineCollapse.waitForExistence(timeout: 5), "The expanded timeline can be collapsed")
+        timelineCollapse.tap()
+        XCTAssertTrue(timelineCollapse.waitForNonExistence(timeout: 5),
+                      "The expanded-only collapse control disappears when the timeline reaches its collapsed bar")
+
         // TODO (103): Add Text is a row of the "Add" menu, its own top-bar icon since.
         app.buttons["toolbar.addButton"].tap()
         let addText = app.buttons["add.addTextRow"]
@@ -34,6 +40,7 @@ final class ToolPanelsUITests: PaintUITestCase {
         let fontButton = app.buttons["textPanel.fontButton"]
         XCTAssertTrue(fontButton.waitForExistence(timeout: 5), "Add Text opens the text settings panel")
 
+        attachScreenshot(XCUIScreen.main, "add-text-settings-bottom-dock-before-midpoint-check")
         let window = app.windows.element(boundBy: 0).frame
         XCTAssertGreaterThan(fontButton.frame.minY, window.midY, """
             The text settings are still a dropdown under the top toolbar. The owner asked for the \
@@ -293,6 +300,83 @@ final class ToolPanelsUITests: PaintUITestCase {
             """)
     }
 
+    /// One real painted raster cel, cold, through Settings, the landed extent and Undo.
+    func testResizingAPaintedCelMovesItsInkIntoTheNewExtentAndUndoRestoresIt() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        XCTAssertGreaterThan(app.windows.firstMatch.frame.width, app.windows.firstMatch.frame.height)
+        addRasterLayer(app)
+        openBrushLibrary(app)
+        tapWhenHittable(app.buttons["brushPanel.group.Basics"], "The public Basics group")
+        let opaque = app.buttons["brushPanel.brush.Opaque Round"]
+        XCTAssertTrue(opaque.waitForExistence(timeout: 5))
+        if !opaque.isSelected { tapWhenHittable(opaque, "The Opaque Round brush") }
+        setBrushSize(app, normalized: 0.6)
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5))
+        setBrushColor(app, hex: "000000")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let host = canvas.frame
+        let paper = paperRect(in: canvas)
+        let originalInk = onHost(paper, 0.5, 0.25)
+        // Crop/expand centres 2048² inside4096²: p becomes(0.25 + p/2) on each axis.
+        let grownInk = onHost(paper, 0.5, 0.375)
+        for point in [onHost(paper, 0.3, 0.25), onHost(paper, 0.7, 0.25), grownInk] {
+            XCTAssertTrue(visiblePaperRect(app, in: canvas).contains(CGPoint(x: point.dx, y: point.dy)),
+                          "PREMISE: the stroke and both pixel controls are on exposed paper")
+            assertBelowTheToolbar(app, canvas, dy: point.dy, "The resize ink/control")
+            assertAboveTheDock(app, canvas, dy: point.dy, "The resize ink/control")
+        }
+        drawLine(on: canvas, from: onHost(paper, 0.3, 0.25), to: onHost(paper, 0.7, 0.25))
+        XCTAssertTrue(waitUntil(canvas, originalInk, { self.isInk($0) }), "PREMISE: actual opaque black raster ink")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: grownInk)), "PREMISE: the destination starts white")
+        attachScreenshot(XCUIScreen.main, "resize-painted-before-2048")
+
+        app.buttons["toolbar.settingsButton"].tap()
+        let row = app.buttons["settings.resizeCanvasRow"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(row.label.contains("2048 × 2048"), "PREMISE: the original canvas extent")
+        row.tap()
+        let width = app.textFields["resizeCanvas.widthField"]
+        let height = app.textFields["resizeCanvas.heightField"]
+        XCTAssertTrue(width.waitForExistence(timeout: 5))
+        setField(width, to: "4096")
+        setField(height, to: "4096")
+        app.buttons["resizeCanvas.applyButton"].tap()
+
+        let landed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == true AND label CONTAINS %@", "4096 × 4096"),
+            object: row)
+        XCTAssertEqual(XCTWaiter.wait(for: [landed], timeout: 60), .completed,
+                       "Real preparation and atomic landing finish at the requested extent")
+        XCTAssertTrue(row.label.contains("4096 × 4096"), "Both typed dimensions reach the actual document")
+        app.buttons["toolbar.settingsButton"].tap()
+        XCTAssertTrue(row.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(canvas.frame, host, "PREMISE: the unchanged host keeps the measured paper ruler")
+        XCTAssertEqual(paperRect(in: canvas, canvasSize: CGSize(width: 4096, height: 4096)), paper)
+        assertAboveTheDock(app, canvas, dy: grownInk.dy, "The grown canvas ink")
+        assertBelowTheToolbar(app, canvas, dy: grownInk.dy, "The grown canvas ink")
+        XCTAssertTrue(waitUntil(canvas, grownInk, { self.isInk($0) }), "The original black ink lands in the centred extent")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: originalInk)), "The old screen row is now blank paper")
+        attachScreenshot(XCUIScreen.main, "resize-painted-landed-4096")
+
+        let undo = app.buttons["sideToolbar.undoButton"]
+        XCTAssertTrue(undo.isEnabled && undo.isHittable, "The completed editor accepts the artist's Undo")
+        undo.tap()
+        app.buttons["toolbar.settingsButton"].tap()
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(row.label.contains("2048 × 2048"), "Undo restores the original extent")
+        app.buttons["toolbar.settingsButton"].tap()
+        XCTAssertTrue(row.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(canvas.frame, host, "PREMISE: Undo preserves the same displayed ruler")
+        assertAboveTheDock(app, canvas, dy: originalInk.dy, "The restored original ink")
+        assertBelowTheToolbar(app, canvas, dy: originalInk.dy, "The restored original ink")
+        XCTAssertTrue(waitUntil(canvas, originalInk, { self.isInk($0) }), "Undo returns the original visible ink")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: grownInk)), "Undo clears the enlarged placement")
+        attachScreenshot(XCUIScreen.main, "resize-painted-undone-2048")
+    }
+
     /// **Export, end to end in the running app** — RENDER.md §3.9, and the half no logic test can
     /// reach.
     ///
@@ -301,7 +385,7 @@ final class ToolPanelsUITests: PaintUITestCase {
     /// the Actions menu, that a sheet raised from inside that panel presents at all, that the
     /// running view is drawn while the wait happens, and that the wait ends somewhere the file can
     /// be picked up from. A session driven straight from a test would agree happily with a row
-    /// nobody can tap and a `ShareLink` that never appears.
+    /// nobody can tap and a system share sheet that never appears.
     ///
     /// **In an existing class on purpose**: `xcodebuild` distributes parallel work per test *class*,
     /// so a new class lengthens the suite's critical path and pays its own setup. This one is the
@@ -312,6 +396,7 @@ final class ToolPanelsUITests: PaintUITestCase {
     /// a fresh document's single frame takes to bake and encode is a property of the machine.
     func testExportIsInTheActionsMenuAndRunsThroughToAShareableFile() throws {
         let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .landscapeLeft
         XCTAssertTrue(launchIntoEditor(app))
 
         app.buttons["toolbar.actionsButton"].tap()
@@ -369,13 +454,174 @@ final class ToolPanelsUITests: PaintUITestCase {
         XCTAssertTrue(app.buttons["export.doneButton"].exists, "…and it offers a way out")
 
         share.tap()
-        XCTAssertTrue(app.otherElements["ActivityListView"].waitForExistence(timeout: 20),
-                      "Delivery is the system share sheet (§3.9), and `ShareLink` is what raises it")
-        // Left up rather than dismissed. Every test in this class starts with `launchIntoEditor`,
-        // which calls `app.launch()`, so the next one gets a fresh process and none of this — and
-        // the obvious tidy-up is a trap: three `PopoverDismissRegion`s are on screen here (the
-        // Actions panel's, the sheet's and the activity view's) and a query for the identifier is
-        // ambiguous, which MEASURED as a failed tap rather than a clean close.
+        let activity = app.otherElements["ActivityListView"]
+        XCTAssertTrue(activity.waitForExistence(timeout: 20),
+                      "Delivery is the system share sheet (§3.9)")
+        let closeButtons = activity.buttons.matching(identifier: "header.closeButton")
+        let close = closeButtons.element
+        XCTAssertTrue(close.waitForExistence(timeout: 5), "The system share sheet can be closed")
+        XCTAssertEqual(closeButtons.count, 1, "The system share sheet exposes one header close button")
+        close.tap()
+        XCTAssertTrue(activity.waitForNonExistence(timeout: 10), "Closing Share returns to the Export result")
+
+        let done = app.buttons["export.doneButton"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5), "The Export result is still available after closing Share")
+        done.tap()
+        XCTAssertTrue(app.buttons["export.frameButton"].waitForNonExistence(timeout: 5),
+                      "Done closes the Export result")
+
+        let actionsButton = app.buttons["toolbar.actionsButton"]
+        XCTAssertTrue(actionsButton.waitForExistence(timeout: 5), "Returning from Export leaves the editor toolbar")
+        actionsButton.tap()
+        XCTAssertTrue(row.waitForNonExistence(timeout: 5), "The Actions menu closes back to the drawing")
+
+        try assertDrawingStillWorksAfterExport(app, screenshot: "export-share-closed-drawing-return")
+    }
+
+    /// Cancelling a visible video export returns the artist to the same drawn canvas, ready to edit.
+    func testCancellingAnActiveVideoExportReturnsToDrawing() throws {
+        let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        app.launchArguments += ["-uiTestSeedVideo", "-uiTestSlowBakeMillis", "2000"]
+        XCTAssertTrue(launchIntoEditor(app))
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5), "The seeded video canvas is exposed")
+        let videoPixel = CGVector(dx: 0.5, dy: 0.4)
+        assertAboveTheDock(app, canvas, dy: videoPixel.dy, "The decoded video sample clears the timeline")
+        XCTAssertNotNil(waitForPixel(canvas, at: videoPixel, timeout: 10, matches: { isVideoGray40($0) }),
+                        "PREMISE: the existing video seed is visibly decoded, not a placeholder")
+        attachScreenshot(XCUIScreen.main, "export-cancel-seeded-video-before")
+
+        setBrushColor(app, hex: "FFFFFF")
+
+        openBrushLibrary(app)
+        let opaqueRound = app.buttons["brushPanel.brush.Opaque Round"]
+        XCTAssertTrue(opaqueRound.waitForExistence(timeout: 5), "The public Opaque Round brush is available")
+        if !opaqueRound.isSelected {
+            tapWhenHittable(opaqueRound, "The public Opaque Round brush")
+        }
+        XCTAssertTrue(opaqueRound.isSelected, "The white return stroke uses the selected opaque brush")
+
+        let videoBlock = app.otherElements["timeline.cel.1.0"]
+        XCTAssertTrue(videoBlock.waitForExistence(timeout: 5), "The imported clip is on its own timeline row")
+        let blockMenuPoint = videoBlock.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        blockMenuPoint.tap()
+        blockMenuPoint.tap()
+        let slowSpeed = app.buttons["timeline.menu.0.25×"]
+        XCTAssertTrue(slowSpeed.waitForExistence(timeout: 5), "The clip menu exposes its public 0.25× speed")
+        slowSpeed.tap()
+        let slowedBlock = try XCTUnwrap(readCel(app, layerIndex: 1, celIndex: 0),
+                                        "The slowed imported video remains on its timeline row")
+        XCTAssertEqual(slowedBlock.start, 0)
+        XCTAssertEqual(slowedBlock.length, 48,
+                       "The existing 0.5-second crop at 0.25× occupies 48 frames at 24 fps")
+        XCTAssertNotNil(waitForPixel(canvas, at: videoPixel, timeout: 10, matches: { isVideoGray40($0) }),
+                        "The clip still shows its first decoded frame after adjusting speed")
+
+        app.buttons["toolbar.actionsButton"].tap()
+        let row = app.buttons["actions.exportRow"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "Export is available from Actions")
+        row.tap()
+        let video = app.buttons["export.videoButton"]
+        XCTAssertTrue(video.waitForExistence(timeout: 5), "The Export sheet offers video")
+        let caption = app.staticTexts["export.caption"]
+        XCTAssertTrue(caption.waitForExistence(timeout: 5))
+        XCTAssertTrue(caption.label.contains("frames 1–48"),
+                      "The public slow-speed edit makes this a 48-frame export: \(caption.label)")
+        video.tap()
+
+        let progress = app.progressIndicators["export.progress"]
+        let cancel = app.buttons["export.cancelButton"]
+        XCTAssertTrue(progress.waitForExistence(timeout: 10),
+                      "PREMISE: the export is still doing visible work; a finished-status label is not enough")
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5), "The running export exposes Cancel")
+        cancel.tap()
+
+        XCTAssertTrue(progress.waitForNonExistence(timeout: 5), "Cancel removes the running progress bar")
+        XCTAssertTrue(app.staticTexts["export.status"].waitForNonExistence(timeout: 5),
+                      "Cancel returns the sheet to idle choices")
+        XCTAssertTrue(video.waitForExistence(timeout: 5), "The idle Export choices return after cancellation")
+        XCTAssertFalse(app.buttons["export.share"].exists,
+                       "A cancelled export does not publish a finished result")
+        XCTAssertFalse(app.buttons["export.doneButton"].exists,
+                       "A cancelled export does not publish a Done action")
+        let close = app.buttons["export.closeButton"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5), "The idle Export sheet can be closed")
+        close.tap()
+        XCTAssertTrue(video.waitForNonExistence(timeout: 5), "Closing idle Export returns to the editor")
+        app.buttons["toolbar.actionsButton"].tap()
+        XCTAssertTrue(row.waitForNonExistence(timeout: 5), "The Actions menu closes back to the drawing")
+        let postCancelVideoPixel = onHost(paperRect(in: canvas), 0.5, 0.4)
+        XCTAssertNotNil(waitForPixel(canvas, at: postCancelVideoPixel, timeout: 10,
+                                     matches: { isVideoGray40($0) }),
+                        "The seeded clip remains visibly decoded after cancelling and closing Export")
+
+        try assertDrawingStillWorksAfterExport(app,
+                                               screenshot: "export-cancel-drawing-return",
+                                               baselineIsVisible: isVideoGray40,
+                                               drawnInkIsVisible: isWhitish,
+                                               baselineDescription: "the video seed's gray40 frame",
+                                               inkDescription: "white")
+    }
+
+    private func assertDrawingStillWorksAfterExport(_ app: XCUIApplication, screenshot: String,
+                                                    baselineIsVisible: (RGBA?) -> Bool,
+                                                    drawnInkIsVisible: (RGBA?) -> Bool,
+                                                    baselineDescription: String,
+                                                    inkDescription: String) throws {
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5), "The drawing canvas is exposed again")
+        let visible = visiblePaperRect(app, in: canvas)
+        let strokeStart = CGVector(dx: Double(visible.minX + visible.width * 0.44),
+                                   dy: Double(visible.minY + visible.height * 0.48))
+        let strokeEnd = CGVector(dx: strokeStart.dx + Double(visible.width * 0.08), dy: strokeStart.dy)
+        let inkPoint = CGVector(dx: (strokeStart.dx + strokeEnd.dx) / 2,
+                                dy: (strokeStart.dy + strokeEnd.dy) / 2)
+        XCTAssertTrue(baselineIsVisible(rgbaPixel(of: canvas, at: inkPoint)),
+                      "The measured stroke point starts on \(baselineDescription)")
+        assertBelowTheToolbar(app, canvas, dy: inkPoint.dy, "The stroke clears the toolbar")
+        assertAboveTheDock(app, canvas, dy: inkPoint.dy, "The stroke clears the timeline")
+        drawLine(on: canvas, from: strokeStart, to: strokeEnd)
+        let visibleStrokePixel = waitForPixel(canvas, at: inkPoint, timeout: 10,
+                                             matches: drawnInkIsVisible)
+        attachScreenshot(XCUIScreen.main, "\(screenshot)-poststroke")
+        let directPixel = rgbaPixel(of: canvas, at: inkPoint)
+        let reading = directPixel.map { "rgba=(\($0.r), \($0.g), \($0.b), \($0.a))" } ?? "unavailable"
+        let diagnostic = XCTAttachment(string: "Post-stroke midpoint direct canvas read: \(reading)")
+        diagnostic.name = "\(screenshot)-poststroke-midpoint-rgba"
+        diagnostic.lifetime = .keepAlways
+        add(diagnostic)
+        XCTAssertNotNil(visibleStrokePixel,
+                        "A \(inkDescription) pixel appears where the post-Export stroke was drawn")
+
+        let beforePan = try XCTUnwrap(canvasOffsets(readTransform(app)), "The canvas exposes its transform offsets")
+        let delta = CGVector(dx: 45, dy: 25)
+        try panAboveTheDock(app, canvas, stagger: 0, delta: delta)
+        let afterPan = try XCTUnwrap(canvasOffsets(readTransform(app)), "The canvas continues to expose its transform offsets")
+        XCTAssertGreaterThan(abs(afterPan.x - beforePan.x) + abs(afterPan.y - beforePan.y), 1,
+                             "The two-finger gesture moves the drawn canvas")
+        attachScreenshot(XCUIScreen.main, screenshot)
+    }
+
+    private func assertDrawingStillWorksAfterExport(_ app: XCUIApplication, screenshot: String) throws {
+        try assertDrawingStillWorksAfterExport(app, screenshot: screenshot,
+                                               baselineIsVisible: isWhitish,
+                                               drawnInkIsVisible: isInk,
+                                               baselineDescription: "paper",
+                                               inkDescription: "dark")
+    }
+
+    private func isVideoGray40(_ pixel: RGBA?) -> Bool {
+        guard let pixel else { return false }
+        return abs(Int(pixel.r) - 40) <= 18 && abs(Int(pixel.g) - 40) <= 18
+            && abs(Int(pixel.b) - 40) <= 18
+    }
+
+    private func canvasOffsets(_ transform: String) -> (x: Double, y: Double)? {
+        let values = transform.split(separator: ",").compactMap { Double($0) }
+        guard values.count == 4 else { return nil }
+        return (values[2], values[3])
     }
 
     // MARK: - Where an export goes, and what it carries (TODO (126), (127))

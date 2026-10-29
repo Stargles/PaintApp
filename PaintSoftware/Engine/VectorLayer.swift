@@ -681,10 +681,9 @@ enum FillPaint: Equatable {
     /// The paint carried through a geometric map — the same one that carried the fill's path.
     ///
     /// A flat colour has no geometry and is returned as it is. A gradient's two points go through the
-    /// map; **for an affine map that is exact** (a linear ramp stays linear), and for a projective or
-    /// lattice map it is the endpoint approximation, which is right at both ends and a little off in
-    /// between — the path's own flatten-then-map is the part such a map is careful about, and a ramp
-    /// between two colours is not where the eye finds the difference.
+    /// map: the endpoint approximation used for a projective or lattice map, which is right at both
+    /// ends and a little off in between. `transformed(by:)` carries an affine's complete linear colour
+    /// field instead; mapping just the endpoints would change its interior under a Freeform stretch.
     ///
     /// Nil when a point cannot be mapped (a homography sending it through infinity), which the caller
     /// treats as it treats an unmappable path.
@@ -700,9 +699,29 @@ enum FillPaint: Equatable {
         }
     }
 
-    /// `mapped(by:)` through an affine, which cannot refuse a point — so this has no nil to answer.
-    func transformed(by transform: CGAffineTransform) -> FillPaint {
-        mapped(by: { $0.applying(transform) }) ?? self
+    /// An affine carries the ramp's level lines as well as its ends. Their normal is A⁻ᵀ(to−from),
+    /// so project the pushed span onto that direction; two points still represent the same field.
+    func transformed(by t: CGAffineTransform) -> FillPaint {
+        guard case .linearGradient(let source) = self else { return self }
+        var gradient = source
+        gradient.from = source.from.applying(t)
+        gradient.to = source.to.applying(t)
+        let mapped = FillPaint.linearGradient(gradient)
+        let determinant = t.a * t.d - t.b * t.c
+        guard source.from != source.to, determinant.isFinite, determinant != 0,
+              !(t.a == t.d && t.b == -t.c),
+              !(t.a == -t.d && t.b == t.c) else { return mapped }
+        let dx = source.to.x - source.from.x, dy = source.to.y - source.from.y
+        let qx = t.d * dx - t.b * dy, qy = t.a * dy - t.c * dx
+        let length = hypot(qx, qy)
+        guard length.isFinite, length > 0 else { return mapped }
+        let nx = qx / length, ny = qy / length
+        let extent = nx * (t.a * dx + t.c * dy) + ny * (t.b * dx + t.d * dy)
+        let end = CGPoint(x: gradient.from.x + nx * extent, y: gradient.from.y + ny * extent)
+        guard extent.isFinite, extent != 0, end.x.isFinite, end.y.isFinite,
+              end != gradient.from else { return mapped }
+        gradient.to = end
+        return .linearGradient(gradient)
     }
 }
 
@@ -5496,7 +5515,7 @@ final class VectorCanvas {
             // not mint a new one, and the float tracks its pieces by id. The group is the field this
             // arm dropped until 2026-09-06 — every lasso nudge and canvas resize silently un-tagged a
             // fill, which stopped travelling with its group at the first Move (KEYFRAMES.md §3.4).
-            // The gradient's two points go through the same affine as the path, which is exact.
+            // The paint carries its colour field through the same affine as the path.
             return .fill(fill.reshaped(to: moved, paint: fill.paint.transformed(by: t)))
         case .image, .text, .video, .stream:
             // The kinds whose placement is a stored pose or four ordered corners. Each caller answers

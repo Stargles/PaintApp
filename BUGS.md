@@ -3031,6 +3031,10 @@ owner-landscape pictures. Evidence: native/mend-cap-consumers-red-cdf9c258-run01
 s54-final-qualification. Product unchanged8bb; narrow far-open endpoint proposal under review,
 long rectangular proof exhaustion remains open. Offline capsule tracing is not actualAA/GPU proof.
 
+Historical status (October29): this failure predates dba6c0f8, which replaced the distance-wave
+implementation with frozen vector support. Later c267 cap assertions and83380 owner-size pictures
+cover attached/detached/full caps. This old8bb failure is not evidence of a current cap defect.
+
 ## Wide Mend Reach repaints square-hole corners — 2026-10-24
 
 ActualGPU reproduction at0ca9d759/productfbb: the existing protected-contour method fails ONLY its
@@ -3048,6 +3052,11 @@ and radius-ascent alternatives are unqualified; convenient paths and maximal squ
 independent counterexamples. Evidence: s54-final-qualification/native/
 square-ring-red-0ca9d759-run01/root-independent-acceptance.json. Source comparison remains under
 mend-free-caps-b865-readonly/square-ring-original-vs-endpoint/.
+
+Historical status (October29): the Reach40 failure predates frozen vector support and establishes
+no current defect. The current raster-only square-ring check omits vector support. The integrated
+`testCanonicalSupportPreservesTheSquareHoleAtWideReach` supplies actual support and a useful-body
+premise; it is unrun, so the exact448-pixel ring case remains unqualified.
 
 ## Resize Settings copy contradicts supported Undo — October26
 

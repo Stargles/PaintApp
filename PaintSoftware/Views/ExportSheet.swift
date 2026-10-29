@@ -16,8 +16,8 @@ import SwiftUI
 ///
 /// ## Where a finished export goes
 ///
-/// **"Save to Photos" is the primary action** (TODO (126)) and `ShareLink` (§3.9's *"system share
-/// sheet"*) stays beside it. Photos is the one the owner reaches for — an export lands in the camera
+/// **"Save to Photos" is the primary action** (TODO (126)) and the system share
+/// sheet stays beside it. Photos is the one the owner reaches for — an export lands in the camera
 /// roll, and in whatever syncs it, in one tap — and it needs the app's only Photos permission, which
 /// is add-only. The share sheet is kept because it is the way to Files, AirDrop and Mail, and "Send to
 /// Computer" is a third, independent destination; none of the three replaces another.
@@ -25,6 +25,7 @@ struct ExportSheet: View {
 
     @ObservedObject var canvasManager: CanvasManager
     @StateObject private var session: FrameExportSession
+    @State private var sharing: FrameExportFile?
     /// STREAM.md §5.8 — reused rather than duplicated: `StreamBar` already observes this same
     /// object for its own connected/not word, and `connectionStates` is `@Published` there.
     @ObservedObject private var streamCoordinator: ScreenStreamCoordinator
@@ -53,8 +54,8 @@ struct ExportSheet: View {
                 choices
             case .baking, .writing:
                 running
-            case .finished(let url):
-                finished(url)
+            case .finished(let file):
+                finished(file)
             case .failed(let sentence):
                 failed(sentence)
             }
@@ -63,6 +64,12 @@ struct ExportSheet: View {
         }
         .padding(28)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .sheet(item: $sharing) { file in
+            let binding = $sharing
+            ExportSharePresentation(file: file) {
+                if binding.wrappedValue === file { binding.wrappedValue = nil }
+            }
+        }
         // A running export holds the baker's virtual playhead; leaving without releasing it would
         // leave the loop baking the export's range for an artist who has gone back to drawing.
         .onDisappear { session.cancel() }
@@ -117,8 +124,9 @@ struct ExportSheet: View {
         }
     }
 
-    private func finished(_ url: URL) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+    private func finished(_ file: FrameExportFile) -> some View {
+        let url = file.url
+        return VStack(alignment: .leading, spacing: 14) {
             Label("Export ready", systemImage: "checkmark.circle.fill")
                 .foregroundColor(.green)
                 .accessibilityIdentifier("export.status")
@@ -140,7 +148,7 @@ struct ExportSheet: View {
 
             photosNotice
 
-            ShareLink(item: url) {
+            Button { sharing = file } label: {
                 Label("Share", systemImage: "square.and.arrow.up")
             }
             .buttonStyle(.bordered)
@@ -361,4 +369,16 @@ struct ExportSheet: View {
         }
         .contentShape(Rectangle())
     }
+}
+
+/// The modal Share presentation reuses UIKit's completion to keep the file alive.
+private struct ExportSharePresentation: UIViewControllerRepresentable {
+    let file: FrameExportFile
+    let onCompletion: () -> Void
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        FrameExportSession.shareController(for: file, onCompletion: onCompletion)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }

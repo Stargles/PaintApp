@@ -263,6 +263,20 @@ final class FillObjectLogicTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(value, last, "the ramp never goes backwards (x = \(x))")
             last = value
         }
+
+        // A coincident ramp is its end colour, including after a nonuniform affine.
+        let collapsed = LinearGradientPaint(start: .init(red: 0, green: 0, blue: 0, alpha: 1),
+                                           end: .init(red: 1, green: 1, blue: 1, alpha: 1),
+                                           from: CGPoint(x: 20, y: 24), to: CGPoint(x: 20, y: 24))
+        let collapsedFill = VectorElement.fill(VectorFillElement(
+            path: CGPath(rect: CGRect(x: 16, y: 16, width: 16, height: 16), transform: nil),
+            paint: .linearGradient(collapsed)))
+        let stretched = VectorCanvas.mapping(collapsedFill,
+            throughStretch: CGAffineTransform(a: 2, b: 0, c: 0, d: 1, tx: -24, ty: 0))
+        let collapsedCanvas = VectorCanvas(size: CanvasFixture.canvasSize, elements: [stretched])
+        let collapsedImage = try XCTUnwrap(collapsedCanvas.render()?.cgImage)
+        XCTAssertEqual(pixel(collapsedImage, 32, 20), [255, 255, 255, 255],
+                       "a coincident gradient keeps its end colour through Freeform")
     }
 
     /// **The ramp blends in Oklab, not in sRGB** — the owner's *"is the linear gradient oklab?"*, and it
@@ -484,6 +498,36 @@ final class FillObjectLogicTests: XCTestCase {
         let halved = fill.reshaped(to: CGPath(rect: CGRect(x: 10, y: 10, width: 20, height: 20), transform: nil))
         XCTAssertEqual(halved.gradient, gradient, "a cut half keeps the parent's points")
         XCTAssertEqual(halved.opacity, fill.opacity)
+
+        for transform in [CGAffineTransform(translationX: 3, y: 7),
+                          CGAffineTransform(rotationAngle: .pi / 7),
+                          CGAffineTransform(scaleX: 1.7, y: 1.7),
+                          CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: 64, ty: 0)] {
+            let ordinary = try XCTUnwrap(VectorCanvas.mapping(.fill(fill), throughStretch: transform).fill?.gradient)
+            XCTAssertEqual([ordinary.from, ordinary.to],
+                           [gradient.from.applying(transform), gradient.to.applying(transform)],
+                           "similarities and reflection retain their exact pushed endpoints")
+        }
+
+        let diagonal = LinearGradientPaint(start: gradient.start, end: gradient.end,
+                                          from: CGPoint(x: 3, y: 5), to: CGPoint(x: 19, y: 21))
+        let diagonalFill = fill.reshaped(to: try XCTUnwrap(fill.cgPath), paint: .linearGradient(diagonal))
+        for singular in [CGAffineTransform(a: 0, b: 0, c: 0, d: 1, tx: 7, ty: 11),
+                         CGAffineTransform(a: 0, b: 0, c: 0, d: 0, tx: 7, ty: 11)] {
+            let mapped = try XCTUnwrap(VectorCanvas.mapping(.fill(diagonalFill), throughStretch: singular).fill?.gradient)
+            XCTAssertEqual([mapped.from, mapped.to],
+                           [diagonal.from.applying(singular), diagonal.to.applying(singular)],
+                           "a singular affine retains the existing endpoint contract, without an inverse")
+        }
+
+        let coincident = LinearGradientPaint(start: gradient.start, end: gradient.end,
+                                            from: CGPoint(x: 6, y: 9), to: CGPoint(x: 6, y: 9))
+        let affine = CGAffineTransform(a: 2, b: 0, c: 1, d: 1, tx: 3, ty: 4)
+        let coincidentFill = fill.reshaped(to: try XCTUnwrap(fill.cgPath), paint: .linearGradient(coincident))
+        let mappedCoincident = try XCTUnwrap(VectorCanvas.mapping(.fill(coincidentFill), throughStretch: affine).fill?.gradient)
+        XCTAssertEqual([mappedCoincident.from, mappedCoincident.to],
+                       [coincident.from.applying(affine), coincident.to.applying(affine)],
+                       "coincident endpoints remain coincident at their mapped point")
     }
 
     /// **A lasso Move of a gradient is a real Move**: lifted by the lasso, nudged, baked — and the
@@ -505,6 +549,92 @@ final class FillObjectLogicTests: XCTestCase {
         let near = pixel(image, 33, 32), far = pixel(image, 62, 32)
         XCTAssertLessThan(near[0], 20, "black at the moved fill's left edge")
         XCTAssertGreaterThan(far[0], 235, "white at its right edge")
+
+        // A diagonal ramp under Freeform must carry its interior colours, not only its endpoints.
+        // The reference draws ORIGINAL geometry under a native CTM, without mapping the paint or
+        // resampling a bitmap. The actual image comes from the real Move owner and cel flatten.
+        let (stretchedManager, stretchedLayer, stretchedVector) = vectorFixture()
+        let diagonalRect = CGRect(x: 16, y: 16, width: 16, height: 16)
+        stretchedVector.addFill(canvasSpacePath: CGPath(rect: diagonalRect, transform: nil),
+                                paint: .linearGradient(.fresh(from: CGPoint(x: 16, y: 16),
+                                                              to: CGPoint(x: 32, y: 32))))
+        let originalElements = stretchedVector.elements
+        let diagonalID = try XCTUnwrap(originalElements.first?.id)
+        XCTAssertTrue(stretchedManager.beginVectorMove(ofElementIDs: [diagonalID]))
+        var stretchedFrame = try XCTUnwrap(stretchedManager.vectorFloat).frame.transform
+        stretchedFrame.scale *= sqrt(2)
+        stretchedManager.nudgeVectorFloat(to: stretchedFrame, aspect: 2, stretchAxis: 0)
+        XCTAssertTrue(stretchedManager.commitAllInteractiveState())
+        let stretchedImage = try XCTUnwrap(flattened(stretchedManager, layerIndex: stretchedLayer))
+
+        // x2/y1 about (24,24): the original interior point (28,20) lands at (32,20).
+        let referenceCanvas = VectorCanvas(size: CanvasFixture.canvasSize, elements: originalElements,
+            transform: CGAffineTransform(a: 2, b: 0, c: 0, d: 1, tx: -24, ty: 0))
+        let original = referenceCanvas.freeze(quality: .full)
+        let referenceFormat = PixelOps.transparentFormat()
+        referenceFormat.preferredRange = .standard
+        let nativeReference = UIGraphicsImageRenderer(size: CanvasFixture.canvasSize,
+            format: referenceFormat).image { context in
+                _ = original.draw(into: context.cgContext,
+                                  frameRect: CGRect(origin: .zero, size: CanvasFixture.canvasSize),
+                                  quality: .full)
+            }
+        let referenceImage = try XCTUnwrap(nativeReference.cgImage)
+        for (name, picture) in [("affine-gradient-actual-move", UIImage(cgImage: stretchedImage)),
+                                ("affine-gradient-native-ctm-reference", nativeReference)] {
+            let attachment = XCTAttachment(image: picture)
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+
+        let movedFill = try XCTUnwrap(stretchedVector.elements.first?.fill)
+        let movedBounds = try XCTUnwrap(movedFill.cgPath).boundingBoxOfPath
+        let boundsError = [movedBounds.minX - 8, movedBounds.minY - 16,
+                           movedBounds.width - 32, movedBounds.height - 16].map { abs($0) }.max() ?? .infinity
+        XCTAssertLessThanOrEqual(boundsError, 0.00001, "PREMISE: Freeform reached x2/y1 about the fill centre")
+        let sourceGradient = try XCTUnwrap(originalElements.first?.fill?.gradient)
+        let mappedGradient = try XCTUnwrap(movedFill.gradient)
+        let sourceSpan = CGVector(dx: sourceGradient.to.x - sourceGradient.from.x,
+                                  dy: sourceGradient.to.y - sourceGradient.from.y)
+        let mappedSpan = CGVector(dx: mappedGradient.to.x - mappedGradient.from.x,
+                                  dy: mappedGradient.to.y - mappedGradient.from.y)
+        // Independent source-space projection through the literal reference CTM's inverse. Three
+        // noncollinear actual pixel centres distinguish a transported field from pushed endpoints.
+        let inverseReference = referenceCanvas.transform.inverted()
+        for point in [CGPoint(x: 32.5, y: 20.5), CGPoint(x: 16.5, y: 20.5), CGPoint(x: 32.5, y: 28.5)] {
+            let sourcePoint = point.applying(inverseReference)
+            let expectedFraction = ((sourcePoint.x - sourceGradient.from.x) * sourceSpan.dx
+                + (sourcePoint.y - sourceGradient.from.y) * sourceSpan.dy)
+                / (sourceSpan.dx * sourceSpan.dx + sourceSpan.dy * sourceSpan.dy)
+            let actualFraction = ((point.x - mappedGradient.from.x) * mappedSpan.dx
+                + (point.y - mappedGradient.from.y) * mappedSpan.dy)
+                / (mappedSpan.dx * mappedSpan.dx + mappedSpan.dy * mappedSpan.dy)
+            XCTAssertTrue(actualFraction.isFinite && expectedFraction.isFinite
+                          && abs(actualFraction - expectedFraction) <= 1e-12,
+                          "Freeform must carry the scalar field at \(point): actual \(actualFraction), source \(expectedFraction)")
+        }
+        let actualInterior = pixel(stretchedImage, 32, 20), referenceInterior = pixel(referenceImage, 32, 20)
+        XCTAssertEqual([actualInterior[3], referenceInterior[3]], [255, 255],
+                       "PREMISE: both whole images paint the corresponding interior pixel")
+        XCTAssertEqual([pixel(stretchedImage, 4, 20)[3], pixel(referenceImage, 4, 20)[3]], [0, 0],
+                       "PREMISE: neither image paints outside the moved path")
+        XCTAssertTrue((1..<255).contains(referenceInterior[0]),
+                      "PREMISE: the native reference pixel lies inside the nonblank ramp, not an end colour")
+        // At pixel centre(32.5,20.5), inverse x2/y1 gives source(28.25,20.5), hence t67/128.
+        // Neutral Oklab has linear RGB=L³. Judge each drawn image against this independent colour;
+        // native-CTM and mapped-identity CoreGraphics gradients need not quantize to the same byte.
+        let fraction = 67.0 / 128.0
+        let linearGrey = fraction * fraction * fraction
+        let expectedGrey = Int((255 * (1.055 * pow(linearGrey, 1.0 / 2.4) - 0.055)).rounded())
+        let actualDifference = (0..<3).map { abs(actualInterior[$0] - expectedGrey) }.max() ?? 0
+        let referenceDifference = (0..<3).map { abs(referenceInterior[$0] - expectedGrey) }.max() ?? 0
+        let actualFormat = "\(stretchedImage.bitsPerComponent)bpc/\(stretchedImage.bitsPerPixel)bpp, \(String(describing: stretchedImage.colorSpace?.name))"
+        let nativeFormat = "\(referenceImage.bitsPerComponent)bpc/\(referenceImage.bitsPerPixel)bpp, \(String(describing: referenceImage.colorSpace?.name))"
+        XCTAssertLessThanOrEqual(actualDifference, 2,
+            "Freeform changed an interior colour: moved \(actualInterior) [\(actualFormat)], analytic grey \(expectedGrey)")
+        XCTAssertLessThanOrEqual(referenceDifference, 2,
+            "Native CTM reference \(referenceInterior) [\(nativeFormat)] must match analytic grey \(expectedGrey)")
     }
 
     // MARK: - The document format

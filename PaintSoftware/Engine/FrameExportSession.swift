@@ -1,6 +1,44 @@
 import Foundation
 import Combine
 import SwiftUI
+import UIKit
+
+/// One immutable export. Consumers retain this handle until their actual completion.
+nonisolated final class FrameExportFile: Sendable, Equatable, Identifiable {
+    private static let prefix = "PaintAppExport-"
+    let url: URL
+    private let directory: URL
+    var id: URL { url }
+
+    init(root: URL, stem: String, pathExtension: String) throws {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let directory = root.appendingPathComponent(Self.prefix + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
+                                                attributes: [.posixPermissions: 0o700])
+        self.directory = directory
+        url = directory.appendingPathComponent(stem + "." + pathExtension)
+    }
+
+    static func == (lhs: FrameExportFile, rhs: FrameExportFile) -> Bool { lhs === rhs }
+
+    deinit { try? FileManager.default.removeItem(at: directory) }
+
+    /// Only the existing startup gate calls this, before any export/consumer can exist.
+    /// Interrupted exports are disposable; this is not a durable sharing queue.
+    static func cleanupAbandoned(in root: URL = FileManager.default.temporaryDirectory) {
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey]
+        guard let children = try? FileManager.default.contentsOfDirectory(at: root,
+            includingPropertiesForKeys: Array(keys)) else { return }
+        for child in children {
+            let name = child.lastPathComponent
+            guard name.hasPrefix(prefix),
+                  UUID(uuidString: String(name.dropFirst(prefix.count))) != nil,
+                  let values = try? child.resourceValues(forKeys: keys),
+                  values.isDirectory == true, values.isSymbolicLink != true else { continue }
+            try? FileManager.default.removeItem(at: child)
+        }
+    }
+}
 
 // MARK: - The export driver (RENDER.md §3.9)
 //
@@ -63,7 +101,7 @@ final class FrameExportSession: ObservableObject {
         /// Writing the container. `done` frames of `total` are in it.
         case writing(done: Int, total: Int)
         /// The file is on disk and ready to share.
-        case finished(URL)
+        case finished(FrameExportFile)
         /// Something refused. The string is the artist's sentence, not an `NSError` description.
         case failed(String)
 
@@ -194,7 +232,8 @@ final class FrameExportSession: ObservableObject {
     /// or while no client is connected (the sheet already disables the button then, but this is the
     /// real guard `StreamFileSendLogicTests` drives).
     func sendToComputer() {
-        guard case .finished(let url) = phase else { return }
+        guard case .finished(let file) = phase else { return }
+        let url = file.url
         if case .sending = sendState { return }
         guard let manager else {
             sendState = .failed("No document is open on the iPad")
@@ -209,9 +248,12 @@ final class FrameExportSession: ObservableObject {
         let kind = FrameExport.Kind(pathExtension: url.pathExtension).rawValue
         sendState = .sending(bytesSent: 0, totalBytes: 0)
         client.sendFile(url: url, kind: kind, onProgress: { [weak self] sent, total in
-            self?.sendState = .sending(bytesSent: sent, totalBytes: total)
+            guard let self, case .finished(let current) = self.phase, current === file,
+                  case .sending = self.sendState else { return }
+            self.sendState = .sending(bytesSent: sent, totalBytes: total)
         }, completion: { [weak self] outcome in
-            guard let self else { return }
+            guard let self, case .finished(let current) = self.phase, current === file,
+                  case .sending = self.sendState else { return }
             if outcome.ok {
                 self.sendState = .succeeded(client.remoteName ?? endpoint.host)
             } else {
@@ -224,23 +266,34 @@ final class FrameExportSession: ObservableObject {
     /// in whatever syncs the camera roll (Google Photos) without a trip through the share sheet. A
     /// no-op while nothing is finished or while a save is already running.
     ///
-    /// `destination` is the caller's rather than a stored default, so this file names no framework a
-    /// logic test would have to link: the sheet passes `PhotoLibraryDestination`, a test passes its own.
+    /// Authorization and library access stay in the destination: the sheet passes
+    /// `PhotoLibraryDestination`, while tests supply a held destination without using Photos.
     func saveToPhotos(using destination: any PhotosDestination) {
-        guard case .finished(let url) = phase, photosState != .saving else { return }
+        guard case .finished(let file) = phase, photosState != .saving else { return }
+        let url = file.url
         photosState = .saving
         let kind = FrameExport.Kind(pathExtension: url.pathExtension)
         Task { [weak self] in
             let result = await destination.save(url, as: kind)
-            // Not `.saving` any more means `reset()` ran while the library was working: the result
-            // is about a file the sheet has already let go of.
-            guard let self, self.photosState == .saving else { return }
+            guard let self, case .finished(let current) = self.phase, current === file,
+                  self.photosState == .saving else { return }
             switch result {
             case .saved: self.photosState = .saved
             case .denied: self.photosState = .denied
             case .failed(let sentence): self.photosState = .failed(sentence)
             }
         }
+    }
+
+    /// UIKit owns the copied completion until the selected activity ends or is canceled.
+    /// Capture the file independently of the sheet/session, without retaining the controller back.
+    static func shareController(for file: FrameExportFile,
+                                onCompletion: @escaping () -> Void) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: [file.url], applicationActivities: nil)
+        controller.completionWithItemsHandler = { _, _, _, _ in
+            withExtendedLifetime(file) { onCompletion() }
+        }
+        return controller
     }
 
     /// The document, or the cancellation that its absence means. See `manager`.
@@ -297,6 +350,8 @@ final class FrameExportSession: ObservableObject {
             return
         }
         frames = range
+        sendState = .idle
+        photosState = .idle
         phase = .baking(done: 0, total: range.count)
         task = Task { [weak self] in await self?.run(product, range) }
     }
@@ -305,10 +360,10 @@ final class FrameExportSession: ObservableObject {
 
     private func run(_ product: Product, _ range: ClosedRange<Int>) async {
         do {
-            let url = try await produce(product, range)
+            let file = try await produce(product, range)
             guard !Task.isCancelled else { return }
             endFocus()
-            phase = .finished(url)
+            phase = .finished(file)
         } catch {
             // cancel() already released this run's wait and focus. A replacement may own them now.
             guard !Task.isCancelled else { return }
@@ -322,28 +377,28 @@ final class FrameExportSession: ObservableObject {
         }
     }
 
-    private func produce(_ product: Product, _ range: ClosedRange<Int>) async throws -> URL {
+    private func produce(_ product: Product, _ range: ClosedRange<Int>) async throws -> FrameExportFile {
         switch product {
         case .frame(let frame):
             let decoded = try await bakedFrame(frame, within: range, index: 0, of: 1)
             phase = .writing(done: 0, total: 1)
             let cut = try delivered(of: decoded, includingPadding: includePadding)
             let stem = FrameExport.safeStem(try liveDocument().projectName) + "-frame-\(frame)"
-            let url = Self.outputURL(stem: stem, extension: "png")
+            let file = try outputFile(stem: stem, pathExtension: "png")
             try await offMain {
                 guard let picture = decoded.cropped(to: cut), let png = FrameExport.pngData(picture) else {
                     throw Failure.unreadableFrame(frame)
                 }
-                do { try png.write(to: url, options: .atomic) }
+                do { try png.write(to: file.url, options: .atomic) }
                 catch { throw Failure.couldNotWrite(error.localizedDescription) }
             }
             phase = .writing(done: 1, total: 1)
-            return url
+            return file
 
         case .video:
             let total = range.count
-            let url = Self.outputURL(stem: FrameExport.safeStem(try liveDocument().projectName),
-                                     extension: "mp4")
+            let file = try outputFile(stem: FrameExport.safeStem(try liveDocument().projectName),
+                                      pathExtension: "mp4")
             let fps = try liveDocument().fps
             let includingPadding = includePadding
             var writer: VideoFrameWriter?
@@ -358,7 +413,7 @@ final class FrameExportSession: ObservableObject {
                     // the export the knob's resolution, and the store's pixels already *are* that;
                     // recomputing it here would be a second account of one number, which is how the
                     // two come to differ.
-                    writer = try VideoFrameWriter(url: url, size: cut.size, fps: fps)
+                    writer = try VideoFrameWriter(url: file.url, size: cut.size, fps: fps)
                 }
                 guard let live = writer else { throw Failure.couldNotWrite("The movie would not open.") }
                 try await offMain {
@@ -369,7 +424,7 @@ final class FrameExportSession: ObservableObject {
             guard let live = writer else { throw Failure.nothingToExport }
             try await offMain { try live.finish() }
             phase = .writing(done: total, total: total)
-            return url
+            return file
         }
     }
 
@@ -564,18 +619,11 @@ final class FrameExportSession: ObservableObject {
     /// Overridable so logic tests write into their own temp directory instead of the app's.
     nonisolated(unsafe) static var outputDirectoryOverride: URL?
 
-    /// `tmp/PaintAppExports/`. The share sheet needs a real file URL, and a temporary one is right:
-    /// an export is a *product*, not a document, and iOS may reclaim it once it has been sent on.
-    static var outputDirectory: URL {
-        outputDirectoryOverride
-            ?? FileManager.default.temporaryDirectory.appendingPathComponent("PaintAppExports",
-                                                                             isDirectory: true)
-    }
-
-    static func outputURL(stem: String, extension ext: String) -> URL {
-        let directory = outputDirectory
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory.appendingPathComponent(stem + "." + ext, isDirectory: false)
+    private func outputFile(stem: String, pathExtension: String) throws -> FrameExportFile {
+        do {
+            return try FrameExportFile(root: Self.outputDirectoryOverride ?? FileManager.default.temporaryDirectory,
+                                       stem: stem, pathExtension: pathExtension)
+        } catch { throw Failure.couldNotWrite(error.localizedDescription) }
     }
 }
 

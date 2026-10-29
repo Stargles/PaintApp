@@ -196,14 +196,10 @@ closed off explicitly: **the header and every buffer move together, in one opera
   is the app's only true resampler, and it is a *homography* warp built for text distort — far more
   machinery than a uniform scale needs.
 - No transform for `Lattice` / `InterpolationRecipe` (§1).
-- No determinate progress UI anywhere in the app, and **stage 3 did not add one** — see §4, which
-  records why an atomic walk and a progress bar are exclusive. The only *working* long-operation
-  pattern is `GalleryOpenState` + `Task { await Task.yield(); … }`
-  ([`GalleryView.swift:134-145`](../PaintSoftware/Views/GalleryView.swift)), and `isResizing` is now a
-  second instance of it — with the twist that the flag is raised only on the *predicted-slow* path,
-  because a flag nothing suspends around is a flag SwiftUI never renders. The two other spinner flags
-  are still dead (`isRegisteringInterpolation` guards synchronous work and can never be observed;
-  `isFilling` is declared and read but never assigned).
+- No determinate progress UI. Canvas updates prepare durable raster outputs on one serial worker
+  and land the document atomically. `canvasUpdatePhase` owns the safety lock and progress identity;
+  `isResizing` is its derived busy predicate. `DrawingView` announces a still-pending preparation
+  after 0.2 s, while the audit announces known costly geometry/landing work before it starts.
 
 ---
 
@@ -617,7 +613,7 @@ Four rules:
 3. **Gate the save while a resize is in flight.** `ScenePhaseSaveGate` fires on `active → !active`
    ([`ScenePhaseSaveGate.swift:33-35`](../PaintSoftware/Services/ScenePhaseSaveGate.swift)), so an artist
    switching apps mid-resize would otherwise write a document that is half old-size and half new. An
-   `isResizing` flag consulted by `ContentView.saveIfNeeded` alongside its existing
+   `isResizing` safety predicate consulted by `ContentView.saveIfNeeded` alongside its existing
    `screen == .editor && canvasSize != nil` guard is the whole of it. **Shipped in stage 3** as
    `ScenePhaseSaveGate.mayStartSave(screenIsEditor:hasCanvas:isResizing:)`, the three conditions in
    one place. The window it covers is narrower than it looks and is real: the mutation walk is one
@@ -816,15 +812,17 @@ gate's two thresholds.
 
 **What shipped**, all five items, plus three refutations of what this section asked for:
 
-- **The busy state, and the decision not to show it.** `CanvasManager.isResizing` drives a
-  hit-testing overlay in `DrawingView`; `resizeCanvasAnnouncingProgress` is what the Resize button
-  calls. The interesting part is that there are **two paths**, because the flag is free and only the
-  *suspension* costs anything: a resize that never suspends is one main-actor turn, so SwiftUI never
-  lays out with the flag set and there is no frame in which a spinner could appear. A document
-  predicted (via `CanvasResizeAudit`, from this document's own measured per-cel costs) to block for
-  less than **0.2 s** takes that path and shows nothing; anything above it sets the flag *before* the
-  `Task`, so rule 12's gate closes with no window, and then `await Task.yield()` commits the
-  overlay's frame before the block starts. That is what stops a 0.27 s resize flashing a modal.
+- **Safety and visible progress.** The Resize button calls `resizeCanvasAnnouncingProgress`.
+  One published `canvasUpdatePhase` is idle, preparing(operation ID), or announced(operation ID).
+  Preparing and announced both derive `isResizing == true`: the entire editor rejects input and
+  saves cannot start. Raster outputs are prepared durably off-main through the existing serial
+  `LatestWins` owner, then size, geometry, buffers and history land synchronously together. The
+  presenter waits **0.2 s** before announcing an underestimated pending job; cancellation and the
+  captured operation ID prevent an old deadline announcing a completed or replacement job.
+  `CanvasResizeAudit`'s historical estimate still announces known costly geometry/landing early.
+  A short native-only walk finishes in one actor turn. This preserves a no-flash presentation
+  policy without making background preparation synchronous; actual public visibility remains a
+  separate runtime qualification.
 - **`isResizing` and the save gate.** `ScenePhaseSaveGate.mayStartSave(screenIsEditor:hasCanvas:isResizing:)`
   — the second gate, and the one that is not about the scene phase. `ContentView.saveIfNeeded`'s
   existing two-part guard goes through it.
@@ -1000,19 +998,13 @@ mapper.
     > *"resize freezing canvas isnt that big of an issue, as long as the user knows its loading. It
     > is a one time thing anyway."*
 
-    This is a ruling about the *contract*, not a licence to leave the block unmeasured, and it moves
-    the bar in one direction only: **the busy state becomes the requirement and off-main execution
-    becomes an option**. §4 stage 3 is re-sorted around it. Three things it does **not** license.
-    A block the artist is not told about is still a bug — an unannounced freeze and an announced one
-    are different products, and the yield that gets the spinner its first frame is the whole
-    difference. **Stage 3 built it with one refinement the ruling implies but does not state**: the
-    yield is what makes the busy state visible, so a resize predicted to finish inside
-    `CanvasResizeAudit.announceAboveSeconds` (0.2 s) does not take it, runs in one main-actor turn,
-    and is never rendered as busy at all. Telling the artist about a 29 ms operation is not honesty,
-    it is a flicker. It does not license a block during which a *save* can start (rule 12): a longer
-    operation is a wider window for `ScenePhaseSaveGate` to write a half-resized document, so the
-    ruling makes `isResizing` more necessary, not less. And it does not license unbounded memory —
-    "one time" is about the artist's patience, and jetsam does not consult it.
+    The safety lock starts immediately, independently of visible progress. Durable raster work runs
+    off-main and its document landing stays atomic. A known costly geometry/landing walk announces
+    before blocking; otherwise the presenter announces preparation still pending after 0.2 s. Short
+    jobs can finish without flashing a modal. The phase carries the actual operation ID, so a stale
+    deadline cannot announce the next job. The historical per-cel estimate is not a bound on current
+    PNG preparation time. A save may not start during either preparation or announcement (rule 12),
+    and memory remains bounded by the serial worker; "one time" does not license unbounded memory.
 
     **The rest of the owner's message was a question, and it is answered in §2**: *"since they are
     stored as signed ints, resizing … shouldnt change the origin point and thus none of the stroke

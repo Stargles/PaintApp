@@ -64,7 +64,12 @@ final class FillObjectUITests: PaintUITestCase {
     /// lift hands the brush back, and one undo takes it away.
     func testPrimingARectangleThenDraggingPlacesASolidAxisAlignedSquareCentredOnThePress() throws {
         let (app, canvas) = launch()
+        let collapse = app.buttons["timeline.collapseButton"]
+        XCTAssertTrue(collapse.waitForExistence(timeout: 5))
+        collapse.tap()
+        _ = try settled { app.otherElements["timeline.panel"].frame }
         let paper = paperRect(in: canvas)
+        assertAboveTheDock(app, canvas, dy: onHost(paper, 0.5, 0.8).dy, "the exact lower outside-square paper probe")
         let centre = onHost(paper, 0.5, 0.5)
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, dx: centre.dx, dy: centre.dy)), "PREMISE: blank paper")
 
@@ -370,6 +375,170 @@ final class FillObjectUITests: PaintUITestCase {
             return p.r > 150 && p.g < 90 && p.b < 90
         }), "the lift end of the ramp is now red")
         attachScreenshot(app, "gradient-end-red")
+    }
+
+    /// A nonuniform Freeform stretch carries the whole colour field, including points off its axis.
+    /// The public route commits real geometry before sampling, then drives both history directions.
+    func testFreeformStretchCarriesTheGradientsOffAxisColoursThroughUndoAndRedo() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        let window = app.windows.firstMatch
+        XCTAssertGreaterThan(window.frame.width, window.frame.height, "PREMISE: landscape before canvas creation")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let select = app.buttons["selectPanel.mode.rectangle"]
+        app.buttons["toolbar.selectButton"].tap()
+        XCTAssertTrue(select.waitForExistence(timeout: 5))
+        let host = canvas.frame
+        let paper = visiblePaperRect(app, in: canvas)
+        func screenRect(_ rect: CGRect) -> CGRect {
+            CGRect(x: host.minX + rect.minX * host.width, y: host.minY + rect.minY * host.height,
+                   width: rect.width * host.width, height: rect.height * host.height)
+        }
+        func onCanvas(_ point: CGPoint) -> CGVector {
+            CGVector(dx: (point.x - host.minX) / host.width, dy: (point.y - host.minY) / host.height)
+        }
+        func colours(_ points: [CGPoint]) throws -> [RGB] {
+            let pixel = try pixelProbe(canvas)
+            return points.map {
+                let p = onCanvas($0), c = pixel(p.dx, p.dy)
+                return RGB(r: Int(c.r), g: Int(c.g), b: Int(c.b))
+            }
+        }
+        func difference(_ a: RGB, _ b: RGB) -> Int {
+            max(abs(a.r - b.r), abs(a.g - b.g), abs(a.b - b.b))
+        }
+        let bottomClipped = screenRect(paper)
+        let top = max(bottomClipped.minY, host.minY + CGFloat(toolbarBottom(app, canvas)) * host.height)
+        let visible = CGRect(x: bottomClipped.minX, y: top, width: bottomClipped.width,
+                             height: bottomClipped.maxY - top)
+        let side = min(visible.width, visible.height)
+        XCTAssertGreaterThan(side, 150, "PREMISE: room for the two-dimensional band and its grips")
+        let centre = CGPoint(x: visible.midX, y: visible.midY)
+        let press = CGPoint(x: centre.x - 0.08 * side, y: centre.y - 0.08 * side)
+        let lift = CGPoint(x: centre.x + 0.08 * side, y: centre.y + 0.08 * side)
+        for point in [press, lift] {
+            XCTAssertTrue(visible.contains(point) && window.frame.contains(point), "PREMISE: the physical45° placement is visible")
+        }
+        app.buttons["toolbar.selectButton"].tap()
+        app.buttons["toolbar.addButton"].tap()
+        let gradient = app.buttons["add.linearGradientRow"]
+        XCTAssertTrue(gradient.waitForExistence(timeout: 5) && gradient.isEnabled)
+        gradient.tap()
+        XCTAssertEqual(primedObjectName(app), "gradient")
+        let width = app.sliders["sideToolbar.gradientWidthSlider"]
+        XCTAssertTrue(width.waitForExistence(timeout: 5))
+        dragRailSlider(width, fromNormalizedDy: 0.09, toNormalizedDy: 0.80)
+        dragOnCanvas(app, from: onCanvas(press), to: onCanvas(lift))
+        let gradientDone = app.buttons["gradientPanel.doneButton"]
+        XCTAssertTrue(gradientDone.waitForExistence(timeout: 5))
+        gradientDone.tap()
+        XCTAssertTrue(gradientDone.waitForNonExistence(timeout: 5))
+        app.buttons["toolbar.selectButton"].tap()
+        XCTAssertTrue(select.waitForExistence(timeout: 5))
+        XCTAssertEqual(canvas.frame, host, "PREMISE: one host basis for placement and colour probes")
+        XCTAssertEqual(visiblePaperRect(app, in: canvas), paper)
+        let frame = try XCTUnwrap(readFrameLabel(app)?.current)
+        app.buttons["toolbar.moveButton"].tap()
+        let done = app.buttons["moveBar.doneButton"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        let oldBox = screenRect(try XCTUnwrap(settledMoveBox(app)))
+        XCTAssertGreaterThan(min(oldBox.width, oldBox.height), 30)
+        let expanded = CGRect(x: oldBox.midX - 0.95 * oldBox.width, y: oldBox.midY - 0.55 * oldBox.height,
+                              width: 1.9 * oldBox.width, height: 1.1 * oldBox.height)
+        XCTAssertTrue(visible.contains(expanded.insetBy(dx: -12, dy: -12)), "PREMISE: the declared stretch and outside probe fit above the dock")
+        XCTAssertTrue(window.frame.contains(expanded.insetBy(dx: -12, dy: -12)))
+        let a = 0.10 * min(oldBox.width, oldBox.height)
+        let c = CGPoint(x: oldBox.midX, y: oldBox.midY)
+        let points = [c, CGPoint(x: c.x - a, y: c.y - a), CGPoint(x: c.x + a, y: c.y + a),
+                      CGPoint(x: c.x - a, y: c.y + a), CGPoint(x: c.x + a, y: c.y - a)]
+        let liftedColours = try settled { try colours(points) }
+        done.tap()
+        XCTAssertTrue(done.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(select.waitForExistence(timeout: 5))
+        XCTAssertNotNil(waitForPixel(canvas, at: onCanvas(c)) { (20...220).contains(Int($0.r)) })
+        let before = try settled { try colours(points) }
+        XCTAssertEqual(before, liftedColours, "PREMISE: Done without a nudge leaves the drawing unchanged")
+        for i in [0, 3, 4] {
+            XCTAssertTrue([before[i].r, before[i].g, before[i].b].allSatisfy { (20...220).contains($0) },
+                          "PREMISE: the centre and both off-axis probes are inside a useful grey band")
+            XCTAssertLessThanOrEqual(difference(before[i], before[0]), 6, "PREMISE: perpendicular probes have the centre's colour")
+        }
+        XCTAssertGreaterThanOrEqual(before[2].r - before[1].r, 20, "PREMISE: the diagonal really contains a varying ramp")
+        let beforePixels = try pixelProbe(canvas)
+        attachScreenshot(XCUIScreen.main, "affine-gradient-before-stretch")
+
+        app.buttons["toolbar.moveButton"].tap()
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        let freeform = app.buttons["Freeform"]
+        XCTAssertTrue(freeform.waitForExistence(timeout: 5))
+        freeform.tap()
+        let start = CGPoint(x: oldBox.maxX, y: oldBox.minY)
+        let end = CGPoint(x: start.x + 0.35 * oldBox.width, y: start.y)
+        for point in [start, end] {
+            XCTAssertTrue(visible.contains(point) && window.frame.contains(point), "PREMISE: both grip endpoints are above the dock")
+        }
+        dragOnCanvas(app, from: onCanvas(start), to: onCanvas(end))
+        let newBox = screenRect(try XCTUnwrap(settledMoveBox(app)))
+        let sx = newBox.width / oldBox.width, sy = newBox.height / oldBox.height
+        XCTAssertTrue((1.5...1.9).contains(sx), "PREMISE: a useful horizontal stretch, sx=\(sx)")
+        XCTAssertTrue((0.90...1.10).contains(sy), "PREMISE: height is retained, sy=\(sy)")
+        XCTAssertGreaterThan(abs(sx - sy), 0.3)
+        XCTAssertLessThanOrEqual(hypot(newBox.midX - oldBox.midX, newBox.midY - oldBox.midY), 2,
+                                 "PREMISE: the Freeform grip scales about the band's centre")
+        func carried(_ point: CGPoint) -> CGPoint {
+            CGPoint(x: newBox.midX + sx * (point.x - c.x), y: newBox.midY + sy * (point.y - c.y))
+        }
+        // Pick an extension witness from the BEFORE picture only, never from the post-stretch answer.
+        var extensionSources: [CGPoint] = []
+        for yi in -4...4 {
+            for xi in -4...4 {
+                let point = CGPoint(x: c.x + CGFloat(xi) * oldBox.width / 10, y: c.y + CGFloat(yi) * oldBox.height / 10)
+                let p = onCanvas(point), rgb = beforePixels(p.dx, p.dy)
+                if [rgb.r, rgb.g, rgb.b].allSatisfy({ (20...220).contains(Int($0)) })
+                    && carried(point).x < oldBox.minX - 2 {
+                    extensionSources.append(point)
+                }
+            }
+        }
+        let extensionPoint = carried(try XCTUnwrap(extensionSources.first, "PREMISE: useful band interior extends beyond its old bounds"))
+        let outside = CGPoint(x: expanded.maxX + 8, y: expanded.midY)
+        done.tap()
+        XCTAssertTrue(done.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(select.waitForExistence(timeout: 5))
+        XCTAssertEqual(canvas.frame, host)
+        XCTAssertEqual(visiblePaperRect(app, in: canvas), paper, "The committed drawing uses the same Select-visible basis")
+        XCTAssertEqual(readFrameLabel(app)?.current, frame)
+        XCTAssertNotNil(waitForPixel(canvas, at: onCanvas(extensionPoint)) { !self.isWhitish($0) },
+                        "The committed stretch, rather than an unchanged old picture, reaches past its old bounds")
+        let after = try settled { try colours(points.map(carried)) }
+        attachScreenshot(XCUIScreen.main, "affine-gradient-after-stretch")
+        for i in [3, 4] {
+            XCTAssertLessThanOrEqual(difference(after[i], before[i]), 6,
+                                     "The committed Freeform stretch carries off-axis colour \(i): \(before[i]) → \(after[i])")
+        }
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: onCanvas(outside))), "Paper outside the stretched band remains paper")
+
+        undo(app)
+        XCTAssertNotNil(waitForPixel(canvas, at: onCanvas(extensionPoint)) { self.isWhitish($0) }, "Undo restores the old drawn extent")
+        let undone = try settled { try colours(points) }
+        for i in [3, 4] {
+            XCTAssertLessThanOrEqual(difference(undone[i], before[i]), 6, "Undo restores the original off-axis colour")
+        }
+        XCTAssertEqual(readFrameLabel(app)?.current, frame)
+        let redo = app.buttons["sideToolbar.redoButton"]
+        XCTAssertTrue(redo.isEnabled)
+        redo.tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: onCanvas(extensionPoint)) { !self.isWhitish($0) }, "Redo restores the stretched drawn extent")
+        let redone = try settled { try colours(points.map(carried)) }
+        for i in [3, 4] {
+            XCTAssertLessThanOrEqual(difference(redone[i], before[i]), 6, "Redo restores the carried off-axis colour")
+        }
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: onCanvas(outside))))
+        XCTAssertEqual(canvas.frame, host)
+        XCTAssertEqual(visiblePaperRect(app, in: canvas), paper)
+        XCTAssertEqual(readFrameLabel(app)?.current, frame)
+        attachScreenshot(XCUIScreen.main, "affine-gradient-redone")
     }
 
     /// **Select → Edit Gradient — the whole journey, from a fresh document.** Drag a gradient out and

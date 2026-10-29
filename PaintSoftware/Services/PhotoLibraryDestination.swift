@@ -5,8 +5,8 @@ import Photos
 ///
 /// **Add-only access** (`NSPhotoLibraryAddUsageDescription`, `.addOnly`): the app only ever writes to
 /// the library, so it never asks to read the artist's photos and the system's prompt says so. A file
-/// is *copied* in, not moved — the export stays in `tmp/PaintAppExports` for the share sheet and for
-/// Send to Computer.
+/// is *copied* in, not moved — the finished export's owner retains the source file while Photos,
+/// the share sheet or Send to Computer is using it.
 struct PhotoLibraryDestination: PhotosDestination {
 
     func save(_ file: URL, as kind: FrameExport.Kind) async -> PhotosSaveResult {

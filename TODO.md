@@ -3,6 +3,13 @@
 
 ## Current owner-facing status — October 28
 
+**October29 qualification update:** Export/Resize/Gradient are integrated after a179/179 baseline,
+13 intended-failure controls, one first-target-only deadline control with downstream timeout, nine
+reviewed pictures, and a normal49/49 rebuild. All717 unrelated source entries stayed exact. Final
+assembled checks remain. The exact current-support square-hole Mend test is now integrated and
+unrun; it is a verification gap, not a confirmed current defect. Next is the copied Test/Test1
+simulator diagnostic at e05770a3; no device readiness has been reused.
+
 **Operational report:** Kevin sees repeated macOS prompts asking ChatGPT to access OneDrive or
 other app/cloud data. Keep work scoped to explicit repository, PaintWork and owned-simulator paths;
 audit process/path attribution without traversing cloud folders or changing privacy settings. Cause
@@ -116,26 +123,20 @@ that the final combined audit build has passed.
    All source restored and post-fault normal154 passed. The reviewed34-path successor is harvested,
    including41 required callback-argument adaptations omitted from the unapplied10-path candidate.
    Finish combined checks and physical confirmation; preserve original packets and limits.
-2. Gradient movement: keep the existing two-point paint representation and correct its affine
-   colour calculation. The component and model fault checks pass. The public fault test stopped at
-   an earlier drawing witness; investigate that witness before claiming the colour check is proved.
-   Compose with the current resize checks and complete qualification before integration.
-3. Resize: retain one operation phase, the existing worker and atomic landing. Model checks pass;
-   finish the painted drawing/Undo workflow with its corrected functional premise. Test visible
-   progress separately with one fixed real-count scene. No artificial delay or growing fixture.
+2. Gradient movement: the two-point representation and corrected affine colour field are integrated.
+   Whole FillObject15 and model checks pass in the179 baseline; the public original-formula control
+   reaches the off-axis colour assertion after healthy setup, and normal output rebuilt green.
+   Final assembled checks remain.
+3. Resize: one operation phase, existing worker and atomic landing are integrated. Whole ToolPanels15,
+   Resize47 and painted resize/Undo pass. Direct public output-loss and Undo-placement controls reach
+   their pixel assertions; normal49 rebuilt green. Final assembled checks and visible-progress cost
+   check remain; no artificial delay or growing fixture.
 4. Tap selection: canonical brush geometry correction is integrated. Its model, public drawing and
    deliberate-failure checks passed separately. Final combined checks remain.
-5. Export: one immutable finished-file owner and separate output directory protect handed-off files
-   and reject stale destination answers. Correct the test's unsupported immediate controller-
-   retirement premise using UIKit's documented callback-clear boundary; that focused test and
-   all87destination/presentation checks now pass. Complete the actual system Share close/return
-   tests and observe actual system Share dismissal before testing cancel → drawing and gestures.
-   Source preflight corrects a stale class count:694 has13 public ToolPanels tests, not20. Header-close
-   uniqueness will be checked after its existence wait. A separate active-export Cancel → idle →
-   Close → drawn stroke/pan witness is being added using the existing fixed animation seed and
-   worker-delay seam; it stages cancellation and carries no performance claim. No new runtime hook
-   or fixture growth.
-   Preserve the existing presentation safety rule; no separate transfer registry or service.
+5. Export: the immutable finished-file owner and unique output directory are integrated. Destination
+   ownership checks, actual system Share close/return, active Cancel → idle → Close → drawing/pan,
+   and bottom-docked Add Text checks pass in the179 baseline; root inspected their pictures.
+   The historical87 packet retains its original scope/count. Final assembled checks remain.
 6. Saved data: implement one shared checked package-address boundary before reads and writes. The
    old code reproduces required-raster, brush-table/texture, nested-media, link and write failures.
    Preserve legal old spellings until the separate one-shot Projects/Backups/Trash repair. Capture a

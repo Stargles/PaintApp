@@ -200,9 +200,10 @@ final class FrameExportSessionLogicTests: XCTestCase {
         let phase = await settle(session)
         let composited = CompositeProbe.end().count
 
-        guard case .finished(let url) = phase else {
+        guard case .finished(let exportedUrl) = phase else {
             return XCTFail("The export must finish, and it stopped at \(phase).")
         }
+        let url = exportedUrl.url
         XCTAssertEqual(composited, 0,
                        "§2.1: an export reads the bake. A composite here is the export re-rendering "
                        + "a frame the store already holds.")
@@ -235,10 +236,11 @@ final class FrameExportSessionLogicTests: XCTestCase {
         session.exportFrame(0)
         let phase = await settle(session)
         let count = CompositeProbe.end().count
-        guard case .finished(let url) = phase else {
+        guard case .finished(let exportedUrl) = phase else {
             session.cancel()
             return XCTFail("The repaired cache must export its PNG; stopped at \(phase).")
         }
+        let url = exportedUrl.url
         XCTAssertEqual(count, 1, "The shared baker regenerates the missing frame once.")
         XCTAssertTrue(baker.isBaked(atFrame: 0))
         XCTAssertEqual(baker.keyByFrame[0], key)
@@ -299,9 +301,10 @@ final class FrameExportSessionLogicTests: XCTestCase {
         let session = FrameExportSession(manager: manager)
         session.exportVideo()
         let phase = await settle(session)
-        guard case .finished(let url) = phase else {
+        guard case .finished(let exportedUrl) = phase else {
             return XCTFail("The export must finish, and it stopped at \(phase).")
         }
+        let url = exportedUrl.url
         XCTAssertEqual(session.frames, 1...3, "The session covers the marked shot and nothing else.")
 
         let levels = try await Self.greyLevels(of: url)
@@ -330,9 +333,10 @@ final class FrameExportSessionLogicTests: XCTestCase {
         let phase = await settle(session)
         let composited = CompositeProbe.end().count
 
-        guard case .finished(let url) = phase else {
+        guard case .finished(let exportedUrl) = phase else {
             return XCTFail("The export must finish, and it stopped at \(phase).")
         }
+        let url = exportedUrl.url
         XCTAssertEqual(composited, 0, "§2.1 covers the image path as well as the video one.")
         XCTAssertEqual(url.pathExtension, "png")
         XCTAssertTrue(url.lastPathComponent.contains("-frame-2"),
@@ -460,7 +464,8 @@ final class FrameExportSessionLogicTests: XCTestCase {
         baker.isSuspended = false
         baker.kick()
         let phase = await settle(replacement)
-        guard case .finished(let url) = phase else { return XCTFail("Replacement stopped at \(phase)") }
+        guard case .finished(let exportedUrl) = phase else { return XCTFail("Replacement stopped at \(phase)") }
+        let url = exportedUrl.url
         let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
         let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
         let grey = try XCTUnwrap(Self.firstGrey(image))
@@ -653,13 +658,19 @@ final class FrameExportSessionLogicTests: XCTestCase {
         XCTAssertLessThan(firstBaking ?? .max, firstWriting ?? .min,
                           "Nothing is written before something is baked.")
 
-        guard case .finished(let url) = phase else {
+        guard case .finished(let exportedUrl) = phase else {
             return XCTFail("The export must end holding a file: \(phase)")
         }
-        XCTAssertEqual(seen.last, .finished(url), "…and that is the last thing published.")
+        let url = exportedUrl.url
+        XCTAssertEqual(seen.last, .finished(exportedUrl), "…and that is the last thing published.")
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "The file is really there.")
-        XCTAssertEqual(url.deletingLastPathComponent().path, outputs.path,
-                       "…in the export directory, which the share sheet needs a real file URL from.")
+        let directory = url.deletingLastPathComponent()
+        XCTAssertEqual(directory.deletingLastPathComponent().path, outputs.path,
+                       "…in an exclusive immediate child of the export directory.")
+        let directoryName = directory.lastPathComponent, prefix = "PaintAppExport-"
+        XCTAssertTrue(directoryName.hasPrefix(prefix)
+                      && UUID(uuidString: String(directoryName.dropFirst(prefix.count))) != nil,
+                      "The export owns a UUID-named directory, not a shared output path.")
     }
 
     // MARK: - The refusals
@@ -757,9 +768,10 @@ final class FrameExportSessionLogicTests: XCTestCase {
         XCTAssertFalse(session.includePadding, "The padding is off until the artist turns it on.")
         CompositeProbe.begin()
         session.exportFrame(0)
-        guard case .finished(let without) = await settle(session) else {
+        guard case .finished(let exportedWithout) = await settle(session) else {
             return XCTFail("The export must finish, and it stopped at \(session.phase).")
         }
+        let without = exportedWithout.url
         let cut = try Self.png(at: without)
         XCTAssertEqual([cut.width, cut.height], [48, 48], "Without the padding the file is the artwork alone.")
         XCTAssertEqual(cut.alpha(0, 0), 255, "…so its first pixel is artwork, not margin.")
@@ -767,9 +779,10 @@ final class FrameExportSessionLogicTests: XCTestCase {
         session.reset()
         session.includePadding = true
         session.exportFrame(0)
-        guard case .finished(let with) = await settle(session) else {
+        guard case .finished(let exportedWith) = await settle(session) else {
             return XCTFail("The export must finish, and it stopped at \(session.phase).")
         }
+        let with = exportedWith.url
         XCTAssertEqual(CompositeProbe.end().count, 0, "The option cuts the bake; it re-renders nothing.")
         let whole = try Self.png(at: with)
         XCTAssertEqual([whole.width, whole.height], [64, 64], "With the padding the file is the whole canvas.")
@@ -787,18 +800,20 @@ final class FrameExportSessionLogicTests: XCTestCase {
         let session = FrameExportSession(manager: manager)
 
         session.exportVideo()
-        guard case .finished(let without) = await settle(session) else {
+        guard case .finished(let exportedWithout) = await settle(session) else {
             return XCTFail("The export must finish, and it stopped at \(session.phase).")
         }
+        let without = exportedWithout.url
         let artworkSize = try await Self.movieSize(without)
         XCTAssertEqual(artworkSize, CGSize(width: 48, height: 48))
 
         session.reset()
         session.includePadding = true
         session.exportVideo()
-        guard case .finished(let with) = await settle(session) else {
+        guard case .finished(let exportedWith) = await settle(session) else {
             return XCTFail("The export must finish, and it stopped at \(session.phase).")
         }
+        let with = exportedWith.url
         let wholeSize = try await Self.movieSize(with)
         XCTAssertEqual(wholeSize, CGSize(width: 64, height: 64))
     }
@@ -861,7 +876,8 @@ final class FrameExportSessionLogicTests: XCTestCase {
         await warm(manager)
         let session = FrameExportSession(manager: manager)
         session.exportFrame(0)
-        guard case .finished(let url) = await settle(session) else { return nil }
+        guard case .finished(let exportedUrl) = await settle(session) else { return nil }
+        let url = exportedUrl.url
         return (session, url)
     }
 
@@ -884,9 +900,10 @@ final class FrameExportSessionLogicTests: XCTestCase {
         session.reset()
         XCTAssertEqual(session.photosState, .idle, "Exporting something else starts the destination over.")
         session.exportVideo()
-        guard case .finished(let movie) = await settle(session) else {
+        guard case .finished(let exportedMovie) = await settle(session) else {
             return XCTFail("The export must finish, and it stopped at \(session.phase).")
         }
+        let movie = exportedMovie.url
         session.saveToPhotos(using: library)
         _ = await settle(until: { session.photosState != .saving })
         XCTAssertEqual(library.calls.last?.file, movie)
@@ -953,6 +970,313 @@ final class FrameExportSessionLogicTests: XCTestCase {
         await unwind()
 
         XCTAssertEqual(session.photosState, .idle, "The late answer was dropped.")
+    }
+
+    /// Resetting the sheet does not make an older Photos answer the replacement file's answer.
+    func testAnOlderPhotosAnswerCannotFinishAReplacementSave() async throws {
+        let manager = paddedDocument()
+        await warm(manager)
+        let session = FrameExportSession(manager: manager)
+        let firstPhotos = FakePhotos(answers: [.saved], holding: true)
+        let replacementPhotos = FakePhotos(answers: [.failed("The replacement was refused.")], holding: true)
+        defer { firstPhotos.release(); replacementPhotos.release(); session.cancel() }
+
+        session.exportFrame(0)
+        guard case .finished(let exportedFirst) = await settle(session) else {
+            return XCTFail("The first export must finish, and it stopped at \(session.phase).")
+        }
+        let first = exportedFirst.url
+        let firstPNG = try Self.png(at: first)
+        XCTAssertEqual([firstPNG.width, firstPNG.height], [48, 48], "Premise: A is the actual artwork cut.")
+        XCTAssertEqual(firstPNG.alpha(0, 0), 255, "Premise: A contains opaque artwork.")
+        let firstAttachment = XCTAttachment(data: try Data(contentsOf: first), uniformTypeIdentifier: "public.png")
+        firstAttachment.name = "export-photos-first-artwork"
+        firstAttachment.lifetime = .keepAlways
+        add(firstAttachment)
+        session.saveToPhotos(using: firstPhotos)
+        let firstHeld = await settle(until: { firstPhotos.calls.count == 1 })
+        XCTAssertTrue(firstHeld, "Premise: Photos is actually holding the first export.")
+        XCTAssertEqual(firstPhotos.calls.map(\.file), [first])
+
+        session.reset()
+        session.includePadding = true
+        session.exportFrame(0)
+        guard case .finished(let exportedReplacement) = await settle(session) else {
+            return XCTFail("The replacement export must finish, and it stopped at \(session.phase).")
+        }
+        let replacement = exportedReplacement.url
+        let replacementPNG = try Self.png(at: replacement)
+        XCTAssertEqual([replacementPNG.width, replacementPNG.height], [64, 64],
+                       "Premise: B is a different actual output of the same frame.")
+        XCTAssertEqual(replacementPNG.alpha(0, 0), 0, "Premise: B carries the transparent margin.")
+        XCTAssertEqual(replacementPNG.alpha(8, 8), 255, "Premise: B also contains the artwork.")
+        let replacementAttachment = XCTAttachment(data: try Data(contentsOf: replacement),
+                                                  uniformTypeIdentifier: "public.png")
+        replacementAttachment.name = "export-photos-replacement-padding"
+        replacementAttachment.lifetime = .keepAlways
+        add(replacementAttachment)
+        session.saveToPhotos(using: replacementPhotos)
+        let replacementHeld = await settle(until: { replacementPhotos.calls.count == 1 })
+        XCTAssertTrue(replacementHeld, "Premise: the replacement Photos request is independently held.")
+        XCTAssertEqual(replacementPhotos.calls.map(\.file), [replacement])
+        XCTAssertEqual(session.photosState, .saving, "Premise: B is waiting for its own answer.")
+
+        firstPhotos.release()
+        await unwind()
+        XCTAssertEqual(session.photosState, .saving,
+                       "An older file's Photos result cannot finish the replacement save.")
+        replacementPhotos.release()
+        _ = await settle(until: { session.photosState != .saving })
+        XCTAssertEqual(session.photosState, .failed("The replacement was refused."),
+                       "The replacement publishes its own answer, not the earlier file's answer.")
+    }
+
+    /// A consumer holding A's URL must still read A after another export of the same frame finishes.
+    func testReexportingTheSameFrameDoesNotReplaceAConsumersPNG() async throws {
+        let manager = paddedDocument()
+        await warm(manager)
+        let session = FrameExportSession(manager: manager)
+        let photos = FakePhotos(answers: [.saved], holding: true)
+        defer { photos.release(); session.cancel() }
+
+        session.exportFrame(0)
+        guard case .finished(let exportedFirst) = await settle(session) else {
+            return XCTFail("The first export must finish, and it stopped at \(session.phase).")
+        }
+        let first = exportedFirst.url
+        let firstBytes = try Data(contentsOf: first)
+        let firstPNG = try Self.png(at: first)
+        XCTAssertEqual([firstPNG.width, firstPNG.height], [48, 48], "Premise: A is the artwork cut.")
+        XCTAssertEqual(firstPNG.alpha(0, 0), 255, "Premise: A's corner contains opaque artwork.")
+        let firstAttachment = XCTAttachment(data: firstBytes, uniformTypeIdentifier: "public.png")
+        firstAttachment.name = "export-file-first-artwork"
+        firstAttachment.lifetime = .keepAlways
+        add(firstAttachment)
+        session.saveToPhotos(using: photos)
+        let held = await settle(until: { photos.calls.count == 1 })
+        XCTAssertTrue(held, "Premise: a real destination request still holds A's handed URL.")
+        let handedURL = try XCTUnwrap(photos.calls.first?.file)
+        XCTAssertEqual(handedURL, first)
+
+        session.reset()
+        session.includePadding = true
+        session.exportFrame(0)
+        guard case .finished(let exportedReplacement) = await settle(session) else {
+            return XCTFail("The replacement export must finish, and it stopped at \(session.phase).")
+        }
+        let replacement = exportedReplacement.url
+        let replacementBytes = try Data(contentsOf: replacement)
+        let replacementPNG = try Self.png(at: replacement)
+        XCTAssertEqual([replacementPNG.width, replacementPNG.height], [64, 64],
+                       "Premise: B exports the same frame with its padding.")
+        XCTAssertEqual(replacementPNG.alpha(0, 0), 0, "Premise: B's corner is transparent margin.")
+        XCTAssertEqual(replacementPNG.alpha(8, 8), 255, "Premise: B contains the same artwork.")
+        XCTAssertNotEqual(replacementBytes, firstBytes, "Premise: the two actual PNG products differ.")
+        let replacementAttachment = XCTAttachment(data: replacementBytes, uniformTypeIdentifier: "public.png")
+        replacementAttachment.name = "export-file-replacement-padding"
+        replacementAttachment.lifetime = .keepAlways
+        add(replacementAttachment)
+
+        let retainedBytes = try Data(contentsOf: handedURL)
+        XCTAssertEqual(retainedBytes, firstBytes,
+                       "A pending consumer's original URL must still name A's PNG bytes after B finishes.")
+        photos.release()
+        await unwind()
+    }
+
+    func testPhotosKeepsItsOriginalFileThroughResetAndRetiresItAfterTheAnswer() async throws {
+        let manager = paddedDocument()
+        let finished = await finishedFrameExport(manager)
+        let (session, url) = try XCTUnwrap(finished)
+        let bytes = try Data(contentsOf: url)
+        let photos = FakePhotos(answers: [.saved], holding: true)
+        defer { photos.release(); session.cancel() }
+        session.saveToPhotos(using: photos)
+        let held = await settle(until: { photos.calls.count == 1 })
+        XCTAssertTrue(held, "Premise: the real destination call is still pending.")
+        session.reset()
+        XCTAssertEqual(try Data(contentsOf: url), bytes,
+                       "Reset cannot retire the source a pending Photos request still needs.")
+        photos.release()
+        await unwind()
+        XCTAssertEqual(session.photosState, .idle, "The old answer does not republish after reset.")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.deletingLastPathComponent().path),
+                       "The last destination releases its own completed product directory.")
+    }
+
+    func testOldSendProgressAndCompletionCannotPublishIntoAReplacementExport() async throws {
+        let manager = paddedDocument()
+        let endpoint = StreamEndpoint(host: "laptop", port: 47301)
+        manager.streamCoordinator.documentEndpointOverride = endpoint
+        manager.streamCoordinator.sync()
+        let client = try XCTUnwrap(manager.streamCoordinator.client(for: endpoint))
+        manager.streamCoordinator.stateChanged(.connected, at: endpoint)
+        defer { client.stop() }
+        let finished = await finishedFrameExport(manager)
+        let (session, firstURL) = try XCTUnwrap(finished)
+        let firstBytes = try Data(contentsOf: firstURL)
+        let firstChunk = expectation(description: "first actual send chunk is held")
+        let secondChunk = expectation(description: "replacement actual send chunk is held")
+        let firstEnd = expectation(description: "first actual file ended")
+        let secondEnd = expectation(description: "replacement actual file ended")
+        var chunks: [(Error?) -> Void] = []
+        var begins: [StreamFileBegin] = []
+        var ends = 0
+        client.writeFrameOverride = { type, payload, completed in
+            if type == .fileBegin, let begin = StreamJSON.decode(StreamFileBegin.self, from: payload) {
+                begins.append(begin)
+            }
+            if type == .fileChunk {
+                chunks.append(completed)
+                if chunks.count == 1 { firstChunk.fulfill() }
+                if chunks.count == 2 { secondChunk.fulfill() }
+            } else {
+                if type == .fileEnd {
+                    ends += 1
+                    if ends == 1 { firstEnd.fulfill() }
+                    if ends == 2 { secondEnd.fulfill() }
+                }
+                completed(nil)
+            }
+        }
+        session.sendToComputer()
+        await fulfillment(of: [firstChunk], timeout: 5)
+        XCTAssertEqual(chunks.count, 1, "Premise: one real chunk is stalled, not its session callback.")
+        session.reset()
+        session.includePadding = true
+        session.exportFrame(0)
+        guard case .finished(let replacement) = await settle(session) else {
+            return XCTFail("Replacement export must finish.")
+        }
+        XCTAssertEqual(try Data(contentsOf: firstURL), firstBytes,
+                       "A queued/in-flight sender still owns its original immutable source.")
+        let releaseFirst = try XCTUnwrap(chunks.first)
+        releaseFirst(nil)
+        await fulfillment(of: [firstEnd], timeout: 5)
+        await unwind()
+        XCTAssertEqual(session.sendState, .idle, "Old send progress cannot reappear after reset.")
+        guard session.sendState == .idle else { return }
+        let firstID = try XCTUnwrap(begins.first?.id)
+        client.handle(StreamFrame(.fileResult, payload: StreamJSON.encode(
+            StreamFileResult(id: firstID, ok: true, reason: nil))))
+        // The client's FIFO retires A before admitting B; A's main callback arrives while B is busy.
+        session.sendToComputer()
+        await fulfillment(of: [secondChunk], timeout: 5)
+        XCTAssertEqual(session.sendState, .sending(bytesSent: 0, totalBytes: 0),
+                       "A's terminal result cannot finish B's independently pending send.")
+        guard session.sendState == .sending(bytesSent: 0, totalBytes: 0) else { return }
+        XCTAssertEqual(begins.count, 2, "Premise: B was actually admitted after A, not refused.")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstURL.deletingLastPathComponent().path),
+                       "A's real terminal callback retires A after reset.")
+        let releaseSecond = try XCTUnwrap(chunks.dropFirst().first)
+        releaseSecond(nil)
+        await fulfillment(of: [secondEnd], timeout: 5)
+        await unwind()
+        let replacementSize = try Data(contentsOf: replacement.url).count
+        XCTAssertEqual(session.sendState, .sending(bytesSent: replacementSize, totalBytes: replacementSize),
+                       "The current file still reports its own actual chunk progress.")
+        let secondID = try XCTUnwrap(begins.last?.id)
+        client.handle(StreamFrame(.fileResult, payload: StreamJSON.encode(
+            StreamFileResult(id: secondID, ok: false, reason: "B was refused."))))
+        let answered = await settle(until: { session.sendState == .failed("B was refused.") })
+        XCTAssertTrue(answered, "B must publish its own actual receiver result.")
+        XCTAssertEqual(session.sendState, .failed("B was refused."))
+        let stopped = expectation(description: "sender queue joined")
+        client.stop { stopped.fulfill() }
+        await fulfillment(of: [stopped], timeout: 5)
+    }
+
+    func testAQueuedPNGWriteFailureRetiresOnlyItsPartialProductDirectory() async throws {
+        let manager = paddedDocument()
+        await warm(manager)
+        let session = FrameExportSession(manager: manager)
+        let gate = DispatchSemaphore(value: 0)
+        let firstWriting = session.$phase.first { $0 == .writing(done: 0, total: 1) }.sink { _ in
+            session.workQueue.async { gate.wait() }
+        }
+        defer { firstWriting.cancel(); gate.signal(); session.cancel() }
+        session.exportFrame(0)
+        let writing = await settle(session, until: { $0 == .writing(done: 0, total: 1) })
+        XCTAssertEqual(writing, .writing(done: 0, total: 1),
+                       "Premise: the real bake read completed before the PNG work was gated.")
+        guard writing == .writing(done: 0, total: 1) else { return }
+        let products = try FileManager.default.contentsOfDirectory(at: outputs,
+            includingPropertiesForKeys: nil)
+        XCTAssertEqual(products.count, 1, "Premise: the actual product owns one exclusive directory.")
+        guard products.count == 1 else { return }
+        let directory = try XCTUnwrap(products.first)
+        let isDirectory = try directory.resourceValues(forKeys: [.isDirectoryKey]).isDirectory
+        XCTAssertEqual(isDirectory, true, "Premise: the queued PNG's actual owned path is a directory.")
+        guard isDirectory == true else { return }
+        let target = directory.appendingPathComponent(FrameExport.safeStem(manager.projectName) + "-frame-0.png")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
+        gate.signal()
+        let result = await settle(session)
+        guard case .failed = result else { return XCTFail("The real PNG write must refuse a directory target.") }
+        await unwind()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path),
+                       "Failed queued work retires its own directory and partial products.")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outputs.path),
+                      "Failure never removes the surrounding test/export root.")
+    }
+
+    func testStartupExportSweepRemovesOnlyAbandonedUUIDDirectories() throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: outputs, withIntermediateDirectories: true)
+        let abandoned = outputs.appendingPathComponent("PaintAppExport-" + UUID().uuidString, isDirectory: true)
+        try fm.createDirectory(at: abandoned, withIntermediateDirectories: false)
+        try Data([1, 2, 3]).write(to: abandoned.appendingPathComponent("old.mp4"))
+        let neighbor = outputs.appendingPathComponent("outside-neighbor", isDirectory: true)
+        try fm.createDirectory(at: neighbor, withIntermediateDirectories: false)
+        let neighborFile = neighbor.appendingPathComponent("keep.png")
+        let neighborBytes = Data([9, 8, 7])
+        try neighborBytes.write(to: neighborFile)
+        let malformed = outputs.appendingPathComponent("PaintAppExport-not-a-uuid", isDirectory: true)
+        try fm.createDirectory(at: malformed, withIntermediateDirectories: false)
+        let ordinaryFile = outputs.appendingPathComponent("PaintAppExport-" + UUID().uuidString)
+        try neighborBytes.write(to: ordinaryFile)
+        let link = outputs.appendingPathComponent("PaintAppExport-" + UUID().uuidString)
+        try fm.createSymbolicLink(at: link, withDestinationURL: neighbor)
+        FrameExportFile.cleanupAbandoned(in: outputs)
+        XCTAssertFalse(fm.fileExists(atPath: abandoned.path), "Startup retires an abandoned owned export.")
+        XCTAssertEqual(try Data(contentsOf: neighborFile), neighborBytes, "Outside data is untouched.")
+        XCTAssertTrue(fm.fileExists(atPath: malformed.path), "Malformed names do not grant ownership.")
+        XCTAssertEqual(try Data(contentsOf: ordinaryFile), neighborBytes, "An owned-looking regular file stays.")
+        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: link.path), neighbor.path,
+                       "An owned-looking symlink is not traversed or removed.")
+    }
+
+    /// This exercises the actual controller factory's capture, not UIKit's activity dispatch.
+    func testShareControllerRetainsTheProductThroughItsCompletionWiring() async throws {
+        let manager = paddedDocument()
+        for completed in [false, true] {
+            let finished = await finishedFrameExport(manager)
+            let (session, url) = try XCTUnwrap(finished)
+            let original = try Data(contentsOf: url)
+            var controller: UIActivityViewController?
+            var completions = 0
+            var existedInCompletion = false
+            if case .finished(let file) = session.phase {
+                controller = FrameExportSession.shareController(for: file) {
+                    completions += 1
+                    existedInCompletion = FileManager.default.fileExists(atPath: url.path)
+                }
+            }
+            XCTAssertNotNil(controller?.completionWithItemsHandler, "Premise: this is the real factory path.")
+            session.reset()
+            XCTAssertEqual(try Data(contentsOf: url), original,
+                           "The actual activity controller pins the product independently of the session.")
+            controller?.completionWithItemsHandler?(nil, completed, nil, nil)
+            XCTAssertEqual(completions, 1, "Both completion and cancellation finish the same owner scope.")
+            XCTAssertTrue(existedInCompletion, "The product remains alive through the completion callback.")
+            // UIKit clears this copied property after activity completion or dismissal. Model
+            // that boundary without assuming its unpresented controller retires synchronously.
+            controller?.completionWithItemsHandler = nil
+            withExtendedLifetime(controller) {
+                XCTAssertFalse(FileManager.default.fileExists(atPath: url.deletingLastPathComponent().path),
+                               "After the controller releases its callback the product has no remaining owner.")
+            }
+        }
     }
 
     // MARK: - Readback
