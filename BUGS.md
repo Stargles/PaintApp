@@ -3062,3 +3062,8 @@ only; Release behavior is pending. `CanvasManager+Recording` copies its take and
 before appending. Remove those ownership copies through in-place mutation, retaining all raw input.
 No attribution to the ordinary-drawing lag/crash. Root receipt lives in
 `s55-recorded-regressions/recording-cow-old2-aafe063f/root-causal-acceptance.json`.
+
+Recording copy finding: corrected via in-place optional/dictionary mutation, now harvested.
+75 logic checks passed in both Debug and Release; two original-copy controls reached their two
+resource assertions; public4 passed and both graph pictures were inspected. No measured timing/RSS
+improvement or attribution to ordinary drawing/crash is claimed. Final assembled gates remain.

@@ -14,7 +14,8 @@ displayFrame and visibility checks pass. c897 whole9 passed7 and failed two fixt
 Green bounds included the green Live label; full-screen stream rectangles match within1pixel. The
 new test now reuses the existing blue-frame convention and removes four unnecessary coordinate
 helpers. Mode1 now traverses its probe rather than relying on the final touch-up endpoint. Whole9
-rerun pending; no additional On Top runtime state or correction.
+passed9/9 at e981, one public live-scratch fault hit its intended assertion and normal1 rebuilt green.
+Root inspected the eraser and red→blue continuity pictures. No additional On Top runtime state.
 This adds to (does not replace) stream offset, Test Move/lag/crash and the rest of TODO.
 
 Kevin resumed: **continue; do not park**. Read this file, `AGENTS.md`, `CLAUDE.md`, `TODO.md`,
@@ -229,3 +230,32 @@ Source-rate recording OLD aafe selected2 is joined/strictly reconciled: only two
 assertions failed (511 scalar /4,088 pose backing relocations with unchanged capacity over512events).
 All data/target/unwrap/stop checks passed. Author may now remove copying through the existing mutation
 seam; no sampling cap/timing/crash claim. Packet: `recording-cow-old2-aafe063f`.
+
+## Current continuation — recording harvested, combined gates active
+
+Source-rate recording now appends through the existing optional/dictionary mutation seam. It removes
+local take/channel copies and copy-back; no new state, API, schema, timer or sampling cap. OLD512events
+showed511 scalar/4,088 pose relocations with unchanged capacity. bf Debug75 and Release75 passed; two
+old-copy controls hit exactly two resource assertions. 621 public4 passed with root-looked slider and
+stable landscape Move graphs. Four endpoints are harvested in this commit; all727 outside entries
+remain exact. Receipt: `s55-recorded-regressions/recording-cow-harvest-6210-to-e981/`.
+
+Stream e981 whole9 is green; public Mode1 scratch-control1 failed only its intended held assertion,
+all731 source entries restored, and normal1 rebuilt green. Root looked the live-reference result and
+red→blue Move exit pictures. Earlier c8977/9 and369 parity failures remain preserved: green Live text
+contaminated bounds; the eraser probe was an endpoint guaranteed at lift. Corrected fixtures reuse
+blue and traverse the same probe; four unnecessary coordinate helpers were deleted.
+
+Owned56 maintenance reclaimed3,116,032,000 bytes. All12,578 Containers entries were archived and
+verified; app/artwork/bundle unchanged through boot (56changed/9added OS cache entries only). Packet:
+`owned56C-cache-cleanup-after-recording-stream-20261029`. Originals/installed6fb remain unchanged.
+
+Root now runs private candidate21979024 in `PaintApp-s55-export-resize-gradient-compose`: explicit
+149logic +30public methods in one179 baseline. It combines Export27d2, Resizeac(final546 ancestor)
+and Gradient8e through scoped three-way hunks; independent review found no concrete seam blocker.
+No native outcome or integration harvest yet. Old Export87 shorthand is not reinterpreted.
+
+Next: join/reconcile combined179, then actual Resize11/Gradient1 controls and normal rebuild. Also
+run the prepared old-writer MotionGroup protocol (nonce unchanged), fresh isolated Test/olderTest1
+TEMP diagnostics atfe535 (corrected freshTest535004B/olderTest1 12305349B map), remaining artist UI/
+recovery gates and final assembled Debug/Release, performance/device gates. No main merge/push/install.

@@ -778,3 +778,11 @@ Mode1 held erase probes the gesture endpoint; moved samples can stop short befor
 is guaranteed at lift. Source matches qualifiedcf in the eraser path. Drive the same eraser across
 the existing .50 probe to .56 (within the already-painted mark), preserving .70 outside probe, all
 pixel predicates and4second hold. These are fixture corrections, with no runtime fix.
+
+Current qualification update: the recording copy removal is harvested through four exact endpoints;
+Debug75/Release75, two intended copy faults, public4 and root-looked graph captures pass. Stream
+whole9, one intended live-scratch fault and a normal1 rebuild pass. Final assembled checks remain.
+Export/Resize/Gradient are privately composed at21979024; root179 baseline is active, no result yet.
+Disk maintenance recovered3.116GB with12,578 archived app-data entries preserved. The white notch
+review found no confirmed new reference defect; existing full display-versus-commit logic covers
+coverage/z-order, so no speculative runtime mechanism or duplicate UI probe is added.

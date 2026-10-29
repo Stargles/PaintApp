@@ -141,6 +141,109 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
                       + "reported pose, so a press-and-hold is a take too")
     }
 
+    /// **All eight Move-box streams append without relocating reserved storage** — an allocation
+    /// witness, not a timing threshold. It drives the existing `updateFloatingPose` route with the
+    /// injected clock and checks every timestamp/value, including rotation winding across two turns.
+    func testRecordedMovePoseSamplesDoNotRelocateWithinReservedCapacity() throws {
+        let eventCount = 512
+        let duration: TimeInterval = 4
+        let components = PoseComponents.Component.allCases
+        let (manager, clock) = movingDocument()
+        let tgt = target(manager)
+        manager.armRecording()
+        XCTAssertTrue(manager.beginContainerPoseMove())
+        XCTAssertTrue(manager.beginMoveBoxTake())
+
+        func reservePoseStorage() throws {
+            var take = try XCTUnwrap(manager.recordingTake)
+            for component in components {
+                var samples: [ValueRecording.Sample] = []
+                samples.reserveCapacity(eventCount)
+                take.poses[component] = ValueRecording(samples: samples)
+            }
+            manager.recordingTake = take
+        }
+        try reservePoseStorage()
+
+        func storageState(for component: PoseComponents.Component,
+                          in take: CanvasManager.RecordingTake?)
+            -> (count: Int, capacity: Int, address: UInt)? {
+            guard let recording = take?.poses[component] else { return nil }
+            let capacity = recording.samples.capacity
+            return recording.samples.withUnsafeBufferPointer { buffer in
+                guard let address = buffer.baseAddress else {
+                    return (buffer.count, capacity, 0)
+                }
+                return (buffer.count, capacity, UInt(bitPattern: address))
+            }
+        }
+
+        func observations() -> [PoseComponents.Component: (count: Int, capacity: Int, address: UInt)] {
+            guard let take = manager.recordingTake else { return [:] }
+            var result: [PoseComponents.Component: (count: Int, capacity: Int, address: UInt)] = [:]
+            for component in components {
+                if let state = storageState(for: component, in: take) { result[component] = state }
+            }
+            return result // Only counts, capacities and integer addresses outlive this read.
+        }
+
+        let initial = observations()
+        XCTAssertEqual(initial.count, components.count)
+        for component in components {
+            XCTAssertEqual(initial[component]?.count, 0, "PREMISE: no pose sample before the drag")
+            XCTAssertGreaterThanOrEqual(initial[component]?.capacity ?? 0, eventCount,
+                                         "PREMISE: each component has spare capacity for this witness")
+        }
+
+        let epoch = clock.now
+        var sameCapacityObservations = 0
+        var backingRelocations = 0
+        for index in 0..<eventCount {
+            let before = observations() // No take, ValueRecording or Array survives to the next event.
+            let time = epoch + duration * TimeInterval(index + 1) / Double(eventCount)
+            let expectedRotation = Double(index + 1) * 720 / Double(eventCount)
+            clock.now = time
+            manager.tickPlayback()
+            manager.updateFloatingPose(
+                transform: FloatingTransform(position: canvasCentre, scaleX: 1, scaleY: 1,
+                                             rotation: CGFloat(expectedRotation * .pi / 180)),
+                distortQuad: nil)
+            let after = observations()
+
+            for component in components {
+                guard let old = before[component], let new = after[component], old.count > 0,
+                      old.capacity == new.capacity else { continue }
+                sameCapacityObservations += 1
+                if old.address != new.address { backingRelocations += 1 }
+            }
+        }
+
+        XCTAssertGreaterThan(sameCapacityObservations, eventCount * components.count / 2,
+                             "PREMISE: enough component appends were compared without capacity growth")
+        XCTAssertEqual(backingRelocations, 0,
+                       "Each pose stream should append in place while its reserved capacity remains")
+
+        do {
+            let take = try XCTUnwrap(manager.recordingTake)
+            XCTAssertEqual(take.target, tgt, "All streams remain attached to the target the box took")
+            XCTAssertEqual(Set(take.poses.keys), Set(components))
+            for component in components {
+                let samples = try XCTUnwrap(take.poses[component]?.samples)
+                XCTAssertEqual(samples.count, eventCount, "Every reported pose must reach every channel")
+                for index in samples.indices {
+                    let expectedTime = epoch + duration * TimeInterval(index + 1) / Double(eventCount)
+                    let expectedRotation = Double(index + 1) * 720 / Double(eventCount)
+                    XCTAssertEqual(samples[index].time, expectedTime, accuracy: 1e-10)
+                    var expected = PoseComponents.Values.resting(in: canvasBox)
+                    expected.rotation = expectedRotation
+                    XCTAssertEqual(samples[index].value, expected[component], accuracy: 0.02,
+                                   "\(component) keeps its reported pose value, including unwrapped turns")
+                }
+            }
+        }
+        XCTAssertNil(manager.stopRecording(), "The complete two-turn pose take remains recordable")
+    }
+
     /// **A Move box touched with the recorder idle behaves exactly as it did before recording existed.**
     ///
     /// This is the surface's safety property and it is a whole-gesture assertion rather than a flag

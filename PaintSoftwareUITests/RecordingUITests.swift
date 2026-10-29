@@ -233,6 +233,7 @@ final class RecordingUITests: PaintUITestCase {
         XCTAssertGreaterThan(framesAfter.current, framesBeforeTheTake.current,
                              "Playback ran with the take, which is the half the owner said arming "
                              + "was stealing the time for")
+        attachScreenshot(XCUIScreen.main, "Recorded slider curve on the timeline")
     }
 
     /// **§5's second surface, end to end from a document with nothing in it: arm, put a finger on the
@@ -259,7 +260,8 @@ final class RecordingUITests: PaintUITestCase {
         // The notice is read below, and `CanvasNotice.duration` is 2.6 s — a self-dismissing banner is
         // a race no `waitForExistence` can win.
         app.launchArguments += ["-uiTestNoticeSeconds", "120"]
-        XCTAssertTrue(launchIntoEditor(app), "Setup: a brand-new document, no prior state")
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft),
+                      "Setup: a brand-new landscape document, no prior state")
 
         // 8 fps, one tap on a preset — §2.7's editable rate, used here for what it is for.
         app.buttons["timeline.frameRateButton"].tap()
@@ -371,5 +373,6 @@ final class RecordingUITests: PaintUITestCase {
                       "The key-marker band is drawn on this track now, where it was not before")
         XCTAssertFalse(((markers.value as? String) ?? "").isEmpty,
                        "…and it names the frames it is drawing markers on")
+        attachScreenshot(XCUIScreen.main, "Recorded Move curve in landscape")
     }
 }

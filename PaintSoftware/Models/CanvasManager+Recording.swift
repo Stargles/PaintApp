@@ -371,17 +371,22 @@ extension CanvasManager {
     /// **The rotation is unwrapped onto the previous sample's turn**, so a box spun through 180° keeps
     /// winding rather than jumping a full turn back between two samples — which the resample would
     /// otherwise draw as the box spinning the other way.
+    ///
+    /// **Mutates the stored optional and dictionary entry in place.** This is the control's own-rate
+    /// path, so a local take/channel copy would share the sample array with the property and make each
+    /// append copy the accumulated stream.
     @discardableResult
     func recordMoveBoxSample(_ target: KeyframeTarget, pose: PoseQuad) -> Bool {
-        guard isRecording, var take = recordingTake, take.target == target,
-              let box = take.basePose?.track.box,
+        guard isRecording, recordingTake?.target == target,
+              let box = recordingTake?.basePose?.track.box,
               var values = PoseComponents.decompose(pose, inBox: box) else { return false }
-        if let last = take.poses[.rotation]?.samples.last { values = values.unwrappingRotation(near: last.value) }
+        if let last = recordingTake?.poses[.rotation]?.samples.last {
+            values = values.unwrappingRotation(near: last.value)
+        }
         let now = playbackNow()
         for component in PoseComponents.Component.allCases {
-            take.poses[component, default: ValueRecording()].record(values[component], at: now)
+            recordingTake?.poses[component, default: ValueRecording()].record(values[component], at: now)
         }
-        recordingTake = take
         return true
     }
 
@@ -565,11 +570,9 @@ extension CanvasManager {
     /// playhead from, so a test can hand the recorder numbers instead of sleeping through a take.
     func recordParameterSample(_ target: KeyframeTarget, parameterID: String,
                                value: Double) -> Bool {
-        guard isRecording, var take = recordingTake, take.target == target else { return false }
-        var channel = take.channels[parameterID] ?? ValueRecording()
-        channel.record(value, at: playbackNow())
-        take.channels[parameterID] = channel
-        recordingTake = take
+        guard isRecording, recordingTake?.target == target else { return false }
+        let now = playbackNow()
+        recordingTake?.channels[parameterID, default: ValueRecording()].record(value, at: now)
         return true
     }
 

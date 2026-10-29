@@ -505,6 +505,76 @@ final class RecordingLogicTests: XCTestCase {
         manager.stopRecording()
     }
 
+    /// **A scalar take appends into its reserved storage when capacity is unchanged** — an
+    /// allocation witness, not a timing threshold. The address observer returns only primitives and
+    /// ends before each real `CanvasManager.recordParameterSample` call, so it cannot itself retain
+    /// the array and force copy-on-write.
+    func testRecordedScalarSamplesDoNotRelocateWithinReservedCapacity() throws {
+        let eventCount = 512
+        let (manager, clock) = self.manager()
+        let tgt = target(manager)
+        XCTAssertNil(manager.startRecording(target: tgt))
+
+        // Seed spare capacity through the existing ValueRecording initializer. This avoids counting
+        // ordinary Array growth as a relocation and leaves every recorded sample to the real manager API.
+        func reserveChannelStorage() throws {
+            var take = try XCTUnwrap(manager.recordingTake)
+            var samples: [ValueRecording.Sample] = []
+            samples.reserveCapacity(eventCount)
+            take.channels[brightnessID] = ValueRecording(samples: samples)
+            manager.recordingTake = take
+        }
+        try reserveChannelStorage()
+
+        func storageState() -> (count: Int, capacity: Int, address: UInt)? {
+            guard let recording = manager.recordingTake?.channels[brightnessID] else { return nil }
+            let capacity = recording.samples.capacity
+            return recording.samples.withUnsafeBufferPointer { buffer in
+                guard let address = buffer.baseAddress else {
+                    return (buffer.count, capacity, 0)
+                }
+                return (buffer.count, capacity, UInt(bitPattern: address))
+            }
+        }
+
+        let initial = try XCTUnwrap(storageState())
+        XCTAssertEqual(initial.count, 0, "PREMISE: this take has not recorded yet")
+        XCTAssertGreaterThanOrEqual(initial.capacity, eventCount,
+                                     "PREMISE: storage is reserved for the complete bounded witness")
+
+        let epoch = clock.now
+        var sameCapacityObservations = 0
+        var backingRelocations = 0
+        for index in 0..<eventCount {
+            let before = storageState() // The observer's copied ValueRecording dies here.
+            let time = epoch + TimeInterval(index + 1) / Double(eventCount)
+            let value = 0.25 + Double(index) / Double(eventCount * 2)
+            clock.now = time
+            XCTAssertTrue(manager.recordParameterSample(tgt, parameterID: brightnessID, value: value),
+                          "The accepted target must retain every source-rate sample")
+            let after = storageState()
+            if let before, let after, before.count > 0, before.capacity == after.capacity {
+                sameCapacityObservations += 1
+                if before.address != after.address { backingRelocations += 1 }
+            }
+        }
+
+        XCTAssertGreaterThan(sameCapacityObservations, eventCount / 2,
+                             "PREMISE: enough appends were compared without capacity growth")
+        XCTAssertEqual(backingRelocations, 0,
+                       "Appending with spare capacity should not copy the accumulated sample buffer")
+
+        let recorded = try XCTUnwrap(manager.recordingTake?.channels[brightnessID]?.samples)
+        XCTAssertEqual(recorded.count, eventCount)
+        for index in recorded.indices {
+            XCTAssertEqual(recorded[index].time,
+                           epoch + TimeInterval(index + 1) / Double(eventCount), accuracy: 1e-10)
+            XCTAssertEqual(recorded[index].value,
+                           0.25 + Double(index) / Double(eventCount * 2), accuracy: 1e-12)
+        }
+        XCTAssertNil(manager.stopRecording(), "All captured values move, so the take remains recordable")
+    }
+
     // MARK: - A slider tick during a take
 
     /// **The recorder catches the tick, and nothing is written.** Keying per reported value is the
