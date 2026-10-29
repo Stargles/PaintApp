@@ -34,6 +34,20 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
 
 ## New audit findings — recorded October 29 before implementation
 
+- [ ] Correct/calibrate the shared private touch synthesizer's screen coordinate contract. Combined409
+  passed407; the held-Shape workflow reached adjustable state but the actual final video shows a
+  vertical clipped line where the test requested a horizontal line in landscape. The common
+  fingerStroke helper transforms screenPoint to portrait and submits a portrait event record; public
+  recorded taps have a landscape1080×810 parent window. Possible extra conversion is a hypothesis,
+  not a product bug. Prove the shared coordinate route in both landscape directions and portrait,
+  compare intended drawn positions, then fix the single helper seam. Keep artist pixel assertions,
+  use existing UI classes/helpers and no app hook. Current evidence: combined409 root-shape-look.
+- [ ] Tighten current node op/mixMode payload validation after actual-writer evidence. All17 historic
+  LayerFolder encoders explicitly wrote op and Mix mode; missing/unknown op→stack and absent Mix
+  mode→normal are decoder inventions, separate from real retired-slot migration. Preserve valid
+  writers and fail loudly on malformed current nodes; prove finite full-manifest/package behavior.
+  Keep any known-slot migration retirement/current-library repair as a separate audited format task.
+
 The combined409 native baseline remains frozen atd798 in the integration worktree. This records-only
 branch is the live queue so new root-cause work can proceed independently; merge these records back
 only after the native/source extraction boundary. None of these findings is physical crash proof.
