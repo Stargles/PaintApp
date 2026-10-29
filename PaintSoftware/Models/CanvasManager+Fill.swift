@@ -314,7 +314,6 @@ extension CanvasManager {
         let celID = layers[layerIndex].cels[celIndex].id
         fillGestureLayerID = layerID
         fillGestureCelID = celID
-        fillGestureBaseBaked = layers[layerIndex].cels[celIndex].bakedImage
         beginLiveFill(layerID: layerID, celID: celID)
         refreshUndoRedoState() // the fill is undoable from the moment it starts, even on a blank canvas
 
@@ -772,7 +771,6 @@ extension CanvasManager {
         _ = endFillGeneration()
         fillQueue.async { [weak self] in self?.endFillSession() }
         endLiveFill(landing: landing)
-        fillGestureBaseBaked = nil
         fillGestureLayerID = nil
         fillGestureCelID = nil
         refreshUndoRedoState()
@@ -959,7 +957,6 @@ extension CanvasManager {
         let celID = layers[layerIndex].cels[celIndex].id
         fillGestureLayerID = layerID
         fillGestureCelID = celID
-        fillGestureBaseBaked = layers[layerIndex].cels[celIndex].bakedImage
         beginLiveFill(layerID: layerID, celID: celID)
         refreshUndoRedoState()
 

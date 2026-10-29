@@ -3973,7 +3973,6 @@ final class CanvasManager: ObservableObject {
     // point at the same one (see `registerUndoableCelChange` for the same principle).
     var fillGestureLayerID: UUID?
     var fillGestureCelID: UUID?
-    var fillGestureBaseBaked: RasterSource?  // immutable baked version before this gesture
 
     /// Records the artist's own answer for whether a layer bounds the fill (§6.6) — written by the
     /// row's drop button, which is the only control that sets it.
