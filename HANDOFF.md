@@ -2,78 +2,56 @@
 
 Kevin said **continue; do not park**. TODO.md retains every unfinished owner ask. Use useful agents,
 conserve usage, solve causes through existing owners and remove superseded paths. Kevin confirms the
-rapid erasing crash uses **To Cross**; he is asleep until noon Toronto time. No physical crash cause
-has been established. Do not request device interaction before he is back unless already available.
+rapid erasing crash uses **To Cross**. His previous sleep-until-noon period has passed, but fresh
+saved/unlocked readiness is still needed for physical work. No physical crash cause is established.
 
 ## Current state and next action
 
-1. **Continue; do not park.** E owns one A2 Release diagnostic at e2ad4f43 on owned15B;
-   preservation is complete and its Release build-for-testing is compiling. No other native run.
-   H is source-only (Shape scale21f25b40 and final Deform8 audit); CR is source-only (tiny-dab
-   redesign and TEMP bitmap sentinel e57b53f0). Use root-next-gates.json for the actual lease.
+1. **Continue; do not park.** Root owns native scheduling and completion metadata. The frozen normal
+   wrapper may write its start lease; agents report completion by message. Actual authority lives in
+   `~/PaintWork/s54-final-qualification/root-next-gates.json`. One Debug public Paste/Bake/save/reopen
+   check is running atf422 under image_audit_fresh. No parallel compiler/simulator lifecycle.
 2. **Integration:** `~/PaintWork/PaintApp-s54-qualified-integration`, `tmp/s54-qualified-integration`.
-   Source headb3e45f7d before this record: HUD four-path harvestbdf; measured cold recovery fixture
-   0953652e; photo-import noticea18c739a; shape finding recordedb3e45f7d. Source731,
-   fast5449/full6064 (new isolated component tests not harvested). Main/origin afd2030c and
-   installed6fb unchanged; no merge, push or new install. Root's4 + H's32 newly reviewed whole
-   bodies are recorded outside the repo; the remaining8 assignment-unknown Deform bodies are
-   being reviewed. This does not convert old partial-method reviews into whole-file claims.
-3. **To Cross:** integrated window candidate passed112, four mapped controls and clean35 at740e.
-   Real Test1 Release A1da7e and B101ab each passed1/rootstrict731. B1 used seven native windows,
-   then missing measurements for newly-ID'd cut fragments caused `.everything` atv8. Local full
-   render requests fell36→29. Cached assignments are not allocations; no speed/crash-cause claim.
-   B2/A2 are paused for central completed-walk counts and exact-input instrumentation. No permanent
-   bounds-policy fix is approved from an inferred rectangle.
-4. **Geometry evidence:** A1post539 vsB1post541 elements from identical527 input. Two RoughInk seeds
-   retain different ink intervals; this is not just AA. The older13d `.saving` checkpoint matches
-   all541 B1 elements after normalization, but its durable project stayed527. Thus the difference
-   predates B1; current0.1-point logs cannot explain it. Actual full-precision replay is pending.
-   See B1's `a1-b1-vector-geometry-review.md`; preserve all original and checkpoint packages.
-5. **Missing red ink:** original exact retained size1 stroke is independently zero-red atb437.
-   Candidate9221 and successor2161 each pass the strict saved1pt regression but whole66 is65/66.
-   The completed2161 matrix has140 issues: residual point-sample energy bias/transition failures
-   are real;124 lower-Y checks may be a second-bitmap readback coordinate error, not yet proven.
-   CR committed a pure asymmetric bitmap/readback TEMP sentinel e57b53f0 (selected1 unrun), then
-   prepares a bounded direct-area prototype without residual point mixing. Do not harvest any
-   current tiny-dab production code. The actual CGGradient boundary and matched Release cost
-   remain gates. Root inspected the new saved-stroke picture; the old0-red witness stays frozen.
-6. **Placed images:** c3d2 normal68 passed67/68: wholeBake25 and actualPackageLayout39 green,
-   old3BakeUI green; new public method set down its own float by toggling Actions before Done.
-   Actual recording shows the pasted image, disproving initial IPC-loss inference. Test-onlyd232
-   uses the proven box-touch dismissal route, keeps all six-cell pixel assertions, and has one
-   failed-method rerun proposal pending. Conditional controls include oldBake .up logic+publicUI
-   and oldPNG coefficient packagequad/pixels. Direct package matrix proves the scale-unit bug;
-   runner pasteboard metadata alone does not prove AUT scale2. No new schema/decoder/repair.
-7. **PerfHUD:** source71ee fixes teardown at the existing HUD owner, removing unreachable monitor
-   deinit cleanup. Normal2 passed; restoring the old cycle failed the intended weak-release check.
-   A clean restored normal9 (allTopBar8+release1) passed9/9,0skip; root strict/source731 verified.
-   Root inspected full enabled/hidden HUD pictures and the visible padding/veil patch; app-attached
-   padding PNGs are clipped, so no full-screen padding claim. Earlier compile/AX/occluded-premise
-   failures stay preserved. Four paths harvested; assembled qualification remains.
-8. **Diagnostics:** `PaintApp-s55-two-temp-diagnostics` b437 selected2Debug failed2/2 as described
-   above, source731 exact. These methods are unharvestable TEMP diagnostics. Old0a/7b sources remain
-   frozen. Renderer/PNG evidence: `~/PaintWork/s55-recorded-regressions/two-temp-diagnostics-b4377638/`.
-9. **Storage:** root's fresh storage_cleanup agent now owns bounded old-artifact inventory/trial,
-    while Debug correctness can continue. Current54/55, artwork, all packages and original videos
-    stay protected; no Release timing while cleanupIO runs. TODO records the exact old-log trial
-    and derived-frame dedup review scope. Older completed cache cleanup:
- completed owned15B offline cleanup preserved6,880 container entries in verified
-   240,148,620B archive SHAa89d6c..., reclaimed1,008,570,368B, then boot-verified artwork/bundles and
-   left15BShutdown. Own56 is Booted for current gates. Earlier56 cleanup recovered1,318,694,912B.
-   Use existing exact-cache/archive helpers; normal runner requires >10GiB. Closed-result dedup's
-   old994 allowlist is not a new-session plan. Never scan cloud folders, alterTCC or deleteOSswap.
-10. **Screenshot pitfall:** full captures can have EXIF/XMP8 and preview black despite millions of
-    white rawRGB pixels. Preserve originals; losslessly rotate and strip metadata into a separate
-    diagnostic copy before concluding a canvas went black. Root normalized the HUD-afterGallery
-    capture and inspected the complete white paper/controls with HUD off. No app fix was justified.
-11. **Next:** after A2 preservation/root review, queued native gates are the TEMP bitmap sentinel,
-    corrected public Paste method, and fresh staged cold recovery; B2 needs another explicit grant.
-    Shape scale21f25b40 is source-only with a boundary logic test and public-class proposal pending.
-    Finish qualified fixes/controls and harvest only reviewed source, then exact assembled
-    Debug/Release fast tiers, affected whole UI classes/full phase gate, existing UI47/mask/graph
-    controls and Release Mend/Liquify/full-raster measurements. Prior component receipts are reused.
-    Windows remains externally unavailable (no repeated probe); physical confirmation waits for
-    fresh readiness. Canonical unfinished asks remain whole in TODO until the qualified main merge.
+   Source731, fast5449/full6064 before isolated tests are harvested. HUD teardown, measured opaque
+   cold-recovery fixture, photo-import notice and UI-test-only Release active architecture setting
+   are integrated. Main/origin afd2030c and installed6fb are unchanged; no merge, push or new install.
+3. **To Cross:** the integrated window component passed112, four controls and restored35. Actual
+   A2 Release completed1/1/rootstrict731:36cuts,27full4096²outputs,6reduced480²outputs,
+   11superseded and1empty. Those are completed pictures, not allocations or crash causality.
+   New fragment-bounds candidateff3535c9 measures arriving pieces through the existing geometry walk,
+   reuses the existing map and unions old/new damage; focused124 and mapped controls remain unrun.
+   A1/B1 RoughInk interval variability still requires full-precision input review; B2 is unrun.
+4. **Tiny brushes:** absolute bitmap sentinel65ef passed1/rootstrict731 and established the correct
+   Y oracle. Direct-area8a5 passed65/66; only the strict actual-gradient handoff assertion failed.
+   Failed evidence is preserved. Fresh candidate7a400 uses bounded area coverage plus a smooth
+   transition into the actual cached gradient, with alpha/eraser composition checks. Whole67 and
+   matched Release cost proposals are validated but unrun; no tiny-dab source harvested. The saved
+   original1pt zero-red witness remains, and public cold1pt reachability still needs a test.
+5. **Placed pictures:** Bake25+PackageLayout39 and old3BakeUI passed. The added public method twice
+   stopped on optional Move/Set Down premises before Bake, so those failures qualify no Bake pixels.
+   f422 removes that irrelevant optional detour and keeps all six-cell appearance/save/reopen checks.
+   Controls and final whole68 remain pending. The PNG coefficient corrects scale units without a
+   schema/decoder/repair; the direct package matrix, not runner pasteboard metadata, owns that proof.
+6. **Remaining source candidates:** Shapes136ed37b reuses one guarded scale (whole83 unrun).
+   Export21f85d7a uses the existing clamped frame range for actual output and advertised filename
+   (selected2/whole67 and six controls unrun). Fresh cold strict-text recovery uses the measured
+   larger opaque mark but Cancel/Versions/Restore/Trash remains unrun on a fresh simulator.
+7. **Source audit:** all153 former unknown files were reviewed whole. Current accepted/proposed
+   receipts cover189 of346 original runtime bodies plus new LayerFillView;157 original partial,
+   caller-only or changed bodies still need renewal. Do not repeat old whole reviews or count
+   partial work as complete. Keep interpolation's future overhaul deferred.
+8. **Storage:** old-log compression trial passed with byte/metadata checks. The26-frame dedup trial
+   preserved bytes/permissions but stopped on an OS-created provenance-token change; initial failure
+   stays failed. Root permits a narrow independent revalidation of those old derived nonexecutable
+   PNGs with only the exact old/new token, never manual security-xattr writes. Prepare durable
+   directory timestamp journaling before further mutation; no full batch is approved yet. Artwork,
+   packages, original videos, current54/55 evidence, Products and worktrees remain protected.
+   No timing benchmarks while cleanupIO runs. Older owned56/15B cache cleanup remains qualified.
+9. **Next:** finish these isolated checks/controls and harvest only reviewed source, then assembled
+   Debug/Release fast tiers, affected whole UI classes/full phase, existing UI47/mask/graph controls,
+   stream OnTop Move-exit witness and Release Mend/Liquify/full-raster measurements. Reuse earlier
+   component proofs. Windows host availability was asked; no reply yet. Physical confirmation needs
+   fresh saved/unlocked readiness. All unfinished owner asks remain in TODO until qualified merge.
 
 Detailed active state is the live root-next-gates JSON and its byte-exact archived predecessors.
 Keep source-only, integrated, qualified and installed distinct. No physical crash cause is proved.

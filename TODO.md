@@ -34,16 +34,23 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
 
 ### Current evidence and decisions
 
-- **Current check:** the HUD release and public Gallery/reopen checks passed; restoring the old
-  cleanup failed the release assertion, then all eight menu checks and the release check passed.
-  This four-path component is integrated. New picture-save and tiny-brush fixes remain isolated;
-  the corrected whole66 small-brush class also finished65/66. Broader matrix failures
-  exposed a real coverage/transition problem in that isolated candidate; a bitmap-coordinate
-  sentinel and simpler bounded-area redesign are pending. No tiny-dab code is harvested.
-  PNG/Bake normal68 reached67pass/1test-setupfailure: the test reopened Actions and committed
-  its own pasted float before checking Set Down. No Bake pixel assertion was reached in that method.
-  None of this newer work is installed. The Test1 eraser comparison saved seven local full-render
-  requests before a conservative fallback; all-owner work and input variability still need checks.
+- **Current checks:** HUD teardown is integrated after its release/menu checks and old-code control.
+  Tiny-brush direct-area8a5 finished65/66; only its actual-gradient handoff failed. The calibrated
+  coordinate sentinel passed. Fresh7a400 transition candidate has whole67 and matched-cost proposals
+  prepared; none of its source is integrated. PNG/Bake64 logic and old3 public tests passed, while
+  the new public test stopped on optional Move premises. Simplifiedf422 is now running the actual
+  Paste/Bake/save/reopen workflow with unchanged pixel checks. Eraser A2 Release passed1 and counted
+  27full4096²pictures plus6reduced480²pictures across36cuts. The fresh-fragment bounds candidate
+  reuses the existing geometry walk/map; focused124 is pending. No physical crash cause is proved.
+
+- **Old generated-file cleanup:** the single-log compression trial passed byte/metadata checks.
+  The26-path derived-PNG trial preserved bytes and permissions but failed its original exact-xattr
+  oracle because macOS updated `com.apple.provenance`. Keep that result failed. Root permits a new
+  narrow revalidation accepting only the exact recorded old/new OS-managed token on these old
+  nonexecutable derived PNGs, never manual security-xattr writes. Original parent-directory times
+  were not durably saved: record this limit, never invent restoration. Before more mutations,
+  journal timestamps durably and restore them in finally. Full batch/DSC mutation is not approved.
+  Protected artist packages, original recordings, current54/55 evidence and Products stay untouched.
 
 - **Generated-build resource audit:** recorded Release builds compile the UI tests for both
   arm64 and x86_64, while the owned iPad simulator executes arm64. Select only the active
