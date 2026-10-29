@@ -92,8 +92,7 @@ struct ExportSheet: View {
                 session.exportFrame()
             } label: {
                 row(icon: "photo", title: "Export This Frame",
-                    detail: "Frame \(canvasManager.currentFrame + 1) as a PNG, with transparency where "
-                          + "the paper is hidden.")
+                    detail: frameDetail)
             }
             .accessibilityIdentifier("export.frameButton")
 
@@ -319,6 +318,15 @@ struct ExportSheet: View {
         // A screen stream is reference and in no frame the baker writes (STREAM.md §2.13).
         if canvasManager.documentHoldsAVisibleStream { parts.append("screen stream not included") }
         return parts.joined(separator: " · ")
+    }
+
+    private var frameDetail: String {
+        guard let range = FrameExport.frameRange(playbackStart: canvasManager.currentFrame,
+                                                playbackEnd: canvasManager.currentFrame,
+                                                contentEndFrame: canvasManager.contentEndFrame) else {
+            return "There is no frame to export."
+        }
+        return "Frame \(range.lowerBound + 1) as a PNG, with transparency where the paper is hidden."
     }
 
     private var videoDetail: String {

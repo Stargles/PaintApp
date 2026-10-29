@@ -478,6 +478,59 @@ final class ToolPanelsUITests: PaintUITestCase {
         try assertDrawingStillWorksAfterExport(app, screenshot: "export-share-closed-drawing-return")
     }
 
+    func testExportingPastTheLastCelFinishesWithTheSceneEndFrame() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetGallery"]
+        let size = CGSize(width: 96, height: 96)
+        XCTAssertTrue(launchIntoEditor(app, size: size, orientationBeforeCreatingCanvas: .landscapeLeft))
+        XCTAssertEqual(app.windows.firstMatch.frame.size, CGSize(width: 1080, height: 810),
+                       "PREMISE: the public export runs at the owner's landscape size")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = paperRect(in: canvas, canvasSize: size)
+        let ink = onHost(paper, 0.5, 0.25)
+        assertAboveTheDock(app, canvas, dy: ink.dy, "The source drawing stays above the expanded timeline")
+        assertBelowTheToolbar(app, canvas, dy: ink.dy, "The source drawing stays below the toolbar")
+        setBrushColor(app, hex: "FF0000")
+        drawLine(on: canvas, from: onHost(paper, 0.3, 0.25), to: onHost(paper, 0.7, 0.25))
+        XCTAssertNotNil(waitForPixel(canvas, at: ink, matches: isRed),
+                        "PREMISE: the held scene-end drawing contains visible red ink")
+        attachScreenshot(XCUIScreen.main, "export-past-end-source-drawing")
+
+        let cel = app.otherElements["timeline.cel.0.0"]
+        let ruler = app.otherElements["timeline.ruler"]
+        XCTAssertTrue(cel.waitForExistence(timeout: 5))
+        XCTAssertTrue(ruler.waitForExistence(timeout: 5))
+        let span = try XCTUnwrap(readCel(app, layerIndex: 0, celIndex: 0))
+        XCTAssertEqual(span.start, 0, "PREMISE: the new drawing begins at frame zero")
+        XCTAssertGreaterThan(span.length, 0, "PREMISE: the drawing has a scene-end frame")
+        let requested = span.length + 2
+        let column = cel.frame.width / CGFloat(span.length)
+        let point = CGPoint(x: cel.frame.minX + (CGFloat(requested) + 0.5) * column, y: ruler.frame.midY)
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(point),
+                      "PREMISE: the public ruler shows the empty frame beyond the last cel")
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: point.x, dy: point.y)).tap()
+        XCTAssertEqual(readFrameLabel(app)?.current, requested + 1,
+                       "PREMISE: the public playhead is beyond the scene, without adding a cel")
+        XCTAssertEqual(readCel(app, layerIndex: 0, celIndex: 0)?.length, span.length,
+                       "PREMISE: scrubbing did not lengthen the drawing")
+        attachScreenshot(XCUIScreen.main, "export-past-end-empty-playhead")
+
+        openExportSheet(app)
+        let frameButton = app.buttons["export.frameButton"]
+        XCTAssertTrue(frameButton.label.contains("Frame \(span.length) as a PNG"),
+                      "The choice advertises the same clamped scene-end frame that will be written")
+        frameButton.tap()
+        let share = app.buttons["export.share"]
+        XCTAssertTrue(share.waitForExistence(timeout: 60),
+                      "The public out-of-scene PNG export finishes instead of waiting for an unschedulable frame")
+        let filename = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@",
+                                                            "-frame-\(span.length - 1).png")).firstMatch
+        XCTAssertTrue(filename.waitForExistence(timeout: 5),
+                      "The finished file exposes the normalized scene-end frame number")
+        attachScreenshot(XCUIScreen.main, "export-past-end-finished-scene-end-png")
+    }
+
     /// Cancelling a visible video export returns the artist to the same drawn canvas, ready to edit.
     func testCancellingAnActiveVideoExportReturnsToDrawing() throws {
         let app = XCUIApplication()

@@ -34,6 +34,11 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
 
 ### Current evidence and decisions
 
+- **Assembly efficiency:** root has source-reviewed and assembled the small Shape scale and export
+  frame-range corrections into the integration candidate before their native checks. Their original
+  pins and control proposals stay frozen. This is unqualified source assembly, not completion, main
+  merge or install; the next combined slice must repin its classes, counts and controls.
+
 - **Current checks:** HUD teardown is integrated after its release/menu checks and old-code control.
   Tiny-brush direct-area8a5 finished65/66; only its actual-gradient handoff failed. The calibrated
   coordinate sentinel passed. Fresh7a400 transition candidate has whole67 and matched-cost proposals

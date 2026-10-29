@@ -693,7 +693,9 @@ final class ShapeRecoveryUITests: PaintUITestCase {
     /// so this stroke reaches the stroke view, whose prepared settlement bakes the shape on the way past.
     func testDrawingOverAPendingShapeCommitsItAndDrawsInOneTouch() throws {
         let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        XCTAssertGreaterThan(app.windows.firstMatch.frame.width, app.windows.firstMatch.frame.height,
+                             "PREMISE: this shape workflow is actually in landscape")
 
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
@@ -709,12 +711,13 @@ final class ShapeRecoveryUITests: PaintUITestCase {
         try drawAndHoldShape(on: canvas, from: CGVector(dx: left, dy: shapeY), to: CGVector(dx: right, dy: shapeY))
         XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: middle, dy: shapeY)),
                        "the shape should be sitting in the adjustable state")
+        attachScreenshot(XCUIScreen.main, "pending-shape-visible-owner-landscape")
 
         // One touch, well clear of the shape's endpoint handles.
         drawLine(on: canvas, from: CGVector(dx: left, dy: strokeY), to: CGVector(dx: right, dy: strokeY))
 
         let firstTouchLanded = waitUntilFilled(canvas, dx: middle, dy: strokeY, timeout: 5)
-        attachScreenshot(XCUIScreen.main, "pending-shape-and-first-stroke-owner-screen")
+        attachScreenshot(XCUIScreen.main, "pending-shape-and-first-stroke-owner-landscape")
         XCTAssertTrue(firstTouchLanded,
                       "the stroke drawn over a pending shape must land on the first touch, "
                       + "not be swallowed as a dismissal of the shape")

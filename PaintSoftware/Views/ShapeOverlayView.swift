@@ -151,27 +151,28 @@ final class ShapeOverlayView: CanvasPlaneView {
     /// transform change. Everything above is divided by this to land at its screen size.
     var canvasScale: CGFloat = 1 {
         didSet {
-            guard canvasScale != oldValue, canvasScale > 0 else { return }
+            guard canvasScale != oldValue else { return }
             applyScaleDependentGeometry()
         }
     }
 
-    private var handleSize: CGFloat { Self.handleScreenSize / canvasScale }
-    private var rotationHandleSize: CGFloat { Self.rotationHandleScreenSize / canvasScale }
-    private var rotationHandleOffset: CGFloat { Self.rotationHandleScreenOffset / canvasScale }
-    private var handleBorderWidth: CGFloat { 2 / canvasScale }
-    private var outlineWidth: CGFloat { 1 / canvasScale }
+    /// A pinch may briefly drive the live canvas scale to zero as its fingers cross. Keep every
+    /// screen-sized handle, outline, and hit radius finite in that transient state, using the same
+    /// small floor as the neighboring transform overlays.
+    private var safeScale: CGFloat { max(canvasScale, 0.01) }
+    private var handleSize: CGFloat { Self.handleScreenSize / safeScale }
+    private var rotationHandleSize: CGFloat { Self.rotationHandleScreenSize / safeScale }
+    private var rotationHandleOffset: CGFloat { Self.rotationHandleScreenOffset / safeScale }
+    private var handleBorderWidth: CGFloat { 2 / safeScale }
+    private var outlineWidth: CGFloat { 1 / safeScale }
     /// The node target's radius in canvas points. Named rather than spelled out at the one call site
     /// so `handleReach * canvasScale == 22` is assertable, the way `ObjectTransformOverlayView`
     /// exposes its own.
-    var handleReach: CGFloat { Self.handleScreenReach / canvasScale }
+    var handleReach: CGFloat { Self.handleScreenReach / safeScale }
     /// The outline target's radius in canvas points.
     ///
-    /// Floored at a 0.01 scale where the others are not, because this one is consulted for a shape
-    /// that may still be mid-pinch: `canvasScale`'s `didSet` guards the *side effect* on a
-    /// non-positive scale, not the stored value, so a zero would otherwise make every point in the
-    /// plane infinitely close to the outline and swallow the whole canvas.
-    var bodyReach: CGFloat { Self.bodyScreenReach / max(canvasScale, 0.01) }
+    /// Uses the same floor as the drawn handles so hit geometry remains finite during a pinch too.
+    var bodyReach: CGFloat { Self.bodyScreenReach / safeScale }
 
     // MARK: - Layers & gesture
 

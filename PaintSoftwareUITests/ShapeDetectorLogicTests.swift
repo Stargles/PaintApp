@@ -1777,6 +1777,34 @@ final class ShapeDetectorLogicTests: XCTestCase {
         }
     }
 
+    func testTransientTinyCanvasScaleKeepsShapeChromeAndHitGeometryFinite() {
+        let fixture = outlineFixtures()[1]
+        for canvasScale in [CGFloat(0), 0.005] {
+            let view = overlay(for: fixture.shape, canvasScale: 1)
+            view.canvasScale = canvasScale
+            let effectiveScale = max(canvasScale, 0.01)
+            let chrome = view.drawnChrome
+
+            XCTAssertTrue(chrome.outlineWidth.isFinite)
+            XCTAssertEqual(chrome.outlineWidth * effectiveScale, 1, accuracy: 1e-9)
+            XCTAssertEqual(view.handleReach * effectiveScale, 22, accuracy: 1e-9)
+            XCTAssertEqual(view.bodyReach * effectiveScale, 22, accuracy: 1e-9)
+            XCTAssertFalse(chrome.handles.isEmpty)
+            for entry in chrome.handles {
+                let frame = entry.frame
+                XCTAssertTrue(frame.minX.isFinite && frame.minY.isFinite &&
+                              frame.width.isFinite && frame.height.isFinite,
+                              "\(entry.kind) has finite geometry at live scale \(canvasScale)")
+                XCTAssertEqual(frame.width * effectiveScale, 14, accuracy: 1e-9)
+                XCTAssertEqual(frame.height * effectiveScale, 14, accuracy: 1e-9)
+                XCTAssertEqual(view.target(at: CGPoint(x: frame.midX, y: frame.midY)), entry.kind,
+                               "\(entry.kind) remains the target at live scale \(canvasScale)")
+            }
+            XCTAssertNil(view.target(at: CGPoint(x: 100_000, y: 100_000)),
+                         "a tiny transient scale must not make a distant touch claimable")
+        }
+    }
+
     /// The outline is grabbed **where it is drawn**, not where an unrotated one would be.
     ///
     /// A 1000 × 200 rectangle turned a quarter turn is 200 × 1000 on screen, and the two candidate

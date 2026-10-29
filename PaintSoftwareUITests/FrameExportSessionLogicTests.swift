@@ -355,6 +355,35 @@ final class FrameExportSessionLogicTests: XCTestCase {
                        + "\(Self.greyLevel(0)) here is the playhead's frame written instead.")
     }
 
+    func testAnOutOfSceneFrameExportWritesTheClampedFramesPictureAndFilename() async throws {
+        for (requested, expectedFrame) in [(12, 2), (-4, 0)] {
+            let manager = greyDocument(frames: 3)
+            let baker = manager.frameBaker
+            let key = try XCTUnwrap(baker.currentKey(atFrame: expectedFrame))
+            XCTAssertFalse(baker.store.contains(key),
+                           "PREMISE: frame \(expectedFrame) must be baked for this cold export")
+            let session = FrameExportSession(manager: manager)
+            defer { session.cancel() }
+            session.bakeTimeout = 1
+            session.exportFrame(requested)
+            let phase = await settle(session, timeout: 15)
+            guard case .finished(let file) = phase else {
+                return XCTFail("A cold out-of-scene request \(requested) must finish with the clamped frame; stopped at \(phase).")
+            }
+            XCTAssertTrue(file.url.lastPathComponent.hasSuffix("-frame-\(expectedFrame).png"),
+                          "The PNG filename names the clamped frame actually exported")
+            let source = try XCTUnwrap(CGImageSourceCreateWithURL(file.url as CFURL, nil))
+            let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+            let level = try XCTUnwrap(Self.firstGrey(image))
+            XCTAssertEqual(Double(level), Double(Self.greyLevel(expectedFrame)), accuracy: 2,
+                           "The PNG holds the clamped scene-boundary drawing, not an out-of-scene blank")
+            let baked = try XCTUnwrap(baker.store.loadDecoded(key))
+            let pixels = try XCTUnwrap(FrameBakeStore.bgraBytes(image))
+            XCTAssertEqual(pixels.bytes, Array(baked.pixels),
+                           "The complete PNG pixels equal the baked clamped frame")
+        }
+    }
+
     // MARK: - The virtual playhead (§3.9)
 
     /// **A finished export hands the baker back to the artist's playhead.**

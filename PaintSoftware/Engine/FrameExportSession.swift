@@ -379,7 +379,8 @@ final class FrameExportSession: ObservableObject {
 
     private func produce(_ product: Product, _ range: ClosedRange<Int>) async throws -> FrameExportFile {
         switch product {
-        case .frame(let frame):
+        case .frame:
+            let frame = range.lowerBound
             let decoded = try await bakedFrame(frame, within: range, index: 0, of: 1)
             phase = .writing(done: 0, total: 1)
             let cut = try delivered(of: decoded, includingPadding: includePadding)
