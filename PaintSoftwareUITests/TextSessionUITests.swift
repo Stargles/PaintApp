@@ -170,8 +170,8 @@ final class TextSessionUITests: PaintUITestCase {
         XCTAssertGreaterThan(black, 40, "PREMISE: both words are black on the paper")
         XCTAssertEqual(try count(isRedInk), 0, "PREMISE: and nothing on the paper is red")
 
-        // Put a caret in the actual visible gap between the two words, then open the native edit menu
-        // from that caret. A selected-word menu omits UIKit's Select All action on this iPad.
+        // Place a caret in the actual visible gap between the two words, then tap that caret to open
+        // UIKit's edit menu. A selected-word menu omits Select All on this iPad.
         let ink = try inkReading(canvas, in: window)
         XCTAssertGreaterThan(ink.ink, 40, "PREMISE: the text is visibly drawn before selection")
         let boxValues = readField(app, "textbox:").split(separator: ",").compactMap { Double($0) }
@@ -215,7 +215,7 @@ final class TextSessionUITests: PaintUITestCase {
         XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: tapping the gap places a caret in the live editor")
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5),
                       "PREMISE: placing the caret keeps the software keyboard active")
-        caret.press(forDuration: 1.0)
+        caret.tap()
         let selectAll = app.menuItems["Select All"]
         XCTAssertTrue(selectAll.waitForExistence(timeout: 5),
                       "PREMISE: the caret's native edit menu offers Select All")
