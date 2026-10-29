@@ -123,6 +123,11 @@ that the final combined audit build has passed.
    retirement premise using UIKit's documented callback-clear boundary; that focused test and
    all87destination/presentation checks now pass. Complete the actual system Share close/return
    tests and observe actual system Share dismissal before testing cancel → drawing and gestures.
+   Source preflight corrects a stale class count:694 has13 public ToolPanels tests, not20. Header-close
+   uniqueness will be checked after its existence wait. A separate active-export Cancel → idle →
+   Close → drawn stroke/pan witness is being added using the existing fixed animation seed and
+   worker-delay seam; it stages cancellation and carries no performance claim. No new runtime hook
+   or fixture growth.
    Preserve the existing presentation safety rule; no separate transfer registry or service.
 6. Saved data: implement one shared checked package-address boundary before reads and writes. The
    old code reproduces required-raster, brush-table/texture, nested-media, link and write failures.
