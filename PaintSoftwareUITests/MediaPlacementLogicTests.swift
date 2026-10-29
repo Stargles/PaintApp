@@ -267,7 +267,7 @@ final class MediaPlacementLogicTests: XCTestCase {
     func testAStrokeAloneIsNotOfferedThem() throws {
         let (manager, vector) = manager()
         manager.commitVectorFloatIfNeeded()
-        vector.images = []
+        vector.elements = []
         vector.addStroke(VectorStroke(id: UUID(), brush: TestBrushes.hardRound, color: black(), size: 4, opacity: 1,
                                       samples: [VectorSample(x: 2, y: 2, pressure: 1),
                                                 VectorSample(x: 4, y: 4, pressure: 1),

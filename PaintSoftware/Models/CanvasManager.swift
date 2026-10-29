@@ -606,8 +606,8 @@ final class CanvasManager: ObservableObject {
     private func addedImageElement(_ image: UIImage, centre: CGPoint, fit: CGFloat, cascading: Bool,
                                    onCelAt surface: (layerIndex: Int, celIndex: Int)) -> VectorImageElement? {
         guard let vector = layers[surface.layerIndex].cels[surface.celIndex].vector else { return nil }
-        let imagesBefore = vector.images
-        let cascade = cascading ? CGFloat(imagesBefore.count) * Self.importCascadeStep : 0
+        let elementsBefore = vector.elements
+        let cascade = cascading ? CGFloat(vector.images.count) * Self.importCascadeStep : 0
         let drawn = VectorImageElement(image: image,
                                        transform: LayerTransform(position: CGPoint(x: centre.x + cascade,
                                                                                    y: centre.y + cascade),
@@ -619,15 +619,10 @@ final class CanvasManager: ObservableObject {
         objectWillChange.send()
         let layerID = layers[surface.layerIndex].id
         let celID = layers[surface.layerIndex].cels[surface.celIndex].id
-        recordUndo(label: .insertImage, cost: Self.approximateImageCost(image), undo: { [weak self] in
-            vector.images = imagesBefore
-            vector.bumpVersion()
-            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
-        }, redo: { [weak self] in
-            vector.images = imagesBefore + [element]
-            vector.bumpVersion()
-            self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
-        })
+        registerVectorElementsUndo(vectorCanvas: vector,
+                                   oldElements: elementsBefore, newElements: vector.elements,
+                                   layerID: layerID, celID: celID, label: .insertImage,
+                                   swap: .addsAndRemoves(ink: nil))
         return element
     }
 

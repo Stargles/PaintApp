@@ -1760,14 +1760,14 @@ final class VectorCanvas {
     /// Backing store for `suppressedElementIDs`/`editingElementID`; see there.
     private var _suppressedElementIDs: Set<UUID> = []
 
-    /// The display list itself. Existing code keeps using the three kind-filtered accessors below.
+    /// The display list itself. Kind-filtered accessors below expose its individual object types.
     var elements: [VectorElement] {
         get { lock.lock(); defer { lock.unlock() }; return _elements }
         set {
             lock.lock()
             defer { lock.unlock() }
             _elements = newValue
-            // These five setters deliberately do not invalidate — callers follow with
+            // These four setters deliberately do not invalidate — callers follow with
             // `bumpVersion()` — but they *do* move the list, and a base whose prefix claim has
             // quietly stopped being true is the one failure mode that draws a wrong picture rather
             // than a stale one. Dropping it here costs a store and needs no caller to remember.
@@ -1803,19 +1803,14 @@ final class VectorCanvas {
         }
     }
 
+    /// The layer's pictures, back to front. Structural edits restore the ordered `elements` list.
     var images: [VectorImageElement] {
-        get { lock.lock(); defer { lock.unlock() }; return _elements.compactMap(\.image) }
-        set {
-            lock.lock()
-            defer { lock.unlock() }
-            _elements = Self.splicing(_elements, kind: .image, with: newValue.map { .image($0) })
-            dropIncrementalBase()
-        }
+        lock.lock(); defer { lock.unlock() }; return _elements.compactMap(\.image)
     }
 
     /// The layer's text objects, back to front.
     ///
-    /// The setter obeys the same splice contract as the three above. `commitInteractiveText` does
+    /// The setter obeys the same splice contract as strokes and fills above. `commitInteractiveText` does
     /// **not** use it: it upserts through `upsertText(_:)` and undoes by swapping the whole `elements`
     /// array (`registerVectorElementsUndo`), which is what a *shorter* or *longer* list needs — the
     /// positional splice can only preserve the z-positions of elements that already exist. Every fill
@@ -1830,7 +1825,7 @@ final class VectorCanvas {
         }
     }
 
-    /// The layer's videos, back to front. **Read-only, unlike the four above**: there is no verb yet
+    /// The layer's videos, back to front. Read-only like images: there is no verb yet
     /// that replaces a video element in place, and a setter with no caller would be a splice contract
     /// nothing tests. `ProjectStore`'s save reads it to copy each asset into the package.
     var videos: [VectorVideoElement] {
@@ -2463,7 +2458,7 @@ final class VectorCanvas {
         index == elements.count - 1 ? .appended(count: 1) : .everything
     }
 
-    /// The `strokes`/`fills`/`images` setter contract — see the comment above those accessors.
+    /// The `strokes`/`fills`/`texts` setter contract — see the comment above those accessors.
     ///
     /// **Positional, not bucketed, and that is what makes it safe now that fills are appended.** The
     /// old version gathered every element of `kind` back at the index the *first* one occupied, which

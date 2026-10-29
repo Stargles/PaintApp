@@ -796,11 +796,8 @@ final class BrushEngineLogicTests: XCTestCase {
         }
     }
 
-    /// The compatibility accessors are the whole reason this refactor stayed small: ~30 call sites read
-    /// and assign `.strokes`/`.fills`/`.images` as if the three arrays were still there. The undo/redo
-    /// path is the one that assigns wholesale (`StrokeCanvasView.registerVectorUndo` snapshots
-    /// `canvas.strokes` and later puts it straight back), so a get→set round trip must be an identity on
-    /// the display list — otherwise every undo would drift a stroke above or below a fill.
+    /// Reassigning the writable kind-filtered accessors preserves every existing z-position,
+    /// including pictures interleaved with the edited kinds.
     func testKindAccessorGetSetRoundTripPreservesElementOrder() {
         let fill = opaqueFill(CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
         let image = placedImage(.green)
@@ -808,12 +805,11 @@ final class BrushEngineLogicTests: XCTestCase {
         let second = centreStroke(CodableColor(red: 1, green: 1, blue: 0, alpha: 1))
         let original: [VectorElement] = [.fill(fill), .image(image), .stroke(first), .stroke(second)]
 
-        for label in ["strokes", "fills", "images"] {
+        for label in ["strokes", "fills"] {
             let canvas = VectorCanvas(size: Self.canvasSize, elements: original)
             switch label {
             case "strokes": canvas.strokes = canvas.strokes
-            case "fills": canvas.fills = canvas.fills
-            default: canvas.images = canvas.images
+            default: canvas.fills = canvas.fills
             }
             XCTAssertEqual(canvas.elements.map(\.id), original.map(\.id),
                            "Reading and re-assigning .\(label) must leave the display list exactly as it was")
@@ -972,6 +968,50 @@ final class BrushEngineLogicTests: XCTestCase {
                        "Redo should replay the very element undo removed, not construct a fresh one")
         XCTAssertEqual(secondAfterRedo.transform.position, secondBeforeUndo.transform.position,
                        "Redo must re-place the second image at the identical cascaded offset it had before undo")
+    }
+
+    /// A fill appended after image A stays between A and a newly placed image B through history.
+    /// Kind-only snapshots cannot recover B's position once Undo removes its slot.
+    func testImagePlacementRedoPreservesInterleavedFillOcclusionAndSourceIdentity() throws {
+        let fx = try XCTUnwrap(importFixture(), "Setup: expected a vector cel")
+        let first = placedImage(.red)
+        fx.vector.addImage(first)
+        let fill = opaqueFill(CodableColor(red: 0, green: 1, blue: 0, alpha: 1))
+        fx.vector.addFill(fill)
+        let beforeIDs = [first.id, fill.id]
+        XCTAssertEqual(fx.vector.elements.map(\.id), beforeIDs, "setup: the fill covers image A")
+
+        let source = solidImage(.blue)
+        XCTAssertTrue(fx.manager.placeImage(source, centre: CGPoint(x: 32, y: 32), width: 16))
+        let second = try XCTUnwrap(fx.vector.images.last)
+        let afterIDs = beforeIDs + [second.id]
+        XCTAssertEqual(fx.vector.elements.map(\.id), afterIDs, "image B lands above the fill")
+        let forward = try XCTUnwrap(fx.vector.render())
+        let forwardPixels = try XCTUnwrap(rgbaPixels(of: forward, width: 64, height: 64))
+        XCTAssertEqual(rgb(forwardPixels, x: 32, y: 32).2, 1, accuracy: 0.01,
+                       "setup: image B visibly covers the green fill")
+
+        fx.manager.undo()
+        XCTAssertEqual(fx.vector.elements.map(\.id), beforeIDs, "Undo removes only image B")
+        let undone = try XCTUnwrap(fx.vector.render())
+        let undoPixels = try XCTUnwrap(rgbaPixels(of: undone, width: 64, height: 64))
+        XCTAssertEqual(rgb(undoPixels, x: 32, y: 32).1, 1, accuracy: 0.01,
+                       "Undo reveals the green fill, not image A")
+        XCTAssertTrue(try XCTUnwrap(fx.vector.images.first).image === first.image,
+                      "Undo keeps image A's original source handle")
+
+        fx.manager.redo()
+        let redone = try XCTUnwrap(fx.vector.render())
+        let redoPixels = try XCTUnwrap(rgbaPixels(of: redone, width: 64, height: 64))
+        XCTAssertEqual(redoPixels.bytes, forwardPixels.bytes,
+                       "Redo restores the actual occlusion: blue image B must cover the green fill")
+        XCTAssertEqual(fx.vector.elements.map(\.id), afterIDs,
+                       "Redo restores the exact ordered identities [image A, fill, image B]")
+        let restored = try XCTUnwrap(fx.vector.images.last)
+        XCTAssertEqual(restored.transform, second.transform, "Redo keeps image B's placement")
+        XCTAssertTrue(restored.image === source, "Redo keeps image B's original source handle")
+        XCTAssertTrue(try XCTUnwrap(fx.vector.images.first).image === first.image,
+                      "Redo also keeps image A's original source handle")
     }
 
     // MARK: - Display list: `StrokeComposite` decoding
