@@ -91,6 +91,11 @@ white paper was expected, while its blank-pixel checks passed and Undo screensho
 paper/three lines. Preserve the result and investigate capture/oracle/empty-vector handoff before
 accepting any drawn-output or performance claim. Candidate remains unharvested; no new install.
 
+**Latest validation:** corrected740e whole112 is GREEN112/112/0skip with exact source731. Root
+confirmed white paper/all3cuts and Undo restoration from normalized image data; the apparent black
+canvas was screenshot metadata/display, not a demonstrated product defect. Four deliberate controls
+and a clean normal rebuild are now running; candidate remains separate until those checks finish.
+
 ### Work queue
 
 1. Finish copied-Test1 Mode3 diagnosis and review the existing shared-window presentation seam.

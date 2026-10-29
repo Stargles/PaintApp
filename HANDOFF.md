@@ -1,72 +1,65 @@
 # Handoff — active owner-resumed work (October 29)
 
-Kevin said **continue; do not park**. `TODO.md` is the canonical queue of every unfinished owner
-ask. Keep those asks until a qualified merge. This file is a compact current-state index; detailed
-history and original evidence remain in Git and the named packets.
+Kevin said **continue; do not park**. TODO.md retains every unfinished owner ask. Use useful agents,
+conserve usage, solve causes through existing owners and remove superseded paths. Kevin confirms the
+rapid erasing crash uses **To Cross**; he is asleep until noon Toronto time. No physical crash cause
+has been established. Do not request device interaction before he is back unless already available.
 
 ## Current state and next action
 
-Kevin’s newest crash clue: rapidly erasing many brushstrokes. Existing303 only made3 actual cuts;
-that is insufficient burst coverage. Actual cut counts and queued-picture lifetimes are next.
-Kevin confirms **To Cross** and is asleep until12pm; no physical crash cause is established.
+1. **Check native authority first:** `/Users/juliapark/PaintWork/s54-final-qualification/root-next-gates.json`.
+   Currently `/root/eraser_window_source` owns one four-control batch at740e plus a clean normal35
+   rebuild. No other compiler/simulator/device work until all children join and authority returns.
+2. **Root integration:** `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch
+   `tmp/s54-qualified-integration`. Code through6eb7c5c2; current docs through e8e0366a (before this
+   commit). Source731, static fast5447/full6061. Main/origin remainsafd2030c; installed6fb unchanged.
+   No main merge, push or new install. The new Mode3/gesture candidate is NOT harvested.
+3. **Candidate:** `/Users/juliapark/PaintWork/PaintApp-s55-effect-bar-fixture`, clean baseline
+   `740e25900ebf82267197b417625ae240c9624329` before fault-driver mutations. Source731,
+   fast5448/full6062. Ordinary single-cel To Cross reuses StrokeScratch's native replacement window,
+   CelContentPicture and UnlandedInk. Real cuts/Undo remain; unknown/refused damage safely falls back;
+   universal remains on its existing route. No new cache, service, stored feature flag or schema.
+4. **Normal proof:** strict whole112 GREEN112/112/0skip at740e (Mode3sixclasses104 + whole effect/
+   transform continuity8); root inspected erased white paper and retained controls. Earlier d30a146
+   had145pass/1obstructed-pan failure: fingerB hit the still-open Duplicate/Bake popup.740 corrects
+   only that fixture through its close control and actual landscape assertion. Other34 shared-helper
+   cases already passed unchanged in146. Earlier7cc compiled0 due a new benchmark CGRect/CGPath
+   type mistake, corrected byd30a. Preserve original packets; do not relabel them green.
+5. **Image evidence:** Mode3 after-cut PNG appeared black in a viewer, but original RGB was white.
+   EXIF/XMP8 caused preview trouble; normalized copy shows white paper/all3linesgone, Undo restores3.
+   No product empty-canvas fix was justified. App-element effect screenshots also have conflicting
+   crop/orientation metadata; an unapplied test-only XCUIScreen attachment patch is prepared for
+   the final UI run. Keep originals and evaluate actual pixels/frames before changing product code.
+6. **Next controls:** `/s55-recorded-regressions/eraser-mode3-window-faults-740e2590/` targets per-cut
+   update, failure latch, containment and unknown-damage refusal. After intended failures and exact
+   source731 restoration, rebuild normal35; root independently classifies actual assertions. No
+   mutation result is claimed yet. Then select-harvest reviewed changes, apply pure cleanup below,
+   run final fast Debug/Release, affected/full UI and remaining performance/consumer gates.
+7. **Real-scene evidence:** copied Test1 c62 Debug1 and Release1 passed. Both36cuts/864calls; Release
+   index rebuild median1.665ms vs Debug13.789ms (single descriptive captures), so no index redesign.
+   Release produced25 full4096² outputs. Root verified immediateBLACK ink becomesRED at public rest;
+   no persistent Recolour loss. Same-ID input527→539 elements; protected original31 files unchanged.
+   Paired same-source Release A/B proposal is external and UNRUN at
+   `~/PaintWork/s55-recorded-regressions/mode3-window-release-paired-d30a7d14-v3/`.
+8. **Cleanup/audit:** external unapplied five-file patch
+   `interaction-owner-cleanup-candidate-d30a7d14-reviewed.patch` removes unused projection protocol/
+   adapters and hit-test local, reuses exact RotationAngle bearing math and updates stale comments.
+   Apply only after current fault freeze, then final gates.43 explicit whole-file receipts reconcile
+   old ledger whole31→73 and unknown153→111; not a correctness percentage. Current batch reports:
+   `continuation-whole-file-receipt-addendum-740e.{md,json}`. Source findings require actual callers;
+   ProcessRunner's speculative output-growth concern was refuted by its fixed short commands.
+9. **Existing integrated work:** saving retry/clock buckets, strict package/Trash ownership, raster/
+   mask/video/stream bounds, Undo/numeric/brush/curve/text, repeated-tap Move, Move-exit handoff,
+   stream placement, Export/Resize/Gradient and fill recovery have their component proofs. Strict
+   MotionGroup and six manifest-array null checks are harvested; actual previous-writer roundtrip
+   and29final tests passed, temporary witness removed. New Mend/Liquify benchmarks are present;
+   compilation now works, opt-in measurements remain unrun. Do not repeat qualified components.
+10. **Storage:** latest exact owned56 cache cleanup reclaimed4,287,086,592bytes after archiving/
+    verifying11,112 container entries; retained artwork/bundles exact after boot. Free space varies
+    (~11GiB before current gates); check at phase boundaries. Never scan cloud folders or alter TCC.
 
-- Integration: `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch
-  `tmp/s54-qualified-integration`, assembled source through ea860 plus the qualified three-path small-Move harvest fromf33; 731
-  source entries.
-
-- Opt-in Release cost witnesses are now present in `FillFootprintBench` and `LiquifyBench`.
-  They add three methods and bring the static XCTest count to6061; the fast tier stays5447.
-  They are not compiled or native-qualified yet. Run only those three methods in Release with
-  `PAINTAPP_BENCH=1` in the adjacent `.xctestrun` runner environment. Mend All uses a deliberately
-  light72² scene at300/1000 cels; it does not represent dense artwork or device peak memory.
-
-- Recording's four-path harvest is integrated. Component evidence: Debug75 and Release75 green; two
-  copy controls reached exactly two intended resource assertions; `RecordingUITests` 4/4 passed at
-  `6210fe26`. Root reviewed both stable landscape pictures. The other 727 source entries remained
-  byte-exact. Receipt:
-  `/Users/juliapark/PaintWork/s55-recorded-regressions/recording-cow-harvest-6210-to-e981/`.
-
-- Stream placement and Move-exit corrections are integrated. Whole `StreamPlacementUITests` 9/9,
-  normal1 passed at their recorded component pins; the public Mode1 held-scratch control reached its intended assertion. Root
-  reviewed live-reference and red-to-blue continuity pictures. No additional On Top runtime state
-  was added. Assembled-source and device confirmation remain.
-
-- Export, Resize, and Gradient are now harvested through 14 source paths and three specification
-  documents. Candidate `219790247dc684df1ec1182a7a45c0c2cd3daa95` passed179/179, with nine
-  root-reviewed pictures. Thirteen deliberate controls reached their intended assertions; the
-  fourteenth reached its first intended deadline assertion before downstream timeout, so its overall
-  verdict remains inconclusive. Normal source rebuilt49/49. All717 other source entries, including
-  recording and stream corrections, stayed exact. Receipt:
-  `/Users/juliapark/PaintWork/s55-recorded-regressions/compose-harvest-prep-21979024-to-0d4b2b3e/root-applied-receipt.json`.
-  Final assembled fast tiers/UI/performance gates remain.
-
-- Current-support square-hole Mend witness050 passed1/1:96-square/448-ring/Reach40; ambiguous
-  x18 refused, clear auxiliary x70 mended. Only its permanent test was harvested atea860; product
-  unchanged. WholeFillMend29 passed; the classifier control exposed both448-ring/uncertain-join
-  targets, and restored normal1 passed. Performance gates remain. Historical cap reports concern the
-  retired distance-wave algorithm.
-
-- Fresh copied Test passed a cold lasso → one Move tap → Set Down → visible drawing replay. The
-  older Test1 was converted on a verified copy by its original repair; all31 original files stayed
-  exact. Its current Mode3 capture passed the public route, but20 gestures/80 calls made only3 cuts
-  and77 centerline misses. Two4096² worker pictures landed, one was refused. This does not cover
-  Kevin’s rapid-erasing crash clue or establish a physical cause. Evidence:
-  `/Users/juliapark/PaintWork/s55-recorded-regressions/test1-Mode3-current-303790c7/`.
-
-- Separate small-Move body/grip arbitration fixf33 is harvested:77/77 (64model+whole13public),
-  three actual fault targets across pinned runs, restored normal64/64, and inspected pictures.
-  The earlier8x8 offset-control target was unhit and remains uncredited; strengthened16x16 passed.
-  Root owns the sole native slot. This is separate from repeated
-  Move taps and Move-exit picture retirement. Consult `root-next-gates.json` before lifecycle work.
-
-- Text/owner correction is harvested through three paths: the existing touch-down owner gate now
-  excludes a canvas placement recognizer from live UITextView touches. OLD repair count0→2; fixed
-  whole34 passed before/after2faults (3actual targets), with root-looked native menu/red-word pictures.
-  No timer/newstoredstate. Menu-continuity test correction is separate: portrait selectedb0491 and whole8 passed. Owner-landscape3e389 selected1 is RED at the
-  next pan, with Lens Blur settings card visible over the canvas; fixture occlusion assessment next. Do not claim an induced stranded-repair positive; the old simulator trigger is gone.
-
-- No main merge, push, or new install. Main/origin remains
-  `afd2030c831db7a746271fe306e8b5a5b9b02df6`. Merge only after all required gates pass.
+Root active detail: `~/PaintWork/s55-recorded-regressions/root-active-resume-20261029T1120.md`.
+Owner-facing status is the top of TODO.md; detailed historical evidence remains there and in Git.
 
 ## Installed build and protected originals
 
