@@ -1,5 +1,14 @@
 # Known Issues
 
+## Copied Test1 changes ink color after To Cross burst — October29
+
+The temporary13d public diagnostic made36 actual cuts in about14s. Its before picture shows red
+ink; after shows black ink across the remaining faces. Evidence is preserved under
+`/Users/juliapark/PaintWork/s55-recorded-regressions/mode3-burst-selected1-13d541bc/`.
+The scene includes a Recolour layer. Trace whether the after frame is still an uncomposited
+overlay or whether effect ownership/settlement was lost. The setup-only UI test passed; this
+color discrepancy does not have appearance qualification or physical crash attribution.
+
 ## Freeze-repair notice during a successful text workflow — October29
 
 Root inspected the495 public Select All/menu/color test pictures: the native-menu frame shows the
