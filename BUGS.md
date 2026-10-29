@@ -1,5 +1,14 @@
 # Known Issues
 
+## Freeze-repair notice during a successful text workflow — October29
+
+Root inspected the495 public Select All/menu/color test pictures: the native-menu frame shows the
+freeze-repair notice, while the test reaches its actual red/no-black glyph assertions and passes.
+The two new simulator flights031933/031935 were copied before further lifecycle work, under
+`/Users/juliapark/PaintWork/s55-recorded-regressions/text-SelectAll-handle-clearance2-495d8da4/root-flight-copy/`.
+Trace actual recognizer state/lifetime before claiming a false positive or real artist-visible
+freeze. This is audit evidence, not an established regression or a timeout-tuning request.
+
 ## macOS cloud-access prompts during agent work — October 28
 
 Owner reports repeated ChatGPT prompts for OneDrive access. No agent reports intentionally reading

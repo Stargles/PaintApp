@@ -18,6 +18,11 @@ has not reached its color assertions because the small fixture overlaps transfor
 test-only enlarged, clearance-qualified fixture is prepared. Final assembled Debug/Release, whole
 affected UI, performance and device confirmation remain. No new main merge, push or install.
 
+**Audit evidence:** the successful495 Text Select All test shows a freeze-repair notice while
+the public menu/color workflow completes. The two new031933/031935 simulator flights are preserved
+in its `root-flight-copy` packet. Check recognizer ownership before treating this as a real freeze
+or adjusting watchdog thresholds; no product change is assumed.
+
 **Operational report:** Kevin sees repeated macOS prompts asking ChatGPT to access OneDrive or
 other app/cloud data. Keep work scoped to explicit repository, PaintWork and owned-simulator paths;
 audit process/path attribution without traversing cloud folders or changing privacy settings. Cause
@@ -113,7 +118,7 @@ that the final combined audit build has passed.
 | Erasing crash in Test1 | Logs preserved; app/system allocation cause remains unproved | Finish window-renderer checks and fresh physical evidence |
 | Drawing/erasing lag and Move regression | Earlier Move/drawing-wait corrections and bounded eraser preview integrated; Move-exit gap reproduced | Move-exit handoff integrated; combined tests and device confirmation remain |
 | Architecture, cleanup and bug audit | In progress; several corrections separately tested and integrated | Remaining source review, findings below, combined checks and performance |
-| Development disk cleanup | About59GB reclaimed across passes; about19GB currently free | Continue bounded cache housekeeping between test batches |
+| Development disk cleanup | About59GB reclaimed across passes; free space varies with native runs (13.5GiB at the latest boundary) | Continue bounded cache housekeeping between test batches |
 | Undo on an edited cel | Correction integrated; model/public/fault checks passed | Final combined checks |
 | Very large curve coordinates | Safe narrowing integrated; model/archive/fault checks passed | Final combined checks; no crash-cause claim |
 | Library relocation and Trash ownership | Corrections integrated and separately checked | Final combined checks |
