@@ -2,9 +2,11 @@ import XCTest
 import CoreGraphics
 import UIKit
 import CryptoKit
+import QuartzCore
 
 /// Explicit renderer sizing benchmark; excluded from the filename-selected fast tier.
-/// Run in Release with TEST_RUNNER_PAINTAPP_BENCH=1 and the class selector.
+/// Run in Release with a method selector and `PAINTAPP_BENCH=1` configured in the adjacent
+/// `.xctestrun` `EnvironmentVariables` for the XCTest runner.
 final class LiquifyBench: XCTestCase {
     func testRealisticRasterWindowHasMeasuredBoundedCostAwayFromTheOrigin() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["PAINTAPP_BENCH"] == "1", "explicit renderer sizing run")
@@ -198,6 +200,92 @@ final class LiquifyBench: XCTestCase {
                 let attachment = XCTAttachment(image: UIImage(cgImage: image))
                 attachment.name = "liquify-inverse-\(name)"; attachment.lifetime = .keepAlways; add(attachment)
             }
+        }
+    }
+
+    /// Cost of the current point-only vector path (`LiquifyField.mapping`), separate from the
+    /// raster inverse benchmark above. Geometry and rendering are prepared outside the timed loop;
+    /// each warm take maps the same canonical vector strokes through one immutable field.
+    func testPointOnlyVectorLiquifyCostsCanonicalStrokeMapping() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["PAINTAPP_BENCH"] == "1",
+                          "explicit point-only vector sizing run")
+        let size = CGSize(width: 1024, height: 512)
+        let brush = TestBrushes.hardRound
+        let color = CodableColor(red: 0.12, green: 0.34, blue: 0.78, alpha: 1)
+        let strokes: [VectorStroke] = (0..<80).map { row in
+            let y = CGFloat(120 + row * 7)
+            let points = (0..<32).map { step in
+                CGPoint(x: CGFloat(250 + step * 15), y: y)
+            }
+            return VectorStroke(brush: brush, color: color, size: 5, opacity: 0.85,
+                                samples: StrokeSamples(points: points), seed: UInt64(row + 1))
+        }
+        // This distant stroke is a real unaffected control: it is rendered in both pictures but
+        // lies outside the field's support.
+        let control = VectorStroke(brush: brush, color: color, size: 5, opacity: 0.85,
+            samples: StrokeSamples(points: [CGPoint(x: 840, y: 80), CGPoint(x: 930, y: 80)]), seed: 991)
+        let original: [VectorElement] = (strokes + [control]).map(VectorElement.stroke)
+        let definition = LiquifyDeformation(brush: brush, size: 80, power: 1, mode: .push, seed: 42,
+            samples: StrokeSamples(points: [CGPoint(x: 240, y: 256), CGPoint(x: 780, y: 256)]))
+        let field = LiquifyField(definition)
+        XCTAssertFalse(field.isEmpty, "PREMISE: the point-only fixture has a nonempty push field")
+        XCTAssertEqual(strokes.reduce(0) { $0 + $1.samples.positions.count }, 2560,
+                       "PREMISE: the cost fixture contains 2,560 stored stroke points")
+
+        let warm = field.mapping(original)
+        XCTAssertEqual(warm.count, original.count)
+        var takes: [Double] = []
+        var mapped = warm
+        for _ in 0..<4 {
+            let start = CACurrentMediaTime()
+            mapped = field.mapping(original)
+            takes.append(CACurrentMediaTime() - start)
+        }
+
+        let changed = zip(original, mapped).filter { !$0.0.hasSameGeometry(as: $0.1) }
+        XCTAssertGreaterThan(changed.count, 0, "PREMISE: the canonical stroke geometry crosses the push field")
+        XCTAssertTrue(mapped.last?.hasSameGeometry(as: original.last ?? .stroke(control)) == true,
+                      "the distant control stroke keeps its exact source geometry")
+        for (before, after) in zip(original, mapped) {
+            guard case let .stroke(old) = before, case let .stroke(new) = after else {
+                XCTFail("point-only mapping must leave element kinds intact"); continue
+            }
+            XCTAssertEqual(new.id, old.id)
+            XCTAssertEqual(new.brushRef, old.brushRef, "Liquify changes points, not the brush/material")
+            XCTAssertEqual(new.color, old.color)
+            XCTAssertEqual(new.size, old.size, "the rendered stroke width is unchanged")
+            XCTAssertEqual(new.opacity, old.opacity)
+        }
+
+        let beforeImage = try XCTUnwrap(VectorCanvas(size: size, elements: original).render()?.cgImage)
+        let afterImage = try XCTUnwrap(VectorCanvas(size: size, elements: mapped).render()?.cgImage)
+        let before = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(beforeImage, width: beforeImage.width,
+                                                                              height: beforeImage.height))
+        let after = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(afterImage, width: afterImage.width,
+                                                                             height: afterImage.height))
+        XCTAssertNotEqual(before, after, "the mapped point changes reach the normal vector renderer")
+        let controlRect = CGRect(x: 830, y: 70, width: 110, height: 20)
+        var controlDifferences = 0, controlInkPixels = 0
+        for y in Int(controlRect.minY)..<Int(controlRect.maxY) {
+            for x in Int(controlRect.minX)..<Int(controlRect.maxX) {
+                let offset = (y * beforeImage.width + x) * 4
+                if before[offset + 3] != 0 { controlInkPixels += 1 }
+                if !before[offset..<(offset + 4)].elementsEqual(after[offset..<(offset + 4)]) {
+                    controlDifferences += 1
+                }
+            }
+        }
+        XCTAssertGreaterThan(controlInkPixels, 0, "PREMISE: the unchanged control stroke is visible in the source picture")
+        XCTAssertEqual(controlDifferences, 0, "pixels on the unaffected control stroke remain byte-exact")
+        let sorted = takes.sorted()
+        print(String(format: "LIQUIFY VECTOR POINTS strokes=%d storedPoints=2560 fieldSteps=%d fieldBytes=%d changedStrokes=%d warmMsMedian=%.3f rangeMs=%.3f...%.3f",
+            original.count, field.steps.count, field.retainedByteCount, changed.count,
+            sorted[sorted.count / 2] * 1000, sorted.first! * 1000, sorted.last! * 1000))
+        for (name, image) in [("before", beforeImage), ("after", afterImage)] {
+            let attachment = XCTAttachment(image: UIImage(cgImage: image))
+            attachment.name = "liquify-vector-points-\(name)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
         }
     }
 

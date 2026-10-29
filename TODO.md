@@ -19,6 +19,22 @@ failed as intended. The three-path correction is harvested; the separate old men
 qualified through real dismissal→next-pan/pinch behavior. Final assembled Debug/Release, whole
 affected UI, performance and device confirmation remain. No new main merge, push or install.
 
+**Cost-witness harvest scope, before action:** review and harvest only the opt-in
+`FillFootprintBench.swift` and `LiquifyBench.swift` cases from the reviewed component pin
+`eca8200dc47cc2030ce0f22d0c17ed6c607e28e5`. The new tests will be permanent but remain
+uncompiled and unqualified until a later Release run. Mend All uses an explicitly light72² fixture
+at300/1000 cels; it is not a dense real-scene or device-peak claim. Keep the established
+`PAINTAPP_BENCH=1` environment opt-in in the selected `.xctestrun` only. Preserve every other source
+entry and record the exact source-count change.
+
+**Cost-witness harvest completed, unqualified:** the two reviewed test files are now permanent.
+They add three opt-in methods: interactive vector Mend, 300/1000-cel Mend All, and point-only
+vector Liquify. The static XCTest count is6061 (+3 from6058); the fast tier remains5447 because
+no fast-tier source changed. The 300/1000-cel Mend All data is a light synthetic72² fixture, not a
+dense real-scene or device-peak result. These cases have not been compiled or run. A later Release
+run must set `PAINTAPP_BENCH=1` only in the selected `.xctestrun` runner environment and verify
+drawn output/premises before interpreting reported time or footprint.
+
 **Rapid To Cross diagnostic:**13d real copied Test1 run completed36 actual cuts in about14s
 (868calls:817missed,15unchanged), and its flight/pictures are preserved. Root observed remaining
 ink changing red→black in the after picture. Trace display settlement/Recolour ownership before

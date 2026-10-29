@@ -14,6 +14,12 @@ Kevin confirms **To Cross** and is asleep until12pm; no physical crash cause is 
   `tmp/s54-qualified-integration`, assembled source through ea860 plus the qualified three-path small-Move harvest fromf33; 731
   source entries.
 
+- Opt-in Release cost witnesses are now present in `FillFootprintBench` and `LiquifyBench`.
+  They add three methods and bring the static XCTest count to6061; the fast tier stays5447.
+  They are not compiled or native-qualified yet. Run only those three methods in Release with
+  `PAINTAPP_BENCH=1` in the adjacent `.xctestrun` runner environment. Mend All uses a deliberately
+  light72² scene at300/1000 cels; it does not represent dense artwork or device peak memory.
+
 - Recording's four-path harvest is integrated. Component evidence: Debug75 and Release75 green; two
   copy controls reached exactly two intended resource assertions; `RecordingUITests` 4/4 passed at
   `6210fe26`. Root reviewed both stable landscape pictures. The other 727 source entries remained
