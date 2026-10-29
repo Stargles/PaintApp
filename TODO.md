@@ -45,6 +45,12 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
   None of this newer work is installed. The Test1 eraser comparison saved seven local full-render
   requests before a conservative fallback; all-owner work and input variability still need checks.
 
+- **Generated-build resource audit:** recorded Release builds compile the UI tests for both
+  arm64 and x86_64, while the owned iPad simulator executes arm64. Select only the active
+  architecture for the Release UI-test target; retain the shipping app target's existing settings.
+  Verify actual arm64 build and unchanged test counts in the final Release gate. This is a test
+  resource correction, not an app performance claim.
+
 - **Shape handles during a tiny pinch:** source review found that ShapeOverlayView skips update
   side effects for nonpositive canvas scale but still stores it; several handle/chrome dimensions
   divide by that value. Reuse the consistent scale guard already used by the sibling object overlay,
