@@ -8,7 +8,9 @@
 reviewed pictures, and a normal49/49 rebuild. All717 unrelated source entries stayed exact. Final
 assembled checks remain. The exact current-support square-hole Mend test is now integrated and
 unrun; it is a verification gap, not a confirmed current defect. Next is the copied Test/Test1
-simulator diagnostic at e05770a3; no device readiness has been reused.
+simulator diagnostic at e05770a3; no device readiness has been reused. The protected olderTest1
+input has no required geometry version and is withheld from staging; locate its verified converted
+copy or run the original one-shot repair on a copy. Freshly exported Test proceeds independently.
 
 **Operational report:** Kevin sees repeated macOS prompts asking ChatGPT to access OneDrive or
 other app/cloud data. Keep work scoped to explicit repository, PaintWork and owned-simulator paths;

@@ -37,7 +37,10 @@ history and original evidence remain in Git and the named packets.
 - Next: fresh isolated Test/Test1 diagnostic at `e05770a3bcd12379f4ef7fc12d11fe85ce905eb8`,
   `/Users/juliapark/PaintWork/s55-recorded-regressions/test-replay-current-recording-e05770a3/`.
   Product matches integration0d4 except explicit temporary Mode3 recorder notes; it includes the
-  recording copy correction and public Study-folder navigation. Build/stage/selectors are unrun.
+  recording copy correction and public Study-folder navigation. Build is active on fresh simulator
+  `15B8A35F-F71A-4CB4-B037-A01E8A42E1D6`; no stage/launch yet. OlderTest1 lacks required
+  geometry-version keys: withhold it until a verified converted copy is located or the original
+  one-shot repair runs on a copy. Fresh Test may proceed independently.
   Root owns the sole native slot; consult `root-next-gates.json` before any lifecycle action.
 
 - No main merge, push, or new install. Main/origin remains
