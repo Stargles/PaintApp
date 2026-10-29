@@ -183,6 +183,86 @@ final class StreamPlacementUITests: StreamUITestCase {
         try exerciseLiveStreamMove(XCUIApplication(), placement: "inPlace")
     }
 
+    /// The frozen On Top picture must bridge the committed vector render until the replacement
+    /// host surface has actually drawn. The base render deliberately stays at normal speed; only
+    /// the existing window-surface draw seam is delayed.
+    func testOnTopMoveToBrushKeepsStreamVisibleUntilWindowPresents() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-uiTestSlowWindowDrawMillis", "5000"]
+        let canvas = launchWithALiveStream(app, orientationBeforeCreatingCanvas: .landscapeLeft)
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(window.width, window.height, "the app window is landscape like the owner's iPad")
+        XCTAssertGreaterThan(canvas.frame.width, canvas.frame.height, "the canvas host is landscape")
+
+        let timeline = app.otherElements["timeline.panel"]
+        let collapseTimeline = app.buttons["timeline.collapseButton"]
+        XCTAssertTrue(collapseTimeline.waitForExistence(timeout: 5))
+        collapseTimeline.tap()
+        let collapseDeadline = Date().addingTimeInterval(5)
+        while Date() < collapseDeadline, timeline.frame.height > 70 { Thread.sleep(forTimeInterval: 0.1) }
+        XCTAssertLessThan(timeline.frame.height, 70, "the timeline finishes collapsing before the stream is measured")
+
+        laptop.show(.red)
+        waitForPicture(.red, on: canvas)
+        let placement = app.buttons["streamBar.placementButton"]
+        XCTAssertTrue(placement.waitForExistence(timeout: 5))
+        XCTAssertEqual(placement.value as? String, "onTop")
+        let original = try XCTUnwrap(waitForStreamBounds(.red, on: canvas, inside: CGRect(x: 0.05, y: 0.05,
+                                                                                           width: 0.90, height: 0.90)),
+                                     "the connected red On Top frame is visibly drawn before Move")
+        assertAboveTheDock(app, canvas, dy: Double(original.maxY), "the initial stream picture")
+
+        app.buttons["toolbar.moveButton"].tap()
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5))
+        let initialHull = try XCTUnwrap(settledMoveBox(app), "Move publishes the lifted stream hull")
+        let lifted = try XCTUnwrap(waitForStreamBounds(.red, on: canvas, inside: initialHull),
+                                   "the red stream has drawn inside the lifted Move hull")
+        assertBounds(lifted, match: initialHull, tolerance: 0.025, message: "On Top stream is visible in the Move box")
+
+        let destination = CGVector(dx: initialHull.midX + 0.06, dy: initialHull.midY + 0.06)
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: initialHull.midX, dy: initialHull.midY))
+        let end = canvas.coordinate(withNormalizedOffset: destination)
+        start.press(forDuration: 0.6, thenDragTo: end, withVelocity: .slow)
+        let movedHull = try XCTUnwrap(settledMoveBox(app), "the stream's Move hull settles at its new position")
+        XCTAssertGreaterThan(movedHull.midX - initialHull.midX, 0.025, "the Move box actually travelled right")
+        XCTAssertGreaterThan(movedHull.midY - initialHull.midY, 0.04, "the Move box actually travelled down")
+        assertFullyVisible(movedHull, "the moved stream and its Move hull stay inside the canvas host")
+        let movedRed = try XCTUnwrap(waitForStreamBounds(.red, on: canvas, inside: movedHull),
+                                     "healthy red stream pixels reach the moved hull before tool exit")
+        assertBounds(movedRed, match: movedHull, tolerance: 0.025, message: "the drawn stream matches the moved hull")
+        assertAboveTheDock(app, canvas, dy: Double(movedRed.maxY), "the moved stream picture")
+        attachScreenshot(XCUIScreen.main, "On Top Move to Brush healthy red before exit")
+
+        let probe = CGVector(dx: movedRed.midX, dy: movedRed.midY)
+        app.buttons["toolbar.brushButton"].tap()
+        attachScreenshot(XCUIScreen.main, "On Top Move to Brush immediate whole screen")
+        let immediateFrame = canvas.frame
+        let screenProbe = CGPoint(x: immediateFrame.minX + immediateFrame.width * probe.dx,
+                                  y: immediateFrame.minY + immediateFrame.height * probe.dy)
+        let immediatePixel = rgbaPixel(of: canvas, at: probe)
+        let sampler = MidGestureSampler(points: [screenProbe], interval: 0.2)
+        sampler.start()
+        laptop.show(.green)
+        Thread.sleep(forTimeInterval: 5.5)
+        let during = sampler.stop()
+        attachScreenshot(XCUIScreen.main, "On Top Move to Brush during delayed window draw")
+        let green = waitForStreamBounds(.green, on: canvas, inside: movedHull)
+        attachScreenshot(XCUIScreen.main, "On Top Move to Brush after new window draw")
+
+        // Keep every exit-phase image before assertions, including the eventual green front.
+        let immediateVisible = immediatePixel.map { Colour.red.matches($0) || Colour.green.matches($0) } ?? false
+        XCTAssertNotNil(green, "the new host surface eventually presents the green stream at the moved location")
+        XCTAssertGreaterThanOrEqual(during.count, 3, "the delayed window draw produced multiple screen samples")
+        XCTAssertTrue(during.allSatisfy { sample in
+            guard let pixel = sample.pixels.first else { return false }
+            return Colour.red.matches(pixel) || Colour.green.matches(pixel)
+        }, "the moved On Top picture stays visible until the new surface presents; no blank base frame appears")
+        XCTAssertTrue(immediateVisible,
+                      "the moved stream is still visible immediately after switching to Brush")
+        if let green { assertBounds(green, match: movedHull, tolerance: 0.025,
+                                    message: "the new On Top host surface retains the committed Move position") }
+    }
+
     private func selectLayer(_ app: XCUIApplication, _ index: Int) {
         openLayerPanel(app)
         let row = app.staticTexts["layerPanel.row.\(index)"]

@@ -731,3 +731,12 @@ against a transcript this audit does not have.
 - **The raster Move's undo half.** `finalizePendingGesturesForHistoryAction` has fill, shape and text
   arms and no raster-float arm.
 - **Freeform text's minimum-size exemption** is still unruled.
+
+**Conditional OnTop Move handoff, October28:** source trace finds a mixed-lifetime risk, not yet a
+measured visible failure. Successful vector Move commit holds the already-shown float together with
+its OnTop stream surface; the vector base can land without that stream, retire the held picture by
+revision, and precede the next host surface's successful draw. Add one cold public OnTop Move-to-Brush
+continuity witness using the existing 5000 ms window-draw seam and normal vector rendering. Keep In
+Place's global composite ownership unchanged. No runtime lifetime change until the witness proves a
+gap; then reuse the surface's existing presentation completion/ownership boundary rather than a
+global acknowledgement cache.
