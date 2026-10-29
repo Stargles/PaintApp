@@ -890,9 +890,9 @@ final class FillMendLogicTests: XCTestCase {
 
     func testCanonicalSupportPreservesTheSquareHoleAtWideReach() throws {
         // Keep the original 96-square geometry, but pass real canonical vector support into the
-        // same GPU mend mask used by current fills. Four square-tip strokes make the 448-pixel ring
-        // and enclosing frame; a separate enclosed stroke proves the result is not an all-zero
-        // refusal. The hole itself is absent from the supplied fill region.
+        // same GPU mend mask used by current fills. Two closed square-tip strokes make the
+        // 448-pixel ring and enclosing frame; a separate body stroke proves the result is not an
+        // all-zero refusal. The hole itself is absent from the supplied fill region.
         let squareBrush = Brush(name: "Square mend fixture", tip: .stamp(.builtIn(.square)), size: 4,
             dab: BrushDabSettings(flow: 1, spacing: 0.1, hardness: 1))
         let frame = supportStroke([CGPoint(x: 10, y: 10), CGPoint(x: 86, y: 10),
