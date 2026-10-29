@@ -213,6 +213,225 @@ final class VideoBakeLogicTests: XCTestCase {
         }
     }
 
+    func testEverySplitConsumerRefusesBeforeChangingAnAdmittedVideoBlock() throws {
+        for consumer in ["split", "video", "stream", "pose", "grade", "repeat", "merge"] {
+            let manager = CanvasFixture.manager(layerCount: 1)
+            XCTAssertTrue(manager.insertVideo(at: try clip(frames: 5)), "PREMISE: a real small movie imports")
+            let (layerIndex, imported) = try importedVideo(manager)
+            let vector = try XCTUnwrap(manager.layers[layerIndex].cels[0].vector)
+            var video = imported
+            video.sourceStart = SourceTime(value: 92_233_720_367_547_761, timescale: 3_000_000)
+            video.sourceEnd = SourceTime(value: 92_233_720_367_847_761, timescale: 3_000_000)
+            video.speed = 2e-7; video.mappedFrameRate = 3
+            vector.elements = [.video(video), .stroke(stroke())]; vector.bumpVersion()
+            manager.layers[layerIndex].cels[0].frameCount = 12
+            let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+            let rest = PoseQuad(restingIn: box)
+            manager.layers[layerIndex].cels[0].transformTracks = [TransformChannelID.cel.id:
+                CanvasFixture.poseTrack([(0, rest), (11, PoseQuad(box: box, mappedBy: .init(translationX: 1, y: 0)))], interpolation: .linear)]
+            manager.layers[layerIndex].cels[0].pendingPoseBaselines = [TransformChannelID.cel.id: rest]
+            var baker: UUID?
+            if consumer == "stream" {
+                let image = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 4), format: PixelOps.transparentFormat()).image { c in
+                    UIColor.green.setFill(); c.fill(CGRect(x: 0, y: 0, width: 8, height: 4))
+                }
+                var stream = VectorStreamElement(naturalSize: image.size, host: "laptop", port: 47301,
+                    sourceLabel: "Window", transform: LayerTransform(position: CGPoint(x: 8, y: 8), scale: 1, rotation: 0))
+                stream.picture = StreamPicture(frame: image)
+                vector.elements.append(.stream(stream)); vector.bumpVersion()
+            } else if consumer == "grade" {
+                manager.addValueLayer(effect: .hsvShift(.init(hueDegrees: 1)))
+                baker = manager.layers[manager.currentLayerIndex].id
+                manager.layers[manager.currentLayerIndex].cels[0].frameCount = 12
+                manager.layers[manager.currentLayerIndex].effectTracks = ["hsvShift.hue": AnimationCurve(keys: [
+                    .init(frame: 0, value: 1, interpolation: .linear), .init(frame: 11, value: 111, interpolation: .linear)])]
+            } else if consumer == "repeat" {
+                var held = manager.layers[layerIndex].cels[0]
+                held.startFrame = 2; held.transformTracks = [:]; held.pendingPoseBaselines = [:]
+                let plain = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: CanvasFixture.canvasSize),
+                    vector: VectorCanvas(size: CanvasFixture.canvasSize, elements: [.stroke(stroke())]))
+                manager.layers[layerIndex].cels = [plain, held]
+                manager.addTransformLayer()
+                baker = manager.layers[manager.currentLayerIndex].id
+                manager.layers[manager.currentLayerIndex].transform = LayerPose(pose: rest, mode: .repeat, repeatPeriod: 1)
+                manager.layers[manager.currentLayerIndex].cels = [Cel(id: UUID(), startFrame: 0, frameCount: 12,
+                    raster: .empty(size: CanvasFixture.canvasSize))]
+            } else if consumer == "merge" {
+                manager.layers[0].cels = [Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: CanvasFixture.canvasSize)),
+                    Cel(id: UUID(), startFrame: 1, frameCount: 11, raster: .empty(size: CanvasFixture.canvasSize))]
+            }
+            let index = try XCTUnwrap(manager.layers[layerIndex].cels.firstIndex { cel in
+                cel.vector?.videos.contains(where: { $0.id == video.id }) == true
+            })
+            let cel = manager.layers[layerIndex].cels[index]
+            try VideoFrameMap.validate(sourceStart: video.sourceStart, sourceEnd: video.sourceEnd,
+                speed: video.speed, documentFPS: video.resolvedFrameRate)
+            let beforeImage = try XCTUnwrap(manager.videoCelContent(for: cel, atFrame: cel.startFrame)?.render(.full))
+            let grey = try XCTUnwrap(CanvasFixture.greyAt(beforeImage, x: 32, y: 48))
+            XCTAssertEqual(CanvasFixture.nearestLevelIndex(grey, in: Self.levels), 4,
+                           "PREMISE: the real short asset holds its last decoded frame at the admitted far-future time")
+            let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(beforeImage.cgImage)))
+            let bluePixels = stride(from: 0, to: pixels.count, by: 4).filter {
+                Int(pixels[$0 + 2]) > Int(pixels[$0]) + 100 && Int(pixels[$0 + 2]) > Int(pixels[$0 + 1]) + 100 && pixels[$0 + 3] > 240
+            }.count
+            XCTAssertGreaterThan(bluePixels, 10, "PREMISE: opaque passenger ink is visibly drawn over the held movie frame")
+            let layouts = manager.layers.map { $0.cels.map { [$0.startFrame, $0.frameCount] } }
+            let ids = manager.layers.map(\.id), celIDs = manager.layers.map { $0.cels.map(\.id) }
+            let tracks = cel.transformTracks, baselines = cel.pendingPoseBaselines
+            let version = vector.version, history = manager.history.undoStack.count
+            if let baker {
+                guard case .plan(let plan) = manager.bakePlan(forLayerID: baker),
+                      plan.layers.contains(where: { $0.layerID == manager.layers[layerIndex].id }) else {
+                    return XCTFail("PREMISE: the real \(consumer) Bake plan reaches the target layer")
+                }
+            }
+
+            if consumer == "stream" {
+                XCTAssertNotNil(manager.prepareCelSplits(inLayerAt: layerIndex, at: [cel.startFrame + 2]),
+                                "PREMISE: the first Stream Bake cut succeeds")
+                XCTAssertNil(manager.prepareCelSplits(inLayerAt: layerIndex, at: [cel.startFrame + 2, cel.startFrame + 3]),
+                             "PREMISE: a later child cut refuses under the current admission proof")
+            }
+            switch consumer {
+            case "split":
+                let crop = manager.splitCel(layerIndex: layerIndex, celIndex: index, atFrame: cel.startFrame + 1)
+                XCTAssertNil(crop)
+                guard crop == nil else { return }
+            case "video":
+                let outcome = manager.bakeVideoToCels(layerIndex: layerIndex, celIndex: index)
+                XCTAssertEqual(outcome, .refused(.videoTiming), "A split refusal must never report twelve baked drawings")
+                guard outcome == .refused(.videoTiming) else { return }
+            case "stream":
+                let outcome = manager.bakeStreamFrame(layerIndex: layerIndex, celIndex: index, atFrame: cel.startFrame + 2)
+                XCTAssertEqual(outcome, .refused(.videoTiming), "Stream Bake must refuse its entire two-cut operation")
+                guard outcome == .refused(.videoTiming) else { return }
+            case "pose":
+                let outcome = manager.bakePoseToCels(layerIndex: layerIndex, celIndex: index)
+                XCTAssertEqual(outcome, .refused(.videoTiming), "Pose Bake must propagate the refused cuts")
+                guard outcome == .refused(.videoTiming) else { return }
+            case "grade", "repeat":
+                guard case .refused(let reason) = manager.bakeLayer(id: baker!) else {
+                    return XCTFail("The entire \(consumer) Bake must refuse before treatments or carving")
+                }
+                XCTAssertEqual(reason, .videoTiming)
+                guard reason == .videoTiming else { return }
+            case "merge":
+                let merged = manager.mergeLayers(manager.layers[0].id, manager.layers[layerIndex].id)
+                XCTAssertFalse(merged)
+                guard !merged else { return }
+            default: preconditionFailure("Unknown finite test consumer")
+            }
+
+            XCTAssertEqual(manager.layers.map { $0.cels.map { [$0.startFrame, $0.frameCount] } }, layouts,
+                           "\(consumer) preflights the whole cut sequence before any structural write")
+            XCTAssertEqual(manager.layers.map(\.id), ids, "A refused operation removes no layer")
+            XCTAssertEqual(manager.layers.map { $0.cels.map(\.id) }, celIDs, "A refused operation mints no partial split cells")
+            let restored = try XCTUnwrap(manager.layers[layerIndex].cels.first { $0.id == cel.id })
+            XCTAssertEqual(restored.transformTracks, tracks, "A refused operation consumes no pose tracks")
+            XCTAssertEqual(restored.pendingPoseBaselines, baselines)
+            XCTAssertEqual(restored.vector?.videos.first.map(VideoCrop.init(of:)), VideoCrop(of: video), "The original video remains a video with its crop")
+            XCTAssertEqual(vector.version, version, "No original canvas was rewritten in place")
+            XCTAssertEqual(manager.history.undoStack.count, history, "A refused operation creates no history step")
+            let after = try XCTUnwrap(manager.videoCelContent(for: restored, atFrame: restored.startFrame)?.render(.full)?.cgImage)
+            XCTAssertEqual(CanvasFixture.rgbaBytes(after), pixels, "Every actual decoded/ink pixel is retained after \(consumer) refusal")
+        }
+    }
+
+    /// Generic Bake accepts an earlier pending edit at its established action-entry boundary.
+    /// A later timing refusal owns no split/treatment/history and leaves that edit undoable.
+    func testAnAcceptedPendingShapeSurvivesARefusedLayerBakeAndUndoes() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        XCTAssertTrue(manager.insertVideo(at: try clip(frames: 5)))
+        let (layerIndex, original) = try importedVideo(manager)
+        let vector = try XCTUnwrap(manager.layers[layerIndex].cels[0].vector)
+        var video = original
+        video.sourceStart = SourceTime(value: 92_233_720_367_547_761, timescale: 3_000_000)
+        video.sourceEnd = SourceTime(value: 92_233_720_367_847_761, timescale: 3_000_000)
+        video.speed = 2e-7; video.mappedFrameRate = 3
+        vector.elements = [.video(video)]; vector.bumpVersion()
+        manager.layers[layerIndex].cels[0].frameCount = 12
+        manager.addValueLayer(effect: .hsvShift(.init(hueDegrees: 1)))
+        let baker = manager.layers[manager.currentLayerIndex].id
+        manager.layers[manager.currentLayerIndex].cels[0].frameCount = 12
+        manager.layers[manager.currentLayerIndex].effectTracks = ["hsvShift.hue": AnimationCurve(keys: [
+            .init(frame: 0, value: 1, interpolation: .linear), .init(frame: 11, value: 111, interpolation: .linear)])]
+        manager.currentLayerIndex = layerIndex
+        func pixels() throws -> [UInt8] {
+            let cel = manager.layers[layerIndex].cels[0]
+            let image = try XCTUnwrap(manager.videoCelContent(for: cel, atFrame: cel.startFrame)?.render(.full)?.cgImage)
+            return try XCTUnwrap(CanvasFixture.rgbaBytes(image))
+        }
+        let originalPixels = try pixels()
+        manager.brushColor = .black
+        manager.toolProfiles.brush.size = 6
+        manager.beginInteractiveShape(ShapeGeometry(kind: .line,
+            startPoint: CGPoint(x: 10, y: 8), endPoint: CGPoint(x: 50, y: 8)), samples: (0...20).map {
+                VectorSample(x: 10 + CGFloat($0) * 2, y: 8, pressure: 1)
+            })
+        manager.endInteractiveShape()
+        XCTAssertTrue(manager.shapeGestureActive, "PREMISE: a real adjustable shape is pending")
+        XCTAssertNotNil(manager.shapeInk)
+        XCTAssertEqual(vector.elements.count, 1, "The shape has not yet landed in the video cel")
+        let history = manager.history.undoStack.count
+        let ids = manager.layers.map(\.id), celIDs = manager.layers.map { $0.cels.map(\.id) }
+
+        XCTAssertEqual(manager.bakeLayer(id: baker), .refused(.videoTiming))
+        XCTAssertFalse(manager.shapeGestureActive, "The accepted shape settles before generic Bake planning")
+        XCTAssertEqual(manager.history.undoStack.count, history + 1, "Only the preceding shape owns a history step")
+        XCTAssertEqual(manager.history.undoStack.last?.label, .shape)
+        XCTAssertEqual(manager.layers.map(\.id), ids, "The refused Bake keeps the baker and drawings")
+        XCTAssertEqual(manager.layers.map { $0.cels.map(\.id) }, celIDs, "No partial cut is installed")
+        XCTAssertEqual(manager.layers[layerIndex].cels[0].frameCount, 12)
+        XCTAssertEqual(vector.videos.first.map(VideoCrop.init(of:)), VideoCrop(of: video))
+        XCTAssertEqual(vector.elements.count, 2, "Only the accepted shape is added")
+        let landedPixels = try pixels()
+        XCTAssertNotEqual(landedPixels, originalPixels, "The accepted shape is actually drawn over the held movie frame")
+        guard manager.history.undoStack.count == history + 1 else { return }
+        manager.undo()
+        XCTAssertEqual(try pixels(), originalPixels, "Undo removes the preceding shape and restores every original movie pixel")
+        XCTAssertEqual(vector.elements.count, 1)
+        manager.redo()
+        XCTAssertEqual(try pixels(), landedPixels, "Redo restores the shape alone, with no hidden Bake treatment")
+        XCTAssertEqual(manager.layers.map(\.id), ids)
+        XCTAssertEqual(manager.layers[layerIndex].cels.map(\.frameCount), [12])
+    }
+
+    func testTinyRoundedVideoCutsStillBakeTwelvePicturesAndUndo() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        XCTAssertTrue(manager.insertVideo(at: try clip(frames: 5)))
+        let (layerIndex, original) = try importedVideo(manager)
+        let vector = try XCTUnwrap(manager.layers[layerIndex].cels[0].vector)
+        var video = original
+        video.sourceStart = .zero; video.sourceEnd = SourceTime(value: 1, timescale: 1)
+        video.speed = 1e-9; video.mappedFrameRate = 24
+        vector.elements = [.video(video)]; vector.bumpVersion()
+        manager.layers[layerIndex].cels[0].frameCount = 12
+        let crop = VideoCrop(of: video)
+        let split = manager.splitCel(layerIndex: layerIndex, celIndex: 0, atFrame: 6)
+        XCTAssertNotNil(split, "A successful rounded unchanged crop remains a real split")
+        guard split != nil else { return }
+        XCTAssertEqual(manager.layers[layerIndex].cels.map(\.frameCount), [6, 6])
+        guard manager.layers[layerIndex].cels.map(\.frameCount) == [6, 6] else { return }
+        XCTAssertTrue(manager.layers[layerIndex].cels.allSatisfy { $0.vector?.videos.first.map(VideoCrop.init(of:)) == crop })
+        manager.undo()
+        XCTAssertEqual(manager.layers[layerIndex].cels.map(\.frameCount), [12])
+
+        XCTAssertEqual(manager.bakeVideoToCels(layerIndex: layerIndex, celIndex: 0), .baked(cels: 12))
+        XCTAssertEqual(manager.layers[layerIndex].cels.map(\.frameCount), Array(repeating: 1, count: 12),
+                       "A completed bake really has twelve one-frame cells")
+        for cel in manager.layers[layerIndex].cels {
+            let image = try XCTUnwrap(cel.vector?.images.first?.image)
+            XCTAssertEqual(CanvasFixture.nearestLevelIndex(try XCTUnwrap(CanvasFixture.greyAt(image, x: 32, y: 32)), in: Self.levels), 0,
+                           "The tiny rounded timing displays its original first source picture on each frame")
+            XCTAssertTrue(cel.vector?.videos.isEmpty == true)
+        }
+        manager.undo()
+        XCTAssertEqual(manager.layers[layerIndex].cels.map(\.frameCount), [12])
+        XCTAssertEqual(manager.layers[layerIndex].cels[0].vector?.videos.first.map(VideoCrop.init(of:)), crop)
+        manager.redo()
+        XCTAssertEqual(manager.layers[layerIndex].cels.map(\.frameCount), Array(repeating: 1, count: 12))
+    }
+
     // MARK: - Refusals are visible, not swallowed
 
     func testBakeRefusesACelWithNoVideoAndTouchesNothing() throws {

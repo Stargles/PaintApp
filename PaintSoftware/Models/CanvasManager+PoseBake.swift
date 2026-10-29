@@ -29,9 +29,13 @@ extension CanvasManager {
         /// The cel has no vector tier to write the posed ink into.
         case noDrawing
         case pendingEdit
+        case videoTiming
+        case renderUnavailable
 
         var phrase: String {
             switch self {
+            case .renderUnavailable: return "the transformed drawing could not be prepared"
+            case .videoTiming: return "the video timing cannot be divided into those drawings"
             case .notAnimated: return "this block isn't animated"
             case .pendingEdit: return "the held picture could not be placed; try again"
             case .noDrawing: return "this block has no drawing to bake"
@@ -107,8 +111,8 @@ extension CanvasManager {
     /// *left* half's canvas, so rewriting a display list in place would leave the structure snapshot
     /// restoring a cel that still points at the baked ink. `bakeCel` writes a brand-new `VectorCanvas`
     /// into each baked cel instead — the way Bake does — so the one snapshot of `layers` is enough, and
-    /// the nested `withStructureUndo` in each `splitCel` is a no-op bracket while this one is open,
-    /// which is the re-entrancy §6 says to rely on deliberately.
+    /// every split is prepared before the existing structure transaction applies any cut or
+    /// treatment. A failure never reports completed drawings or consumes the original channels.
     ///
     /// **The channels go with the motion.** `transformTracks` and `pendingPoseBaselines` are cleared
     /// on every baked cel: the bake replaced the derivation with the thing it derived, and a live rig
@@ -133,19 +137,19 @@ extension CanvasManager {
         guard !cel.transformTracks.isEmpty else { return .refused(.notAnimated) }
         guard let vector = cel.vector else { return .refused(.noDrawing) }
 
-        // §6's recipe: a float under the artist's finger lands as its own earlier step rather than
-        // being baked mid-motion — and it un-suppresses whatever it was carrying, so the display list
-        // read below is the whole drawing.
-        guard commitAllInteractiveState() else { return .refused(.pendingEdit) }
-
         let layerID = layers[layerIndex].id
-        // From the uncut track — see `poseBakeSegments` for why the order matters.
         let segments = Self.poseBakeSegments(tracks: cel.transformTracks, frameCount: cel.frameCount)
         guard !segments.isEmpty else { return .refused(.notAnimated) }
-
-        withStructureUndo(label: .bakePoseToCels) {
-            bakeCel(layerID: layerID, celID: cel.id, segments: segments, canvasSize: vector.size)
+        guard let pending = prepareCanvasEdit() else { return .refused(.pendingEdit) }
+        let cuts = segments.dropFirst().map { cel.startFrame + $0.localStart }
+        guard let splits = prepareCelSplits(inLayerAt: layerIndex, at: cuts, stagedCels: pending.cels) else {
+            return .refused(.videoTiming)
         }
+        guard pending.commit(), commitAllInteractiveState(), celSplitPlanIsCurrent(splits) else { return .refused(.pendingEdit) }
+        guard withStructureTransaction(label: .bakePoseToCels, {
+            applyCelSplits(splits)
+            return bakeCel(layerID: layerID, celID: cel.id, segments: segments, canvasSize: vector.size)
+        }) else { return .refused(.renderUnavailable) }
 
         return .baked(cels: segments.count)
     }

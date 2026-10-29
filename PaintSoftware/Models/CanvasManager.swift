@@ -212,11 +212,11 @@ final class CanvasManager: ObservableObject {
     /// correct, because the artist declined to decide. See `SaveDamageGate`.
     var damagedSaveAnswered = false
 
-    @Published var layers: [Layer] = []
-    @Published var folders: [LayerFolder] = []
-    @Published var viewPresets: [ViewPreset] = []
+    @Published var layers: [Layer] = [] { didSet { noteStructureWrite() } }
+    @Published var folders: [LayerFolder] = [] { didSet { noteStructureWrite() } }
+    @Published var viewPresets: [ViewPreset] = [] { didSet { noteStructureWrite() } }
     /// -1 means no view preset is active (all layers visible in their natural state).
-    @Published var activeViewPresetIndex: Int = -1
+    @Published var activeViewPresetIndex: Int = -1 { didSet { noteStructureWrite() } }
 
     /// Every motion group in the document, in creation order. Strokes reference these by id
     /// (`VectorStroke.motionGroupID`); a recipe binds geometry to them (`MotionGroupBinding`).
@@ -224,7 +224,7 @@ final class CanvasManager: ObservableObject {
     /// Document-level rather than per-layer so a group can span layers — what stops a lineart arm
     /// and its flat colour drifting apart. Empty until the artist tags something, so this costs
     /// nothing for a project that never interpolates.
-    @Published var motionGroups: [MotionGroup] = []
+    @Published var motionGroups: [MotionGroup] = [] { didSet { noteStructureWrite() } }
 
     /// Every animation group in the document, in creation order — KEYFRAMES.md §2.11 and §3.4.
     /// Elements reference these by id (`VectorElement.animationGroupID`); a cel's `transformTracks`
@@ -235,7 +235,7 @@ final class CanvasManager: ObservableObject {
     /// transform* moves together, and an artist who answered one has said nothing about the other.
     /// Document-level for `motionGroups`' reason, and empty until the artist keyframes a Move, so it
     /// costs a project that never animates nothing.
-    @Published var animationGroups: [AnimationGroup] = []
+    @Published var animationGroups: [AnimationGroup] = [] { didSet { noteStructureWrite() } }
 
     /// **One entry behind `selectionAnimationGroup`** — see that accessor for the three gates in front
     /// of it and why it needs a memo at all. Here rather than in `AnimationGroupMembership.swift`
@@ -267,7 +267,7 @@ final class CanvasManager: ObservableObject {
     /// Every guide stroke in the document. Document-level for the same reason, and because a guide
     /// is meant to be *referenced* by several intervals rather than copied into each, which only
     /// works if it has one home and a stable id.
-    @Published var guideStrokes: [GuideStroke] = []
+    @Published var guideStrokes: [GuideStroke] = [] { didSet { noteStructureWrite() } }
 
     /// Whether the artist is in interpolate mode — the mode the whole interpolation workflow lives
     /// inside.
@@ -519,6 +519,7 @@ final class CanvasManager: ObservableObject {
 
     @Published var currentLayerIndex: Int = 0 {
         didSet {
+            noteStructureWrite()
             if oldValue != currentLayerIndex {
                 // A layer that became current by any route is the row the band follows — the
                 // folder pick yields to it. Only on a *change*: an undo's snapshot restore writes
@@ -703,6 +704,17 @@ final class CanvasManager: ObservableObject {
               info.displaySize.width > 0, info.displaySize.height > 0,
               info.duration.seconds > 0 else { return false }
 
+        // Apply the import's existing scene crop before narrowing a potentially enormous inverse.
+        guard let blockLength = VideoFrameMap.frameCount(sourceStart: .zero, sourceEnd: info.duration,
+                speed: 1, documentFPS: fps, limit: max(contentEndFrame, 1)),
+              let sourceEnd = VideoFrameMap.advancedSourceTime(sourceStart: .zero,
+                elapsedDocumentFrames: blockLength, speed: 1, documentFPS: fps, maximum: info.duration),
+              (try? VideoFrameMap.validate(sourceStart: .zero, sourceEnd: sourceEnd,
+                speed: 1, documentFPS: fps)) != nil else {
+            raise(.videoTimingRefused)
+            return false
+        }
+
         // Earlier edits own their pixels and history before a failed stage can roll back the new layer.
         guard commitAllInteractiveState() else { return false }
 
@@ -728,17 +740,6 @@ final class CanvasManager: ObservableObject {
         let assetURL = imported.assetURL
         let celIndex = imported.celIndex
         let vector = imported.vector
-
-        // §2.4. The whole clip's length in document frames, clipped to the scene the artist already
-        // has — and `sourceEnd` written to the clipped length, so the crop and the block agree from
-        // the first instant and a right-edge drag has somewhere to go.
-        let whole = VideoFrameMap.frameCount(sourceStart: .zero, sourceEnd: info.duration,
-                                             speed: 1, documentFPS: fps)
-        let blockLength = max(1, min(whole, max(contentEndFrame, 1)))
-        let end = VideoFrameMap.unclampedSourceTime(sourceStart: .zero,
-                                                    elapsedDocumentFrames: blockLength,
-                                                    speed: 1, documentFPS: fps)
-        let sourceEnd = end < info.duration ? end : info.duration
 
         let transform = info.preferredTransform
         let centre = placement?.centre ?? CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
@@ -1754,6 +1755,7 @@ final class CanvasManager: ObservableObject {
                     undo: @escaping () -> Void, redo: @escaping () -> Void) {
         history.record(.init(label: label, cost: cost, prepareUndo: prepareUndo, prepareRedo: prepareRedo,
                              undo: undo, redo: redo))
+        noteStructureWrite()
         refreshUndoRedoState()
         documentEdited.send()
     }
@@ -4856,6 +4858,10 @@ final class CanvasManager: ObservableObject {
     /// Without the depth, that drag's `begin` overwrites the session's baseline and its `commit`
     /// records a step from the wrong one, leaving the session with nothing to commit at all.
     var structureGestureDepth = 0
+
+    /// Accepted writes during the current outer gesture, including an out-and-back drag. This is
+    /// transient history ownership, not snapshot equality or a per-feature dirty flag.
+    var structureGestureHasAcceptedWrite = false
 
     /// **A label claimed for the *outermost* bracket by an inner action that spans it**, honoured by
     /// `commitStructureGesture` when the last bracket closes.

@@ -259,6 +259,64 @@ final class VideoElementLogicTests: XCTestCase {
                       "A broken payload is a defect, not a version gap")
     }
 
+    func testCurrentTimingKeepsFractionalClockFallbackAndExtremeHeldEndpoints() throws {
+        let asset = try writeAsset(named: "clock.mov")
+        let rows: [(String, SourceTime, SourceTime, Double, Int, Int, SourceTime)] = [
+            ("fractional", .zero, SourceTime(value: 1, timescale: 1), 0.8, 24, 3, SourceTime(value: 1, timescale: 10)),
+            ("small finite rounded ticks", SourceTime(value: 1, timescale: 1_500_000_000),
+             SourceTime(value: 3, timescale: 2_000_000_000), 1e-9, 3, 2, SourceTime(value: 1, timescale: 750_000_000)),
+            ("90k fallback", SourceTime(value: 47, timescale: Int32.max), SourceTime(value: 1, timescale: 1),
+             0.8, 24, 1, SourceTime(value: 1, timescale: 30)),
+            ("90k fractional fallback", SourceTime(value: 47, timescale: Int32.max), SourceTime(value: 1, timescale: 1),
+             0.1234567, 24, 1, SourceTime(value: 463, timescale: 90_000)),
+            ("working-clock tail rounding", .zero, SourceTime(value: 1, timescale: 13), 24.0 / 13.0, 24, 1,
+             SourceTime(value: 923, timescale: 12_000)),
+            ("large finite held end", .zero, SourceTime(value: 1, timescale: 1), 1e300, 24, 1, SourceTime(value: 1, timescale: 1)),
+            ("largest finite held end", .zero, SourceTime(value: 1, timescale: 1), Double.greatestFiniteMagnitude,
+             24, 1, SourceTime(value: 1, timescale: 1)),
+            ("extreme positive head", SourceTime(value: Int64.max - 1, timescale: 1), SourceTime(value: Int64.max, timescale: 1),
+             1, 1, 0, SourceTime(value: Int64.max - 1, timescale: 1)),
+            ("extreme positive held end", SourceTime(value: Int64.max - 1, timescale: 1), SourceTime(value: Int64.max, timescale: 1),
+             1, 1, 1, SourceTime(value: Int64.max, timescale: 1)),
+            ("extreme negative head", SourceTime(value: Int64.min, timescale: 1), SourceTime(value: Int64.min + 1, timescale: 1),
+             1, 1, 0, SourceTime(value: Int64.min, timescale: 1))
+        ]
+        for (name, start, end, speed, fps, frame, expected) in rows {
+            var video = defaultElement(assetURL: asset)
+            video.sourceStart = start; video.sourceEnd = end; video.speed = speed; video.mappedFrameRate = fps
+            let bytes = try JSONEncoder().encode(VectorCanvasData(from: VectorCanvas(size: Self.canvasSize,
+                elements: [.stroke(stroke()), .video(video)]), imageFileNames: [:]))
+            let decoded = try JSONDecoder().decode(VectorCanvasData.self, from: bytes)
+            XCTAssertTrue(decoded.decodeReport.isClean, "Recognized \(name) timing remains current readable data")
+            let elements = try decoded.canvasSpaceElements(resolvingImages: { _ in nil }, resolvingVideos: { _ in asset })
+            let restored = try XCTUnwrap(elements.compactMap(\.video).first)
+            XCTAssertEqual(VideoFrameMap.sourceTime(of: restored, atDocumentFrame: frame, celStartFrame: 0,
+                documentFPS: restored.resolvedFrameRate), expected, "The current decode-to-map path preserves \(name)")
+        }
+    }
+
+    func testUnrepresentableCurrentTimingFailsThePayloadRatherThanDroppingItsVideo() throws {
+        let asset = try writeAsset(named: "invalid-clock.mov")
+        let rows: [(String, SourceTime, SourceTime, Double, Int)] = [
+            ("tick expansion", SourceTime(value: Int64.max - 1, timescale: 1), SourceTime(value: Int64.max, timescale: 1), 1, 24),
+            ("inverse", .zero, SourceTime(value: 1, timescale: 1), 1e-300, 24),
+            ("zero speed", .zero, SourceTime(value: 1, timescale: 1), 0, 24),
+            ("negative speed", .zero, SourceTime(value: 1, timescale: 1), -1, 24),
+            ("nonpositive mapped rate", .zero, SourceTime(value: 1, timescale: 1), 1, 0)
+        ]
+        for (name, start, end, speed, fps) in rows {
+            var video = defaultElement(assetURL: asset)
+            video.sourceStart = start; video.sourceEnd = end; video.speed = speed; video.mappedFrameRate = fps
+            let payload = VectorCanvasData(from: VectorCanvas(size: Self.canvasSize,
+                elements: [.stroke(stroke()), .video(video)]), imageFileNames: [:])
+            let reference = try XCTUnwrap(payload.videos.first)
+            XCTAssertThrowsError(try JSONDecoder().decode(VectorCanvasData.VideoRef.self,
+                from: JSONEncoder().encode(reference)), "Current \(name) timing fails at its decoder admission boundary")
+            XCTAssertThrowsError(try JSONDecoder().decode(VectorCanvasData.self, from: JSONEncoder().encode(payload)),
+                                 "A current \(name) failure escapes the element-loss decoder so recovery can preserve the whole original")
+        }
+    }
+
     // MARK: - The missing asset
 
     /// **The degradation rule, stated at the codec.** A video whose asset the resolver cannot produce

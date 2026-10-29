@@ -10,33 +10,20 @@ import Foundation
 
 extension SourceTime: Comparable {
 
-    /// Cross-multiplied rather than compared through `seconds`, so two instants a `Double` cannot
-    /// tell apart are still ordered correctly. **Agrees with the synthesized `==`** because both
-    /// operands are normalised at construction: `2/4` and `1/2` are one value with one spelling.
-    ///
-    /// The products are `Int64` and cannot overflow at any duration this app can hold — an hour at
-    /// a 90 kHz clock is `3.24e8`, and the other factor is a timescale — but the overflow-reporting
-    /// multiply is used anyway, falling back to `seconds`, because the alternative to a fallback is
-    /// a trap on a file somebody handed us.
+    /// Int64 numerators times Int32 denominators fit Int128 exactly, including negative clocks.
     static func < (lhs: SourceTime, rhs: SourceTime) -> Bool {
-        let left = lhs.value.multipliedReportingOverflow(by: Int64(rhs.timescale))
-        let right = rhs.value.multipliedReportingOverflow(by: Int64(lhs.timescale))
-        guard !left.overflow, !right.overflow else { return lhs.seconds < rhs.seconds }
-        return left.partialValue < right.partialValue
+        Int128(lhs.value) * Int128(rhs.timescale) < Int128(rhs.value) * Int128(lhs.timescale)
     }
 
-    /// `self - other`, in seconds. Lossy on purpose and only used where a *length* is wanted — the
-    /// block length in §4.3's inverse — never to derive an instant that is stored back.
-    func secondsSince(_ other: SourceTime) -> Double { seconds - other.seconds }
-
-    /// The instant clamped into `low...high`, or `low` when the pair is inverted (a crop whose end
-    /// precedes its start is a damaged element, and holding its first frame is the visible answer).
-    func clamped(from low: SourceTime, to high: SourceTime) -> SourceTime {
-        guard low < high else { return low }
-        if self < low { return low }
-        if high < self { return high }
-        return self
+    /// Subtract on the source clock before converting the length to seconds. Converting each
+    /// absolute timestamp first would erase short crops near an extreme numerator.
+    func secondsSince(_ other: SourceTime) -> Double {
+        let numerator = Int128(value) * Int128(other.timescale)
+            - Int128(other.value) * Int128(timescale)
+        return Double(numerator) / Double(Int64(timescale) * Int64(other.timescale))
     }
+
+
 }
 
 // MARK: - VIDEO.md §4.3, the frame map
@@ -88,36 +75,101 @@ enum VideoFrameMap {
     /// up by a thousand where that fits, which both makes the tick a microsecond or so **and** keeps
     /// every decimal speed an artist can type (0.5, 0.8, 1.25, 2) exact.
     ///
-    /// The `Double` branch is unreachable from any asset — it needs an lcm above two billion — and
-    /// exists because the alternative to a defined answer is an overflow trap on a number that
-    /// arrived in a file.
-    static func unclampedSourceTime(sourceStart: SourceTime,
-                                    elapsedDocumentFrames elapsed: Int,
-                                    speed: Double,
-                                    documentFPS: Int) -> SourceTime {
-        let fps = max(documentFPS, 1)
-        let base = lcm(Int64(sourceStart.timescale), Int64(fps))
-        guard base > 0, base <= Int64(Int32.max) else {
-            let seconds = sourceStart.seconds + Double(elapsed) * speed / Double(fps)
-            return SourceTime(value: Int64((seconds * 90_000).rounded()), timescale: 90_000)
-        }
+    /// Advance on the existing working clock. Crop/asset bounds are compared before narrowing
+    /// the result, so an extreme finite offset can still resolve to its exact held endpoint.
+    static func advancedSourceTime(sourceStart: SourceTime,
+                                   elapsedDocumentFrames elapsed: Int,
+                                   speed: Double, documentFPS: Int,
+                                   minimum: SourceTime? = nil, maximum: SourceTime? = nil) -> SourceTime? {
+        advancedSourceTime(sourceStart: sourceStart, elapsed: Int128(elapsed), speed: speed,
+                           fps: documentFPS, minimum: minimum, maximum: maximum)
+    }
+
+    /// Nil start is the existing90kHz fallback when the LCM cannot be a SourceTime timescale.
+    private static func clock(sourceStart: SourceTime, fps: Int) -> (start: Int128?, scale: Int32) {
+        let sourceScale = Int128(sourceStart.timescale), rate = Int128(fps)
+        let base = sourceScale / Int128(SourceTime.gcd(UInt128(sourceScale), UInt128(rate))) * rate
+        guard base <= Int128(Int32.max) else { return (nil, 90_000) }
         var working = base
-        for multiplier in [Int64(1000), 100, 10] where base * multiplier <= Int64(Int32.max) {
+        for multiplier in [Int128(1000), 100, 10] where base * multiplier <= Int128(Int32.max) {
             working = base * multiplier
             break
         }
-        let startTicks = sourceStart.value * (working / Int64(sourceStart.timescale))
-        let offsetTicks = Int64((Double(elapsed) * speed * Double(working) / Double(fps)).rounded())
-        return SourceTime(value: startTicks + offsetTicks, timescale: Int32(working))
+        return (Int128(sourceStart.value) * (working / sourceScale), Int32(working))
     }
 
-    /// Lowest common multiple, over magnitudes so nothing traps. Zero in, zero out.
-    private static func lcm(_ a: Int64, _ b: Int64) -> Int64 {
-        guard a > 0, b > 0 else { return 0 }
-        var x = a, y = b
-        while y != 0 { (x, y) = (y, x % y) }
-        let (product, overflow) = (a / x).multipliedReportingOverflow(by: b)
-        return overflow ? 0 : product
+    private static func rawTicks(sourceStart: SourceTime, elapsed: Int128, speed: Double, fps: Int,
+                                 clock: (start: Int128?, scale: Int32)) -> Int128? {
+        if let start = clock.start {
+            // Preserve the fractional-speed evaluation order and once-per-frame rounding.
+            guard let offset = Int128(exactly:
+                (Double(elapsed) * speed * Double(clock.scale) / Double(fps)).rounded()) else { return nil }
+            let sum = start.addingReportingOverflow(offset)
+            return sum.overflow ? nil : sum.partialValue
+        }
+        let seconds = sourceStart.seconds + Double(elapsed) * speed / Double(fps)
+        return Int128(exactly: (seconds * 90_000).rounded())
+    }
+
+    private static func precedes(_ ticks: Int128, scale: Int32, _ time: SourceTime) -> Bool {
+        let left = ticks.multipliedReportingOverflow(by: Int128(time.timescale))
+        // The other product is at most95 bits; an overflowing left product is beyond it by sign.
+        if left.overflow { return ticks < 0 }
+        return left.partialValue < Int128(time.value) * Int128(scale)
+    }
+
+    private static func advancedSourceTime(sourceStart: SourceTime, elapsed: Int128,
+                                           speed: Double, fps: Int,
+                                           minimum: SourceTime?, maximum: SourceTime?) -> SourceTime? {
+        guard speed.isFinite, speed > 0, fps > 0 else { return nil }
+        let clock = clock(sourceStart: sourceStart, fps: fps)
+        guard let ticks = rawTicks(sourceStart: sourceStart, elapsed: elapsed, speed: speed, fps: fps, clock: clock) else {
+            // An offset beyond Int128 cannot be cancelled by the at-most95-bit start. Its sign
+            // proves the endpoint without storing a fabricated instant or saturated frame count.
+            if elapsed > 0, let maximum { return maximum }
+            if elapsed < 0, let minimum { return minimum }
+            return nil
+        }
+        if let minimum, precedes(ticks, scale: clock.scale, minimum) { return minimum }
+        if let maximum, !precedes(ticks, scale: clock.scale, maximum) { return maximum }
+        let divisor = Int128(SourceTime.gcd(ticks.magnitude, UInt128(clock.scale)))
+        guard let value = Int64(exactly: ticks / divisor),
+              let scale = Int32(exactly: Int128(clock.scale) / divisor) else {
+            // The exact origin remains representable even when the fallback's expanded ticks do not.
+            return elapsed == 0 ? sourceStart : nil
+        }
+        return SourceTime(value: value, timescale: scale)
+    }
+
+    enum CodingError: Error { case unrepresentableTiming }
+
+    /// Admit the existing nontrapping working-clock domain, plus offsets proved to be held at an
+    /// endpoint. Generic element-loss decoding must not turn this current-data failure into no video.
+    static func validate(sourceStart: SourceTime, sourceEnd: SourceTime,
+                         speed: Double, documentFPS fps: Int) throws {
+        guard frameCount(sourceStart: sourceStart, sourceEnd: sourceEnd,
+                         speed: speed, documentFPS: fps) != nil else { throw CodingError.unrepresentableTiming }
+        guard sourceStart < sourceEnd else { return }
+        let clock = clock(sourceStart: sourceStart, fps: fps)
+        if let first = rawTicks(sourceStart: sourceStart, elapsed: 1, speed: speed, fps: fps, clock: clock) {
+            if !precedes(first, scale: clock.scale, sourceEnd) { return }
+        } else {
+            return // Every positive frame is beyond the crop; the exact endpoint is held.
+        }
+        // Every rounded working-clock tick strictly inside the crop must fit. This admits the
+        // original nontrapping clock domain without scanning a possibly enormous frame sequence.
+        func floor(_ numerator: Int128, _ denominator: Int128) -> Int128 {
+            numerator / denominator - (numerator % denominator < 0 ? 1 : 0)
+        }
+        func ceil(_ numerator: Int128, _ denominator: Int128) -> Int128 {
+            numerator / denominator + (numerator % denominator > 0 ? 1 : 0)
+        }
+        let firstInterior = floor(Int128(sourceStart.value) * Int128(clock.scale), Int128(sourceStart.timescale)) + 1
+        let lastInterior = ceil(Int128(sourceEnd.value) * Int128(clock.scale), Int128(sourceEnd.timescale)) - 1
+        if firstInterior > lastInterior { return }
+        guard Int64(exactly: firstInterior) != nil, Int64(exactly: lastInterior) != nil else {
+            throw CodingError.unrepresentableTiming
+        }
     }
 
     /// §4.3's forward map for one element, **clamped into its own crop**.
@@ -130,11 +182,13 @@ enum VideoFrameMap {
                            atDocumentFrame frame: Int,
                            celStartFrame: Int,
                            documentFPS: Int) -> SourceTime {
-        let raw = unclampedSourceTime(sourceStart: element.sourceStart,
-                                      elapsedDocumentFrames: frame - celStartFrame,
-                                      speed: element.speed,
-                                      documentFPS: documentFPS)
-        return raw.clamped(from: element.sourceStart, to: element.sourceEnd)
+        guard element.sourceStart < element.sourceEnd else { return element.sourceStart }
+        guard let time = advancedSourceTime(sourceStart: element.sourceStart,
+            elapsed: Int128(frame) - Int128(celStartFrame), speed: element.speed, fps: documentFPS,
+            minimum: element.sourceStart, maximum: element.sourceEnd) else {
+            preconditionFailure("Video timing must be admitted before rendering")
+        }
+        return time
     }
 
     // MARK: Source time → source frame
@@ -148,9 +202,11 @@ enum VideoFrameMap {
     /// without opening a decoder.
     ///
     /// Clamped at zero, and 0 for a rate that is not a rate.
-    static func sourceFrameIndex(at time: SourceTime, sourceFPS: Double) -> Int {
-        guard sourceFPS > 0 else { return 0 }
-        return max(0, Int((time.seconds * sourceFPS).rounded()))
+    static func sourceFrameIndex(at time: SourceTime, sourceFPS: Double) -> Int? {
+        guard sourceFPS.isFinite, sourceFPS > 0 else { return 0 }
+        let value = (time.seconds * sourceFPS).rounded()
+        if value <= 0 { return 0 }
+        return Int(exactly: value)
     }
 
     /// **§2.3's frame-for-frame setting**, as the speed it is: every source frame shown, one per
@@ -183,14 +239,18 @@ enum VideoFrameMap {
     /// no frames is not a cel; rounded rather than truncated, so a clip that is 2.5 document frames
     /// long occupies 3 and shows its tail rather than losing it.
     static func frameCount(sourceStart: SourceTime, sourceEnd: SourceTime,
-                           speed: Double, documentFPS: Int) -> Int {
+                           speed: Double, documentFPS: Int, limit: Int? = nil) -> Int? {
+        guard speed.isFinite, speed > 0, documentFPS > 0 else { return nil }
         let span = sourceEnd.secondsSince(sourceStart)
-        guard span > 0, speed > 0 else { return 1 }
-        return max(1, Int((span / speed * Double(max(documentFPS, 1))).rounded()))
+        guard span > 0 else { return 1 }
+        let value = (span / speed * Double(documentFPS)).rounded()
+        if let limit, value >= Double(max(limit, 1)) { return max(limit, 1) }
+        if value < 1 { return 1 }
+        return Int(exactly: value)
     }
 
     /// The same, read off an element.
-    static func frameCount(of element: VectorVideoElement, documentFPS: Int) -> Int {
+    static func frameCount(of element: VectorVideoElement, documentFPS: Int) -> Int? {
         frameCount(sourceStart: element.sourceStart, sourceEnd: element.sourceEnd,
                    speed: element.speed, documentFPS: documentFPS)
     }

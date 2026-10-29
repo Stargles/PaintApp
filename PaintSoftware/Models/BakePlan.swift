@@ -247,9 +247,11 @@ extension CanvasManager {
         /// Everything beneath it was either outside its frames or left as it was.
         case nothingToBake([BakeLeftover])
         case renderUnavailable
+        case videoTiming
 
         var phrase: String {
             switch self {
+            case .videoTiming: return "a video timing cannot be divided; the drawings are unchanged"
             case .renderUnavailable: return "the transformed picture could not be rendered; the drawings and transform are unchanged"
             case .notABakingLayer: return "this layer holds drawings, so it is merged rather than baked"
             case .hidden: return "this layer is hidden, so it changes nothing to bake"

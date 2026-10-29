@@ -85,7 +85,7 @@ final class VideoSpeedLogicTests: XCTestCase {
         let manager = try documentShowingAClip(frames: 24, blockLength: 12)
         for speed in CanvasManager.videoSpeedChoices {
             manager.setVideoSpeed(layerIndex: 1, celIndex: 0, to: speed)
-            let expected = VideoFrameMap.frameCount(of: try video(manager), documentFPS: 24)
+            let expected = try XCTUnwrap(VideoFrameMap.frameCount(of: try video(manager), documentFPS: 24))
             XCTAssertEqual(manager.layers[1].cels[0].frameCount, expected,
                            "At \(speed)x the block should be \(expected) frames.")
         }
@@ -161,6 +161,22 @@ final class VideoSpeedLogicTests: XCTestCase {
         manager.setVideoSpeed(layerIndex: 1, celIndex: 0, to: 1)
         XCTAssertEqual(vector.version, version)
         XCTAssertEqual(manager.layers[1].cels[0].frameCount, 12)
+    }
+
+    func testAnUnrepresentableSpeedRefusesBeforeChangingVideoBlockOrHistory() throws {
+        let manager = try documentShowingAClip(frames: 6)
+        let vector = try XCTUnwrap(manager.layers[1].cels[0].vector)
+        let crop = VideoCrop(of: try video(manager)), version = vector.version
+        let lengths = manager.layers[1].cels.map(\.frameCount)
+        let history = manager.history.undoStack.count
+
+        manager.setVideoSpeed(layerIndex: 1, celIndex: 0, to: 1e-300)
+
+        XCTAssertEqual(VideoCrop(of: try video(manager)), crop, "An unrepresentable inverse leaves the speed and source crop unchanged")
+        XCTAssertEqual(manager.layers[1].cels.map(\.frameCount), lengths, "No block is lengthened before refusal")
+        XCTAssertEqual(vector.version, version, "The vector owner does not publish a refused edit")
+        XCTAssertEqual(manager.history.undoStack.count, history, "A refused speed has no undo step")
+        XCTAssertEqual(manager.notice?.code, "videoTimingRefused", "The artist is told why the edit was refused")
     }
 
     // MARK: - Support

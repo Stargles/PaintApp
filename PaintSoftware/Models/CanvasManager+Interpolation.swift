@@ -19,6 +19,7 @@ extension CanvasManager {
                                _ body: () -> Void) {
         guard structureUndoDepth == 0, gestureSnapshot == nil else {
             body()
+            noteStructureWrite()
             return
         }
         // Bake a pending shape/fill first, so it lands as its own earlier step.
@@ -60,6 +61,8 @@ extension CanvasManager {
     private func applyInterpolationState(groups: [MotionGroup], guides: [GuideStroke],
                                          layers restoredLayers: [Layer], canvases: [VectorCanvas],
                                          elements: [[VectorElement]]) {
+        structureUndoDepth += 1
+        defer { structureUndoDepth -= 1 }
         motionGroups = groups
         guideStrokes = guides
         layers = restoredLayers

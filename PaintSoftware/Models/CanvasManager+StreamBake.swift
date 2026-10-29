@@ -11,7 +11,7 @@ import UIKit
 /// enum surfaced through `CanvasNotice`, never a silent `Bool`. That file's doc comment carries the
 /// two arguments this one leans on without repeating them — why `withStructureUndo` alone would
 /// corrupt the first cel's undo (the left half keeps the block's own `VectorCanvas` instance, so
-/// `touching: [vector]` is what restores it), and why a cel's pose is baked into the written
+/// `touching: [settledVector]` is what restores it), and why a cel's pose is baked into the written
 /// geometry rather than dropped.
 extension CanvasManager {
 
@@ -33,9 +33,11 @@ extension CanvasManager {
         /// does, so a real artist never meets this; a direct caller or a test does.
         case notOnStreamCel
         case pendingEdit
+        case videoTiming
 
         var phrase: String {
             switch self {
+            case .videoTiming: return "A video's timing in this block cannot be divided. Nothing was changed."
             case .noFrameYet: return "No picture from the computer yet"
             case .pendingEdit: return "the held picture could not be placed; try again"
             case .notOnStreamCel: return "This frame doesn't hold a screen stream"
@@ -294,27 +296,22 @@ extension CanvasManager {
         guard let picture = stream.displayFrame else {
             return .refused(.noFrameYet)
         }
-        let snapshot = Self.streamSnapshot(picture, fitting: stream.naturalSize)
+        guard let pending = prepareCanvasEdit() else { return .refused(.pendingEdit) }
+        guard let splits = prepareCelSplits(inLayerAt: layerIndex, at: [frame, frame + 1],
+                                           stagedCels: pending.cels) else { return .refused(.videoTiming) }
         let streamID = stream.id
 
         // KEYFRAMES §6's recipe: a pending float baked first, so it lands as its own earlier step.
-        guard commitAllInteractiveState() else { return .refused(.pendingEdit) }
+        guard pending.commit(), commitAllInteractiveState(), celSplitPlanIsCurrent(splits),
+              let settledVector = layers[layerIndex].cels.first(where: { $0.id == cel.id })?.vector else { return .refused(.pendingEdit) }
+        let snapshot = Self.streamSnapshot(picture, fitting: stream.naturalSize)
 
-        // `touching: [vector]`: the block's own canvas is the one `splitCel` never copies (it keeps
+        // `touching: [settledVector]`: the block's own canvas is the one `splitCel` never copies (it keeps
         // the left half), and it is the one the swap mutates whenever `frame` is the block's first
         // frame — see `bakeVideoToCels`. Every other cel the split makes is a fresh object the
         // restored `[Layer]` simply drops.
-        withInterpolationUndo(label: .bakeStreamFrame, touching: [vector]) {
-            // Cut in front of the frame, then behind it. Each `splitCel` re-sorts the cel array, so
-            // the index is re-found from the frame rather than carried across the first cut.
-            if frame > cel.startFrame,
-               let index = activeCelIndex(inLayer: layerIndex, atFrame: cel.startFrame) {
-                splitCel(layerIndex: layerIndex, celIndex: index, atFrame: frame)
-            }
-            if frame + 1 < cel.endFrame,
-               let index = activeCelIndex(inLayer: layerIndex, atFrame: frame) {
-                splitCel(layerIndex: layerIndex, celIndex: index, atFrame: frame + 1)
-            }
+        withInterpolationUndo(label: .bakeStreamFrame, touching: [settledVector]) {
+            applyCelSplits(splits)
             guard let index = activeCelIndex(inLayer: layerIndex, atFrame: frame),
                   let baked = layers[layerIndex].cels[index].vector else { return }
             let bakedCel = layers[layerIndex].cels[index]

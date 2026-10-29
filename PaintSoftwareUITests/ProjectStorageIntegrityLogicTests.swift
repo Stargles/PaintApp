@@ -178,6 +178,53 @@ final class ProjectStorageIntegrityLogicTests: XCTestCase {
         }
     }
 
+    func testUnrepresentableCurrentVideoTimingRecoversExactBackupAndPreservesTheOriginal() throws {
+        for expansion in [true, false] {
+            let asset = root.appendingPathComponent("finite-\(expansion).mov")
+            try Data("package asset; timing preflight reads no pixels".utf8).write(to: asset)
+            let package = try package("Projects/video-\(expansion).paintproj") { manager in
+                manager.addVectorLayer()
+                manager.layers[1].cels[0].vector?.elements = [.stroke(placedStroke()), .video(VectorVideoElement(
+                    assetURL: asset, assetFileName: asset.lastPathComponent, naturalSize: CGSize(width: 16, height: 16),
+                    sourceStart: .zero, sourceEnd: SourceTime(value: 1, timescale: 1), speed: 1,
+                    transform: LayerTransform(position: CGPoint(x: 24, y: 24), scale: 1, rotation: 0), mappedFrameRate: 24))]
+                manager.layers[1].cels[0].vector?.bumpVersion()
+            }
+            let manifest = try JSONDecoder().decode(ProjectManifest.self,
+                from: Data(contentsOf: package.appendingPathComponent("manifest.json")))
+            let good = try fileBytes(package)
+            let latest = ProjectBackupManager.latestSnapshotURL(directory: ProjectBackupManager.backupsDirectory(projectID: manifest.id))
+            XCTAssertEqual(try fileBytes(latest), good, "PREMISE: the actual current writer made an exact intact backup")
+            XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: package), "PREMISE: the saved current timing is readable")
+            let drawing = try vectorURL(package)
+            try edit(drawing) { json in
+                var elements = json["elements"] as! [[String: Any]]
+                let index = elements.firstIndex { $0["kind"] as? String == "video" }!
+                var video = elements[index]["video"] as! [String: Any]
+                if expansion {
+                    video["sourceStart"] = ["value": Int64.max - 1, "timescale": 1] as [String: Any]
+                    video["sourceEnd"] = ["value": Int64.max, "timescale": 1] as [String: Any]
+                } else { video["speed"] = 1e-300 }
+                elements[index]["video"] = video; json["elements"] = elements
+            }
+            let damaged = try fileBytes(package)
+            XCTAssertFalse(ProjectBackupManager.validateProject(at: package), "Timing metadata fails before Gallery can open the package")
+            XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: package), "An unsafe current timing cannot become a replacement backup")
+            XCTAssertNil(ProjectStore.load(from: package), "The direct open refuses instead of dropping the video into a successful scene")
+
+            ProjectBackupManager.repairCorruptedProjects()
+
+            XCTAssertEqual(try fileBytes(package), good, "Recovery restores every current-writer backup byte")
+            let loaded = try XCTUnwrap(ProjectStore.load(from: package))
+            XCTAssertEqual(loaded.layers[1].cels[0].vector?.videos.first?.speed, 1)
+            XCTAssertEqual(loaded.layers[1].cels[0].vector?.strokes.count, 1, "The neighboring drawn ink remains with the recovered video")
+            let preserved = try XCTUnwrap(ProjectBackupManager.listTrash().first {
+                $0.displayName == package.deletingPathExtension().lastPathComponent
+            })
+            XCTAssertEqual(try fileBytes(preserved.url), damaged, "Every original file survives unchanged in Trash")
+        }
+    }
+
     func testTypedColorDamageRestoresValidBackupAndPreservesDamagedPackageInTrash() throws {
         let package = try package { $0.colorPanel.recordPainted(.red) }
         let manifestURL = package.appendingPathComponent("manifest.json")

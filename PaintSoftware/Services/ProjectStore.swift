@@ -2165,6 +2165,9 @@ enum ProjectStore {
                     }
                 } catch let error as ProjectPackageLayout.AddressError {
                     throw error
+                } catch let error as VideoFrameMap.CodingError {
+                    log.error("Cannot open video timing in cel \(celManifest.id, privacy: .public): \(String(describing: error), privacy: .public)")
+                    return nil
                 } catch let error as VectorGeometryCodingError {
                     log.error("Cannot open geometry in cel \(celManifest.id, privacy: .public): \(String(describing: error), privacy: .public)")
                     return nil

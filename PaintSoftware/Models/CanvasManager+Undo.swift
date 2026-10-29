@@ -110,6 +110,8 @@ extension CanvasManager {
     }
 
     private func restoreStructure(_ snapshot: StructureSnapshot) {
+        structureUndoDepth += 1
+        defer { structureUndoDepth -= 1 }
         layers = snapshot.layers
         folders = snapshot.folders
         viewPresets = snapshot.viewPresets
@@ -159,7 +161,11 @@ extension CanvasManager {
     /// one undo step — without this, merging would record a bare "Delete Layer" that reverses half
     /// the operation and leaves the survivor flattened.
     func withStructureUndo(label: HistoryActionLabel, _ body: () -> Void) {
-        guard structureUndoDepth == 0, gestureSnapshot == nil else { body(); return }
+        guard structureUndoDepth == 0, gestureSnapshot == nil else {
+            body()
+            noteStructureWrite()
+            return
+        }
         _ = withStructureTransaction(label: label) { body(); return true }
     }
 
@@ -177,12 +183,17 @@ extension CanvasManager {
         let before = captureStructure()
         let cropBefore = pendingKeyframeCrop
         structureUndoDepth += 1
-        defer { structureUndoDepth -= 1 }
+        var accepted = false
+        defer {
+            structureUndoDepth -= 1
+            if accepted { noteStructureWrite() }
+        }
         guard body() else {
             restoreStructure(before)
             pendingKeyframeCrop = cropBefore
             return false
         }
+        accepted = true
         if records {
             recordStructureChange(label: label, from: before, to: captureStructure())
             flushPendingKeyframeCrop()
@@ -235,6 +246,13 @@ extension CanvasManager {
         raise(.keyframesCropped(crop))
     }
 
+    /// Raw snapshot-owned writes count only outside a transaction body. A successful shared
+    /// bracket reports acceptance after its depth closes; rollback/restoration writes never count.
+    func noteStructureWrite() {
+        guard structureGestureDepth > 0, structureUndoDepth == 0 else { return }
+        structureGestureHasAcceptedWrite = true
+    }
+
     /// Opens a gesture bracket. **Nests**, for the same reason `withStructureUndo` does: only the
     /// outermost scope captures a baseline, so one user action is one undo step even when a bracket
     /// spans another — a mask-edit session (§6.6) is open for as long as a layer's options menu is,
@@ -245,6 +263,7 @@ extension CanvasManager {
         // Same rule as `withStructureUndo`: bake transients before the baseline snapshot, so the
         // drag about to start doesn't span a shape/fill that wasn't committed when it began.
         guard beginCanvasEdit() else { return false }
+        structureGestureHasAcceptedWrite = false
         structureGestureDepth = 1
         gestureSnapshot = captureStructure()
         return true
@@ -263,6 +282,9 @@ extension CanvasManager {
         let claimed = pendingGestureLabel
         pendingGestureLabel = nil
         gestureSnapshot = nil
+        let accepted = structureGestureHasAcceptedWrite
+        structureGestureHasAcceptedWrite = false
+        guard accepted else { pendingKeyframeCrop = nil; return }
         recordStructureChange(label: claimed ?? label, from: before, to: captureStructure())
         flushPendingKeyframeCrop()
     }
@@ -276,6 +298,7 @@ extension CanvasManager {
         guard structureGestureDepth == 0 else { return }
         pendingGestureLabel = nil
         gestureSnapshot = nil
+        structureGestureHasAcceptedWrite = false
         // A cancelled drag recorded nothing, so there is no crop to report and no step to undo.
         pendingKeyframeCrop = nil
     }

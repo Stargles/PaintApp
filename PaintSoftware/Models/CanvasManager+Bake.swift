@@ -108,7 +108,11 @@ extension CanvasManager {
             raise(.bakeRefused(refusal))
             return .refused(refusal)
         case .plan(let plan):
-            guard withStructureTransaction(label: .bakeLayer, { perform(plan) }) else {
+            guard let splits = prepareBakeSplits(plan), splits.values.allSatisfy(celSplitPlanIsCurrent) else {
+                raise(.bakeRefused(.videoTiming))
+                return .refused(.videoTiming)
+            }
+            guard withStructureTransaction(label: .bakeLayer, { perform(plan, splits: splits) }) else {
                 raise(.bakeRefused(.renderUnavailable))
                 return .refused(.renderUnavailable)
             }
@@ -117,16 +121,32 @@ extension CanvasManager {
         }
     }
 
-    private func perform(_ plan: BakePlan) -> Bool {
+    private func prepareBakeSplits(_ plan: BakePlan) -> [UUID: CelSplitPlan]? {
+        var result: [UUID: CelSplitPlan] = [:]
+        for layer in plan.layers {
+            guard let index = layers.firstIndex(where: { $0.id == layer.layerID }) else { return nil }
+            var cuts: [Int] = []
+            for drawing in layer.cels {
+                guard let cel = layers[index].cels.first(where: { $0.id == drawing.celID }) else { return nil }
+                cuts.append(contentsOf: drawing.segments.dropFirst().map { cel.startFrame + $0.localStart })
+            }
+            if let loop = layer.loop { cuts.append(contentsOf: loop.runs.flatMap { [$0.frames.lowerBound, $0.frames.upperBound] }) }
+            guard let prepared = prepareCelSplits(inLayerAt: index, at: cuts, afterRasterizing: layer.rasterizes) else { return nil }
+            result[layer.layerID] = prepared
+        }
+        return result
+    }
+
+    private func perform(_ plan: BakePlan, splits: [UUID: CelSplitPlan]) -> Bool {
         let memo = BakeColourMemo()
         for layerBake in plan.layers {
-            guard bake(layerBake, memo: memo) else { return false }
+            guard let prepared = splits[layerBake.layerID], bake(layerBake, splits: prepared, memo: memo) else { return false }
         }
         if let at = layers.firstIndex(where: { $0.id == plan.bakerID }) { deleteLayer(at: at) }
         return true
     }
 
-    private func bake(_ layerBake: LayerBake, memo: BakeColourMemo) -> Bool {
+    private func bake(_ layerBake: LayerBake, splits: CelSplitPlan, memo: BakeColourMemo) -> Bool {
         guard let canvasSize, let at = layers.firstIndex(where: { $0.id == layerBake.layerID }) else { return false }
         switch layerBake.medium {
         case .flatColour(let operation):
@@ -139,19 +159,20 @@ extension CanvasManager {
                 guard rasterizeLayer(layerIndex: at) else { return false }
                 guard layers[at].kind == .raster, layers[at].cels.allSatisfy({ $0.raster.hasContent }) else { return false }
             }
+            if layerBake.loop == nil { applyCelSplits(splits) }
             for cel in layerBake.cels {
                 guard bakeCel(layerID: layerBake.layerID, celID: cel.celID, segments: cel.segments,
                               canvasSize: canvasSize, memo: memo) else { return false }
             }
-            if let loop = layerBake.loop, !replay(loop, onLayerID: layerBake.layerID) { return false }
+            if let loop = layerBake.loop, !replay(loop, onLayerID: layerBake.layerID, splits: splits) { return false }
         }
         return true
     }
 
-    /// **Cuts a cel into the runs `segments` names and writes each one's treatment** — the body Bake
-    /// and Bake Animation share. Cut left to right at each boundary, every nested `withStructureUndo`
-    /// a no-op inside the step that is already open; then each run is addressed by the frame it starts
-    /// on, which is stable across the cuts where an index is not.
+    /// **Writes each already-cut run's treatment** — the body Bake
+    /// and Bake Animation share. Both callers admit and apply their complete cut sequence before
+    /// entering this writer; each run is addressed by its stable starting frame. Whole layer Bake
+    /// admits every affected layer, including the existing rasterize-first projection.
     ///
     /// The segments were resolved on the uncut cel (`bakeSegments`), and **the order is load-bearing**:
     /// §3.1 says a split re-parameterises a bezier on both sides, so re-reading a half after cutting
@@ -161,11 +182,6 @@ extension CanvasManager {
                  canvasSize: CGSize, memo: BakeColourMemo = BakeColourMemo()) -> Bool {
         guard let at = celIndices(forCel: celID, inLayer: layerID) else { return false }
         let startFrame = layers[at.layer].cels[at.cel].startFrame
-        for segment in segments.dropFirst() {
-            let cut = startFrame + segment.localStart
-            guard let idx = activeCelIndex(inLayer: at.layer, atFrame: cut - 1) else { continue }
-            splitCel(layerIndex: at.layer, celIndex: idx, atFrame: cut)
-        }
         for segment in segments {
             guard let treatment = segment.treatment,
                   let idx = activeCelIndex(inLayer: at.layer, atFrame: startFrame + segment.localStart)
@@ -228,7 +244,7 @@ extension CanvasManager {
     /// drawing is made — a derived cel is flattened to the still it shows, from the drawings it refers to,
     /// and a pose comes with the drawing — so a replayed drawing is a duplicated one; and carving can drop
     /// a cel a later run's source refers to.
-    private func replay(_ loop: LoopBake, onLayerID layerID: UUID) -> Bool {
+    private func replay(_ loop: LoopBake, onLayerID layerID: UUID, splits: CelSplitPlan) -> Bool {
         guard let at = layers.firstIndex(where: { $0.id == layerID }) else { return false }
         let held = layers[at].cels
         var drawings: [(frames: Range<Int>, cel: Cel?)] = []
@@ -242,6 +258,7 @@ extension CanvasManager {
             cel.cropPoseKeysToSpan()
             drawings.append((run.frames, cel))
         }
+        applyCelSplits(splits)
         for drawing in drawings {
             vacate(drawing.frames, inLayerAt: at)
             if let cel = drawing.cel {
@@ -257,14 +274,9 @@ extension CanvasManager {
         return true
     }
 
-    /// Empties `frames` on a layer: a drawing across either edge is cut there, and every drawing left
-    /// inside goes.
+    /// Empties already-aligned `frames`. The complete replay cut plan was admitted and applied
+    /// before any run was replaced, so this owner only removes drawings wholly inside the run.
     private func vacate(_ frames: Range<Int>, inLayerAt at: Int) {
-        for edge in [frames.lowerBound, frames.upperBound] {
-            if let idx = activeCelIndex(inLayer: at, atFrame: edge), layers[at].cels[idx].startFrame < edge {
-                splitCel(layerIndex: at, celIndex: idx, atFrame: edge)
-            }
-        }
         layers[at].cels.removeAll { $0.startFrame >= frames.lowerBound && $0.endFrame <= frames.upperBound }
     }
 

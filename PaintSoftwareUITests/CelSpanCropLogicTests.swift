@@ -123,9 +123,9 @@ final class CelSpanCropLogicTests: XCTestCase {
     /// Watched failing with `resizeCelRightEdge`'s `cropPoseKeysToSpan()` call removed: the keys read
     /// `[0, 4, 9]` and the crop is empty. Watched failing again with the boundary insertion removed
     /// from `cropped(toFrameCount:)`: the keys read `[0, 4]` and frame 5 falls back to key 4's pose.
-    func testShorteningACelFromTheRightCropsTheKeysPastItsNewEnd() {
+    func testShorteningACelFromTheRightCropsTheKeysPastItsNewEnd() throws {
         let manager = fixture()
-        let crop = manager.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 6)
+        let crop = try XCTUnwrap(manager.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 6))
 
         XCTAssertEqual(manager.layers[1].cels[0].frameCount, 6)
         XCTAssertEqual(keyFrames(manager), [0, 4, 5], "the keys inside stay, and 5 gains the pose it showed")
@@ -225,10 +225,20 @@ final class CelSpanCropLogicTests: XCTestCase {
     /// the second `.changed` found the key already gone and the commit reported `[0, 4]`.
     func testADragPastAKeyAndBackWithinOneGestureKeepsIt() {
         let manager = fixture()
+        let before = manager.history.undoStack.count
         dragRightEdge(manager, through: [8, 6, 5, 8, 10])
         XCTAssertEqual(manager.layers[1].cels[0].frameCount, 10)
         XCTAssertEqual(keyFrames(manager), [0, 4, 9])
         XCTAssertNil(croppedNotice(manager), "nothing was discarded at the commit, so nothing is said")
+        XCTAssertEqual(manager.history.undoStack.count, before + 1,
+                       "An accepted out-and-back drag keeps its existing history step")
+        guard manager.history.undoStack.count == before + 1 else { return }
+        manager.undo()
+        XCTAssertEqual(manager.layers[1].cels[0].frameCount, 10)
+        XCTAssertEqual(keyFrames(manager), [0, 4, 9])
+        manager.redo()
+        XCTAssertEqual(manager.layers[1].cels[0].frameCount, 10)
+        XCTAssertEqual(keyFrames(manager), [0, 4, 9])
     }
 
     /// **Only the committed state is reported.** A drag that passes 9 and settles at 8 reports the
@@ -251,7 +261,7 @@ final class CelSpanCropLogicTests: XCTestCase {
     /// the new local frame 0 (document frame 15) carrying the pose the track showed there — a fifth of
     /// the way from the old local-frame -1 key to local-frame 4's key, 50. The key at 9 (document 19)
     /// becomes local 4 and stays, unmoved — and the pose at document frame 19 is exactly what it was.
-    /// That is the video crop's reading of this edge (`writeVideoCrop(anchoredAt: .tail)`): what the
+    /// That is the video crop's reading of this edge (the tail-anchored crop edit): what the
     /// block shows at a document frame it still covers does not change because its head was trimmed —
     /// which now includes the frames between the new head and the surviving key, not only the key
     /// itself.
@@ -260,12 +270,12 @@ final class CelSpanCropLogicTests: XCTestCase {
     /// five frames later in the document and the key at 19 was cropped as if it were at 24. Watched
     /// failing again with the boundary insertion removed from `cropped(toFrameCount:)`: the keys read
     /// `[4]` and frame 16 falls back to the one surviving key's pose (90) instead of 60.
-    func testShorteningACelFromTheLeftCropsTheKeysBeforeItsNewStart() {
+    func testShorteningACelFromTheLeftCropsTheKeysBeforeItsNewStart() throws {
         let manager = fixture(start: 10)
         XCTAssertEqual(shownDX(manager, atFrame: 19)!, 90, accuracy: 1e-9, "Premise")
         XCTAssertEqual(shownDX(manager, atFrame: 16)!, 60, accuracy: 1e-9, "Premise")
 
-        let crop = manager.resizeCelLeftEdge(layerIndex: 1, celIndex: 0, newStartFrame: 15)
+        let crop = try XCTUnwrap(manager.resizeCelLeftEdge(layerIndex: 1, celIndex: 0, newStartFrame: 15))
 
         XCTAssertEqual(manager.layers[1].cels[0].startFrame, 15)
         XCTAssertEqual(manager.layers[1].cels[0].frameCount, 5)
@@ -280,9 +290,9 @@ final class CelSpanCropLogicTests: XCTestCase {
     /// Lengthening from the left crops nothing and shifts the keys the other way, so the drawing's
     /// motion stays on the document frames it was on and the new frames at the front hold the first
     /// key's pose (`AnimationCurve`'s decision 2).
-    func testLengtheningFromTheLeftShiftsTheKeysAndCropsNothing() {
+    func testLengtheningFromTheLeftShiftsTheKeysAndCropsNothing() throws {
         let manager = fixture(start: 10)
-        let crop = manager.resizeCelLeftEdge(layerIndex: 1, celIndex: 0, newStartFrame: 6)
+        let crop = try XCTUnwrap(manager.resizeCelLeftEdge(layerIndex: 1, celIndex: 0, newStartFrame: 6))
         XCTAssertTrue(crop.isEmpty)
         XCTAssertEqual(keyFrames(manager), [4, 8, 13], "every key moved up by the four frames added")
         XCTAssertEqual(shownDX(manager, atFrame: 14)!, 40, accuracy: 1e-9, "document frame 14 unchanged")
@@ -310,14 +320,14 @@ final class CelSpanCropLogicTests: XCTestCase {
 
     /// A predecessor shoved earlier by the resize keeps its keys: its origin moves and its keys are
     /// numbered from it, so nothing of its is outside its span and nothing of its is reported.
-    func testAPushedNeighbourKeepsEveryKey() {
+    func testAPushedNeighbourKeepsEveryKey() throws {
         let manager = fixture(start: 10)
         let neighbour = Cel(id: UUID(), startFrame: 4, frameCount: 6, raster: .empty(size: size),
                             vector: .empty(size: size))
         manager.layers[1].cels.insert(neighbour, at: 0)
         manager.layers[1].cels[0].transformTracks = [TransformChannelID.cel.id: track([(0, 0), (5, 50)])]
 
-        let crop = manager.resizeCelLeftEdge(layerIndex: 1, celIndex: 1, newStartFrame: 7)
+        let crop = try XCTUnwrap(manager.resizeCelLeftEdge(layerIndex: 1, celIndex: 1, newStartFrame: 7))
         XCTAssertEqual(manager.layers[1].cels[0].startFrame, 1, "Premise: the neighbour was pushed")
         XCTAssertEqual(keyFrames(manager, cel: 0), [0, 5], "and carries its keys with it")
         XCTAssertTrue(crop.isEmpty, "lengthening the resized cel cropped nothing either")
@@ -332,10 +342,10 @@ final class CelSpanCropLogicTests: XCTestCase {
     ///
     /// Watched failing with `split`'s left insertion put back at `cut`: the crop reports frame 5 and
     /// the left keys read `[0]`, which then stops the drawing dead at frame 0's pose.
-    func testASplitLeavesEveryKeyInsideItsHalfAndEveryFrameUnchanged() {
+    func testASplitLeavesEveryKeyInsideItsHalfAndEveryFrameUnchanged() throws {
         let manager = fixture(keys: [(0, 0), (9, 90)])
         let before = (0..<10).map { shownDX(manager, atFrame: $0) }
-        let crop = manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 5)
+        let crop = try XCTUnwrap(manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 5))
 
         XCTAssertTrue(crop.isEmpty, "a split under the current rule discards nothing")
         XCTAssertEqual(keyFrames(manager, cel: 0), [0, 4])
@@ -360,9 +370,9 @@ final class CelSpanCropLogicTests: XCTestCase {
     ///
     /// Watched failing with the boundary insertion removed: cel 1's keys read `[0]` and frame 4 (the
     /// half's own last frame) reads 50 — the cut key's pose, held — instead of 90.
-    func testASplitCropsAStrayKeyALegacyDocumentCarriedAndNamesIt() {
+    func testASplitCropsAStrayKeyALegacyDocumentCarriedAndNamesIt() throws {
         let manager = fixture(keys: [(0, 0), (12, 120)])   // 12 is two past a ten-frame cel
-        let crop = manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 5)
+        let crop = try XCTUnwrap(manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 5))
         XCTAssertEqual(crop.frames, [12])
         XCTAssertEqual(keyFrames(manager, cel: 0), [0, 4])
         XCTAssertEqual(keyFrames(manager, cel: 1), [0, 4],
@@ -451,7 +461,7 @@ final class CelSpanCropLogicTests: XCTestCase {
     /// opacity keys read `[0]` and `keyframeFrames` lost frame 9. Watched failing a second way with
     /// `cropTransformLayerKeysToBlocks`'s call removed from `resizeCelRightEdge`: `layers[2].transform`'s
     /// key at 11 survives past a block that ends at 4.
-    func testLayerLevelTracksAreUntouchedExceptATransformLayersOwnWhichCropsWithItsBlock() {
+    func testLayerLevelTracksAreUntouchedExceptATransformLayersOwnWhichCropsWithItsBlock() throws {
         let manager = fixture()
         let layerID = manager.layers[1].id
         let opacity = AnimationCurve(keys: [.init(frame: 0, value: 1), .init(frame: 9, value: 0.2)])
@@ -467,10 +477,10 @@ final class CelSpanCropLogicTests: XCTestCase {
         let rest = PoseQuad(restingIn: CGRect(origin: .zero, size: size))
         manager.layers[2].transform = LayerPose(pose: rest, track: CanvasFixture.poseTrack([(0, rest), (11, slide(24))]))
 
-        var crop = manager.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 6)
-        crop.merge(manager.resizeCelLeftEdge(layerIndex: 1, celIndex: 0, newStartFrame: 2))
-        crop.merge(manager.resizeCelRightEdge(layerIndex: 2, celIndex: 0, newEndFrame: 4))
-        crop.merge(manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 4))
+        var crop = try XCTUnwrap(manager.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 6))
+        crop.merge(try XCTUnwrap(manager.resizeCelLeftEdge(layerIndex: 1, celIndex: 0, newStartFrame: 2)))
+        crop.merge(try XCTUnwrap(manager.resizeCelRightEdge(layerIndex: 2, celIndex: 0, newEndFrame: 4)))
+        crop.merge(try XCTUnwrap(manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 4)))
 
         XCTAssertEqual(crop.discarded.keys.sorted(), [TransformChannelID.cel.id + ".x", "transform.x"],
                        "the drawing layer's own channel, and the transform layer's, and nothing else")
@@ -596,9 +606,9 @@ final class CelSpanCropLogicTests: XCTestCase {
     /// A bare call outside any bracket registers no undo step, so it raises nothing: the sentence
     /// would be a lie there. The verb's return value is its whole report, and it is what every test
     /// above that calls a handle verb directly reads.
-    func testABareVerbCallOutsideAnyBracketReturnsTheCropAndRaisesNoNotice() {
+    func testABareVerbCallOutsideAnyBracketReturnsTheCropAndRaisesNoNotice() throws {
         let manager = fixture()
-        let crop = manager.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 6)
+        let crop = try XCTUnwrap(manager.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 6))
         XCTAssertEqual(crop.frames, [9])
         XCTAssertNil(manager.notice)
         XCTAssertNil(manager.pendingKeyframeCrop, "nothing is parked for a later, unrelated step to claim")
@@ -861,9 +871,9 @@ final class CelSpanCropLogicTests: XCTestCase {
     ///
     /// Watched failing with the left half's `cropPoseKeysToSpan()` removed from `splitCel`: the left
     /// keys read `[-5, 0, 4]` and the crop is empty.
-    func testASplitCropsAKeyBelowZeroFromTheLeftHalfAndNamesIt() {
+    func testASplitCropsAKeyBelowZeroFromTheLeftHalfAndNamesIt() throws {
         let manager = fixture(start: 10, keys: [(-5, -50), (0, 0), (9, 90)])
-        let crop = manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 15)
+        let crop = try XCTUnwrap(manager.splitCel(layerIndex: 1, celIndex: 0, atFrame: 15))
         XCTAssertEqual(keyFrames(manager, cel: 0), [0, 4])
         XCTAssertEqual(keyFrames(manager, cel: 1), [0, 4])
         XCTAssertEqual(crop.frames, [5], "10 + (-5): the document frame the key sat on, before the block")

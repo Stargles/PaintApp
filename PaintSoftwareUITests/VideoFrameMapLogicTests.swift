@@ -88,7 +88,7 @@ final class VideoFrameMapLogicTests: XCTestCase {
     /// at 0.8 every one of the thirty source frames is shown exactly once, over thirty document
     /// frames. At the documented 1.25 the same clip would land on source frames 0, 2, 3, 5, … and
     /// show fewer than half of them, which is the opposite of what the setting is named for.
-    func testFrameForFrameShowsEverySourceFrameExactlyOnce() {
+    func testFrameForFrameShowsEverySourceFrameExactlyOnce() throws {
         let speed = VideoFrameMap.frameForFrameSpeed(sourceFPS: 30, documentFPS: 24)
         XCTAssertEqual(speed, 0.8, accuracy: 1e-12)
 
@@ -100,7 +100,7 @@ final class VideoFrameMapLogicTests: XCTestCase {
         for frame in 0..<30 {
             let time = VideoFrameMap.sourceTime(of: clip, atDocumentFrame: frame, celStartFrame: 0,
                                                 documentFPS: 24)
-            seen.append(VideoFrameMap.sourceFrameIndex(at: time, sourceFPS: 30))
+            seen.append(try XCTUnwrap(VideoFrameMap.sourceFrameIndex(at: time, sourceFPS: 30)))
         }
         XCTAssertEqual(seen, Array(0..<30),
                        "Frame-for-frame means each source frame once, in order, with none repeated "
@@ -203,6 +203,46 @@ final class VideoFrameMapLogicTests: XCTestCase {
         XCTAssertTrue(SourceTime(value: 999, timescale: 1000) < SourceTime(value: 1, timescale: 1))
     }
 
+    func testExtremeAcceptedSourceTimesKeepTheirExactOrderAndDifference() throws {
+        let low = try JSONDecoder().decode(SourceTime.self,
+            from: Data("{\"value\":9223372036854775805,\"timescale\":2}".utf8))
+        let high = try JSONDecoder().decode(SourceTime.self,
+            from: Data("{\"value\":9223372036854775807,\"timescale\":2}".utf8))
+        XCTAssertLessThan(low, high, "Current rational timestamps remain ordered beyond Double's integer precision")
+        XCTAssertEqual(high.secondsSince(low), 1,
+                       "A one-second crop remains one second even when both absolute seconds round to the same Double")
+        XCTAssertEqual(VideoFrameMap.advancedSourceTime(sourceStart: low, elapsedDocumentFrames: 0,
+            speed: 1, documentFPS: 2, minimum: high), high, "The crop floor uses the exact source-clock order")
+    }
+
+    func testCheckedTimeAndInverseConversionsRespectRepresentableNeighbors() throws {
+        let lastDoubleInteger = Int64.max - 1023 // 2^63 - 1024, Double's last in-range integer.
+        XCTAssertEqual(VideoFrameMap.sourceFrameIndex(at: SourceTime(value: lastDoubleInteger, timescale: 1), sourceFPS: 1),
+                       Int(lastDoubleInteger), "The exact in-range neighbor remains a valid frame index")
+        XCTAssertNil(VideoFrameMap.sourceFrameIndex(at: SourceTime(value: Int64.max, timescale: 1), sourceFPS: 1),
+                     "A rounded Double of 2^63 is outside Int, even though Double(Int.max) spells the same bound")
+        XCTAssertEqual(VideoFrameMap.frameCount(sourceStart: .zero,
+            sourceEnd: SourceTime(value: lastDoubleInteger, timescale: 1), speed: 1, documentFPS: 1), Int(lastDoubleInteger))
+        XCTAssertNil(VideoFrameMap.frameCount(sourceStart: .zero,
+            sourceEnd: SourceTime(value: Int64.max, timescale: 1), speed: 1, documentFPS: 1))
+        XCTAssertNil(VideoFrameMap.frameCount(sourceStart: .zero, sourceEnd: SourceTime(value: 1, timescale: 1),
+            speed: 1e-300, documentFPS: 24), "A finite speed must not saturate an unrepresentable cel length")
+        XCTAssertEqual(VideoFrameMap.frameCount(sourceStart: .zero, sourceEnd: SourceTime(value: Int64.max, timescale: 1),
+            speed: 1, documentFPS: 24, limit: 12), 12, "Import applies its existing scene crop before narrowing")
+        for speed in [1e30, Double.greatestFiniteMagnitude] {
+            XCTAssertEqual(VideoFrameMap.advancedSourceTime(sourceStart: .zero, elapsedDocumentFrames: 1,
+                speed: speed, documentFPS: 24, maximum: SourceTime(value: 1, timescale: 1)),
+                SourceTime(value: 1, timescale: 1), "The exact held endpoint is resolved before an unsafe integer narrowing")
+        }
+        XCTAssertEqual(VideoFrameMap.advancedSourceTime(sourceStart: SourceTime(value: Int64.max - 1, timescale: 1),
+            elapsedDocumentFrames: 1, speed: 1, documentFPS: 1), SourceTime(value: Int64.max, timescale: 1),
+            "Wider intermediate ticks reduce before the representable final numerator is narrowed")
+        XCTAssertNil(VideoFrameMap.advancedSourceTime(sourceStart: SourceTime(value: Int64.max, timescale: 1),
+            elapsedDocumentFrames: 1, speed: 1, documentFPS: 1), "An unbounded sum past SourceTime has no replacement instant")
+        XCTAssertEqual(VideoFrameMap.advancedSourceTime(sourceStart: SourceTime(value: Int64.min + 1, timescale: 1),
+            elapsedDocumentFrames: -1, speed: 1, documentFPS: 1), SourceTime(value: Int64.min, timescale: 1))
+    }
+
     // MARK: - The bake-key component (§4.5, VIDEO.md §5)
 
     /// **The pin.** Two document frames of one video block are two pictures, so they must be two
@@ -281,7 +321,7 @@ final class VideoFrameMapLogicTests: XCTestCase {
         for frame in 0..<5 {
             let time = VideoFrameMap.sourceTime(of: clip, atDocumentFrame: frame, celStartFrame: 0,
                                                 documentFPS: 24)
-            byArithmetic.append(VideoFrameMap.sourceFrameIndex(at: time, sourceFPS: 30))
+            byArithmetic.append(try XCTUnwrap(VideoFrameMap.sourceFrameIndex(at: time, sourceFPS: 30)))
         }
         XCTAssertEqual(byArithmetic, [0, 1, 3, 4, 5],
                        "Frame 2 of the source is dropped and the 2.5 tie rounds up — which is the "

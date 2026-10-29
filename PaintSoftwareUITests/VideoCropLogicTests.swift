@@ -106,6 +106,119 @@ final class VideoCropLogicTests: XCTestCase {
         XCTAssertEqual(try shownSourceFrame(manager, atFrame: 0), 0)
     }
 
+    func testARoundedUnchangedVideoCropStillChangesItsSpanAndUndoes() throws {
+        let manager = try documentShowingAClip(frames: 24)
+        let originalVector = try XCTUnwrap(manager.layers[1].cels[0].vector)
+        var clip = try video(manager)
+        clip.sourceStart = .zero; clip.sourceEnd = SourceTime(value: 1, timescale: 1)
+        clip.speed = 1e-9; clip.mappedFrameRate = 24
+        originalVector.elements = [.video(clip)]; originalVector.bumpVersion()
+        manager.layers[1].cels[0].frameCount = 12
+        let payload = VectorCanvasData(from: originalVector, imageFileNames: [:])
+        XCTAssertTrue(try JSONDecoder().decode(VectorCanvasData.self,
+            from: JSONEncoder().encode(payload)).decodeReport.isClean, "PREMISE: this finite tiny speed is current readable timing")
+        XCTAssertEqual(VideoFrameMap.frameCount(of: clip, documentFPS: 24), 24_000_000_000,
+                       "PREMISE: the inverse fits Int; this value is never used to allocate frames")
+        let originalCrop = VideoCrop(of: clip)
+
+        for leftEdge in [false, true] {
+            let vector = try XCTUnwrap(manager.layers[1].cels[0].vector)
+            let version = vector.version, history = manager.history.undoStack.count
+            let expectedStart = leftEdge ? 6 : 0
+            manager.notice = nil
+            manager.beginStructureGesture()
+            if leftEdge { manager.resizeCelLeftEdge(layerIndex: 1, celIndex: 0, newStartFrame: 6) }
+            else { manager.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 6) }
+            manager.commitStructureGesture(label: .resizeFrame)
+
+            XCTAssertEqual(manager.layers[1].cels[0].startFrame, expectedStart,
+                           "The successful rounded \(leftEdge ? "head" : "tail") crop still moves the requested block edge")
+            XCTAssertEqual(manager.layers[1].cels[0].frameCount, 6,
+                           "A zero rounded footage offset does not refuse the six-frame span")
+            XCTAssertEqual(VideoCrop(of: try video(manager)), originalCrop,
+                           "Rounding to the opposite endpoint retains the original crop instead of writing zero footage")
+            XCTAssertEqual(vector.version, version, "An unchanged crop does not rewrite video elements")
+            XCTAssertEqual(manager.history.undoStack.count, history + 1, "The real span edit owns one Undo step")
+            XCTAssertNil(manager.notice, "Successful unchanged crop arithmetic exposes no refusal")
+            guard manager.layers[1].cels[0].startFrame == expectedStart,
+                  manager.layers[1].cels[0].frameCount == 6,
+                  manager.history.undoStack.count == history + 1 else { return }
+
+            manager.undo()
+            XCTAssertEqual(manager.layers[1].cels[0].startFrame, 0)
+            XCTAssertEqual(manager.layers[1].cels[0].frameCount, 12, "Undo restores the original block span")
+            XCTAssertEqual(VideoCrop(of: try video(manager)), originalCrop)
+            manager.redo()
+            XCTAssertEqual(manager.layers[1].cels[0].startFrame, expectedStart)
+            XCTAssertEqual(manager.layers[1].cels[0].frameCount, 6, "Redo restores the successful six-frame span")
+            XCTAssertEqual(VideoCrop(of: try video(manager)), originalCrop)
+            manager.undo()
+        }
+    }
+
+    func testAnUnrepresentableCropRefusesBeforePushingItsNeighbor() throws {
+        for acceptedFirst in [false, true] {
+            let manager = try documentShowingAClip(frames: acceptedFirst ? 7 : 6)
+            let vector = try XCTUnwrap(manager.layers[1].cels[0].vector)
+            var clip = try video(manager)
+            clip.assetURL = directory.appendingPathComponent("unavailable.mov")
+            clip.sourceStart = SourceTime(value: Int64.max - 2, timescale: 1)
+            clip.sourceEnd = SourceTime(value: Int64.max - 1, timescale: 1)
+            clip.mappedFrameRate = 1
+            clip.naturalSize = CGSize(width: 16, height: 16)
+            vector.elements = [.video(clip)]
+            vector.addFill(canvasSpacePath: CGPath(rect: CGRect(x: 4, y: 4, width: 12, height: 12), transform: nil),
+                           color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1))
+            manager.layers[1].cels[0].frameCount = 12
+            manager.layers[1].cels.append(Cel(id: UUID(), startFrame: 15, frameCount: 2,
+                raster: .empty(size: CanvasFixture.canvasSize)))
+            let starts = manager.layers[1].cels.map(\.startFrame)
+            let originalLengths = manager.layers[1].cels.map(\.frameCount)
+            let version = vector.version, history = manager.history.undoStack.count
+            let crop = VideoCrop(of: clip)
+            let image = try XCTUnwrap(vector.render())
+            XCTAssertEqual(CanvasFixture.greyAt(image, x: 8, y: 8), 0, "PREMISE: opaque drawn ink accompanies the video")
+            let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(image.cgImage)))
+            try VideoFrameMap.validate(sourceStart: clip.sourceStart, sourceEnd: clip.sourceEnd,
+                speed: clip.speed, documentFPS: clip.resolvedFrameRate)
+
+            manager.beginStructureGesture()
+            if acceptedFirst {
+                manager.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 1)
+                XCTAssertEqual(manager.layers[1].cels[0].frameCount, 1, "PREMISE: the earlier request in this gesture succeeds")
+            }
+            manager.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 20)
+            manager.commitStructureGesture(label: .resizeFrame)
+
+            let lengths = acceptedFirst ? [1, 2] : originalLengths
+            XCTAssertEqual(manager.layers[1].cels.map(\.startFrame), starts, "Refusal precedes any neighbor push")
+            XCTAssertEqual(manager.layers[1].cels.map(\.frameCount), lengths,
+                           "A refused request retains earlier accepted work and the original other spans")
+            XCTAssertEqual(VideoCrop(of: try video(manager)), crop, "No source boundary is manufactured for the overflowing crop")
+            XCTAssertEqual(vector.version, version)
+            XCTAssertEqual(manager.history.undoStack.count, history + (acceptedFirst ? 1 : 0),
+                           "A refusal-only gesture has no history; earlier accepted work owns one step")
+            XCTAssertEqual(manager.notice?.code, "videoTimingRefused")
+            let after = try XCTUnwrap(manager.layers[1].cels[0].vector?.render()?.cgImage)
+            XCTAssertEqual(CanvasFixture.rgbaBytes(after), pixels, "Every drawn pixel remains intact after refusal")
+            guard manager.layers[1].cels.map(\.startFrame) == starts,
+                  manager.layers[1].cels.map(\.frameCount) == lengths,
+                  manager.history.undoStack.count == history + (acceptedFirst ? 1 : 0) else { return }
+            if acceptedFirst {
+                manager.undo()
+                XCTAssertEqual(manager.layers[1].cels.map(\.frameCount), originalLengths, "Undo restores the accepted span without undoing setup")
+                XCTAssertEqual(VideoCrop(of: try video(manager)), crop)
+                let undone = try XCTUnwrap(manager.layers[1].cels[0].vector?.render()?.cgImage)
+                XCTAssertEqual(CanvasFixture.rgbaBytes(undone), pixels)
+                manager.redo()
+                XCTAssertEqual(manager.layers[1].cels.map(\.frameCount), lengths, "Redo keeps the accepted edit despite the later refusal")
+                XCTAssertEqual(VideoCrop(of: try video(manager)), crop)
+                let redone = try XCTUnwrap(manager.layers[1].cels[0].vector?.render()?.cgImage)
+                XCTAssertEqual(CanvasFixture.rgbaBytes(redone), pixels)
+            }
+        }
+    }
+
     // MARK: - The drift
 
     /// **A crop drag that goes out and comes back lands exactly where it started.** This is the

@@ -81,11 +81,11 @@ nonisolated enum ProjectRecipeMetadata {
         }
     }
 
-    /// Version and projective ownership are payload integrity; ordinary damaged element fields keep
-    /// their existing reported-loss policy. This preflight never allocates ordinary stroke samples.
+    /// Version, projective ownership and admitted video timing are payload integrity. Ordinary
+    /// damaged element fields keep their reported-loss policy; no stroke samples or pixels are read.
     private struct GeometryMetadata: Decodable {
         private enum Root: String, CodingKey { case geometryVersion, elements }
-        private enum Slot: String, CodingKey { case kind, stroke }
+        private enum Slot: String, CodingKey { case kind, stroke, video }
         private enum Stroke: String, CodingKey { case placement }
         init(from decoder: Decoder) throws {
             try VectorGeometryCodingError.preserving {
@@ -98,8 +98,12 @@ nonisolated enum ProjectRecipeMetadata {
                     let decoder = try elements.superDecoder()
                     try VectorCanvasData.validateResourceAddress(from: decoder)
                     guard let slot = try? decoder.container(keyedBy: Slot.self),
-                          let kind = try? slot.decode(String.self, forKey: .kind), kind == "stroke",
-                          slot.contains(.stroke),
+                          let kind = try? slot.decode(String.self, forKey: .kind) else { continue }
+                    if kind == "video" {
+                        try VectorCanvasData.VideoRef.validateTiming(from: slot.superDecoder(forKey: .video))
+                        continue
+                    }
+                    guard kind == "stroke", slot.contains(.stroke),
                           let stroke = try? slot.superDecoder(forKey: .stroke).container(keyedBy: Stroke.self) else { continue }
                     guard stroke.contains(.placement) else { throw InvalidMetadata() }
                     if try !stroke.decodeNil(forKey: .placement) {

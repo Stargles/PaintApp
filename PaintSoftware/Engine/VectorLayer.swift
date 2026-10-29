@@ -1070,7 +1070,7 @@ struct SourceTime: Codable, Equatable {
     init(value: Int64, timescale: Int32) {
         precondition(timescale > 0,
                      "A source time's timescale is a denominator: \(timescale) is not a clock.")
-        let divisor = Int64(Self.gcd(value.magnitude, UInt64(timescale)))
+        let divisor = Int64(Self.gcd(UInt128(value.magnitude), UInt128(timescale)))
         self.value = value / divisor
         self.timescale = Int32(Int64(timescale) / divisor)
     }
@@ -1086,7 +1086,7 @@ struct SourceTime: Codable, Equatable {
     /// `gcd(0, t) == t`, so a zero value normalises to `0/1` rather than dividing by zero, and the
     /// result is never 0 because `timescale > 0`. Taken over magnitudes so `Int64.min` cannot trap
     /// the way `abs` would.
-    private static func gcd(_ a: UInt64, _ b: UInt64) -> UInt64 {
+    static func gcd(_ a: UInt128, _ b: UInt128) -> UInt128 {
         var a = a, b = b
         while b != 0 { (a, b) = (b, a % b) }
         return a
@@ -1190,7 +1190,9 @@ struct VectorVideoElement: Identifiable, PlacedRectangle {
     /// Every §4.3 call site reads this — never `mappedFrameRate` and never a document's live fps —
     /// so a crop drag, an Adjust Speed choice and a played/baked frame all agree about which rate this
     /// element's footage is mapped at.
-    var resolvedFrameRate: Int { mappedFrameRate ?? 24 }
+    var resolvedFrameRate: Int { Self.resolvedFrameRate(mappedFrameRate) }
+
+    static func resolvedFrameRate(_ stored: Int?) -> Int { stored ?? 24 }
 
     /// **The source frame this element is showing right now** — stage 3, and runtime-only in
     /// `assetURL`'s exact sense: it is never persisted, never compared and never carried by a copy
@@ -7786,6 +7788,10 @@ struct VectorCanvasData: Codable {
         /// shape `animationGroupID` already uses, and `VectorVideoElement.resolvedFrameRate` is the
         /// one place that reads as 24.
         var mappedFrameRate: Int?
+        private enum CodingKeys: String, CodingKey {
+            case fileName, width, height, sourceStart, sourceEnd, speed, x, y, scale, rotation
+            case aspect, stretchAxis, mirrored, animationGroupID, mappedFrameRate
+        }
     }
 
     /// The persisted form of a `VectorStreamElement` — STREAM.md §5.1's fields, and nothing runtime.
@@ -7971,6 +7977,8 @@ struct VectorCanvasData: Codable {
             } catch let error as ProjectPackageLayout.AddressError {
                 throw error
             } catch let error as VectorGeometryCodingError {
+                throw error
+            } catch let error as VideoFrameMap.CodingError {
                 throw error
             } catch ElementData.Failure.unknownKind(let raw) {
                 outcome = .unknownKind(raw)
@@ -8347,5 +8355,37 @@ extension Array where Element == VectorElement {
     /// (`VectorElement.isReference`) and is left out. The same list, in the same z-order, otherwise.
     var withoutReference: [VectorElement] {
         contains(where: \.isReference) ? filter { !$0.isReference } : self
+    }
+}
+
+extension VectorCanvasData.VideoRef {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        fileName = try c.decode(String.self, forKey: .fileName)
+        width = try c.decode(Double.self, forKey: .width)
+        height = try c.decode(Double.self, forKey: .height)
+        sourceStart = try c.decode(SourceTime.self, forKey: .sourceStart)
+        sourceEnd = try c.decode(SourceTime.self, forKey: .sourceEnd)
+        speed = try c.decode(Double.self, forKey: .speed)
+        x = try c.decode(Double.self, forKey: .x)
+        y = try c.decode(Double.self, forKey: .y)
+        scale = try c.decode(Double.self, forKey: .scale)
+        rotation = try c.decode(Double.self, forKey: .rotation)
+        aspect = try c.decode(Double.self, forKey: .aspect)
+        stretchAxis = try c.decode(Double.self, forKey: .stretchAxis)
+        mirrored = try c.decode(Bool.self, forKey: .mirrored)
+        animationGroupID = try c.decodeIfPresent(UUID.self, forKey: .animationGroupID)
+        mappedFrameRate = try c.decodeIfPresent(Int.self, forKey: .mappedFrameRate)
+        try VideoFrameMap.validate(sourceStart: sourceStart, sourceEnd: sourceEnd,
+            speed: speed, documentFPS: VectorVideoElement.resolvedFrameRate(mappedFrameRate))
+    }
+
+    /// Package preflight reads the same timing fields without constructing a canvas or any pixels.
+    static func validateTiming(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        try VideoFrameMap.validate(sourceStart: c.decode(SourceTime.self, forKey: .sourceStart),
+            sourceEnd: c.decode(SourceTime.self, forKey: .sourceEnd),
+            speed: c.decode(Double.self, forKey: .speed),
+            documentFPS: VectorVideoElement.resolvedFrameRate(c.decodeIfPresent(Int.self, forKey: .mappedFrameRate)))
     }
 }

@@ -377,9 +377,9 @@ extension CanvasManager {
         // "fill the empty space after this," so it still needs its own stop, and this clamp is now
         // the only thing standing between it and pushing every block after it down the timeline.
         let stop = neighborBounds(layerIndex: layerIndex, celIndex: celIndex).upperBound
-        withStructureUndo(label: .extendFrame) {
-            resizeCelRightEdge(layerIndex: layerIndex, celIndex: celIndex,
-                               newEndFrame: min(stop, max(contentEndFrame, cel.endFrame)))
+        withStructureTransaction(label: .extendFrame) {
+            return resizeCelRightEdge(layerIndex: layerIndex, celIndex: celIndex,
+                               newEndFrame: min(stop, max(contentEndFrame, cel.endFrame))) != nil
         }
     }
 
@@ -528,7 +528,7 @@ extension CanvasManager {
     /// local frame is below 0 is outside the span and goes (`Cel.cropPoseKeysToSpan`) — but not before
     /// a key lands on the new local frame 0 carrying the pose shown there, 2026-09-11's symmetric
     /// reading of the same ruling `resizeCelRightEdge` carries at its own edge. That is the same
-    /// reading `writeVideoCrop(anchoredAt: .tail)` gives the footage one line down: this edge crops the
+    /// reading the tail-anchored crop edit gives the footage one line down: this edge crops the
     /// *head*, and what the block shows at a document frame it still covers is what it showed there
     /// before. The other reading — keys keep their local numbers and the whole animation
     /// slides later with the edge — would retime the drawing against every other layer as a side
@@ -545,15 +545,15 @@ extension CanvasManager {
     ///   a notice by the bracket that records the step (`noteKeyframeCrop`); a bare call from a test
     ///   has no bracket, and the return value is its report.
     @discardableResult
-    func resizeCelLeftEdge(layerIndex: Int, celIndex: Int, newStartFrame: Int) -> KeyframeCrop {
-        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return KeyframeCrop() }
+    func resizeCelLeftEdge(layerIndex: Int, celIndex: Int, newStartFrame: Int) -> KeyframeCrop? {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return nil }
         // Baseline for every position in this call — the resized cel's own anchor (its endFrame,
         // which this edge never moves) and every predecessor's untouched start/length — comes from
         // `gestureSnapshot` when a drag has one open, not from `layers` as it currently stands. See
         // `resizeCelRightEdge`'s comment for why: reading the live (already-pushed) state here is
         // exactly the bug that made dragging out and back not restore the neighbours.
         let baseline = gestureSnapshot?.layers ?? layers
-        guard baseline.indices.contains(layerIndex), baseline[layerIndex].cels.indices.contains(celIndex) else { return KeyframeCrop() }
+        guard baseline.indices.contains(layerIndex), baseline[layerIndex].cels.indices.contains(celIndex) else { return nil }
         let baselineCel = baseline[layerIndex].cels[celIndex]
         let requestedStart = min(newStartFrame, baselineCel.endFrame - 1)
 
@@ -584,6 +584,12 @@ extension CanvasManager {
         // the cascade only ever moves later by this shift, i.e. away from them, never toward.
         let deficit = max(0, -cursor)
         let clampedStart = requestedStart + deficit
+
+        guard let videoCrop = videoCropEdit(for: baselineCel.vector,
+            length: baselineCel.endFrame - clampedStart, anchoredAt: .tail) else {
+            raise(.videoTimingRefused)
+            return nil
+        }
 
         layers[layerIndex].cels[celIndex].startFrame = clampedStart
         layers[layerIndex].cels[celIndex].frameCount = baselineCel.endFrame - clampedStart
@@ -642,7 +648,7 @@ extension CanvasManager {
         // VIDEO.md §2.2, and this edge crops the **head**: the block's end never moves, so neither
         // does the tail of the crop. The pushed predecessors keep their own lengths and therefore
         // their own crops, which is right — being shoved along the timeline is not being cropped.
-        writeVideoCrop(layerIndex: layerIndex, celIndex: celIndex, anchoredAt: .tail)
+        writeVideoCrop(videoCrop, layerIndex: layerIndex, celIndex: celIndex)
         return crop
     }
 
@@ -695,12 +701,18 @@ extension CanvasManager {
     ///
     /// - Returns: the keys removed, in absolute frames; see `resizeCelLeftEdge`.
     @discardableResult
-    func resizeCelRightEdge(layerIndex: Int, celIndex: Int, newEndFrame: Int) -> KeyframeCrop {
-        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return KeyframeCrop() }
+    func resizeCelRightEdge(layerIndex: Int, celIndex: Int, newEndFrame: Int) -> KeyframeCrop? {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return nil }
         let baseline = gestureSnapshot?.layers ?? layers
-        guard baseline.indices.contains(layerIndex), baseline[layerIndex].cels.indices.contains(celIndex) else { return KeyframeCrop() }
+        guard baseline.indices.contains(layerIndex), baseline[layerIndex].cels.indices.contains(celIndex) else { return nil }
         let baselineCel = baseline[layerIndex].cels[celIndex]
         let clampedEnd = max(newEndFrame, baselineCel.startFrame + 1)
+
+        guard let videoCrop = videoCropEdit(for: baselineCel.vector,
+            length: clampedEnd - baselineCel.startFrame, anchoredAt: .head) else {
+            raise(.videoTimingRefused)
+            return nil
+        }
 
         layers[layerIndex].cels[celIndex].startFrame = baselineCel.startFrame
         layers[layerIndex].cels[celIndex].frameCount = clampedEnd - baselineCel.startFrame
@@ -751,7 +763,7 @@ extension CanvasManager {
         // VIDEO.md §2.2's other edge. The block's start never moves, so the head of the crop is
         // fixed and the tail follows the new length — up to the clip's own duration, past which
         // there is no more footage to reveal and the last frame holds (§4.3's clamp).
-        writeVideoCrop(layerIndex: layerIndex, celIndex: celIndex, anchoredAt: .head)
+        writeVideoCrop(videoCrop, layerIndex: layerIndex, celIndex: celIndex)
         return crop
     }
 
@@ -778,52 +790,65 @@ extension CanvasManager {
     /// `VideoFrameSource`, whose readers are kept open per asset, so a drag asks a dictionary rather
     /// than the file system per tick; an asset that will not open imposes no ceiling, which is the
     /// same "degrade, do not refuse" the missing-asset path already takes.
-    func writeVideoCrop(layerIndex: Int, celIndex: Int, anchoredAt anchor: VideoCropAnchor) {
-        guard layers.indices.contains(layerIndex),
-              layers[layerIndex].cels.indices.contains(celIndex) else { return }
-        let cel = layers[layerIndex].cels[celIndex]
-        guard let vector = cel.vector, vector.holdsVideo else { return }
-        let length = max(cel.frameCount, 1)
-        var elements = vector.elements
-        var changed = false
+    private func videoCropEdit(for vector: VectorCanvas?, length: Int, anchoredAt anchor: VideoCropAnchor)
+        -> (elements: [VectorElement], rewritten: Set<UUID>)? {
+        guard let vector, vector.holdsVideo else { return ([], []) }
+        return videoCropEdit(elements: vector.elements, length: length, anchoredAt: anchor)
+    }
+
+    private func preparedVideoCrop(_ videos: [VectorVideoElement], length: Int,
+                                   anchoredAt anchor: VideoCropAnchor) -> [VectorVideoElement]? {
+        var videos = videos
+        for index in videos.indices {
+            var video = videos[index]
+            switch anchor {
+            case .head:
+                guard let end = VideoFrameMap.advancedSourceTime(sourceStart: video.sourceStart,
+                    elapsedDocumentFrames: length, speed: video.speed, documentFPS: video.resolvedFrameRate,
+                    maximum: videoFrames.info(for: video.assetURL)?.duration) else { return nil }
+                if video.sourceStart < end { video.sourceEnd = end }
+            case .tail:
+                guard let start = VideoFrameMap.advancedSourceTime(sourceStart: video.sourceEnd,
+                    elapsedDocumentFrames: -length, speed: video.speed, documentFPS: video.resolvedFrameRate,
+                    minimum: .zero) else { return nil }
+                if start < video.sourceEnd { video.sourceStart = start }
+            }
+            guard (try? VideoFrameMap.validate(sourceStart: video.sourceStart, sourceEnd: video.sourceEnd,
+                speed: video.speed, documentFPS: video.resolvedFrameRate)) != nil else { return nil }
+            videos[index] = video
+        }
+        return videos
+    }
+
+    private func videoCropEdit(elements: [VectorElement], length: Int, anchoredAt anchor: VideoCropAnchor)
+        -> (elements: [VectorElement], rewritten: Set<UUID>)? {
+        guard let videos = preparedVideoCrop(elements.compactMap(\.video), length: length, anchoredAt: anchor) else { return nil }
+        return applyingVideoCrops(videos, to: elements)
+    }
+
+    /// Only the timing fields land; geometry and fresh treatment identities remain owned by the
+    /// current display list. Planning never retains a full ink list or copies a pixel tier.
+    private func applyingVideoCrops(_ videos: [VectorVideoElement], to elements: [VectorElement])
+        -> (elements: [VectorElement], rewritten: Set<UUID>) {
+        guard !videos.isEmpty else { return (elements, []) }
+        let crops = Dictionary(uniqueKeysWithValues: videos.map { ($0.id, VideoCrop(of: $0)) })
+        var elements = elements
         var rewritten: Set<UUID> = []
         for index in elements.indices {
             guard case .video(var video) = elements[index] else { continue }
-            // TODO (105): each element's own `resolvedFrameRate`, not the document's live `fps` — a
-            // crop written against a different rate than playback resolves against would set a
-            // boundary the block's last frame never actually reaches. See `VectorVideoElement
-            // .mappedFrameRate`.
-            switch anchor {
-            case .head:
-                var end = VideoFrameMap.unclampedSourceTime(sourceStart: video.sourceStart,
-                                                            elapsedDocumentFrames: length,
-                                                            speed: video.speed,
-                                                            documentFPS: video.resolvedFrameRate)
-                if let duration = videoFrames.info(for: video.assetURL)?.duration,
-                   duration < end {
-                    end = duration
-                }
-                guard video.sourceStart < end, end != video.sourceEnd else { continue }
-                video.sourceEnd = end
-            case .tail:
-                var start = VideoFrameMap.unclampedSourceTime(sourceStart: video.sourceEnd,
-                                                              elapsedDocumentFrames: -length,
-                                                              speed: video.speed,
-                                                              documentFPS: video.resolvedFrameRate)
-                if start < .zero { start = .zero }
-                guard start < video.sourceEnd, start != video.sourceStart else { continue }
-                video.sourceStart = start
-            }
+            guard let crop = crops[video.id] else { preconditionFailure("Prepared split video identity changed") }
+            guard VideoCrop(of: video) != crop else { continue }
+            video.sourceStart = crop.start; video.sourceEnd = crop.end; video.speed = crop.speed
             elements[index] = .video(video)
             rewritten.insert(video.id)
-            changed = true
         }
-        guard changed else { return }
-        // A same-id rewrite, declared as one (TODO (41)). A crop changes which source frame the
-        // element shows and not where its rectangle is, and this canvas draws only the rectangle —
-        // the decoded frame is `videoCelContent`'s — so the seam bounds it by the placeholder's own
-        // quad, read off the element before and after.
-        vector.restoreElements(elements, changedInk: nil, rewriting: rewritten)
+        return (elements, rewritten)
+    }
+
+    private func writeVideoCrop(_ edit: (elements: [VectorElement], rewritten: Set<UUID>),
+                                layerIndex: Int, celIndex: Int) {
+        guard !edit.rewritten.isEmpty, let vector = layers[layerIndex].cels[celIndex].vector else { return }
+        vector.restoreElements(edit.elements, changedInk: nil, rewriting: edit.rewritten)
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
     }
 
@@ -900,40 +925,43 @@ extension CanvasManager {
               layers[layerIndex].cels.indices.contains(celIndex),
               let vector = layers[layerIndex].cels[celIndex].vector, vector.holdsVideo else { return }
 
+        var elements = vector.elements
+        var wanted = layers[layerIndex].cels[celIndex].frameCount
+        var rewritten: Set<UUID> = []
+        for index in elements.indices {
+            guard case .video(var video) = elements[index], video.speed != speed else { continue }
+            video.speed = speed
+            guard let length = VideoFrameMap.frameCount(of: video, documentFPS: video.resolvedFrameRate),
+                  (try? VideoFrameMap.validate(sourceStart: video.sourceStart, sourceEnd: video.sourceEnd,
+                    speed: speed, documentFPS: video.resolvedFrameRate)) != nil else {
+                raise(.videoTimingRefused)
+                return
+            }
+            wanted = length
+            elements[index] = .video(video)
+            rewritten.insert(video.id)
+        }
+        guard !rewritten.isEmpty else { return }
+        let start = layers[layerIndex].cels[celIndex].startFrame
+        let ceiling = layers[layerIndex].cels.enumerated()
+            .filter { $0.offset != celIndex && $0.element.startFrame > start }
+            .map { $0.element.startFrame }.min()
+        let room = ceiling.map { $0 - start } ?? Int.max
+        let length = max(1, min(wanted, room))
+        guard !start.addingReportingOverflow(length).overflow else { raise(.videoTimingRefused); return }
+        var cropEdit: (elements: [VectorElement], rewritten: Set<UUID>)?
+        if length != wanted {
+            guard let crop = videoCropEdit(elements: elements, length: length, anchoredAt: .head) else {
+                raise(.videoTimingRefused)
+                return
+            }
+            cropEdit = crop
+        }
         withStructureUndo(label: .adjustVideoSpeed) {
-            var elements = vector.elements
-            var wanted = layers[layerIndex].cels[celIndex].frameCount
-            var changed = false
-            var rewritten: Set<UUID> = []
-            for index in elements.indices {
-                guard case .video(var video) = elements[index], video.speed != speed else { continue }
-                video.speed = speed
-                elements[index] = .video(video)
-                rewritten.insert(video.id)
-                // TODO (105): this element's own resolved rate, not the document's live fps —
-                // `writeVideoCrop`'s note applies here too.
-                wanted = VideoFrameMap.frameCount(of: video, documentFPS: video.resolvedFrameRate)
-                changed = true
-            }
-            guard changed else { return }
-            // `writeVideoCrop`'s seam and its reason: a speed is a same-id rewrite that moves no
-            // rectangle.
             vector.restoreElements(elements, changedInk: nil, rewriting: rewritten)
-
-            let start = layers[layerIndex].cels[celIndex].startFrame
-            let ceiling = layers[layerIndex].cels.enumerated()
-                .filter { $0.offset != celIndex && $0.element.startFrame > start }
-                .map { $0.element.startFrame }.min()
-            let room = ceiling.map { $0 - start } ?? Int.max
-            let length = max(1, min(wanted, room))
             layers[layerIndex].cels[celIndex].frameCount = length
-            // A faster clip is a shorter block, and a shorter block crops the pose keys past its new
-            // end — TODO (62), the same rule the right-edge handle applies, reached by the speed row.
             noteKeyframeCrop(layers[layerIndex].cels[celIndex].cropPoseKeysToSpan())
-            // Only when the neighbour clipped it: otherwise the crop already says exactly this.
-            if length != wanted {
-                writeVideoCrop(layerIndex: layerIndex, celIndex: celIndex, anchoredAt: .head)
-            }
+            if let cropEdit { writeVideoCrop(cropEdit, layerIndex: layerIndex, celIndex: celIndex) }
             scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: celIndex)
         }
     }
@@ -974,6 +1002,119 @@ extension CanvasManager {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return false }
         let cel = layers[layerIndex].cels[celIndex]
         return atFrame > cel.startFrame && atFrame < cel.endFrame
+    }
+
+    /// Video-only metadata for a complete existing cut sequence. No detached canvas, raster copy,
+    /// track rewrite or history entry is made while these local values are prepared.
+    struct CelSplitPlan {
+        struct Source {
+            let id: UUID
+            let frames: Range<Int>
+            let videos: [VectorVideoElement]
+        }
+        struct Cut {
+            let frames: Range<Int>
+            let leftFrames: Range<Int>
+            let rightFrames: Range<Int>
+            let before: [VectorVideoElement]
+            let left: [VectorVideoElement]
+            let right: [VectorVideoElement]
+        }
+        let layerID: UUID
+        let sources: [Source]
+        let cuts: [Cut]
+    }
+
+    func prepareCelSplits<Cuts: Sequence>(inLayerAt layerIndex: Int, at frames: Cuts,
+                          stagedCels: [UUID: Cel] = [:], afterRasterizing: Bool = false) -> CelSplitPlan? where Cuts.Element == Int {
+        guard layers.indices.contains(layerIndex) else { return nil }
+        let layer = layers[layerIndex]
+        var requested = frames.makeIterator()
+        guard let first = requested.next() else { return CelSplitPlan(layerID: layer.id, sources: [], cuts: []) }
+        let sources = layer.cels.map { current -> CelSplitPlan.Source in
+            let cel = stagedCels[current.id] ?? current
+            let videos = (cel.vector?.holdsVideo == true ? cel.vector?.videos ?? [] : []).map { original -> VectorVideoElement in
+                var video = original; video.displayFrame = nil; return video
+            }
+            return .init(id: cel.id, frames: cel.startFrame ..< cel.endFrame, videos: videos)
+        }
+        var virtual = sources.map { ($0.frames, afterRasterizing ? [] : $0.videos) }
+        var cuts: [CelSplitPlan.Cut] = []
+        var next: Int? = first
+        while let frame = next {
+            next = requested.next()
+            guard let index = virtual.firstIndex(where: { $0.0.lowerBound < frame && frame < $0.0.upperBound }) else { continue }
+            let source = virtual[index]
+            guard let left = preparedVideoCrop(source.1, length: frame - source.0.lowerBound, anchoredAt: .head),
+                  let right = preparedVideoCrop(source.1, length: source.0.upperBound - frame, anchoredAt: .tail) else { return nil }
+            let leftFrames = source.0.lowerBound ..< frame, rightFrames = frame ..< source.0.upperBound
+            cuts.append(.init(frames: source.0, leftFrames: leftFrames, rightFrames: rightFrames,
+                              before: source.1, left: left, right: right))
+            virtual.replaceSubrange(index ... index, with: [(leftFrames, left), (rightFrames, right)])
+        }
+        return CelSplitPlan(layerID: layer.id, sources: sources, cuts: cuts)
+    }
+
+    private func sameSplitVideos(_ left: [VectorVideoElement], _ right: [VectorVideoElement]) -> Bool {
+        left.count == right.count && zip(left, right).allSatisfy { pair in
+            let (a, b) = pair
+            return a.id == b.id && a.assetURL == b.assetURL && a.assetFileName == b.assetFileName
+                && a.resolvedFrameRate == b.resolvedFrameRate && VideoCrop(of: a) == VideoCrop(of: b)
+        }
+    }
+
+    func celSplitPlanIsCurrent(_ plan: CelSplitPlan) -> Bool {
+        guard let layer = layers.first(where: { $0.id == plan.layerID }) else { return false }
+        if plan.sources.isEmpty { return plan.cuts.isEmpty }
+        guard layer.cels.count == plan.sources.count else { return false }
+        return plan.sources.allSatisfy { source in
+            guard let cel = layer.cels.first(where: { $0.id == source.id }),
+                  cel.startFrame == source.frames.lowerBound, cel.endFrame == source.frames.upperBound else { return false }
+            return sameSplitVideos(cel.vector?.holdsVideo == true ? cel.vector?.videos ?? [] : [], source.videos)
+        }
+    }
+
+    /// Applies an admitted sequence under its caller's existing history/transaction scope. Every
+    /// numeric decision is already in the plan; these are the original split/track/copy owners.
+    @discardableResult
+    func applyCelSplits(_ plan: CelSplitPlan) -> KeyframeCrop {
+        guard let layerIndex = layers.firstIndex(where: { $0.id == plan.layerID }) else {
+            preconditionFailure("Prepared split layer disappeared")
+        }
+        var discarded = KeyframeCrop()
+        for cut in plan.cuts {
+            guard let index = layers[layerIndex].cels.firstIndex(where: {
+                $0.startFrame == cut.frames.lowerBound && $0.endFrame == cut.frames.upperBound
+            }) else { preconditionFailure("Prepared split span changed") }
+            let cel = layers[layerIndex].cels[index]
+            precondition(sameSplitVideos(cel.vector?.holdsVideo == true ? cel.vector?.videos ?? [] : [], cut.before), "Prepared split timing changed")
+            var leftTracks: [String: TransformTrack] = [:], rightTracks: [String: TransformTrack] = [:]
+            for (id, track) in cel.transformTracks {
+                let halves = track.split(atCelLocalFrame: cut.leftFrames.count)
+                leftTracks[id] = halves.left; rightTracks[id] = halves.right
+            }
+            layers[layerIndex].cels[index].frameCount = cut.leftFrames.count
+            layers[layerIndex].cels[index].transformTracks = leftTracks
+            var crop = layers[layerIndex].cels[index].cropPoseKeysToSpan()
+            var right = Cel(id: UUID(), startFrame: cut.rightFrames.lowerBound, frameCount: cut.rightFrames.count,
+                raster: cel.raster.makeCopy(), bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy(),
+                interpolation: cel.interpolation, transformTracks: rightTracks, pendingPoseBaselines: cel.pendingPoseBaselines)
+            crop.merge(right.cropPoseKeysToSpan())
+            layers[layerIndex].cels.append(right)
+            layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
+            noteKeyframeCrop(crop); discarded.merge(crop)
+            if let left = activeCelIndex(inLayer: layerIndex, atFrame: cut.frames.lowerBound),
+               let vector = layers[layerIndex].cels[left].vector {
+                writeVideoCrop(applyingVideoCrops(cut.left, to: vector.elements), layerIndex: layerIndex, celIndex: left)
+            }
+            if let right = activeCelIndex(inLayer: layerIndex, atFrame: cut.rightFrames.lowerBound) {
+                if let vector = layers[layerIndex].cels[right].vector {
+                    writeVideoCrop(applyingVideoCrops(cut.right, to: vector.elements), layerIndex: layerIndex, celIndex: right)
+                }
+                scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: right)
+            }
+        }
+        return discarded
     }
 
     /// Splits a cel into two at `atFrame` (strictly inside the cel); both halves keep the original drawing.
@@ -1017,49 +1158,22 @@ extension CanvasManager {
     /// deleted once as unreachable on the premise that no stored key is below 0, and review found the
     /// writer that made the premise false; `CelSpanCropLogicTests` pins both halves.
     ///
-    /// - Returns: what the split discarded, in absolute frames.
+    /// - Returns: the removed keys in absolute frames; nil on refusal. A successful no-op returns
+    ///   an empty crop, distinct from refusing an unrepresentable child.
     @discardableResult
-    func splitCel(layerIndex: Int, celIndex: Int, atFrame: Int) -> KeyframeCrop {
-        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return KeyframeCrop() }
+    func splitCel(layerIndex: Int, celIndex: Int, atFrame: Int) -> KeyframeCrop? {
+        guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return nil }
         let cel = layers[layerIndex].cels[celIndex]
         guard atFrame > cel.startFrame, atFrame < cel.endFrame else { return KeyframeCrop() }
-        let cut = atFrame - cel.startFrame
-        var leftTracks: [String: TransformTrack] = [:]
-        var rightTracks: [String: TransformTrack] = [:]
-        for (id, track) in cel.transformTracks {
-            let halves = track.split(atCelLocalFrame: cut)
-            leftTracks[id] = halves.left
-            rightTracks[id] = halves.right
+        guard let plan = prepareCelSplits(inLayerAt: layerIndex, at: [atFrame]), celSplitPlanIsCurrent(plan) else {
+            raise(.videoTimingRefused)
+            return nil
         }
         var crop = KeyframeCrop()
-        withStructureUndo(label: .splitFrame) {
-            layers[layerIndex].cels[celIndex].frameCount = atFrame - cel.startFrame
-            layers[layerIndex].cels[celIndex].transformTracks = leftTracks
-            crop.merge(layers[layerIndex].cels[celIndex].cropPoseKeysToSpan())
-            var secondHalf = Cel(id: UUID(), startFrame: atFrame, frameCount: cel.endFrame - atFrame, raster: cel.raster.makeCopy(), bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy(), interpolation: cel.interpolation, transformTracks: rightTracks, pendingPoseBaselines: cel.pendingPoseBaselines)
-            crop.merge(secondHalf.cropPoseKeysToSpan())
-            noteKeyframeCrop(crop)
-            layers[layerIndex].cels.append(secondHalf)
-            layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
-            // **VIDEO.md §7's second row**: *"two cels; `sourceEnd` of the left half and
-            // `sourceStart` of the right are both set to the cut's source time"* — no re-encode and
-            // one shared asset file, since `makeCopy()` above gave the right half its own canvas
-            // holding the same `assetFileName`.
-            //
-            // It is two calls to the crop writer rather than arithmetic spelled here, and the two
-            // *are* that instant: the left half keeps its start and is now `cut` frames long, so its
-            // anchored tail lands on `sourceStart + cut · speed / fps`; the right half keeps its end
-            // and is the remainder, so its anchored head lands on the same value from the other side.
-            // A no-op on one memoized `Bool` for a cel holding no video, which is what makes Split
-            // Drawing on an ordinary cel exactly what it was.
-            if let left = activeCelIndex(inLayer: layerIndex, atFrame: cel.startFrame) {
-                writeVideoCrop(layerIndex: layerIndex, celIndex: left, anchoredAt: .head)
-            }
-            if let idx = activeCelIndex(inLayer: layerIndex, atFrame: atFrame) {
-                writeVideoCrop(layerIndex: layerIndex, celIndex: idx, anchoredAt: .tail)
-                scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: idx)
-            }
-        }
+        guard withStructureTransaction(label: .splitFrame, {
+            crop = applyCelSplits(plan)
+            return true
+        }) else { return nil }
         return crop
     }
 

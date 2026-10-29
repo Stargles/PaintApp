@@ -629,6 +629,17 @@ extension CanvasManager {
         let survivorID = layers[bottomIndex].id
         let bothVector = layers[bottomIndex].kind == .vector && layers[topIndex].kind == .vector
         var stayedVector = false
+        guard let pending = prepareCanvasEdit() else { return false }
+        let boundaries = Set((layers[bottomIndex].cels + layers[topIndex].cels).flatMap { [$0.startFrame, $0.endFrame] }).sorted()
+        guard let bottomSplits = prepareCelSplits(inLayerAt: bottomIndex, at: boundaries, stagedCels: pending.cels),
+              let topSplits = prepareCelSplits(inLayerAt: topIndex, at: boundaries, stagedCels: pending.cels) else {
+            raise(.videoTimingRefused)
+            return false
+        }
+        guard pending.commit(), celSplitPlanIsCurrent(bottomSplits), celSplitPlanIsCurrent(topSplits) else {
+            raise(.drawingSourceUnavailable)
+            return false
+        }
         guard withStructureTransaction(label: .mergeLayers, {
             // **The float settle, said here rather than inherited from `rasterizeLayer`.** That method
             // does it for the pixel arm's reason — a suppressed id whose canvas is about to be
@@ -639,7 +650,8 @@ extension CanvasManager {
             commitVectorFloatIfLifted(fromLayer: layers[topIndex].id)
             // Cut both timelines to the boundaries the *pair* has, so that from here on every frame
             // either has one cel from each layer or one from exactly one of them.
-            alignCelBoundaries(bottomIndex, topIndex)
+            applyCelSplits(bottomSplits)
+            applyCelSplits(topSplits)
             // Asked after the settle and after the alignment: settling writes the float's ink back
             // into the display lists this reads, and the alignment decides which cels it pairs up.
             stayedVector = vectorMergeIsExact(bottomIndex: bottomIndex, topIndex: topIndex)
@@ -695,41 +707,6 @@ extension CanvasManager {
         currentLayerIndex = survivor
         if let cel = activeCelIndex(inLayer: survivor, atFrame: currentFrame) {
             scheduleThumbnailRegen(layerIndex: survivor, celIndex: cel)
-        }
-    }
-
-    /// **Cuts both layers' timelines to the boundaries the pair has between them**, so that from here
-    /// on a frame either has one cel from each layer or one from exactly one of them, and two cels at
-    /// one start frame are the same length.
-    ///
-    /// It is what makes "merge every frame" expressible at all. The lower layer holding one drawing
-    /// across the whole scene while the upper holds one across the middle of it is three pictures, and
-    /// a cel shows one picture — so preserving what the artist was looking at means the survivor gets
-    /// three cels. **A merge can therefore increase the survivor's block count**, which is a visible
-    /// change to their timeline and is the honest one; the alternative is picking a frame and losing
-    /// the rest, which is exactly the defect this stage exists to fix.
-    ///
-    /// Through `splitCel` rather than by writing `frameCount` here, because a split is not only an
-    /// arithmetic: KEYFRAMES.md §3.1 rules how a pose channel is cut (keys either side, a key inserted
-    /// at the cut so the value is continuous), the interpolation recipe goes to both halves, and
-    /// VIDEO.md §7 wants a crop written on each. That method owns all three and this must not grow a
-    /// second copy of any of them.
-    private func alignCelBoundaries(_ bottomIndex: Int, _ topIndex: Int) {
-        var boundaries: Set<Int> = []
-        for layerIndex in [bottomIndex, topIndex] {
-            for cel in layers[layerIndex].cels {
-                boundaries.insert(cel.startFrame)
-                boundaries.insert(cel.endFrame)
-            }
-        }
-        for frame in boundaries.sorted() {
-            for layerIndex in [bottomIndex, topIndex] {
-                // Cels within a layer are disjoint, so at most one can straddle a boundary.
-                guard let celIndex = layers[layerIndex].cels.firstIndex(where: {
-                    $0.startFrame < frame && frame < $0.endFrame
-                }) else { continue }
-                splitCel(layerIndex: layerIndex, celIndex: celIndex, atFrame: frame)
-            }
         }
     }
 

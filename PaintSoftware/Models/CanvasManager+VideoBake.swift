@@ -34,9 +34,11 @@ extension CanvasManager {
         /// asset has nothing in.
         case noDecodableFrames
         case pendingEdit
+        case videoTiming
 
         var phrase: String {
             switch self {
+            case .videoTiming: return "the video timing cannot be divided into those drawings"
             case .noVideo: return "this block doesn't hold a video"
             case .unreadableAsset: return "that video's file can't be read"
             case .pendingEdit: return "the held picture could not be placed; try again"
@@ -48,14 +50,10 @@ extension CanvasManager {
     /// Bakes the video on `layers[layerIndex].cels[celIndex]` into one cel of concrete content per
     /// document frame the block spans.
     ///
-    /// **Built on `splitCel`, not beside it.** Turning an *n*-frame block into *n* one-frame cels is
-    /// exactly what *n − 1* calls to Split Drawing's own verb already do — the same crop anchoring
-    /// (`writeVideoCrop`), the same `TransformTrack.split`, both already tested by
-    /// `VideoCropLogicTests` and `SplitDrawingLogicTests`. The whole loop runs inside one
-    /// `withInterpolationUndo`, which makes every `splitCel` call's own `withStructureUndo` bracket
-    /// a no-op (both share `structureUndoDepth`, already nonzero by the time the loop starts), so
-    /// the many splits and the image swap that follows land as the single undo step KEYFRAMES §6
-    /// asks a bake to be, not one step per cel.
+    /// **Built on Timeline's shared prepared cuts.** The complete left-to-right sequence is
+    /// admitted before history or image writes; every later cut reads the prepared child timing.
+    /// The same track/crop/copy owner then lands the cuts inside one `withInterpolationUndo`, so
+    /// the operation records one step and never consumes a still-multiframe cell after refusal.
     ///
     /// **`withStructureUndo` alone would silently corrupt the first cel's undo.** `splitCel` never
     /// copies the *left* half's canvas — only the newly-split-off right half gets `makeCopy()` — so
@@ -118,6 +116,10 @@ extension CanvasManager {
         let startFrame = cel.startFrame
         let endFrame = cel.endFrame
 
+        guard let pending = prepareCanvasEdit() else { return .refused(.pendingEdit) }
+        guard let splits = prepareCelSplits(inLayerAt: layerIndex,
+            at: (startFrame + 1) ..< endFrame, stagedCels: pending.cels) else { return .refused(.videoTiming) }
+
         // Whether *anything* in the block's own span can be decoded at all — asked before any
         // mutation, so a file that opens but names a crop with nothing in it refuses cleanly
         // instead of leaving every resulting cel still showing the video.
@@ -138,20 +140,13 @@ extension CanvasManager {
 
         // KEYFRAMES §6's recipe: a pending float baked first, so it lands as its own earlier step
         // rather than being swallowed into (or re-baked on top of) this one.
-        guard commitAllInteractiveState() else { return .refused(.pendingEdit) }
+        guard pending.commit(), commitAllInteractiveState(), celSplitPlanIsCurrent(splits),
+              let settledVector = layers[layerIndex].cels.first(where: { $0.id == cel.id })?.vector else { return .refused(.pendingEdit) }
 
-        // `touching: [vector]` — see the doc comment above for why only the *original* canvas
+        // `touching: [settledVector]` — see the doc comment above for why only the *original* canvas
         // needs its elements snapshotted explicitly.
-        withInterpolationUndo(label: .bakeVideoToImages, touching: [vector]) {
-            // Chop the block into one cel per document frame, left to right. Every nested
-            // `withStructureUndo` inside `splitCel` below is a no-op bracket, because this one is
-            // already open by the time it runs.
-            var cursor = startFrame
-            while cursor + 1 < endFrame {
-                guard let idx = activeCelIndex(inLayer: layerIndex, atFrame: cursor) else { break }
-                splitCel(layerIndex: layerIndex, celIndex: idx, atFrame: cursor + 1)
-                cursor += 1
-            }
+        withInterpolationUndo(label: .bakeVideoToImages, touching: [settledVector]) {
+            applyCelSplits(splits)
 
             // Every cel in the span is now exactly one document frame. Swap each one's video for
             // the picture it shows at that instant and re-identify everything on it.
@@ -173,7 +168,7 @@ extension CanvasManager {
                     // once, where a shortcut would silently start reading the wrong instant. MEASURED
                     // by mutation: substituting the outer `startFrame` constant here (which makes
                     // `elapsedDocumentFrames` negative instead of zero on every cel but the first)
-                    // does not redden anything, because `SourceTime.clamped` floors both to the same
+                    // does not redden anything, because the checked frame map floors both to the same
                     // `sourceStart` — the real guarantee that each cel gets its own picture lives in
                     // the crop `splitCel`/`writeVideoCrop` anchored during the split above, which the
                     // cel-selection mutation just below this one pins directly.
