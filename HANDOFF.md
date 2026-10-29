@@ -151,3 +151,5 @@ The previous complete handoff is byte-exact at
 `62f34678e68b7b39066cfe1a609d63e9e5fea544ea1b286e2c301ba2b89e508e`).
 
 Joined-phase owned56C cache cleanup preserved11,112 container entries and reclaimed4,287,086,592bytes; retained artwork/active bundles exact after boot. Receipt: `~/PaintWork/s55-recorded-regressions/owned56C-cache-cleanup-before-final-gates-20261029/`.
+
+Mode3 follow-up: c62 selected1 passed; immediate ink BLACK becomes RED after public rest (root inspected both), so no persistent Recolour loss. Actual cut/index/render analysis is next. Source-authorized assessment/candidate may reuse existing native replacement-window/UnlandedInk owners for ordinary To Cross, with exact finite damage/admission fallback and no new service/cache/state. Universal remains separately scoped. No physical cause claim.

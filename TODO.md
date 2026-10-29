@@ -70,6 +70,13 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
   readiness before a further device restart. Automatic renewal must preserve installed6fb while
   main is older and advance its source/artifact/profile state only after a successful install.
 
+**Mode3 source follow-up recorded before implementation:** copied Test1 produces repeated full-canvas
+base work during successful ordinary To Cross cuts. Review a minimal extension of the existing native
+replacement window and held-picture handoff, preserving real per-sample cuts/Undo, captured references,
+poses and refusal fallback. No parallel cache, service, timer or new per-feature state. Universal
+multi-layer erasing remains a separate existing route unless its owners can reuse this safely. Measure
+actual work/output before claiming latency benefit; no simulator observation establishes the crash cause.
+
 ### Work queue
 
 1. Finish copied-Test1 Mode3 diagnosis and review the existing shared-window presentation seam.
