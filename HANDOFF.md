@@ -7,9 +7,11 @@ in TODO/BUGS before investigation; reuse existing held-content/revision retireme
 OLD9649 now reproduces the immediate gap: the drawing is visible in its moved position, then the
 first post-exit ink check fails. Its delayed/final checks were unreached; earlier21b/5f/b99 packets
 failed setup and get no gap credit. A source-only correction reuses UnlandedInk to retain the same
-transformed picture and actual On Top surfaces until installed-base retirement. Independent review
-found a new test's mismatched image sizes; that test-only correction is in progress before native
-qualification. No Move-exit harvest or assembled-source qualification yet.
+transformed picture and actual On Top surfaces until installed-base retirement. At7ef, whole72 ran
+71pass/1oldlasso-dock-premise failure: both new Brush/Eraser exit workflows and all logic passed;
+root inspected all six immediate/during/final landscape pictures. Test-only447 fixes the older
+fixture's dock clearance; fresh whole72 is active. Three deliberate controls remain. No Move-exit
+harvest or assembled-source qualification yet.
 This adds to (does not replace) stream offset, Test Move/lag/crash and the rest of TODO.
 
 Kevin resumed: **continue; do not park**. Read this file, `AGENTS.md`, `CLAUDE.md`, `TODO.md`,
@@ -20,9 +22,9 @@ Historical technical detail and raw results remain in Git and the external packe
 ## Integration, install, and protected data
 
 - Integration worktree: `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch
-  `tmp/s54-qualified-integration`, source HEAD `4381c457` before this documentation reconciliation.
-  Package harvest is `e4f9c8fa`, stream `a97f3f47`, eraser `66c15482`, and fill `4381c457`.
-  Current static census:731 source entries / fast5,427 / full6,030 (255 fast classes).
+  `tmp/s54-qualified-integration`, source HEAD `45167735` before this documentation reconciliation.
+  Package harvest is `e4f9c8fa`, stream `a97f3f47`, eraser `66c15482`, fill `4381c457`, autosave `45167735`.
+  Current static census:731 source entries / fast5,429 / full6,033.
   These are static counts only: this assembled source has **not** passed its final native gates.
 - Main/origin remain `afd2030c`; no merge or push. A qualified merge is authorized after remaining
   gates pass. Component qualification and harvested source do not qualify the assembled integration.
@@ -136,9 +138,9 @@ the existing one-shot protocol. Cold Gallery packet: `package-address-cold-ui-29
 
 ## Remaining owner queue
 
-Keep every unfinished TODO item. Immediate queue: finish autosave controls and normal rebuild;
-qualify Move-exit correction; then final assembled eraser/fill/stream/package gates. Stream and fill
-component rebuild, causal extraction and harvest are already complete. Also retain these boundaries:
+Keep every unfinished TODO item. Immediate queue: finish Move-exit qualification and harvest;
+Export/Gradient/Resize/decoder/public effect gates; then final assembled checks. Autosave, stream and
+fill component controls/rebuilds/harvest are complete. Also retain these boundaries:
 
 - Autosave e3 is now harvested through34 reviewed paths: normal154 green, ordinary UI1pass/1namedskip
   with root-looked reopened stroke, six data faults/7targets and16 clock/driver/landing faults/21targets
@@ -146,8 +148,11 @@ component rebuild, causal extraction and harvest are already complete. Also reta
   rebuilt green. The old10-path candidate omitted41 required callback-argument migrations in24 files
   and was never applied; the successor includes only those adaptations and preserves package2905.
   Receipt: `s55-recorded-regressions/autosave-harvest-e3-to-339698f1/`. Final combined gates remain.
-- Export `694bdf49`: ToolPanels class count is 20. Drive actual Share dismissal/close-return and
-  cancel → drawing/gesture checks. Fresh saved/unlocked export readiness is unanswered.
+- Export `c1f0e2bc`: ToolPanels is14 including the new active-cancel case (694 had13, not20).
+  Selected active-cancel1 ran setupRED because Cancel was never exposed; seed/paper premises passed,
+  actual cancellation was unreached. Slow-bake delay does not guarantee a cold cache. Author is
+  diagnosing captured output before another fixed fixture; no delay/fixture growth. Drive the
+  independent Share close-return selector and whole class too. Fresh physical readiness unanswered.
 - Gradient `8e5d100e`: whole15 plus public1 are prepared, native unrun. Check current packet/gates.
 - Resize `ac`: use the corrected drawn/Undo premise and complete visible-progress checks.
 - Source cleanup, architecture review, final assembled Debug/Release/UI gates, and owner-device
@@ -201,7 +206,7 @@ Current Move7ef whole72 ran71pass/1oldfixtureRED: both new Brush/Eraser exit cas
 Root inspected six full landscape immediate/during/final pictures with the moved ink visible. The old
 lasso-half test stopped at its dock-clearance premise before its drag; no product failure is inferred.
 Test-only447 raises its source into the exposed paper; the fresh72 rerun and three faults remain.
-Root is also running the separate Export active-cancel selected1 atc1; whole14 remains pending.
+Separate Export active-cancel1 atc1 stopped at its Cancel-visibility premise; whole14 remains pending.
 
 Latest owned56C cleanup recovered5,058,568,192bytes after native16 joined. All10,403 archived entries
 were exact immediately after deletion; boot added49/changed81 Apple paths and removed none. Peer
