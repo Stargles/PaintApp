@@ -151,12 +151,8 @@ struct CanvasNotice: Identifiable, Equatable {
         /// narrowing it until it holds nothing else. One rule, two instructions, and a notice that
         /// cannot say which is worth less than no notice.
         case animationGroupNotAlone
-        /// `ProjectStore.writeAtomically` could not stage a valid package — the pre-save validation,
-        /// the live-package stash, or the final rename failed. Until ARCHITECTURE_REVIEW.md finding 3,
-        /// all three returns were silent: `completion` ran regardless, so the gallery appeared exactly
-        /// as it does on success while the artist's edits were never actually written. Raised from
-        /// `ContentView` (via `ProjectStore.save`'s `onSaveFailed`), which is the one place that both
-        /// owns `canvasManager` and learns the write's outcome.
+        /// The save could not land a package or settle a held picture. `ContentView` raises this
+        /// when completion has no landed URL, keeps the document open and restores autosave eligibility.
         case saveFailed
         /// A canvas resize declined to run because `M` could not carry every element — a damaged
         /// archived fill path is the one reachable cause (`VectorCanvas.canBeMapped`).

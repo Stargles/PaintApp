@@ -879,8 +879,10 @@ final class RasterResidencyLogicTests: XCTestCase {
         let finished = expectation(description: "normal save completed")
         let allocations = owner.usage.allocations
         var failed = false
-        let decision = ProjectStore.save(manager, to: url, onSaveFailed: { failed = true },
-                                         completion: { finished.fulfill() })
+        let decision = ProjectStore.save(manager, to: url, completion: { landed in
+            failed = landed == nil
+            finished.fulfill()
+        })
         XCTAssertEqual(decision, .write)
         XCTAssertEqual(owner.usage.allocations, allocations,
                        "Freezing every saved tier and the thumbnail recipe must not resolve their pixels")
@@ -1010,8 +1012,10 @@ final class RasterResidencyLogicTests: XCTestCase {
         XCTAssertNotNil(manager.packageLedger.entry(for: celID))
         let completed = expectation(description: "failed normal save completed")
         var failed = false
-        XCTAssertEqual(ProjectStore.save(manager, to: url, onSaveFailed: { failed = true },
-                                         completion: { completed.fulfill() }), .write)
+        XCTAssertEqual(ProjectStore.save(manager, to: url, completion: { landed in
+            failed = landed == nil
+            completed.fulfill()
+        }), .write)
         await fulfillment(of: [completed], timeout: 30)
         XCTAssertTrue(failed)
         XCTAssertEqual(try Data(contentsOf: url.appendingPathComponent("manifest.json")), manifest)

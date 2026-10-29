@@ -86,7 +86,7 @@ final class ProjectSaveLogicTests: XCTestCase {
     /// a package that is provably complete.
     private func saveAndWait(_ manager: CanvasManager, to url: URL) {
         let finished = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(manager, to: url) { finished.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in finished.fulfill() }
         wait(for: [finished], timeout: 30)
     }
 
@@ -331,7 +331,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         let url = projectURL()
 
         let finished = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(manager, to: url) { finished.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in finished.fulfill() }
 
         // No waiting: this is the reload-immediately case.
         assertNeverPartial(at: url, "Reload racing a first save")
@@ -356,7 +356,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         manager.addLayer()
         manager.projectName = "Async Save"   // keep the same package path
         let finished = expectation(description: "second save completion")
-        ProjectStore.save(manager, to: url) { finished.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in finished.fulfill() }
 
         // Mid-save: whichever version is visible, it must be a whole one.
         assertNeverPartial(at: url, "Reload racing a re-save")
@@ -385,7 +385,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         var callerHadResumedWhenCompletionRan = false
         var wasMainThread = false
         var validatedInsideCompletion = false
-        ProjectStore.save(manager, to: url) {
+        ProjectStore.save(manager, to: url) { _ in
             callerHadResumedWhenCompletionRan = callerResumed
             wasMainThread = Thread.isMainThread
             validatedInsideCompletion = ProjectBackupManager.validateProject(at: url)
@@ -403,15 +403,14 @@ final class ProjectSaveLogicTests: XCTestCase {
     /// ARCHITECTURE_REVIEW.md finding 3: `writeAtomically`'s three failure returns used to be bare
     /// `return`s, indistinguishable from success — `completion` ran either way, so `ContentView` (and
     /// the gallery it navigates to) looked exactly the same whether the write landed or not.
-    /// `onSaveFailed` is the channel that tells them apart, and this pins both directions of it: a
-    /// failing write must call it, a succeeding one must not.
+    /// Completion carries the actual landed URL, or nil on failure, while ending either attempt.
     ///
     /// The failure is induced by pointing the whole Projects/Backups/Trash tree at a path whose
     /// parent is a plain file rather than a directory, so every `createDirectory`/`write` under it
     /// fails with ENOTDIR. Nothing crashes — `ProjectBackupManager` and `writePackage` guard every one
     /// of those calls with `try?` — the package is just never actually written, so `validateProject`
     /// finds no manifest and `writeAtomically` takes its first failure return.
-    func testAFailedSaveCallsOnSaveFailedAndASucceedingOneDoesNot() {
+    func testSaveCompletionDistinguishesAFailedAttemptFromALandedPackage() {
         let manager = makeManager()
         let blocker = FileManager.default.temporaryDirectory
             .appendingPathComponent("save-blocker-\(UUID().uuidString)")
@@ -424,15 +423,16 @@ final class ProjectSaveLogicTests: XCTestCase {
         let failedSave = expectation(description: "ProjectStore.save completion (failing write)")
         var reportedFailure = false
         var completionRanOnFailure = false
-        ProjectStore.save(manager, to: brokenURL, onSaveFailed: { reportedFailure = true }) {
+        ProjectStore.save(manager, to: brokenURL) { landed in
+            reportedFailure = landed == nil
             completionRanOnFailure = true
             failedSave.fulfill()
         }
         wait(for: [failedSave], timeout: 30)
 
-        XCTAssertTrue(reportedFailure, "A save that cannot stage a valid package must call onSaveFailed")
+        XCTAssertTrue(reportedFailure, "A save that cannot stage a valid package must complete with no landed URL")
         XCTAssertTrue(completionRanOnFailure,
-                      "completion must still run on failure too — it means \"the attempt is over\", not \"it worked\", and existing callers rely on it to stop waiting")
+                      "Completion must end a failed attempt with nil instead of leaving its caller waiting")
         XCTAssertFalse(FileManager.default.fileExists(atPath: brokenURL.path),
                        "Nothing should have been swapped into the live path when staging never produced a valid package")
 
@@ -443,12 +443,13 @@ final class ProjectSaveLogicTests: XCTestCase {
         let workingURL = projectURL(name: "Writable")
         let goodSave = expectation(description: "ProjectStore.save completion (succeeding write)")
         var reportedFailureOnSuccess = false
-        ProjectStore.save(manager, to: workingURL, onSaveFailed: { reportedFailureOnSuccess = true }) {
+        ProjectStore.save(manager, to: workingURL) { landed in
+            reportedFailureOnSuccess = landed == nil
             goodSave.fulfill()
         }
         wait(for: [goodSave], timeout: 30)
 
-        XCTAssertFalse(reportedFailureOnSuccess, "A save that actually lands on disk must not call onSaveFailed")
+        XCTAssertFalse(reportedFailureOnSuccess, "A save that actually lands on disk must complete with its landed URL")
         XCTAssertTrue(FileManager.default.fileExists(atPath: workingURL.path), "Setup: the second save should have landed")
     }
 
@@ -1237,7 +1238,7 @@ final class ProjectSaveLogicTests: XCTestCase {
 
         let url = projectURL()
         let written = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(manager, to: url) { written.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in written.fulfill() }
         await fulfillment(of: [written], timeout: 120)
 
         guard let synchronous = ProjectStore.load(from: url),
@@ -1283,7 +1284,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 1)
         let url = projectURL(name: "One Cel")
         let written = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(manager, to: url) { written.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in written.fulfill() }
         await fulfillment(of: [written], timeout: 120)
 
         XCTAssertEqual(ProjectStore.load(from: url)?.layers.first?.cels.count, 1)
@@ -1354,7 +1355,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         }
         let url = projectURL()
         let written = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(manager, to: url) { written.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in written.fulfill() }
         await fulfillment(of: [written], timeout: 120)
 
         guard let opened = await ProjectStore.loadInBackground(from: url),
@@ -1390,7 +1391,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: 16, frameCount: 2))
         let url = projectURL()
         let written = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(manager, to: url) { written.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in written.fulfill() }
         await fulfillment(of: [written], timeout: 120)
 
         guard let opened = await ProjectStore.loadInBackground(from: url) else {
@@ -1421,7 +1422,7 @@ final class ProjectSaveLogicTests: XCTestCase {
         let manager = makeManager()
         let url = projectURL()
         let written = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(manager, to: url) { written.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in written.fulfill() }
         await fulfillment(of: [written], timeout: 120)
 
         guard let opened = await ProjectStore.loadInBackground(from: url) else {

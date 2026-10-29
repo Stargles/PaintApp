@@ -1217,7 +1217,7 @@ final class TransformLayerModesLogicTests: XCTestCase {
 
         let url = root.appendingPathComponent("shake.paintproj", isDirectory: true)
         let finished = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(fx.manager, to: url) { finished.fulfill() }
+        ProjectStore.save(fx.manager, to: url) { _ in finished.fulfill() }
         wait(for: [finished], timeout: 30)
 
         let reloaded = try XCTUnwrap(ProjectStore.load(from: url))
@@ -1252,7 +1252,7 @@ final class TransformLayerModesLogicTests: XCTestCase {
         let looperID = fx.manager.layers[fx.looper].id, drawnID = fx.manager.layers[fx.drawn].id
         let url = root.appendingPathComponent("repeat.paintproj", isDirectory: true)
         let finished = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(fx.manager, to: url) { finished.fulfill() }
+        ProjectStore.save(fx.manager, to: url) { _ in finished.fulfill() }
         wait(for: [finished], timeout: 30)
 
         let reloaded = try XCTUnwrap(ProjectStore.load(from: url))
@@ -1291,7 +1291,7 @@ final class TransformLayerModesLogicTests: XCTestCase {
 
         let url = root.appendingPathComponent("modes.paintproj", isDirectory: true)
         let finished = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(fx.manager, to: url) { finished.fulfill() }
+        ProjectStore.save(fx.manager, to: url) { _ in finished.fulfill() }
         wait(for: [finished], timeout: 30)
 
         let reloaded = try XCTUnwrap(ProjectStore.load(from: url))

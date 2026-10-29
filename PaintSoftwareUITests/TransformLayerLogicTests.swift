@@ -663,7 +663,7 @@ final class TransformLayerLogicTests: XCTestCase {
 
         let url = root.appendingPathComponent("round-trip.paintproj", isDirectory: true)
         let finished = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(stack.manager, to: url) { finished.fulfill() }
+        ProjectStore.save(stack.manager, to: url) { _ in finished.fulfill() }
         wait(for: [finished], timeout: 30)
 
         let reloaded = try XCTUnwrap(ProjectStore.load(from: url))
@@ -920,7 +920,7 @@ final class TransformLayerLogicTests: XCTestCase {
         let moverID = manager.layers[mover].id
         let url = root.appendingPathComponent("old-spelling.paintproj", isDirectory: true)
         let finished = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(manager, to: url) { finished.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in finished.fulfill() }
         wait(for: [finished], timeout: 30)
 
         // Rewrite the manifest into the old spelling. The premise is checked first: this build writes
@@ -951,7 +951,7 @@ final class TransformLayerLogicTests: XCTestCase {
         // And saving it again writes the new kind: an older build cannot open this, by design.
         let resaved = root.appendingPathComponent("resaved.paintproj", isDirectory: true)
         let done = expectation(description: "ProjectStore.save completion, second")
-        ProjectStore.save(reloaded, to: resaved) { done.fulfill() }
+        ProjectStore.save(reloaded, to: resaved) { _ in done.fulfill() }
         wait(for: [done], timeout: 30)
         let resavedJSON = try String(contentsOf: resaved.appendingPathComponent("manifest.json"), encoding: .utf8)
         XCTAssertTrue(resavedJSON.contains("\"kind\":\"transform\""), "Encoded as the new kind")

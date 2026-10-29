@@ -89,7 +89,7 @@ that the final combined audit build has passed.
 |---|---|---|
 | Simplify vector Liquify and remove the complex version | Point-only version is installed and owner-confirmed; old vector material path removed | Final combined checks and performance boundaries |
 | Mend inside/attached vector strokes and Mend All Fills | Installed; public workflows and deliberate-failure checks passed | Current Release cost/memory comparison; preserve outside edges and uncertain joins |
-| Smart father–grandfather saving | Newest clock-bucket versions implemented and installed | Finish newly found failed-save retry and safe-exit correction |
+| Smart father–grandfather saving | Newest clock-bucket versions implemented and installed | Retry/safe-exit correction harvested; combined checks and real storage-cost confirmation remain |
 | Erasing crash in Test1 | Logs preserved; app/system allocation cause remains unproved | Finish window-renderer checks and fresh physical evidence |
 | Drawing/erasing lag and Move regression | Earlier Move/drawing-wait corrections and bounded eraser preview integrated; Move-exit gap reproduced | Qualify and integrate Move-exit handoff; combined tests and device confirmation remain |
 | Architecture, cleanup and bug audit | In progress; several corrections separately tested and integrated | Remaining source review, findings below, combined checks and performance |
@@ -106,9 +106,11 @@ that the final combined audit build has passed.
 
 1. Saving: the failed-save correction keeps the drawing open, preserves newer edits and retries
    through the existing timer. The model checks and cold failure → automatic save → reopen workflow
-   pass. Currente3 normal154 and ordinary UI (1pass/1namedoptinskip) pass. Six protected-data controls
-   are running; separate16 clock/driver/landing controls remain unrun. Finish actual fault extraction,
-   post-fault normal rebuild and final composition; preserve original packets and limits.
+   pass. Currente3 normal154 and ordinary UI (1pass/1namedoptinskip) pass. Six data faults reached7
+   intended statements and16 clock/driver/landing faults reached21;8 collateral issues get no credit.
+   All source restored and post-fault normal154 passed. The reviewed34-path successor is harvested,
+   including41 required callback-argument adaptations omitted from the unapplied10-path candidate.
+   Finish combined checks and physical confirmation; preserve original packets and limits.
 2. Gradient movement: keep the existing two-point paint representation and correct its affine
    colour calculation. The component and model fault checks pass. The public fault test stopped at
    an earlier drawing witness; investigate that witness before claiming the colour check is proved.

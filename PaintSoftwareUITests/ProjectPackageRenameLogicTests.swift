@@ -52,7 +52,7 @@ final class ProjectPackageRenameLogicTests: XCTestCase {
         let folder = try ProjectStore.createFolder(named: "Shots", in: ProjectStore.projectsDirectory)
         manager.projectName = "Final"
         let finished = expectation(description: "pending rename completed")
-        ProjectStore.save(manager, to: original) { finished.fulfill() }
+        ProjectStore.save(manager, to: original) { _ in finished.fulfill() }
         let landing = ProjectStore.moveProject(at: original, into: folder)
         wait(for: [finished], timeout: 30)
         let moved = try XCTUnwrap(landing)
@@ -103,7 +103,7 @@ final class ProjectPackageRenameLogicTests: XCTestCase {
         // what moves it.
         manager.projectURL = url
         let finished = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(manager, to: url) { finished.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in finished.fulfill() }
         wait(for: [finished], timeout: 30)
         let landed = manager.projectURL ?? url
         XCTAssertTrue(FileManager.default.fileExists(atPath: landed.path),
@@ -160,11 +160,11 @@ final class ProjectPackageRenameLogicTests: XCTestCase {
         let first = expectation(description: "the first save's completion")
         let second = expectation(description: "the second save's completion")
         manager.projectURL = url
-        ProjectStore.save(manager, to: url) { first.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in first.fulfill() }
         between()
         // Read exactly as `saveIfNeeded` reads it — whatever the property says *now*, which is still
         // the pre-rename URL because no completion has had a turn on the main actor yet.
-        ProjectStore.save(manager, to: manager.projectURL ?? url) { second.fulfill() }
+        ProjectStore.save(manager, to: manager.projectURL ?? url) { _ in second.fulfill() }
         wait(for: [first, second], timeout: 60)
     }
 

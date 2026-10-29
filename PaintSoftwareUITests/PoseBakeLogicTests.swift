@@ -301,7 +301,7 @@ final class PoseBakeLogicTests: XCTestCase {
         // The animated document, saved and reopened — what a reload of the *un*baked document shows.
         let animatedURL = root.appendingPathComponent("animated.paintproj", isDirectory: true)
         let savedAnimated = expectation(description: "the animated document is on disk")
-        ProjectStore.save(manager, to: animatedURL) { savedAnimated.fulfill() }
+        ProjectStore.save(manager, to: animatedURL) { _ in savedAnimated.fulfill() }
         wait(for: [savedAnimated], timeout: 30)
         let reopenedAnimated = try XCTUnwrap(ProjectStore.load(from: animatedURL))
         for frame in 0..<12 {
@@ -319,7 +319,7 @@ final class PoseBakeLogicTests: XCTestCase {
 
         let url = root.appendingPathComponent("baked.paintproj", isDirectory: true)
         let finished = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(manager, to: url) { finished.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in finished.fulfill() }
         wait(for: [finished], timeout: 30)
         let reloaded = try XCTUnwrap(ProjectStore.load(from: url))
         let layerIndex = try XCTUnwrap(reloaded.layers.firstIndex { $0.id == layerID })

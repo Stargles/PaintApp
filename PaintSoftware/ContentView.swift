@@ -193,6 +193,12 @@ struct ContentView: View {
 
     // MARK: - Autosave (TODO (76))
 
+    /// Content that is still changing outside a settled save snapshot. Both automatic saves and
+    /// leaving after a background write must wait for it; playback alone does not prevent leaving.
+    private var saveContentIsUnsettled: Bool {
+        canvasManager.strokeIsLive || canvasManager.isResizing || canvasManager.hasInteractiveStatePending
+    }
+
     /// Whether an autosave may start this instant. Every clause is a reason a snapshot taken now
     /// would either hitch something the artist is doing or capture a state they are halfway through.
     /// A save already in flight holds too: an autosave fired into one would snapshot a document whose
@@ -201,17 +207,16 @@ struct ContentView: View {
     private var autosaveIsHeld: Bool {
         screen != .editor
             || autosave.savesInFlight > 0
-            || canvasManager.strokeIsLive
             || canvasManager.isPlaying
-            || canvasManager.isResizing
-            || canvasManager.hasInteractiveStatePending
+            || saveContentIsUnsettled
     }
 
     /// Shows the gallery only once the save has actually landed on disk. `GalleryView` lists projects
     /// from disk in a one-shot `onAppear`, so switching screens while `ProjectStore.save`'s background
     /// write was still in flight would list the project as missing (first save) or with stale content.
     /// The wait doesn't freeze anything — the encode and write are off the main thread now, so the
-    /// editor stays responsive for the moment it takes.
+    /// editor stays responsive for the moment it takes. Drawing again cancels this leave request:
+    /// the newer work remains owed and the artist can tap Gallery again after it settles.
     private func returnToGallery() {
         // `.artist`: there is a person watching, waiting, who can be asked a question — the one save
         // in this app that a prompt is acceptable in front of.
@@ -225,45 +230,53 @@ struct ContentView: View {
     }
 
     private func saveIfNeeded(intent: SaveIntent, completion: (@MainActor () -> Void)? = nil) {
+        let manager = canvasManager
         // The third condition is CANVAS_RESIZE.md §5 rule 12: no save may *start* while a canvas
         // resize is in flight, or the package written is half old-size and half new. See
         // `ScenePhaseSaveGate.mayStartSave` for why that document opens rather than failing.
         guard ScenePhaseSaveGate.mayStartSave(screenIsEditor: screen == .editor,
-                                              hasCanvas: canvasManager.canvasSize != nil,
-                                              isResizing: canvasManager.isResizing) else {
-            completion?()
+                                              hasCanvas: manager.canvasSize != nil,
+                                              isResizing: manager.isResizing) else {
+            if screen == .editor, manager.canvasSize != nil, !autosave.clock.hasUnsavedEdits {
+                autosave.saveDeferred(for: manager)
+            }
             return
         }
         // An adjustable fill, an adjustable smart shape, and a mid-transform move/duplicate are all
         // UI-only state (see `CanvasManager.beginCanvasEdit`) — bake every one of them in before
         // saving, or backgrounding the app silently drops whichever was still pending. A Move box
         // between gestures holds none, and stays up (`settleInteractiveState`).
-        guard canvasManager.settleInteractiveState() else {
-            canvasManager.raise(.saveFailed)
+        guard manager.settleInteractiveState() else {
+            manager.raise(.saveFailed)
+            autosave.saveDeferred(for: manager)
             return
         }
-        let url = canvasManager.projectURL
-            ?? ProjectStore.createNewProjectURL(name: canvasManager.projectName,
+        let url = manager.projectURL
+            ?? ProjectStore.createNewProjectURL(name: manager.projectName,
                                                 in: newProjectFolder ?? ProjectStore.projectsDirectory)
-        canvasManager.projectURL = url
+        manager.projectURL = url
         // This save carries every edit the autosave was waiting on, whatever started it.
         autosave.saveStarted()
-        // `onSaveFailed` is the one channel `completion` never was (ARCHITECTURE_REVIEW.md finding
-        // 3): `writeAtomically`'s three failure returns used to be silent, so the gallery could
-        // appear exactly as it does on a real save while the artist's edits were never written.
-        let decision = ProjectStore.save(canvasManager, to: url, intent: intent,
-                                         onSaveFailed: { canvasManager.raise(.saveFailed) },
-                                         completion: {
-            autosave.saveFinished()
+        let decision = ProjectStore.save(manager, to: url, intent: intent) { landed in
+            autosave.saveFinished(for: manager)
+            guard canvasManager === manager, screen == .editor else { return }
+            guard landed != nil else {
+                manager.raise(.saveFailed)
+                autosave.saveDeferred(for: manager)
+                return
+            }
+            guard !autosave.clock.hasUnsavedEdits, !saveContentIsUnsettled else {
+                if !autosave.clock.hasUnsavedEdits { autosave.saveDeferred(for: manager) }
+                return
+            }
             completion?()
-        })
+        }
         if decision == .ask {
-            autosave.saveFinished()
+            autosave.saveDeferred(for: manager)
+            autosave.saveFinished(for: manager)
             // Nothing was written and `completion` did not run, so the editor stays put with the
             // banner up. The two buttons below are the only ways out.
             pendingDamagedSave = PendingDamagedSave(completion: completion)
-        } else if decision == .refused {
-            autosave.saveFinished()
         }
     }
 

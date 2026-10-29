@@ -214,7 +214,7 @@ final class SceneEndLogicTests: XCTestCase {
 
         let url = ProjectStore.createNewProjectURL(name: "Scene End")
         let finished = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(manager, to: url) { finished.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in finished.fulfill() }
         wait(for: [finished], timeout: 30)
 
         let reloaded = try XCTUnwrap(ProjectStore.load(from: url), "The saved package should load")

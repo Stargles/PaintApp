@@ -587,7 +587,7 @@ final class VideoElementLogicTests: XCTestCase {
     private func saveAndWait(_ manager: CanvasManager, to url: URL,
                              intent: SaveIntent = .artist) -> SaveDecision {
         let finished = expectation(description: "ProjectStore.save completion")
-        let decision = ProjectStore.save(manager, to: url, intent: intent) { finished.fulfill() }
+        let decision = ProjectStore.save(manager, to: url, intent: intent) { _ in finished.fulfill() }
         if decision == .ask { finished.fulfill() }
         wait(for: [finished], timeout: 30)
         return decision

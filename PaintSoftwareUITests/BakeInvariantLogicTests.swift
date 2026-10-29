@@ -315,7 +315,7 @@ final class BakeInvariantLogicTests: XCTestCase {
     private func saveAndOpen(_ manager: CanvasManager, name: String) throws -> CanvasManager {
         let url = ProjectStore.createNewProjectURL(name: name)
         let finished = expectation(description: "save \(name)")
-        ProjectStore.save(manager, to: url) { finished.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in finished.fulfill() }
         wait(for: [finished], timeout: 30)
         return try XCTUnwrap(ProjectStore.load(from: url), "\(name): the saved document must open")
     }

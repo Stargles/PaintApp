@@ -26,7 +26,7 @@ final class EditorStateLogicTests: XCTestCase {
 
     private func saveAndWait(_ manager: CanvasManager, to url: URL) {
         let finished = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(manager, to: url) { finished.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in finished.fulfill() }
         wait(for: [finished], timeout: 30)
     }
 

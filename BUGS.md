@@ -173,13 +173,12 @@ while brief work need not announce; public visibility proof and finite completio
 
 ## Failed artist saves still leave the unsaved document — 2026-10-26
 
-Actual caller trace after the failed-autosave witness: ProjectStore completion only means attempt
-over; ContentView.returnToGallery still closes the baker/streams and changes screen after a failed
-write. Autosave.stop drops re-owed work, and opening another scene replaces the live manager.
-No owner ruling permits this; returnToGallery explicitly promises actual disk landing. Candidate
-f571's timer correction is HOLD/unrun because it leaves this hole. Use existing landed URL? as one
-truthful completion signal; remove parallel failure callback, preserve refusal/ask ownership, keep
-failed drawing open and schedule through the same driver. No per-attempt dirty flag/new service.
+The source correction is harvested with the failed-autosave correction below. Save completion now
+reports the actual landed URL or nil through one channel; failure/refusal retains the editor and
+re-owes work through the existing clock. Newer edits or unsettled content cancel a pending leave
+request, and callbacks are fenced by the captured manager. No extra retry service or dirty flag.
+Component e3 normal154 passed before and after22 deliberate faults; the cold failure → retry → reopen
+and ordinary autosave paths have separate positive evidence. Final assembled and device gates remain.
 
 ## Streamer Quit can exit before asynchronous teardown is joined — 2026-10-26
 
@@ -192,15 +191,17 @@ synchronous exit fallback. Proposal/regression/native proof pending; no transpor
 
 ## A failed autosave forgets that the open drawing still needs saving — 2026-10-26
 
-Current AutosaveClock.fire/saveStarted clear pending timestamps before the write, intentionally
-separating newer edits. ContentView's early settling refusal returns after a saveFailed notice;
-ProjectStore write failure also reports a notice then completes the attempt. saveFinished re-arms
-with no due time unless another edit occurred. No revision/dirty fallback schedules a retry, and
-the notice has no retry action. This is current implementation, not an owner/spec requirement.
-Source trace follows review443b4f18; its initial description of this as intentional was corrected.
-Use existing scheduler/save completion ownership, preserve newer edits and document identity, and
-defer failed retries through the same timer rather than spinning on an expired due time. Source
-proposal/regression/fix and runtime proof remain pending; existing newest-backup policy is separate.
+Root cause: starting an attempt consumed its pending timestamps, while failure ended the attempt
+without restoring any due work. The correction re-owes failed/refused snapshots through the same
+clock and timer, preserves newer edits, and balances old completions without rearming a new document.
+One URL-or-nil completion replaces the old parallel failure channel. All caller signatures migrate.
+
+Harvested from e3 after normal154 green and ordinary UI1pass/1namedskip; root inspected the reopened
+stroke. Six data faults reached7 intended statements; separate16 clock/driver/landing faults reached21
+intended statements, with8 collateral issues uncredited. All730 component source entries restored;
+post-fault normal154 rebuilt green. The reviewed34-path harvest preserves package2905 and all outside
+source; the original10-path proposal omitted41 required callback-argument adaptations and was never
+applied. Final combined qualification and physical behavior remain; retention policy is separate.
 
 ## Colliding clipboard timestamps overwrite queued pictures — 2026-10-26
 

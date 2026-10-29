@@ -140,12 +140,12 @@ Keep every unfinished TODO item. Immediate queue: finish autosave controls and n
 qualify Move-exit correction; then final assembled eraser/fill/stream/package gates. Stream and fill
 component rebuild, causal extraction and harvest are already complete. Also retain these boundaries:
 
-- Autosave product4c / test-onlye3: fresh normal154 passed, exact730 and corrected Gate class names.
-  OrdinaryUI2 completed1pass/1namedoptinskip; root inspected the reopened stroke (portrait). Six
-  protected-data controls are active under root41439. Separate16 clock/driver/landing controls are
-  still unrun and being repinned; neither set gets credit until actual target failures are extracted.
-  Normal154 must rebuild after the last fault before ordinary UI or install. Original inventory is
-  historical; current packets are recorded in root-next-gates.json.
+- Autosave e3 is now harvested through34 reviewed paths: normal154 green, ordinary UI1pass/1namedskip
+  with root-looked reopened stroke, six data faults/7targets and16 clock/driver/landing faults/21targets
+  actually failed. Eight collateral issues are uncredited. Source730 restored; post-fault normal154
+  rebuilt green. The old10-path candidate omitted41 required callback-argument migrations in24 files
+  and was never applied; the successor includes only those adaptations and preserves package2905.
+  Receipt: `s55-recorded-regressions/autosave-harvest-e3-to-339698f1/`. Final combined gates remain.
 - Export `694bdf49`: ToolPanels class count is 20. Drive actual Share dismissal/close-return and
   cancel → drawing/gesture checks. Fresh saved/unlocked export readiness is unanswered.
 - Gradient `8e5d100e`: whole15 plus public1 are prepared, native unrun. Check current packet/gates.
@@ -196,3 +196,14 @@ incomplete-assertion errors before native work. Exact receipts remain in root-ne
 Owner reports repeated macOS OneDrive/app-data approval prompts. Explicit worktree/PaintWork/owned
 simulator scope is enforced; cause is unassigned. No privacy settings changed. Saved logical cache
 manifests and bounded logs can be audited without traversing cloud folders; continue app tasks.
+
+Current Move7ef whole72 ran71pass/1oldfixtureRED: both new Brush/Eraser exit cases and all logic passed.
+Root inspected six full landscape immediate/during/final pictures with the moved ink visible. The old
+lasso-half test stopped at its dock-clearance premise before its drag; no product failure is inferred.
+Test-only447 raises its source into the exposed paper; the fresh72 rerun and three faults remain.
+Root is also running the separate Export active-cancel selected1 atc1; whole14 remains pending.
+
+Latest owned56C cleanup recovered5,058,568,192bytes after native16 joined. All10,403 archived entries
+were exact immediately after deletion; boot added49/changed81 Apple paths and removed none. Peer
+saved-receipt review found no PaintApp/runner data or artwork/bundle delta. About19.8GB free after boot.
+Only the two reviewed generated caches were deleted.

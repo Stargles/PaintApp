@@ -215,7 +215,7 @@ final class BrushStorageLogicTests: XCTestCase {
 
         let url = ProjectStore.createNewProjectURL(name: "Relocated")
         let saved = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(manager, to: url) { saved.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in saved.fulfill() }
         wait(for: [saved], timeout: 30)
 
         // The library forgets both files, which is what another device looks like from the

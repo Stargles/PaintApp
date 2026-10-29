@@ -628,7 +628,7 @@ final class BrushTextureLogicTests: XCTestCase {
 
         let url = ProjectStore.createNewProjectURL(name: "Papered")
         let saved = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(manager, to: url) { saved.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in saved.fulfill() }
         wait(for: [saved], timeout: 30)
 
         let inPackage = url.appendingPathComponent("brushes").appendingPathComponent(fileName)

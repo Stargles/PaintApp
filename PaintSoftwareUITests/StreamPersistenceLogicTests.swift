@@ -33,7 +33,7 @@ final class StreamPersistenceLogicTests: XCTestCase {
 
     private func saveAndWait(_ manager: CanvasManager, to url: URL) -> SaveDecision {
         let finished = expectation(description: "ProjectStore.save completion")
-        let decision = ProjectStore.save(manager, to: url, intent: .artist) { finished.fulfill() }
+        let decision = ProjectStore.save(manager, to: url, intent: .artist) { _ in finished.fulfill() }
         if decision == .ask { finished.fulfill() }
         wait(for: [finished], timeout: 30)
         return decision

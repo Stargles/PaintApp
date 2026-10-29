@@ -456,7 +456,7 @@ final class CanvasResizeLogicTests: XCTestCase {
 
         let url = ProjectStore.createNewProjectURL(name: "Resize Round Trip")
         let finished = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(manager, to: url) { finished.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in finished.fulfill() }
         wait(for: [finished], timeout: 30)
 
         let reloaded = try XCTUnwrap(ProjectStore.load(from: url), "the package should load")

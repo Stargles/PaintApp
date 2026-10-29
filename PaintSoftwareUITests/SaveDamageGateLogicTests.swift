@@ -69,7 +69,7 @@ final class SaveDamageGateLogicTests: XCTestCase {
                              intent: SaveIntent = .artist,
                              file: StaticString = #filePath, line: UInt = #line) -> SaveDecision {
         let finished = expectation(description: "ProjectStore.save completion")
-        let decision = ProjectStore.save(manager, to: url, intent: intent) { finished.fulfill() }
+        let decision = ProjectStore.save(manager, to: url, intent: intent) { _ in finished.fulfill() }
         if decision == .ask {
             finished.fulfill() // nothing was dispatched; the expectation is not what this case is about
         }
@@ -260,7 +260,7 @@ final class SaveDamageGateLogicTests: XCTestCase {
             XCTAssertEqual(try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage))),
                            expectedInk, "Both original strokes survive exactly: \(damage)")
             var completionRan = false
-            XCTAssertEqual(ProjectStore.save(reopened, to: url, intent: .artist) { completionRan = true }, .ask, damage)
+            XCTAssertEqual(ProjectStore.save(reopened, to: url, intent: .artist) { _ in completionRan = true }, .ask, damage)
             XCTAssertFalse(completionRan, "No save was dispatched while the artist must decide")
             XCTAssertEqual(packageBytes(at: url), original, "The artist prompt preserves every original byte")
 
@@ -359,7 +359,7 @@ final class SaveDamageGateLogicTests: XCTestCase {
         let before = packageBytes(at: url)
 
         var completionRan = false
-        let decision = ProjectStore.save(reopened, to: url, intent: .artist) { completionRan = true }
+        let decision = ProjectStore.save(reopened, to: url, intent: .artist) { _ in completionRan = true }
 
         XCTAssertEqual(decision, .ask, "The first artist save on a damaged document asks")
         XCTAssertFalse(completionRan,

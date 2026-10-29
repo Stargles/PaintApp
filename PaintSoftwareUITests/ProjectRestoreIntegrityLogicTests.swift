@@ -18,7 +18,7 @@ final class ProjectRestoreIntegrityLogicTests: XCTestCase {
         manager.layers[1].alphaMask = AlphaMask(sources: [.layer(manager.layers[0].id)])
         let url = ProjectStore.createNewProjectURL(name: "Masked scene")
         let saved = expectation(description: "Save current scene")
-        ProjectStore.save(manager, to: url) { saved.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in saved.fulfill() }
         wait(for: [saved], timeout: 30)
         return (manager, url)
     }

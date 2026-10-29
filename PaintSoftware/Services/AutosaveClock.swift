@@ -50,10 +50,8 @@ struct AutosaveClock: Equatable {
     /// Answers whether a save should start now, and if so forgets the edits it will carry. `held`
     /// is the caller's "not now": the due time is kept, so the next call after the hold lifts fires.
     ///
-    /// **The edits are forgotten before the save has landed, on purpose.** Whatever is edited
-    /// between this call and the landing is a new edit, noted afresh, and carried by the next save —
-    /// which is exactly the guarantee "an edit during a save is not lost" needs, and it needs
-    /// nothing from the save's completion to hold.
+    /// Edits made during the attempt start a new window. A failed attempt reports `noteDeferred`
+    /// to owe its snapshot again; a successful completion leaves newer edits alone.
     mutating func fire(at now: TimeInterval, held: Bool) -> Bool {
         guard !held, let due = dueAt, now >= due else { return false }
         firstUnsavedEdit = nil
@@ -61,11 +59,18 @@ struct AutosaveClock: Equatable {
         return true
     }
 
-    /// A save that happened for another reason — the artist leaving, the app backgrounding — carries
-    /// everything, so nothing is owed.
+    /// An attempt started for another reason carries the current edits too. Failure feedback
+    /// re-owes that snapshot; edits made after the attempt starts get their own window.
     mutating func noteSaved() {
         firstUnsavedEdit = nil
         lastEdit = nil
+    }
+
+    /// An attempt that wrote nothing still owes a save. Start a fresh bounded window rather than
+    /// immediately repeating an expired deadline; any newer edits travel with the next snapshot.
+    mutating func noteDeferred(at now: TimeInterval) {
+        firstUnsavedEdit = now
+        lastEdit = now
     }
 }
 
@@ -86,20 +91,22 @@ final class AutosaveDriver: ObservableObject {
     private(set) var savesInFlight = 0
     private var timer: Timer?
     private var edits: AnyCancellable?
+    private weak var followedManager: CanvasManager?
     private var isHeld: () -> Bool = { true }
     private var save: () -> Void = {}
 
-    /// Starts following `manager`'s edits. Replacing a previous document drops its subscription and
-    /// forgets its edits — they belong to a manager that is no longer on screen and whose exit save
-    /// already carried them.
+    /// Replacing a document drops its subscription and pending clock. In-flight completions remain
+    /// balanced, but cannot re-arm the replacement document.
     func follow(_ manager: CanvasManager, isHeld: @escaping () -> Bool, save: @escaping () -> Void) {
         stop()
+        followedManager = manager
         self.isHeld = isHeld
         self.save = save
         edits = manager.documentEdited.sink { [weak self] in self?.noteEdit() }
     }
 
     func stop() {
+        followedManager = nil
         edits = nil
         timer?.invalidate()
         timer = nil
@@ -131,15 +138,23 @@ final class AutosaveDriver: ObservableObject {
         save()
     }
 
-    /// A save of any kind is starting: it carries every edit noted so far, and holds the next until
-    /// it lands.
+    /// A save of any kind carries every edit noted so far and holds the next until its attempt ends.
     func saveStarted() {
         clock.noteSaved()
         savesInFlight += 1
     }
 
-    func saveFinished() {
+    /// Failure and refusal feedback belongs to the document whose attempt produced it. A late
+    /// callback after stop/follow must not arm the document now on screen.
+    func saveDeferred(for manager: CanvasManager) {
+        guard followedManager === manager else { return }
+        clock.noteDeferred(at: Date.timeIntervalSinceReferenceDate)
+        arm()
+    }
+
+    func saveFinished(for manager: CanvasManager) {
         savesInFlight -= 1
+        guard followedManager === manager else { return }
         arm()
     }
 }

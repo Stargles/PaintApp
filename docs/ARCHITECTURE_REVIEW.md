@@ -112,53 +112,33 @@ render input is declared once and the compiler points at every key that must wid
 test shape this repo already uses for caches (`PerfBaselineTests.testDabGradientCacheHitRate`), one per
 key: mutate each declared input, assert the key changed.
 
-### 3. A save that fails tells nobody — reporting half CLOSED, `ea51607` — and one nil PNG still fails the whole document
+### 3. Save outcome and navigation — integrated; combined qualification pending
 
-**Closed in part, 2026-08-28: the *reporting* half shipped**, one day after the status check above and
-left unmarked for over a week as a result. `writeAtomically` now returns whether the write succeeded;
-`ProjectStore.save` gained an `onSaveFailed` callback that fires on any of the three failure paths
-below; `ContentView` raises `CanvasNotice.Kind.saveFailed` from it. Both sites' doc comments cite this
-finding by name. The paragraphs below are kept as written for the description of the three failure
-paths themselves (still accurate) and for the *atomicity* half, which the fix did not touch and which
-is still live: the failure atom is still the whole document, and `ManifestSkeleton`'s drift is still
-unvalidated.
+`ProjectStore.writeAtomically` returns the landed package URL, or nil if staging, validation,
+preserving the live package or the final rename failed. `ProjectStore.save` completes once on the
+main actor with that outcome. A held edit that cannot settle completes synchronously with nil
+before a snapshot is taken. An unanswered damage question starts no attempt and calls no completion.
 
-`ProjectStore.writeAtomically` (`ProjectStore.swift:587`) has **three failure returns**: validation
-fails → stage to Trash, `return` (`:641`); the pre-save stash fails → `return` (`:651`); the rename
-fails → restore the backup, `return` (`:665`). `completion` still runs either way and still does not
-distinguish success from failure by design — that half of `save`'s contract is unchanged, and
-`ContentView.saveIfNeeded` still branches on `.ask` and nothing else for its own control flow. What
-changed is the new, separate `onSaveFailed` channel: each of the three returns now reports `false`
-through it, so **the gallery no longer appears exactly as it does on success** — that was the actual
-symptom, and it is gone.
+`ContentView` balances each completed attempt and verifies the captured document is still the
+current editor. Failure raises the existing notice, retains the drawing and restores eligibility
+through `AutosaveDriver`'s existing clock and timer. A landed live or version-slot package permits
+Gallery navigation only when newer edits and unsettled content are absent. Continuing to edit keeps
+the current document owed and cancels that leave request. An early save gate authorizes no navigation.
 
-The failure *atom* is the whole document. `writeCel` writes the raster as `if let data =
-png(rasterImage) { write(data, fileName) }` (`:948`) while the manifest still names the file, and
-`validateProject` rejects a package whose manifest names a file that is not there — so one nil
-`pngData()`, or one failed `try? data.write`, discards the entire save in silence. This was **nearly
-shipped**: `ProjectBackupManager.swift:477` records that without the `rasterOmitted` key "every save of
-a document with one blank cel would be quietly trashed instead of committed."
+The writer owns package landing and address fixup; the view owns navigation and notices; the driver
+owns pending save work for its followed document. One completion reports the outcome. All completion
+callers accept its URL argument explicitly, including callers that only need to stop waiting.
 
-`ManifestSkeleton` (`ProjectBackupManager.swift:460`) is a hand-maintained mirror of the manifest's
-file references, and it has **already drifted**: `interpolationFileName` is written (`ProjectStore.swift:1000`)
-and named in the manifest (`ProjectManifest.swift:490`) but is absent from the skeleton, so it is never
-validated.
+Package replacement remains transactional: a failed required sidecar prevents the new manifest from
+certifying an incomplete drawing, and the existing package is preserved. `ProjectPackageLayout`
+provides checked resource addresses; `ProjectRecipeMetadata` validates recipe metadata. The shared
+`ManifestSkeleton` now includes interpolation filenames. It remains a hand-maintained resource view,
+so a new persisted sidecar still needs matching writer, manifest, validation and round-trip coverage.
+The older claims that save failures were silent and interpolation filenames were absent are retired.
 
-[BUGS.md](../BUGS.md)'s *"`validateProject` cannot see a file that is intact but unreadable"* entry already
-covers the validator's *blind spot* and rules a content probe too
-expensive; today's evidence does not change that ruling. It did not cover the **reporting** half either
-— nothing in `BUGS.md` did — which is why that half needed the separate fix below rather than falling
-out of an existing ruling.
-
-**Cost to the next feature, updated.** Any large feature adding a per-cel or per-layer sidecar still
-inherits an all-or-nothing save — a failure is reported now, through `CanvasNotice.saveFailed`, but it
-is still not partial — and must still be registered in `ManifestSkeleton` by hand.
-
-**Remedy — shipped, `ea51607` (2026-08-28).** `writeAtomically` gained a `Bool` return; `ProjectStore.save`
-gained the separate `onSaveFailed` callback described above rather than routing through `completion`
-itself (`completion` keeps its existing "the wait is over" meaning); `ContentView` raises the existing
-`CanvasNotice` banner from `onSaveFailed`. The atomicity problem this finding also named — one nil PNG
-discarding the whole save, and `ManifestSkeleton`'s drift — was not part of this remedy and is not done.
+Component evidence is recorded in TODO/HANDOFF: actual failed-write retry and cold reopen, ordinary
+autosave, 154 normal checks and deliberate data/driver/landing faults. These do not replace the final
+assembled-source and device gates.
 
 ### 4. One persisted property means four hand-kept structs, and the initializer defaults hide the miss
 

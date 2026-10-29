@@ -792,34 +792,28 @@ enum ProjectStore {
     /// encoding and every file operation happen on `saveQueue`. Doing all of it on main blocked the
     /// UI for multiple seconds on a multi-layer, multi-cel project.
     ///
-    /// `completion` runs on the main actor once the package is on disk — or once the save has failed,
-    /// which it does not distinguish, matching the callers that only care that the attempt is over
-    /// (the gallery re-lists projects from disk in a one-shot `onAppear`, so navigating there before
-    /// the rename lands would show the project as missing or stale — `completion` is "the wait is
-    /// over", not "it worked"). `onSaveFailed` is the channel that does distinguish: it runs first,
-    /// also on the main actor, only when `writeAtomically`'s three formerly-silent failure returns
-    /// fire (ARCHITECTURE_REVIEW.md finding 3). `ContentView` is the only caller that passes it, and
-    /// raises the existing `CanvasNotice.Kind.saveFailed` banner from it.
+    /// `completion` runs on the main actor with the actual landed package URL, or nil when the
+    /// attempt failed or could not safely snapshot. A successful version-slot write returns that
+    /// slot's URL; it does not change the live project's address. Callers may stop waiting for any
+    /// outcome, but may leave the editor only after a package actually landed.
     /// `intent` defaults to `.artist` because that is the direction it is safe to be wrong in. A new
     /// call site that forgets it gets the visible behaviour — a banner the artist can answer — rather
     /// than the quiet one, where the project file is left alone and the work goes to a version slot
     /// nobody was told about. The two real call sites in `ContentView` both pass it explicitly.
     ///
-    /// The return value says what the save *did*, and `.ask` is the case worth reading: nothing was
-    /// written and `completion` did **not** run, because the caller's completion is "now show the
-    /// gallery" and the artist has not finished answering yet.
+    /// The return value describes admission and destination, not success. `.ask` starts no attempt
+    /// and calls no completion: the artist has not finished answering yet.
     @MainActor
     @discardableResult
     static func save(_ canvasManager: CanvasManager, to url: URL,
                      intent: SaveIntent = .artist,
-                     onSaveFailed: (@MainActor () -> Void)? = nil,
-                     completion: (@MainActor () -> Void)? = nil) -> SaveDecision {
+                     completion: (@MainActor (URL?) -> Void)? = nil) -> SaveDecision {
         let decision = SaveDamageGate.decide(damage: canvasManager.loadDamage,
                                              answered: canvasManager.damagedSaveAnswered,
                                              intent: intent)
         guard decision != .ask else { return .ask }
         guard canvasManager.settleInteractiveState() else {
-            onSaveFailed?()
+            completion?(nil)
             return .refused
         }
 
@@ -850,10 +844,7 @@ enum ProjectStore {
                             ledger: ledger,
                             startedAt: saveStarted, snapshotSeconds: snapshotSeconds)
             Task { @MainActor in
-                if landed == nil {
-                    onSaveFailed?()
-                }
-                // **Before `completion`, which is "now show the gallery"** — TODO (57) part 2. A save
+                // **Before reporting the landed URL** — TODO (57) part 2. A save
                 // that renamed the package to follow its title has left `canvasManager.projectURL`
                 // naming a directory that no longer exists; the next save would then stage beside the
                 // new name and swap into the *old* one, resurrecting an orphan. `.versionSlot` is
@@ -866,7 +857,7 @@ enum ProjectStore {
                 if let landed, landed != url, decision != .writeAside {
                     canvasManager.projectURL = landed
                 }
-                completion?()
+                completion?(landed)
                 if backgroundTask != .invalid {
                     UIApplication.shared.endBackgroundTask(backgroundTask)
                 }

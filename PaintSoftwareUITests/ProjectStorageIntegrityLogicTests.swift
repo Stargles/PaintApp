@@ -27,7 +27,7 @@ final class ProjectStorageIntegrityLogicTests: XCTestCase {
         let manager = linkedManager()
         configure(manager)
         let saved = expectation(description: "save package")
-        ProjectStore.save(manager, to: url) { saved.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in saved.fulfill() }
         wait(for: [saved], timeout: 30)
         return url
     }
@@ -46,7 +46,7 @@ final class ProjectStorageIntegrityLogicTests: XCTestCase {
         let manager = linkedManager()
         configure(manager)
         let saved = expectation(description: "save async package")
-        ProjectStore.save(manager, to: url) { saved.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in saved.fulfill() }
         await fulfillment(of: [saved], timeout: 30)
         return url
     }
@@ -367,7 +367,7 @@ final class ProjectStorageIntegrityLogicTests: XCTestCase {
                 loaded.layers[0].cels[0].vector = VectorCanvas(size: CanvasFixture.canvasSize, elements: [.stroke(invalid)])
             }
             let saved = expectation(description: "reject unreadable geometry")
-            ProjectStore.save(loaded, to: package) { saved.fulfill() }
+            ProjectStore.save(loaded, to: package) { _ in saved.fulfill() }
             wait(for: [saved], timeout: 30)
             XCTAssertEqual(try fileBytes(package), original,
                            "\(fault): a failed sidecar must abort the atomic swap")

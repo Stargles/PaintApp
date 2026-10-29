@@ -733,7 +733,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
     }
 
     @MainActor
-    func testRefusedLandingDoesNotSnapshotOrCompleteSave() throws {
+    func testRefusedLandingCompletesWithNilWithoutSnapshottingTheHeldPicture() throws {
         defer { CompositorBudget.availableMemoryOverrideBytes = nil }
         let manager = CanvasFixture.manager()
         manager.layers[0].cels[0].bakedImage = try CanvasFixture.rasterSource(image())
@@ -744,17 +744,16 @@ final class LiquifyRasterLogicTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("Held.paintproj")
-        let finished = expectation(description: "save accepts or refuses")
-        var failed = false, completed = false
+        var completionCalls = 0
+        var landed: URL?
         CompositorBudget.availableMemoryOverrideBytes = 1
-        _ = ProjectStore.save(manager, to: url, onSaveFailed: {
-            failed = true; finished.fulfill()
-        }, completion: {
-            completed = true; finished.fulfill()
-        })
-        wait(for: [finished], timeout: 30)
-        XCTAssertTrue(failed, "the actual save entry refuses its snapshot while pixels cannot land")
-        XCTAssertFalse(completed, "the gallery completion cannot discard an unresolved held picture")
+        let decision = ProjectStore.save(manager, to: url) { destination in
+            completionCalls += 1
+            landed = destination
+        }
+        XCTAssertEqual(decision, .refused, "the actual save entry refuses its snapshot while pixels cannot land")
+        XCTAssertEqual(completionCalls, 1, "Refusal terminates exactly one attempt synchronously")
+        XCTAssertNil(landed, "A refused save cannot authorize gallery navigation")
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
         XCTAssertTrue(manager.floatingPiece?.pieceImage === piece.pieceImage)
         XCTAssertEqual(manager.floatingPiece?.transform, piece.transform)

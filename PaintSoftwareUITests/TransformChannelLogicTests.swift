@@ -796,7 +796,7 @@ final class TransformChannelLogicTests: XCTestCase {
 
         let url = root.appendingPathComponent("round-trip.paintproj", isDirectory: true)
         let finished = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(manager, to: url) { finished.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in finished.fulfill() }
         wait(for: [finished], timeout: 30)
 
         XCTAssertTrue(ProjectBackupManager.validateProject(at: url),

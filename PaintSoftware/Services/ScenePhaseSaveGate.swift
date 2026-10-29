@@ -53,9 +53,8 @@ enum ScenePhaseSaveGate {
     /// this gate actually covers is the *announced* path's `Task.yield()` — the one turn the run loop
     /// gets, deliberately, so the busy overlay can be drawn.
     ///
-    /// Refusing rather than deferring: a resize is at most seconds, `completion` still runs so
-    /// nothing is left hanging, and the artist's next stroke or next backgrounding saves the finished
-    /// document. Losing a save is a stall; writing a half-resized package is a corrupted drawing.
+    /// This gate starts no attempt and authorizes no navigation. The current editor's caller keeps
+    /// work owed through its existing autosave clock until the resize has settled.
     static func mayStartSave(screenIsEditor: Bool, hasCanvas: Bool, isResizing: Bool) -> Bool {
         screenIsEditor && hasCanvas && !isResizing
     }

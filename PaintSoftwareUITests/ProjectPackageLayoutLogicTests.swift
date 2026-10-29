@@ -87,7 +87,7 @@ final class ProjectPackageLayoutLogicTests: XCTestCase {
     private func saveAndWait(_ manager: CanvasManager, to url: URL,
                              file: StaticString = #filePath, line: UInt = #line) {
         let finished = expectation(description: "ProjectStore.save completion")
-        ProjectStore.save(manager, to: url) { finished.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in finished.fulfill() }
         wait(for: [finished], timeout: 30)
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path),
                       "Setup: the save should have landed a package at \(url.lastPathComponent)",

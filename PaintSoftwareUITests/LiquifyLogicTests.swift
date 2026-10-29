@@ -1121,7 +1121,7 @@ final class LiquifyLogicTests: XCTestCase {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".paintproj")
         defer { try? FileManager.default.removeItem(at: url) }
         let saved = expectation(description: "in-flight gesture snapshot saved")
-        ProjectStore.save(manager, to: url) { saved.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in saved.fulfill() }
         wait(for: [saved], timeout: 30)
         XCTAssertEqual(finished.wait(timeout: .now() + 5), .success)
         XCTAssertEqual(procedure.resolutionCount, 1, "snapshot capture shares the already-running geometry producer")
@@ -1135,7 +1135,7 @@ final class LiquifyLogicTests: XCTestCase {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".paintproj")
         defer { try? FileManager.default.removeItem(at: url) }
         let saved = expectation(description: "pending gesture snapshot saved")
-        ProjectStore.save(manager, to: url) { saved.fulfill() }
+        ProjectStore.save(manager, to: url) { _ in saved.fulfill() }
         wait(for: [saved], timeout: 30)
         XCTAssertNil(manager.liveCelContentEdit)
         XCTAssertEqual(manager.history.undoStack.count, 1)

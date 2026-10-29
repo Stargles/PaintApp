@@ -3238,7 +3238,7 @@ final class PerfBaselineTests: XCTestCase {
         let saveStarted = CFAbsoluteTimeGetCurrent()
         autoreleasepool {
             let authored = multiCelDocument(layerCount: layerCount, celsPerLayer: celsPerLayer)
-            ProjectStore.save(authored, to: url) { written.fulfill() }
+            ProjectStore.save(authored, to: url) { _ in written.fulfill() }
         }
         await fulfillment(of: [written], timeout: 600)
         let saveSeconds = CFAbsoluteTimeGetCurrent() - saveStarted
@@ -3964,7 +3964,7 @@ final class PerfBaselineTests: XCTestCase {
         let written = expectation(description: "the package is on disk")
         autoreleasepool {
             let authored = multiCelDocument(layerCount: layerCount, celsPerLayer: celsPerLayer)
-            ProjectStore.save(authored, to: url) { written.fulfill() }
+            ProjectStore.save(authored, to: url) { _ in written.fulfill() }
         }
         await fulfillment(of: [written], timeout: 600)
 
@@ -4112,7 +4112,7 @@ final class PerfBaselineTests: XCTestCase {
             for pass in 0...1 {
                 let written = expectation(description: "save \(pass) of \(cels) cels lands")
                 let started = CFAbsoluteTimeGetCurrent()
-                ProjectStore.save(authored, to: url) { written.fulfill() }
+                ProjectStore.save(authored, to: url) { _ in written.fulfill() }
                 await fulfillment(of: [written], timeout: 600)
                 let awaited = CFAbsoluteTimeGetCurrent() - started
                 guard let profile = ProjectStore.lastSaveProfile else {
@@ -4232,7 +4232,7 @@ final class PerfBaselineTests: XCTestCase {
 
         func save() async -> ProjectStore.SaveProfile? {
             let written = expectation(description: "save lands")
-            ProjectStore.save(authored, to: url) { written.fulfill() }
+            ProjectStore.save(authored, to: url) { _ in written.fulfill() }
             await fulfillment(of: [written], timeout: 600)
             return ProjectStore.lastSaveProfile
         }
@@ -4899,7 +4899,7 @@ final class PerfBaselineTests: XCTestCase {
                         vector: VectorCanvas(size: canvas, strokes: strokes))
                 }
             }
-            ProjectStore.save(manager, to: url) { written.fulfill() }
+            ProjectStore.save(manager, to: url) { _ in written.fulfill() }
         }
         await fulfillment(of: [written], timeout: 600)
         let saveAwaited = CFAbsoluteTimeGetCurrent() - saveStarted
