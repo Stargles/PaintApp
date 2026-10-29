@@ -304,18 +304,9 @@ struct FolderManifest: Codable {
         blendMode = try container.decodeIfPresent(BlendMode.self, forKey: .blendMode) ?? .normal
         isIsolated = try container.decodeIfPresent(Bool.self, forKey: .isIsolated) ?? true
         alphaMask = try container.decodeIfPresent(AlphaMask.self, forKey: .alphaMask)
-        // Two different "no role" answers, kept apart on purpose.
-        //
-        // `decodeIfSupported` is the *migration*: a `"slot"` tag from a document saved while nodes
-        // had input-slot folders decodes as an ordinary folder, so the node's operands become its
-        // plain children in the order they already sat in (§4.3). Stated as a call rather than left
-        // to the `try?` below, which would have produced the same result by accident.
-        //
-        // The `try?` is the *tolerance*: a role this build genuinely cannot read — an op from a
-        // future version — degrades the folder to an ordinary one rather than costing the artist the
-        // whole document to save a graph edge. A document that renders is the standing preference
-        // (see `canMask`).
-        compositorRole = (try? CompositorRole.decodeIfSupported(from: container, forKey: .compositorRole)) ?? nil
+        // Absent roles and recognized retired slots are ordinary folders. Malformed current role
+        // payloads fail the manifest read so the existing damaged-package recovery can preserve it.
+        compositorRole = try CompositorRole.decodeIfSupported(from: container, forKey: .compositorRole)
         effect = try container.decodeIfPresent(Effect.self, forKey: .effect)
         effectTracks = try container.decodeIfPresent([String: AnimationCurve].self, forKey: .effectTracks)
         channelTracks = try container.decodeIfPresent([String: AnimationCurve].self, forKey: .channelTracks)

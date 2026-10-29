@@ -148,11 +148,14 @@ extension CompositorRole: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(String.self, forKey: .kind) {
         case "node":
-            switch try container.decodeIfPresent(String.self, forKey: .op) {
-            case "mix":
-                self = .node(op: .mix(try container.decodeIfPresent(BlendMode.self, forKey: .mixMode) ?? .normal))
-            default:
+            switch try container.decode(String.self, forKey: .op) {
+            case "stack":
                 self = .node(op: .stack)
+            case "mix":
+                self = .node(op: .mix(try container.decode(BlendMode.self, forKey: .mixMode)))
+            case let op:
+                throw DecodingError.dataCorruptedError(forKey: .op, in: container,
+                    debugDescription: "Unknown compositor node operation \"\(op)\"")
             }
         case let kind:
             throw DecodingError.dataCorruptedError(forKey: .kind, in: container,
@@ -183,9 +186,8 @@ extension CompositorRole: Codable {
     /// names the node and `containerEntries` already ranks them bottom-to-top, so slot 0 stays the
     /// backdrop. The folders keep their "Input A"/"Input B" names, which is harmless and still reads.
     ///
-    /// Not left to `FolderManifest`'s `try?`, which would swallow a thrown "unknown role" into nil and
-    /// migrate correctly by accident, riding on error handling that exists for a different reason (an
-    /// op from a future build). A migration nobody can grep for is a migration nobody can change.
+    /// The retired tag is recognized explicitly. Malformed current role payloads propagate through
+    /// the manifest read rather than becoming an ordinary folder.
     static func decodeIfSupported<K: CodingKey>(from container: KeyedDecodingContainer<K>,
                                                 forKey key: K) throws -> CompositorRole? {
         guard container.contains(key), !(try container.decodeNil(forKey: key)) else { return nil }

@@ -204,6 +204,90 @@ final class ProjectStorageIntegrityLogicTests: XCTestCase {
                        "The malformed original is retained exactly in Trash")
     }
 
+    func testMalformedCurrentNodeRolesRecoverTheExactBackupAndPreserveTheDamagedPackage() throws {
+        let brokenRoles: [(String, [String: Any])] = [
+            ("missing-op", ["kind": "node"]),
+            ("unknown-op", ["kind": "node", "op": "unrecognized"]),
+            ("missing-mix", ["kind": "node", "op": "mix"]),
+            ("unknown-mix", ["kind": "node", "op": "mix", "mixMode": "unrecognized"]),
+            ("typed-op", ["kind": "node", "op": 17]),
+            ("typed-mix", ["kind": "node", "op": "mix", "mixMode": 17])
+        ]
+        for (name, role) in brokenRoles {
+            let package = try package("Projects/node-\(name).paintproj") { manager in
+                let node = manager.addCompositorNode(op: .mix(.multiply), name: "Mix")
+                XCTAssertNotNil(node, "PREMISE: the normal graph owner creates the saved node")
+                if let node {
+                    manager.restackLayer(manager.layers[0].id, above: .folder(node), parentFolderID: node)
+                }
+            }
+            let manifestURL = package.appendingPathComponent("manifest.json")
+            let original = try JSONDecoder().decode(ProjectManifest.self, from: Data(contentsOf: manifestURL))
+            let node = try XCTUnwrap(original.folders.first)
+            XCTAssertEqual(node.compositorRole, .node(op: .mix(.multiply)),
+                           "PREMISE: the current writer persisted a real Mix node")
+            let goodBytes = try fileBytes(package)
+            let latest = ProjectBackupManager.latestSnapshotURL(
+                directory: ProjectBackupManager.backupsDirectory(projectID: original.id))
+            XCTAssertEqual(try fileBytes(latest), goodBytes, "PREMISE: the latest backup is the exact intact package")
+            try edit(manifestURL) { json in
+                var folders = json["folders"] as! [[String: Any]]
+                folders[0]["compositorRole"] = role
+                json["folders"] = folders
+            }
+            let damagedBytes = try fileBytes(package)
+            XCTAssertTrue(ProjectBackupManager.validateProject(at: package),
+                          "PREMISE: the lightweight resource check cannot detect a typed node-role error")
+            XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: package),
+                           "Full current-format readability rejects the malformed \(name) node role")
+            XCTAssertNil(ProjectStore.load(from: package), "The malformed current role cannot open as a plain group")
+
+            ProjectBackupManager.repairCorruptedProjects()
+
+            XCTAssertEqual(try fileBytes(package), goodBytes,
+                           "Recovery restores every intact backup byte instead of rewriting the node")
+            let loaded = try XCTUnwrap(ProjectStore.load(from: package))
+            XCTAssertEqual(loaded.folders.first { $0.id == node.id }?.compositorRole, .node(op: .mix(.multiply)),
+                           "The recovered node keeps its actual compositing operation")
+            let preserved = try XCTUnwrap(ProjectBackupManager.listTrash().first {
+                $0.displayName == package.deletingPathExtension().lastPathComponent
+            })
+            XCTAssertEqual(try fileBytes(preserved.url), damagedBytes,
+                           "Every malformed original package file remains intact in Trash")
+        }
+    }
+
+    func testMalformedCurrentNodeWithoutBackupKeepsTheOriginalPackageAndDamagedGalleryEntry() throws {
+        let package = try package("Projects/node-no-backup.paintproj") { manager in
+            let node = manager.addCompositorNode(op: .mix(.screen), name: "Mix")
+            XCTAssertNotNil(node, "PREMISE: the normal graph owner creates the saved node")
+            if let node {
+                manager.restackLayer(manager.layers[0].id, above: .folder(node), parentFolderID: node)
+            }
+        }
+        let manifestURL = package.appendingPathComponent("manifest.json")
+        let original = try JSONDecoder().decode(ProjectManifest.self, from: Data(contentsOf: manifestURL))
+        XCTAssertEqual(original.folders.first?.compositorRole, .node(op: .mix(.screen)),
+                       "PREMISE: the current writer persisted a Mix node before corruption")
+        try FileManager.default.removeItem(at: ProjectBackupManager.backupsDirectory(projectID: original.id))
+        try edit(manifestURL) { json in
+            var folders = json["folders"] as! [[String: Any]]
+            folders[0]["compositorRole"] = 17
+            json["folders"] = folders
+        }
+        let damagedBytes = try fileBytes(package)
+
+        ProjectBackupManager.repairCorruptedProjects()
+
+        XCTAssertEqual(try fileBytes(package), damagedBytes,
+                       "Without a backup, maintenance preserves the malformed original package exactly")
+        XCTAssertNil(ProjectStore.load(from: package), "Malformed current node payload cannot become a plain group")
+        XCTAssertTrue(ProjectStore.listProjects(in: package.deletingLastPathComponent()).first?.isCorrupted == true,
+                      "The original remains exposed as damaged in Gallery instead of disappearing")
+        XCTAssertTrue(ProjectBackupManager.listTrash().isEmpty,
+                      "A package with no intact replacement is not displaced into Trash")
+    }
+
     func testTypedColorDamageWithoutBackupLeavesOriginalBytesAndGalleryEntry() throws {
         let package = try package { $0.colorPanel.recordPainted(.red) }
         let manifest = try JSONDecoder().decode(ProjectManifest.self,

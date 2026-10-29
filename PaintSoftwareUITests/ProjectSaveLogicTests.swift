@@ -943,6 +943,54 @@ final class ProjectSaveLogicTests: XCTestCase {
 
     // MARK: - Compositor nodes (§4.3)
 
+    func testFullManifestRejectsMalformedCurrentRolesAndKeepsRecognizedRoles() throws {
+        let folder = FolderManifest(id: UUID(), name: "Mix", isExpanded: true, isVisible: true,
+                                    compositorRole: .node(op: .mix(.multiply)))
+        let manifest = ProjectManifest(id: UUID(), name: "Current roles", canvasWidth: 64,
+                                       canvasHeight: 64, fps: 24, layers: [], modifiedAt: Date(),
+                                       folders: [folder])
+        let base = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(manifest)) as? [String: Any])
+        let savedFolder = try XCTUnwrap((base["folders"] as? [[String: Any]])?.first)
+        let recognized: [(String, Any?, CompositorRole?)] = [
+            ("absent", nil, nil),
+            ("null", NSNull(), nil),
+            ("retired slot", ["kind": "slot", "node": UUID().uuidString, "index": 0] as [String: Any], nil),
+            ("stack", ["kind": "node", "op": "stack"], .node(op: .stack)),
+            ("mix", ["kind": "node", "op": "mix", "mixMode": "multiply"], .node(op: .mix(.multiply))),
+            ("normal mix", ["kind": "node", "op": "mix", "mixMode": "normal"], .node(op: .mix(.normal)))
+        ]
+        for (name, role, expected) in recognized {
+            var json = base, value = savedFolder
+            if let role { value["compositorRole"] = role }
+            else { value.removeValue(forKey: "compositorRole") }
+            json["folders"] = [value]
+            let decoded = try JSONDecoder().decode(ProjectManifest.self,
+                from: JSONSerialization.data(withJSONObject: json))
+            let decodedFolder = try XCTUnwrap(decoded.folders.first)
+            XCTAssertEqual(decodedFolder.compositorRole, expected,
+                           "The full current manifest preserves the recognized \(name) role")
+        }
+        let malformed: [(String, Any)] = [
+            ("missing op", ["kind": "node"]),
+            ("null op", ["kind": "node", "op": NSNull()] as [String: Any]),
+            ("typed op", ["kind": "node", "op": 17] as [String: Any]),
+            ("unknown op", ["kind": "node", "op": "unrecognized"]),
+            ("missing mix mode", ["kind": "node", "op": "mix"]),
+            ("null mix mode", ["kind": "node", "op": "mix", "mixMode": NSNull()] as [String: Any]),
+            ("typed mix mode", ["kind": "node", "op": "mix", "mixMode": 17] as [String: Any]),
+            ("unknown mix mode", ["kind": "node", "op": "mix", "mixMode": "unrecognized"]),
+            ("role payload", 17)
+        ]
+        for (name, role) in malformed {
+            var json = base, value = savedFolder
+            value["compositorRole"] = role
+            json["folders"] = [value]
+            let data = try JSONSerialization.data(withJSONObject: json)
+            XCTAssertThrowsError(try JSONDecoder().decode(ProjectManifest.self, from: data),
+                                 "A malformed current \(name) must fail the full manifest instead of becoming a plain folder")
+        }
+    }
+
     /// A document containing a Mix node saves and loads as the same graph: the node's op, and its
     /// operands in the order they were in. A node's inputs are its ordinary children now (§4.3), so
     /// **the whole of the operand order is the containment and ranking the round trip already
@@ -1090,7 +1138,7 @@ final class ProjectSaveLogicTests: XCTestCase {
             {"id":"\(UUID().uuidString)","name":"Input A","isExpanded":true,"isVisible":true,"opacity":1,
              "compositorRole":{"kind":"slot","node":"\(UUID().uuidString)","index":0}}
             """.utf8)).compositorRole,
-            "And a retired `slot` tag also means an ordinary folder — `decodeIfSupported`, not a throw the `try?` happens to swallow")
+            "The recognized retired `slot` tag explicitly decodes as an ordinary folder")
         XCTAssertFalse(decoded.wasSavedBeforeGroupProperties,
                        "`opacity` was present, so the §10.3 migration must stay disarmed — the new field must not disturb that signal")
         XCTAssertEqual(decoded.opacity, 0.5)
