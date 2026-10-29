@@ -59,7 +59,10 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
   narrow revalidation accepting only the exact recorded old/new OS-managed token on these old
   nonexecutable derived PNGs, never manual security-xattr writes. Original parent-directory times
   were not durably saved: record this limit, never invent restoration. Before more mutations,
-  journal timestamps durably and restore them in finally. Full batch/DSC mutation is not approved.
+  journal timestamps durably and restore them in finally. Root reviewed helper98a2d853 and
+  the independent all1085-group validation; the exact fixed three-folder derived-PNG batch is
+  approved under its matching external grant, with full byte/metadata checks, durable directory
+  restoration and measured free-space change. No DSC mutation is approved. Timing waits for IO join.
   Protected artist packages, original recordings, current54/55 evidence and Products stay untouched.
 
 - **Generated-build resource audit:** recorded Release builds compile the UI tests for both
