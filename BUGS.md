@@ -3052,3 +3052,13 @@ mend-free-caps-b865-readonly/square-ring-original-vs-endpoint/.
 ## Resize Settings copy contradicts supported Undo — October26
 
 Root inspected actual546 transition frames: Settings Resize Canvas detail says “This cannot be undone”, while the active resize modal correctly offers Undo and the existing implementation records it. Correct the old detail in place; do not alter history behavior. Source-only finding, no claim that public Undo was already driven in that aborted workflow.
+
+## Source-rate recording copies its growing sample buffers — October28
+
+OLD test-only aafe, through the real scalar and eight-component Move-box APIs, recorded512events.
+Only the two predeclared resource assertions failed:511 scalar and4,088 pose same-capacity backing
+relocations. All timestamps, values, targets, two-turn unwrap and stop checks passed. Debug evidence
+only; Release behavior is pending. `CanvasManager+Recording` copies its take and nested channel
+before appending. Remove those ownership copies through in-place mutation, retaining all raw input.
+No attribution to the ordinary-drawing lag/crash. Root receipt lives in
+`s55-recorded-regressions/recording-cow-old2-aafe063f/root-causal-acceptance.json`.

@@ -31,7 +31,8 @@ Historical technical detail and raw results remain in Git and the external packe
 - Installed Release is still source `6fb979f442f4d3da1299785de2a077a2058a4dfe`, UUID
   `AE3F2323-9760-3783-BB5A-0756F9828CCA`, profile expiry `2026-10-30T00:18:54Z`. It launched
   normally without arguments for at least 20 seconds; no physical gesture run is established.
-  No fresh saved/unlocked export readiness has been given. Do not restart or install on that basis.
+  Fresh saved/unlocked readiness was consumed by the Test export below. No fresh physical
+  gesture/install readiness is inferred.
 - The 250-package export at
   `/Users/juliapark/PaintWork/s54-final-qualification/device-install-current-20261025/library-backup/package-export`
   is protected and unchanged: 10 Projects, 221 Backups, 19 Trash, 3,127 files / 544,516,496 bytes.
@@ -55,7 +56,7 @@ root owns native execution. No one else should build, compile, or use a simulato
 ### Stream screen and Move box
 
 The new owner report is recorded in TODO/BUGS: a streamed screen can move somewhere different from its
-Move box. Timing (held drag, release, or Set Down) is still unanswered; independent work continues.
+Move box. Kevin confirms the separation happens after release or Set Down; independent work continues.
 Installed6fb predates the placement correction; integration has the qualified component below.
 Do not add offsets or duplicate transform state.
 
@@ -163,8 +164,10 @@ fill component controls/rebuilds/harvest are complete. Also retain these boundar
   `/Users/juliapark/PaintWork/s55-recorded-regressions/windows-next-native-map.md`.
 
 Previous-writer strict-decoder capture, one-shot repair and protection of Projects/Backups/Trash remain
-required. Preserve the prepared MotionGroup data above. Fresh saved/unlocked export readiness and any
-physical restart remain unanswered. Test1 respring needs fresh physical evidence. Do not touch the
+required. Preserve the prepared MotionGroup data above. Fresh Test export is complete (11 packages/57 files,4,337,206B) at
+`/Users/juliapark/PaintWork/s55-recorded-regressions/device-Test-export-20261029T0048Z`.
+All files are locally hashed; the exporter does not supply remote per-file hashes. Device Export
+copies were cleared and normal PaintApp reopened; no install. Fresh restart readiness is consumed. Test1 respring needs fresh physical evidence. Do not touch the
 protected export during inventory.
 
 Deferred exactly as TODO records: interpolation overhaul, multi-cel selection, linear-light blending,
@@ -218,3 +221,8 @@ all package sizes checked against export log. Packet: s55-recorded-regressions/d
 The expendable device export was cleared through index-only mode, then PaintApp launched normally.
 No new install/physical gesture test. Original250-package backup remains untouched. Owner also
 clarifies stream displacement occurs after release or Set Down.
+
+Source-rate recording OLD aafe selected2 is joined/strictly reconciled: only two premapped resource
+assertions failed (511 scalar /4,088 pose backing relocations with unchanged capacity over512events).
+All data/target/unwrap/stop checks passed. Author may now remove copying through the existing mutation
+seam; no sampling cap/timing/crash claim. Packet: `recording-cow-old2-aafe063f`.

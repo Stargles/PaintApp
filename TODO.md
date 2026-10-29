@@ -24,9 +24,9 @@ from ordinary vector ink and the already corrected stream-position jump.
 
 **New owner report, October28:** with a streamed screen present, moving it sometimes places the
 screen picture somewhere different from its Move box. Treat as an active stream/Move correctness
-bug; exact drag/release/Set Down timing and scene are not established. Trace image and box through
+bug; Kevin confirms it happens after release or choosing Set Down; scene is not established. Trace image and box through
 the same coordinate/pose and asynchronous frame ownership; do not compensate with offsets or
-extra state. Optional timing question pending; independent source/reproduction work continues.
+extra state. This timing fits the already recorded placement correction; combined/device verification remains.
 Current installed6fb is the known build boundary; do not attribute this to uninstalled source.
 
 
@@ -34,8 +34,8 @@ Current installed6fb is the known build boundary; do not attribute this to unins
 new crash in **Test1 / 4096²**, and repeated-tap Move failure in **Test / 2048²**. Kevin clarified
 that only the Move problem is canvas-specific. Preserve the separate recordings and real artwork;
 use useful agents, conserve usage, and fix shared root causes. Historical retrieval-only park
-instructions are superseded by this resume. Fresh saved/unlocked readiness for exporting the current
-Test package is still unanswered; continue simulator/source work without restarting the iPad.
+instructions are superseded by this resume. Fresh saved/unlocked readiness was used to export Test plus10 saved versions to the Mac.
+All57 downloaded files are inventoried/hashed; PaintApp reopened normally. No new build installed.
 
 - Move's required vector picture acquisition is corrected through the existing render contract;
   ordinary hidden-layer suppression remains. Its77 focused checks and old-fault control passed,
