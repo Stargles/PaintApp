@@ -100,6 +100,11 @@ struct ProjectManifest: Codable {
     init(from decoder: Decoder) throws {
         _ = try GeometryVersion(from: decoder)
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        func decodeArrayOrEmpty<Element: Decodable>(forKey key: CodingKeys,
+                                                     as element: Element.Type) throws -> [Element] {
+            guard container.contains(key) else { return [] }
+            return try container.decode([Element].self, forKey: key)
+        }
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
         canvasWidth = try container.decode(Double.self, forKey: .canvasWidth)
@@ -112,15 +117,14 @@ struct ProjectManifest: Codable {
         backgroundColor = try container.decodeIfPresent(CodableColor.self, forKey: .backgroundColor)
             ?? CodableColor(red: 1, green: 1, blue: 1, alpha: 1)
         isBackgroundVisible = try container.decodeIfPresent(Bool.self, forKey: .isBackgroundVisible) ?? true
-        customBrushes = try container.decodeIfPresent([Brush].self, forKey: .customBrushes) ?? []
-        folders = try container.decodeIfPresent([FolderManifest].self, forKey: .folders) ?? []
-        viewPresets = try container.decodeIfPresent([ViewPresetManifest].self, forKey: .viewPresets) ?? []
-        // Absent for pre-interpolation projects and any project that never uses it (an empty
-        // registry is not written).
-        motionGroups = try container.decodeIfPresent([MotionGroup].self, forKey: .motionGroups) ?? []
-        guideStrokes = try container.decodeIfPresent([GuideStroke].self, forKey: .guideStrokes) ?? []
-        animationGroups = try container.decodeIfPresent([AnimationGroup].self,
-                                                        forKey: .animationGroups) ?? []
+        // Older packages may omit these nonoptional collections; present values must be arrays.
+        // A JSON null is malformed metadata, not another spelling of an empty collection.
+        customBrushes = try decodeArrayOrEmpty(forKey: .customBrushes, as: Brush.self)
+        folders = try decodeArrayOrEmpty(forKey: .folders, as: FolderManifest.self)
+        viewPresets = try decodeArrayOrEmpty(forKey: .viewPresets, as: ViewPresetManifest.self)
+        motionGroups = try decodeArrayOrEmpty(forKey: .motionGroups, as: MotionGroup.self)
+        guideStrokes = try decodeArrayOrEmpty(forKey: .guideStrokes, as: GuideStroke.self)
+        animationGroups = try decodeArrayOrEmpty(forKey: .animationGroups, as: AnimationGroup.self)
         brushTableFileName = try container.decodeIfPresent(String.self, forKey: .brushTableFileName)
         editorState = try container.decode(EditorStateManifest.self, forKey: .editorState)
     }

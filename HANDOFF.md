@@ -100,13 +100,17 @@ Kevin confirms **To Cross** and is asleep until12pm; no physical crash cause is 
    `/Users/juliapark/PaintWork/s55-recorded-regressions/mode3-current-source-map.md`; no Backboard
    cause claim. Meaningful burst work must count actual cuts, queued renders and retained pictures.
 
-3. **Saved-file validation.** MotionGroup custom decoder/CodingKeys are removed and its permanent
-   model test is harvested: whole29 green, former decoder yielded6 missing/null failures, normal29
-   green. Actual old-writer copy roundtrip9fb passed1/1; all3groups/memberships and input bytes exact.
-   The99-line TEMP method/opt-in and staged runner copy are removed. Captured5files/36,532bytes stay
-   immutable under `/Users/juliapark/PaintWork/s54-final-qualification/motion-group-previous-writer-28c08b26-capture01/`.
-   Next fix ProjectManifest present-null registry→empty validation gap while retaining legal omitted
-   arrays, and repeat actual old-package proof at that source. No schema migration is indicated.
+3. **Saved-file validation.** The motion metadata source and test fix are harvested: all six
+   nonoptional default-empty manifest arrays preserve omitted→empty and explicit `[]`, and reject
+   present `null`. The protected250-manifest audit found no nulls. Whole30 including the actual
+   previous-writer package run passed30/30; the former decoder failed at all six mapped null checks;
+   the staged package and index stayed byte-exact. The TEMP99 test, runner opt-in and staged copy are
+   removed whole. Clean Debug normal29 then passed29/29, no failures/skips, exact source731. Receipts:
+   `/Users/juliapark/PaintWork/s55-recorded-regressions/motion-null-strict-6ba1e0c5/`. The original
+   5-file/36,532-byte capture remains protected at
+   `/Users/juliapark/PaintWork/s54-final-qualification/motion-group-previous-writer-28c08b26-capture01/`.
+   This is component evidence only; checked package-address boundaries, remaining saved-data cases
+   and final assembled gates are still open. No schema migration is indicated.
 
 4. **Windows real-link work.** DNS/resource/clipboard filename collisions, keep-awake lifetime, and
    awaited Quit teardown remain. Last bounded probe timed out October28 at `PC@100.104.85.111`; do

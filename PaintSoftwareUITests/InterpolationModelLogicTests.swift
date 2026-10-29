@@ -106,13 +106,43 @@ final class InterpolationModelLogicTests: XCTestCase {
         XCTAssertFalse(keys.contains("guideStrokes"))
     }
 
-    /// And a manifest saved before the registries existed loads with them empty rather than failing.
-    func testManifestSavedBeforeRegistriesDecodesWithEmptyOnes() throws {
+    /// Omitted nonoptional collections retain their old-format defaults; present arrays are values,
+    /// while null is malformed metadata rather than another spelling of empty.
+    func testNonoptionalManifestArraysKeepOmissionAndRejectPresentNull() throws {
         let manifest = ProjectManifest(id: UUID(), name: "Legacy", canvasWidth: 64, canvasHeight: 64,
                                        fps: 24, layers: [], modifiedAt: Date())
-        let decoded = try JSONDecoder().decode(ProjectManifest.self, from: try encoded(manifest))
-        XCTAssertTrue(decoded.motionGroups.isEmpty)
-        XCTAssertTrue(decoded.guideStrokes.isEmpty)
+        let original = try encoded(manifest)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: original) as? [String: Any])
+        let keys = ["customBrushes", "folders", "viewPresets", "motionGroups", "guideStrokes",
+                    "animationGroups"]
+        for key in keys { object.removeValue(forKey: key) }
+
+        let omittedData = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        let omitted = try JSONDecoder().decode(ProjectManifest.self, from: omittedData)
+        XCTAssertTrue(omitted.customBrushes.isEmpty)
+        XCTAssertTrue(omitted.folders.isEmpty)
+        XCTAssertTrue(omitted.viewPresets.isEmpty)
+        XCTAssertTrue(omitted.motionGroups.isEmpty)
+        XCTAssertTrue(omitted.guideStrokes.isEmpty)
+        XCTAssertTrue(omitted.animationGroups.isEmpty)
+
+        for key in keys { object[key] = [Any]() }
+        let explicitEmpty = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        let decodedEmpty = try JSONDecoder().decode(ProjectManifest.self, from: explicitEmpty)
+        XCTAssertTrue(decodedEmpty.customBrushes.isEmpty)
+        XCTAssertTrue(decodedEmpty.folders.isEmpty)
+        XCTAssertTrue(decodedEmpty.viewPresets.isEmpty)
+        XCTAssertTrue(decodedEmpty.motionGroups.isEmpty)
+        XCTAssertTrue(decodedEmpty.guideStrokes.isEmpty)
+        XCTAssertTrue(decodedEmpty.animationGroups.isEmpty)
+
+        for key in keys {
+            var nullRegistry = object
+            nullRegistry[key] = NSNull()
+            let data = try JSONSerialization.data(withJSONObject: nullRegistry, options: [.sortedKeys])
+            XCTAssertThrowsError(try JSONDecoder().decode(ProjectManifest.self, from: data),
+                                 "A present null \(key) registry is malformed, not absent")
+        }
     }
 
     /// MotionGroup has four required fields in the current format. Defaults in its direct

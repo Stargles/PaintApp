@@ -169,9 +169,17 @@ that the final combined audit build has passed.
    The historical87 packet retains its original scope/count. Final assembled checks remain.
 6. Saved data: implement one shared checked package-address boundary before reads and writes. The
    old code reproduces required-raster, brush-table/texture, nested-media, link and write failures.
-   Preserve legal old spellings until the separate one-shot Projects/Backups/Trash repair. Capture a
-   real previous-writer group package before strict metadata cleanup; retain accepted UInt64 seeds
-   and legal optional omissions. No protected artwork mutation during inventory.
+   Preserve legal old spellings until the separate one-shot Projects/Backups/Trash repair. The
+   captured previous-writer group package passed actual load/save/reload with group fields,
+   memberships, package bytes and index retained. The default-empty manifest arrays now all preserve
+   omitted→empty and `[]`, while rejecting present `null`; no protected manifest had null among the
+   six arrays. Whole30 including the actual package witness passed, the former decoder hit six direct
+   null assertions, the TEMP test/opt-in/copy were removed, and clean Debug normal29 passed29/29 with
+   0 failures/skips. Exact component evidence is in
+   `/Users/juliapark/PaintWork/s55-recorded-regressions/motion-null-strict-6ba1e0c5/` (run pins6ba
+   and68f5). Only `ProjectManifest.swift` and `InterpolationModelLogicTests.swift` were harvested to
+   this integration. Package-address failures, remaining saved-data cases and final assembled gates
+   remain open; no migration or format version change is indicated.
 7. Windows: complete DNS limits, clipboard filename collisions, keep-awake lifetime and awaited Quit
    teardown when the host is reachable. No repeated connection polling. The real-link check needs
    the owner/laptop; previous transport tests retain their actual source pins.
