@@ -3,6 +3,12 @@
 
 ## Current owner-facing status — October 28
 
+**New owner evidence, October29:** the crash seems to occur when erasing many brushstrokes quickly.
+The existing copied-Test1 capture had20 gestures but only3 actual cuts (77 centerline misses), so it
+does not cover that burst. Measure actual successful erasures, queued renders and picture lifetimes
+on the real copied scene. The eraser-option clarification is pending; independent tracing continues.
+No crash cause is established.
+
 **October29 qualification update:** Export/Resize/Gradient are integrated after a179/179 baseline,
 13 intended-failure controls, one first-target-only deadline control with downstream timeout, nine
 reviewed pictures, and a normal49/49 rebuild. All717 unrelated source entries stayed exact. Final

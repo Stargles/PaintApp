@@ -6,6 +6,10 @@ history and original evidence remain in Git and the named packets.
 
 ## Current state and next action
 
+Kevin’s newest crash clue: rapidly erasing many brushstrokes. Existing303 only made3 actual cuts;
+that is insufficient burst coverage. Actual cut counts and queued-picture lifetimes are next.
+The eraser-option question is pending; no physical crash cause is established.
+
 - Integration: `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch
   `tmp/s54-qualified-integration`, source-bearing baseline `0d4b2b3e4c5c71b432dce8fea6130cc0425cf44f`; 731
   source entries.
