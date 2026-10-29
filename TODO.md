@@ -768,3 +768,13 @@ pixels at the moved hull before tool exit, capture every phase before asserting,
 green. No periodic fake-frame loop. The test-only source373 is prepared/unrun; no new runtime fix or
 global acknowledgement state before actual evidence. Prefer retaining each original window's front
 through its existing presentation completion rather than mixing two retirement lifetimes.
+
+StreamPlacement c897 whole9 is joined and strictly reconciled:7pass/2fail. OnTop visibility checks
+all pass; its final green bounds include the green Live label. Root inspected both whole pictures;
+dominant red/green rectangles match within1pixel. Use the existing blue-frame convention from the
+other stream-Move test, and delete the four unnecessary screen-coordinate helpers added during the
+false coordinate diagnosis. Keep every continuity/position predicate and delay unchanged.
+Mode1 held erase probes the gesture endpoint; moved samples can stop short before the raw endpoint
+is guaranteed at lift. Source matches qualifiedcf in the eraser path. Drive the same eraser across
+the existing .50 probe to .56 (within the already-painted mark), preserving .70 outside probe, all
+pixel predicates and4second hold. These are fixture corrections, with no runtime fix.

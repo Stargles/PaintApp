@@ -175,56 +175,6 @@ final class StreamPlacementUITests: StreamUITestCase {
         return try streamPixelBounds(on: canvas, colour: colour)
     }
 
-    /// Compares screenshots and Move geometry in one screen-point coordinate system even when
-    /// switching tools changes the canvas host's accessibility frame.
-    private func screenRect(for unitRect: CGRect, in element: XCUIElement) -> CGRect {
-        let frame = element.frame
-        return CGRect(x: frame.minX + frame.width * unitRect.minX,
-                      y: frame.minY + frame.height * unitRect.minY,
-                      width: frame.width * unitRect.width,
-                      height: frame.height * unitRect.height)
-    }
-
-    private func unitRect(for screenRect: CGRect, in frame: CGRect) -> CGRect {
-        CGRect(x: (screenRect.minX - frame.minX) / frame.width,
-               y: (screenRect.minY - frame.minY) / frame.height,
-               width: screenRect.width / frame.width,
-               height: screenRect.height / frame.height)
-    }
-
-    private func waitForScreenPixel(at point: CGPoint, colour: Colour,
-                                    timeout: TimeInterval = 12) -> RGBA? {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if let pixels = ScreenshotPixels(XCUIScreen.main.screenshot().image),
-               let pixel = pixels.pixel(at: point), colour.matches(pixel) { return pixel }
-            Thread.sleep(forTimeInterval: 0.25)
-        }
-        return nil
-    }
-
-    /// Bounds of the solid stream colour, sampled from one whole-screen capture in absolute screen
-    /// points. The host rectangle limits the scan so toolbar colors do not become stream pixels.
-    private func streamScreenBounds(_ colour: Colour, in screenRect: CGRect) throws -> CGRect? {
-        let pixels = try XCTUnwrap(ScreenshotPixels(XCUIScreen.main.screenshot().image))
-        let divisions = 160
-        var minX = divisions, minY = divisions, maxX = -1, maxY = -1
-        for y in 0...divisions {
-            for x in 0...divisions {
-                let point = CGPoint(x: screenRect.minX + screenRect.width * Double(x) / Double(divisions),
-                                    y: screenRect.minY + screenRect.height * Double(y) / Double(divisions))
-                guard let pixel = pixels.pixel(at: point), colour.matches(pixel) else { continue }
-                minX = min(minX, x); minY = min(minY, y)
-                maxX = max(maxX, x); maxY = max(maxY, y)
-            }
-        }
-        guard maxX >= 0 else { return nil }
-        return CGRect(x: screenRect.minX + screenRect.width * Double(minX) / Double(divisions),
-                      y: screenRect.minY + screenRect.height * Double(minY) / Double(divisions),
-                      width: screenRect.width * Double(maxX - minX) / Double(divisions),
-                      height: screenRect.height * Double(maxY - minY) / Double(divisions))
-    }
-
     func testOnTopStreamPixelsFollowTheMoveBoxWhileHeldReleasedAndAfterSetDown() throws {
         try exerciseLiveStreamMove(XCUIApplication(), placement: "onTop")
     }
@@ -233,9 +183,8 @@ final class StreamPlacementUITests: StreamUITestCase {
         try exerciseLiveStreamMove(XCUIApplication(), placement: "inPlace")
     }
 
-    /// The frozen On Top picture must bridge the committed vector render until the replacement
-    /// host surface has actually drawn. The base render deliberately stays at normal speed; only
-    /// the existing window-surface draw seam is delayed.
+    /// The On Top picture stays visible after committing Move while its next live frame draws.
+    /// The vector base renders normally; only the existing window-surface draw seam is delayed.
     func testOnTopMoveToBrushKeepsStreamVisibleUntilWindowPresents() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-uiTestSlowWindowDrawMillis", "5000"]
@@ -283,39 +232,34 @@ final class StreamPlacementUITests: StreamUITestCase {
         assertAboveTheDock(app, canvas, dy: Double(movedRed.maxY), "the moved stream picture")
         attachScreenshot(XCUIScreen.main, "On Top Move to Brush healthy red before exit")
 
-        let hostFrameBeforeToolSwitch = canvas.frame
-        let expectedScreenBounds = screenRect(for: movedHull, in: canvas)
-        let screenProbe = CGPoint(x: expectedScreenBounds.midX, y: expectedScreenBounds.midY)
+        let probe = CGVector(dx: movedRed.midX, dy: movedRed.midY)
         app.buttons["toolbar.brushButton"].tap()
         attachScreenshot(XCUIScreen.main, "On Top Move to Brush immediate whole screen")
-        let immediatePixels = try XCTUnwrap(ScreenshotPixels(XCUIScreen.main.screenshot().image))
-        let immediatePixel = immediatePixels.pixel(at: screenProbe)
+        let immediateFrame = canvas.frame
+        let screenProbe = CGPoint(x: immediateFrame.minX + immediateFrame.width * probe.dx,
+                                  y: immediateFrame.minY + immediateFrame.height * probe.dy)
+        let immediatePixel = rgbaPixel(of: canvas, at: probe)
         let sampler = MidGestureSampler(points: [screenProbe], interval: 0.2)
         sampler.start()
-        laptop.show(.green)
+        laptop.show(.blue)
         Thread.sleep(forTimeInterval: 5.5)
         let during = sampler.stop()
         attachScreenshot(XCUIScreen.main, "On Top Move to Brush during delayed window draw")
-        let greenPixel = waitForScreenPixel(at: screenProbe, colour: .green)
+        let blue = try waitForStreamBounds(.blue, on: canvas, inside: movedHull)
         attachScreenshot(XCUIScreen.main, "On Top Move to Brush after new window draw")
-        let greenScreenBounds = try streamScreenBounds(.green, in: hostFrameBeforeToolSwitch)
 
-        // Keep every exit-phase image before assertions, including the eventual green front.
-        let immediateVisible = immediatePixel.map { Colour.red.matches($0) || Colour.green.matches($0) } ?? false
-        XCTAssertNotNil(greenPixel, "the new host surface eventually presents green at the pre-exit screen point")
-        XCTAssertNotNil(greenScreenBounds, "the whole-screen capture contains the new green stream")
+        // Keep every exit-phase image before assertions, including the eventual blue front.
+        let immediateVisible = immediatePixel.map { Colour.red.matches($0) || Colour.blue.matches($0) } ?? false
+        XCTAssertNotNil(blue, "the new host surface eventually presents the blue stream at the moved location")
         XCTAssertGreaterThanOrEqual(during.count, 3, "the delayed window draw produced multiple screen samples")
         XCTAssertTrue(during.allSatisfy { sample in
             guard let first = sample.pixels.first, let pixel = first else { return false }
-            return Colour.red.matches(pixel) || Colour.green.matches(pixel)
+            return Colour.red.matches(pixel) || Colour.blue.matches(pixel)
         }, "the moved On Top picture stays visible until the new surface presents; no blank base frame appears")
         XCTAssertTrue(immediateVisible,
                       "the moved stream is still visible immediately after switching to Brush")
-        if let greenScreenBounds {
-            let greenInPreExitHost = unitRect(for: greenScreenBounds, in: hostFrameBeforeToolSwitch)
-            assertBounds(greenInPreExitHost, match: movedHull, tolerance: 0.025,
-                         message: "the new On Top host surface retains the committed Move position in screen coordinates")
-        }
+        if let blue { assertBounds(blue, match: movedHull, tolerance: 0.025,
+                                    message: "the new On Top host surface retains the committed Move position") }
     }
 
     private func selectLayer(_ app: XCUIApplication, _ index: Int) {
@@ -441,7 +385,7 @@ final class StreamPlacementUITests: StreamUITestCase {
         closeEraserPanel(app)
 
         let start = canvas.coordinate(withNormalizedOffset: hostPoint(0.44, 0.50))
-        let end = canvas.coordinate(withNormalizedOffset: eraseHost)
+        let end = canvas.coordinate(withNormalizedOffset: hostPoint(0.56, 0.50))
         let held = samplesDuring([outsideReference, eraseTarget], "In Place reference under Mode 1 scratch") {
             start.press(forDuration: 0.3, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 4)
         }

@@ -8,10 +8,13 @@ OLD9649 reproduces the immediate ink gap. The vector-image correction is now har
 GREEN at447, three actual target-failing controls and normal26 GREEN; all731 component source entries
 reconcile. Root inspected six full landscape immediate/during/final pictures (7ef, same runtime).
 Earlier test-size/compiler/old-dock-premise failures remain preserved. The shared typed callback and
-UnlandedInk hold the existing transformed image; no new pixels/cache/timer/render. A separate On Top
-window/base lifetime boundary is now source-traced and has a test-only373 OLD witness pending. The
-ink base excludes that reference, so its landing must not release a window still awaiting replacement.
-No On Top runtime correction or global acknowledgement state before actual evidence.
+UnlandedInk hold the existing transformed image; no new pixels/cache/timer/render. The separate On Top
+lifetime theory is refuted by the current witness/source: the committed base includes its stream
+displayFrame and visibility checks pass. c897 whole9 passed7 and failed two fixture predicates.
+Green bounds included the green Live label; full-screen stream rectangles match within1pixel. The
+new test now reuses the existing blue-frame convention and removes four unnecessary coordinate
+helpers. Mode1 now traverses its probe rather than relying on the final touch-up endpoint. Whole9
+rerun pending; no additional On Top runtime state or correction.
 This adds to (does not replace) stream offset, Test Move/lag/crash and the rest of TODO.
 
 Kevin resumed: **continue; do not park**. Read this file, `AGENTS.md`, `CLAUDE.md`, `TODO.md`,
