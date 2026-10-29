@@ -206,40 +206,6 @@ extension CanvasManager {
         return true
     }
 
-    /// **Drops every pose key and held baseline in a half-open range of *absolute* frames** — the
-    /// pose half of `removeKeys` and `clearKeys`, applied to every cel of one layer.
-    ///
-    /// The range is absolute and each cel converts it, which is the same conversion
-    /// `poseKeyframeFrames` makes in the other direction and the only place either happens.
-    ///
-    /// Mutates in place without recording; the caller's bracket is what makes it one step. A channel
-    /// left with no keys is removed rather than stored empty — `setEffectParameterTrack`'s rule, and
-    /// the state that would otherwise sit in the channel list animating nothing.
-    ///
-    /// - Returns: whether anything changed.
-    @discardableResult
-    func clearPoseKeys(inLayer index: Int, absoluteFrames frames: Range<Int>) -> Bool {
-        guard layers.indices.contains(index) else { return false }
-        var changed = false
-        for celIndex in layers[index].cels.indices {
-            let cel = layers[index].cels[celIndex]
-            guard !cel.transformTracks.isEmpty || !cel.pendingPoseBaselines.isEmpty else { continue }
-            var tracks = cel.transformTracks
-            for (id, track) in tracks {
-                var trimmed = track
-                for frame in frames { trimmed.removeKeys(atFrame: frame - cel.startFrame) }
-                if trimmed.isEmpty { tracks.removeValue(forKey: id) } else { tracks[id] = trimmed }
-            }
-            guard tracks != cel.transformTracks else { continue }
-            layers[index].cels[celIndex].transformTracks = tracks
-            // A channel whose keys are gone has nothing left for a baseline to be committed onto.
-            layers[index].cels[celIndex].pendingPoseBaselines =
-                cel.pendingPoseBaselines.filter { tracks[$0.key] != nil }
-            changed = true
-        }
-        return changed
-    }
-
     // MARK: - The commit
 
     /// **Where a committed Move would go**, with `KeyframeControl.write`'s four inputs read off the

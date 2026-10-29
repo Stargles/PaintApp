@@ -874,8 +874,7 @@ extension CanvasManager {
         if let container = containerPose(of: target), !container.track.isEmpty {
             var now = container
             for frame in frames { now.track.removeKeys(atFrame: frame) }
-            // A baseline whose channel has no keys left has nothing to be committed onto — the rule
-            // `clearPoseKeys` applies one container down.
+            // A channel with no keys has no pose baseline.
             if now.track.isEmpty { now.baseline = nil }
             if now != container {
                 before.container = container
