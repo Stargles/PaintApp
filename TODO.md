@@ -227,6 +227,17 @@ their files are repaired. Build `2974b33` broke this rule and lost the owner's k
 
 ## Reclaim accumulated development and test storage — 2026-10-26
 
+October29 continuation: bounded inventories locate most growth in retained test results and video
+analysis frames, rather than compiler caches. A storage agent may inspect only the old closed
+`s49-liquify-logs`, `recolour-logs`, `evidence`, and `logs` roots initially. Current54/55 proof,
+compiled products, all artist packages/exports/ZIPs and original videos stay protected. A reversible
+single-file filesystem-compression trial is queued for the old generated
+`s49-liquify-logs/combined/batches/field-output.log`; bytes/ownership/mode/times/xattrs must be
+verified before replacement. Exact duplicate derived PNG frames are a separate path-preserving
+dedup proposal; any loss of distinct modification times requires explicit recorded review. No
+performance measurements run alongside cleanup IO. Concrete allowlists/receipts live in PaintWork.
+
+
 Kevin reports free disk fell from about70GB and asks for thorough cleanup before it causes more
 problems. Inventory storage created by current/past agent work: test simulators, checkouts, compiler
 caches and repeated evidence blobs. Keep real artwork/exports, required benchmark binaries and all

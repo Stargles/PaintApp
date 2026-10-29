@@ -53,7 +53,11 @@ has been established. Do not request device interaction before he is back unless
 8. **Diagnostics:** `PaintApp-s55-two-temp-diagnostics` b437 selected2Debug failed2/2 as described
    above, source731 exact. These methods are unharvestable TEMP diagnostics. Old0a/7b sources remain
    frozen. Renderer/PNG evidence: `~/PaintWork/s55-recorded-regressions/two-temp-diagnostics-b4377638/`.
-9. **Storage:** completed owned15B offline cleanup preserved6,880 container entries in verified
+9. **Storage:** root's fresh storage_cleanup agent now owns bounded old-artifact inventory/trial,
+    while Debug correctness can continue. Current54/55, artwork, all packages and original videos
+    stay protected; no Release timing while cleanupIO runs. TODO records the exact old-log trial
+    and derived-frame dedup review scope. Older completed cache cleanup:
+ completed owned15B offline cleanup preserved6,880 container entries in verified
    240,148,620B archive SHAa89d6c..., reclaimed1,008,570,368B, then boot-verified artwork/bundles and
    left15BShutdown. Own56 is Booted for current gates. Earlier56 cleanup recovered1,318,694,912B.
    Use existing exact-cache/archive helpers; normal runner requires >10GiB. Closed-result dedup's
