@@ -234,7 +234,10 @@ compiled products, all artist packages/exports/ZIPs and original videos stay pro
 single-file filesystem-compression trial is queued for the old generated
 `s49-liquify-logs/combined/batches/field-output.log`; bytes/ownership/mode/times/xattrs must be
 verified before replacement. Exact duplicate derived PNG frames are a separate path-preserving
-dedup proposal; any loss of distinct modification times requires explicit recorded review. No
+dedup proposal; any loss of distinct modification times requires explicit recorded review. Root reviewed the exact trial helper/plan and approves only its26-path/25-alias duplicate-frame
+trial plus the single verified log replacement. Derived-frame timestamp/inode sharing and the log's
+recorded creation-time/compression-flag change are accepted; all bytes/paths/permissions/provenance
+stay exact. Full batch remains conditional on observed positive reclaim and root review. No
 performance measurements run alongside cleanup IO. Concrete allowlists/receipts live in PaintWork.
 
 
