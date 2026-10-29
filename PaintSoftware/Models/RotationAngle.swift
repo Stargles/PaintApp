@@ -45,7 +45,7 @@ enum RotationAngle {
     /// the answer on `snapped`. The text box's two turns and the smart-shape's knob all read the knob
     /// through this, so none of them can disagree about which way is up.
     static func boxAngle(forKnobAt point: CGPoint, about centre: CGPoint, snapping: Bool) -> CGFloat {
-        let angle = atan2(point.y - centre.y, point.x - centre.x) + .pi / 2
+        let angle = bearing(of: point, about: centre) + .pi / 2
         return snapping ? snapped(angle) : angle
     }
 

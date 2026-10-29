@@ -1,36 +1,17 @@
 import UIKit
 
-/// Shared projection math for the two on-canvas transform models (`ObjectTransformFrame`'s
-/// `LayerTransform`, `FloatingPieceOverlayView`'s `FloatingTransform`): both map a point in an
-/// object's own local (untransformed, centered-on-origin) space into the overlay's coordinate space
-/// by applying scale, rotation, and position —
-/// `effectiveScaleX`/`effectiveScaleY` fold in `FloatingTransform`'s independent axes and flip
-/// flags, and collapse to the same uniform `scale` on both axes for `LayerTransform`.
-protocol OverlayTransformProjecting {
-    var position: CGPoint { get }
-    var rotation: CGFloat { get }
-    var effectiveScaleX: CGFloat { get }
-    var effectiveScaleY: CGFloat { get }
-}
-
-extension OverlayTransformProjecting {
+/// Projection helper for Floating Piece handles: map a point in the piece's local, centered space
+/// through its independent scales, flips, rotation, and position into overlay coordinates.
+extension FloatingTransform {
     func projected(_ local: CGPoint) -> CGPoint {
+        let effectiveScaleX = scaleX * (flipH ? -1 : 1)
+        let effectiveScaleY = scaleY * (flipV ? -1 : 1)
         let x = local.x * effectiveScaleX, y = local.y * effectiveScaleY
         let r = rotation
         let rx = x * cos(r) - y * sin(r)
         let ry = x * sin(r) + y * cos(r)
         return CGPoint(x: position.x + rx, y: position.y + ry)
     }
-}
-
-extension LayerTransform: OverlayTransformProjecting {
-    var effectiveScaleX: CGFloat { scale }
-    var effectiveScaleY: CGFloat { scale }
-}
-
-extension FloatingTransform: OverlayTransformProjecting {
-    var effectiveScaleX: CGFloat { scaleX * (flipH ? -1 : 1) }
-    var effectiveScaleY: CGFloat { scaleY * (flipV ? -1 : 1) }
 }
 
 /// **A pan that says when its finger landed, not only when it started panning** — KEYFRAMES.md §5.1

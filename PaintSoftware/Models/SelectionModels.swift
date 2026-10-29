@@ -744,8 +744,8 @@ struct FloatingResizeDrag: Equatable {
         self.start = piece.transform
         self.movingLocal = movingLocal
         self.anchorLocal = anchorLocal
-        // Through `affineTransform`, which is `OverlayTransformProjecting.projected` to the bit and
-        // is reachable from the test target, where that protocol's file is not.
+        // The anchor follows the same affine pose as the floating piece, including its position,
+        // rotation, independent scales and flips.
         self.anchor = anchorLocal.applying(piece.transform.affineTransform)
         self.uniform = uniform
         self.axisIsHorizontal = axisIsHorizontal

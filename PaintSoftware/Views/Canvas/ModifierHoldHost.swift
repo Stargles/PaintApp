@@ -30,10 +30,9 @@ final class HoldShieldView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    /// Only a touch **landing** is hit-tested for a view to bind to, so a `.began` touch in the event is
-    /// what makes this a landing; anything else (a hover, a probe with no event) falls through.
+    /// UIKit asks the window to choose a hit-tested view when a touch begins; a hover or an
+    /// eventless probe falls through.
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        let began = event?.allTouches?.contains(where: { $0.phase == .began }) == true
         guard let event, event.type == .touches, event.timestamp > 0, hold.claimsLanding else { return nil }
         return self
     }

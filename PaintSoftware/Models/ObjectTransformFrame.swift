@@ -480,10 +480,8 @@ struct ObjectTransformFrame: Equatable {
 
     /// A point in the layer's own local (centred, unrotated, unscaled) space, in canvas space.
     ///
-    /// The same arithmetic as `OverlayTransformProjecting.projected`, written out here rather than
-    /// borrowed from it, because that protocol lives in a *Views* file next to `FloatingTransform`
-    /// and this is a model type — depending on it would make the whole floating-piece overlay a
-    /// prerequisite for compiling the Move box's geometry, and for testing it.
+    /// This frame has its own layer transform, content offset and optional distorted quad, so its
+    /// point projection stays with the model geometry used by Move, Scale and Distort handles.
     /// **`projected` as a matrix** — the box's own local space onto canvas space, for the callers
     /// that need the map rather than one image point: a Distort drag pulling a canvas touch back into
     /// local corners, and its inverse.
@@ -876,8 +874,8 @@ struct ObjectTransformDrag: Equatable {
     /// lands that sum on a round angle is the same sweep for either — and a box that began at 7° is
     /// found at 15° and 30°, which is what the artist sees, not at 22° and 37°.
     private func turnedBy(_ point: CGPoint, snapping: Bool) -> CGFloat {
-        let startAngle = atan2(startPoint.y - anchor.y, startPoint.x - anchor.x)
-        let currentAngle = atan2(point.y - anchor.y, point.x - anchor.x)
+        let startAngle = RotationAngle.bearing(of: startPoint, about: anchor)
+        let currentAngle = RotationAngle.bearing(of: point, about: anchor)
         let sweep = currentAngle - startAngle
         guard snapping else { return sweep }
         let drawnAtStart = start.rotation + startBoxAngle
