@@ -77,6 +77,12 @@ poses and refusal fallback. No parallel cache, service, timer or new per-feature
 multi-layer erasing remains a separate existing route unless its owners can reuse this safely. Measure
 actual work/output before claiming latency benefit; no simulator observation establishes the crash cause.
 
+**Current assembled-build boundary:** composed7cc stopped at compilation before any tests ran:
+`FillFootprintBench.swift:249` supplied a rectangle where path subtraction requires a path. The
+fixture-only correction is in progress in the isolated composed tree; it is not a product outcome.
+Release copied-Test1 baselinec62 passed1/1 with36 cuts and25 full picture landings. Point-index
+rebuild body timing is much smaller in Release; no index redesign or physical crash claim follows.
+
 ### Work queue
 
 1. Finish copied-Test1 Mode3 diagnosis and review the existing shared-window presentation seam.
