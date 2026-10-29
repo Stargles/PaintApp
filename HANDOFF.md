@@ -120,3 +120,8 @@ audio/video editing, and dropped brush importers. Do not reopen without owner di
 The previous complete handoff is byte-exact at
 `/Users/juliapark/PaintWork/s55-recorded-regressions/HANDOFF-before-compaction-1a7772c3.md` (SHA-256
 `62f34678e68b7b39066cfe1a609d63e9e5fea544ea1b286e2c301ba2b89e508e`).
+
+October29 continuation: numeric split-refusal follow-up also reaches generic structure-gesture
+history. Refusal alone must produce no Undo step; an earlier accepted drag must survive a later
+refusal and end in one Undo step. Record-before-work is in TODO; source-only author is handling
+this at the existing transaction/gesture seam, not by weakening its test or cancelling the gesture.

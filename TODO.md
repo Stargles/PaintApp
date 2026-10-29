@@ -43,6 +43,14 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
   cannot be admitted, plus unchanged layout/elements/history/pixels on refusal. Review report keeps
   the corrected positive-head example; the earlier negative example was withdrawn.
 
+- [ ] Preserve gesture history when a numeric edit is refused. Public structure gestures always end
+  through commitStructureGesture; its current unconditional before/after record can create an empty
+  Undo step after a refused crop. Required behavior: begin→refuse→end keeps history unchanged;
+  begin→accepted change→later refusal→end preserves that accepted change and records exactly one
+  Undo step. Reuse or minimally extend the generic gesture owner with an accepted-write signal,
+  preserve out-and-back gesture semantics, and never cancel earlier accepted work or introduce
+  video-specific history state. Prove layout/pixels/history plus Undo/Redo through existing tests.
+
 - [ ] Remove measured avoidable cost in the unshipped small-dab candidate before final qualification.
   Identical Release5×4000 batches: old/candidate1pt boundary0.517/1.344µs, center0.503/0.776;
   5.9pt0.687/11.444 (~16.66×);20pt2.127/2.208 (small difference not attributed beyond noise).
