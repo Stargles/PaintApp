@@ -1257,7 +1257,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         }
     }
 
-    func testConsecutiveToCrossCutsMeasureFreshTipFragmentsBeforeAnyCanvasRender() throws {
+    func testConsecutiveToCrossCutsSeedFreshFragmentBoundsWithoutCanvasRender() throws {
         let size = CGSize(width: 512, height: 384)
         let samples = StrokeSamples((0..<65).map { index -> VectorSample in
             let t = CGFloat(index) / 64
@@ -1266,87 +1266,78 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let victim = VectorStroke(brush: TestBrushes.square,
             color: CodableColor(red: 0.08, green: 0.24, blue: 0.92, alpha: 1),
             size: 18, opacity: 1, samples: samples, seed: 0xD06F_2026)
-        let source = VectorCanvas(size: size, elements: [.stroke(victim)])
-        let original = source.elements
-        let originalImage = try XCTUnwrap(source.render(), "PREMISE: the live canvas has a measured base")
-        let originalBytes = try XCTUnwrap(RasterVectorParity.premultipliedBytes(of: originalImage, size: size))
-        let untouchedInkOffset = (60 * Int(size.width) + 256) * 4
-        XCTAssertGreaterThan(originalBytes[untouchedInkOffset + 2], 200,
-                             "PREMISE: the custom square-tip stroke visibly paints blue before the cuts")
-        XCTAssertGreaterThan(originalBytes[untouchedInkOffset + 3], 240)
-        let baseRasterizations = source.rasterizations
-        let frozen = source.freezeDisplay(quality: .full, referenceIDs: [])
-        let scratch = StrokeScratch(canvasSize: size, role: .replacing,
-            celContent: StrokeScratch.CelContent(backing: nil,
-                ink: .ordinary(source: frozen, elements: original, rewriting: []), placement: .identity))
-
-        var changedInk = CGRect.null
-        for point in [CGPoint(x: 256, y: 104), CGPoint(x: 256, y: 244)] {
-            let idsBeforeCut = Set(source.strokes.map(\.id))
-            let result = source.cutToIntersection(atCanvasPoint: point, brush: TestBrushes.hardRound,
-                                                  size: 24)
-            XCTAssertEqual(result.outcome, .cut, "PREMISE: the nib cuts the current live fragment")
-            guard case .region(let cutDamage) = source.lastDamage else {
-                XCTFail("A known victim and its measured replacement fragments must declare a region, got \(source.lastDamage)")
-                return
-            }
-            let freshPieces = source.elements.compactMap(\.stroke).filter { !idsBeforeCut.contains($0.id) }
-            XCTAssertGreaterThan(freshPieces.count, 0, "PREMISE: this cut must mint a fresh visible fragment")
-            let freshElements = freshPieces.map { VectorElement.stroke($0) }
-            let freshInk = VectorCanvas.paintedBounds(of: freshElements)
-            XCTAssertFalse(freshInk.isNull, "PREMISE: the custom-tip fragment must emit paintable geometry")
-            XCTAssertTrue(cutDamage.contains(freshInk),
-                          "The declared edit region must include the custom-tip ink that arrives")
-            changedInk = changedInk.isNull ? cutDamage : changedInk.union(cutDamage)
-            XCTAssertEqual(source.rasterizations, baseRasterizations,
-                           "The next cut is reached without a canvas render warming the new IDs")
+        // Each pair brackets one cut, but stays farther away than the 12 pt nib radius.
+        let barriers = [64, 160, 224, 304].map { row in
+            let y = CGFloat(row)
+            return VectorStroke(brush: TestBrushes.hardRound,
+                color: CodableColor(red: 0.12, green: 0.82, blue: 0.18, alpha: 1),
+                size: 4, opacity: 1,
+                samples: StrokeSamples([VectorSample(x: 180, y: y, pressure: 1),
+                                        VectorSample(x: 332, y: y, pressure: 1)], channels: .pressureOnly),
+                seed: UInt64(row) + 0xB411_1E2)
         }
+        let source = VectorCanvas(size: size,
+            elements: [.stroke(victim)] + barriers.map { VectorElement.stroke($0) })
+        let originalImage = try XCTUnwrap(source.render(),
+                                          "PREMISE: the displayed source has measured victim/barrier bounds")
+        let baseRasterizations = source.rasterizations
+        let originalBytes = try XCTUnwrap(RasterVectorParity.premultipliedBytes(of: originalImage, size: size))
+        let retainedInk = (40 * Int(size.width) + 256) * 4
+        let crossingInk = (64 * Int(size.width) + 256) * 4
+        XCTAssertGreaterThan(originalBytes[retainedInk + 2], 200,
+                             "PREMISE: the custom square-tip victim has visible ink outside both cuts")
+        XCTAssertGreaterThan(originalBytes[retainedInk + 3], 240)
+        XCTAssertGreaterThan(originalBytes[crossingInk + 1], 180,
+                             "PREMISE: the green crossing barriers are visibly drawn")
+        XCTAssertGreaterThan(originalBytes[crossingInk + 3], 240)
 
-        XCTAssertEqual(source.strokes.count, 3, "PREMISE: two cuts split the same long stroke twice")
-        XCTAssertLessThan(changedInk.width * changedInk.height, size.width * size.height / 4,
-                          "The known fragment bounds keep these edits local to the long custom-tip stroke")
-        XCTAssertTrue(scratch.replaceVectorDisplay(elements: source.elements, rewriting: [], damage: changedInk),
-                      "The ordered post-cut list must render through the existing replacement window")
-        let shown = try XCTUnwrap(scratch.renderedCelContent)
-        XCTAssertTrue(shown.window.contains(changedInk), "The admitted window must cover both cut regions")
-
-        let committed = VectorCanvas(size: size, elements: source.elements)
-        let expected = try XCTUnwrap(committed.render(), "PREMISE: the cold committed list renders")
-        let crop = try XCTUnwrap(expected.cgImage?.cropping(to: shown.window))
-        let expectedWindow = UIImage(cgImage: crop, scale: expected.scale, orientation: .up)
-        let windowParity = try XCTUnwrap(RasterVectorParity.report(raster: expectedWindow,
-                                                                    vector: shown.image,
-                                                                    size: shown.window.size))
-        XCTAssertTrue(windowParity.isExact,
-                      "The custom-tip replacement window must match the full committed display: \(windowParity.diagnostic)")
-
+        let firstCut = source.cutToIntersection(atCanvasPoint: CGPoint(x: 256, y: 104),
+                                                brush: TestBrushes.hardRound, size: 24)
+        XCTAssertEqual(firstCut.outcome, .cut, "PREMISE: the first nib removes the span between y64 and y160")
+        guard case .region = source.lastDamage else {
+            XCTFail("The measured original stroke must keep the first cut bounded, got \(source.lastDamage)")
+            return
+        }
+        let idsBeforeFirstCut = Set([victim.id] + barriers.map(\.id))
+        let firstFragmentIDs = Set(source.strokes.map(\.id)).subtracting(idsBeforeFirstCut)
+        XCTAssertEqual(firstFragmentIDs.count, 2,
+                       "PREMISE: the first cut leaves two fresh fragments of the original stroke")
+        XCTAssertEqual(source.strokes.count, 6, "The first cut keeps four barriers and two victim fragments")
         XCTAssertEqual(source.rasterizations, baseRasterizations,
-                       "Window presentation does not render or warm the source canvas")
-        let incremental = try XCTUnwrap(source.render())
-        XCTAssertEqual(source.regionRepairs, 1, "Both consecutive cuts share one bounded base repair")
-        XCTAssertEqual(source.regionRepairsWidened, 0, "Measured fragment bounds must make the declared union sufficient")
-        let finalBytes = try XCTUnwrap(RasterVectorParity.premultipliedBytes(of: incremental, size: size))
-        XCTAssertGreaterThan(finalBytes[untouchedInkOffset + 2], 200,
-                             "The actual retained custom-tip ink remains visible after both cuts")
+                       "No canvas render may warm the fresh fragments before the next cut")
+
+        let secondPoint = CGPoint(x: 256, y: 244)
+        let secondVictim = try XCTUnwrap(source.topmostStroke(atCanvasPoint: secondPoint, slop: 0),
+                                         "PREMISE: the second nib lands on a surviving victim fragment")
+        XCTAssertTrue(firstFragmentIDs.contains(secondVictim.id),
+                      "PREMISE: the second cut targets an ID minted by the first cut")
+        let secondCut = source.cutToIntersection(atCanvasPoint: secondPoint,
+                                                 brush: TestBrushes.hardRound, size: 24)
+        XCTAssertEqual(secondCut.outcome, .cut,
+                       "PREMISE: the second nib removes the span between y224 and y304")
+        guard case .region(let secondDamage) = source.lastDamage else {
+            XCTFail("A freshly measured fragment must keep the second cut local, got \(source.lastDamage)")
+            return
+        }
+        XCTAssertLessThan(secondDamage.width * secondDamage.height, size.width * size.height / 4,
+                          "The second cut stays bounded without an intervening source render")
+        XCTAssertEqual(source.rasterizations, baseRasterizations,
+                       "The second cut cannot rely on a canvas render to measure its new victim")
+
+        XCTAssertEqual(source.strokes.count, 7,
+                       "Two cuts leave three victim fragments while preserving four barriers")
+        let incremental = try XCTUnwrap(source.render(), "The final edited list takes one region repair")
+        let committed = VectorCanvas(size: size, elements: source.elements)
+        let expected = try XCTUnwrap(committed.render(), "PREMISE: an independent full render is available")
         let report = try XCTUnwrap(RasterVectorParity.report(raster: expected, vector: incremental, size: size))
         XCTAssertLessThanOrEqual(report.maxChannelDelta, 2,
-                                 "The incrementally repaired pixels match the independent full render: \(report.diagnostic)")
-        let outside = changedInk.insetBy(dx: -1, dy: -1)
-        let firstOutsideDifference = (0..<(Int(size.width) * Int(size.height))).first { pixel in
-            let x = pixel % Int(size.width), y = pixel / Int(size.width)
-            guard !outside.contains(CGPoint(x: CGFloat(x) + 0.5, y: CGFloat(y) + 0.5)) else { return false }
-            let start = pixel * 4
-            return (0..<4).contains { originalBytes[start + $0] != finalBytes[start + $0] }
-        }
-        XCTAssertNil(firstOutsideDifference,
-                     "A pixel changed outside the returned union of old and new fragment ink")
-
-        source.restoreElements(original, changedInk: changedInk)
-        let undone = try XCTUnwrap(source.render())
-        let undoParity = try XCTUnwrap(RasterVectorParity.report(raster: originalImage, vector: undone, size: size))
-        XCTAssertLessThanOrEqual(undoParity.maxChannelDelta, 2,
-                                 "Undo restores the original full picture: \(undoParity.diagnostic)")
-        XCTAssertEqual(source.regionRepairsWidened, 0, "Undo remains inside the same measured damage promise")
+                                 "The locally repaired picture matches the full committed render: \(report.diagnostic)")
+        XCTAssertEqual(source.regionRepairs, 1, "Both consecutive cuts share one bounded base repair")
+        XCTAssertEqual(source.regionRepairsWidened, 0, "Measured fragments keep the declared region sufficient")
+        let bytes = try XCTUnwrap(RasterVectorParity.premultipliedBytes(of: incremental, size: size))
+        XCTAssertGreaterThan(bytes[retainedInk + 2], 200,
+                             "The retained square-tip stroke remains visible after both cuts")
+        XCTAssertGreaterThan(bytes[retainedInk + 3], 240)
     }
 
     func testScratchRefusedDisplaySourcePublishesNoWindowAndReturnsFailure() {

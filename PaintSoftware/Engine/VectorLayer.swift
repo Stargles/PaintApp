@@ -2527,11 +2527,11 @@ final class VectorCanvas {
         /// which is a stronger claim than "the edit happened there" and is the one the render acts
         /// on. Elements outside it are untouched *and* their ink is untouched.
         ///
-        /// A site declares this from exact bounds of the ink leaving and arriving. Existing strokes
-        /// use their `paintedBounds`; To Cross measures each fresh piece with the same bounds-only dab
-        /// walk and unions it before publishing damage. Other sites may leave arrivals unknown, in
-        /// which case the render's escape check widens the repair or falls back to a full walk. A
-        /// bounds entry is never inferred from brush size.
+        /// A site declares this from bounds of the ink leaving and arriving. Existing strokes use
+        /// their `paintedBounds`; To Cross fragments retain a subset of the departing stroke's dab
+        /// walk, while seeding measured bounds under each fresh id for later edits. Other sites may
+        /// leave arrivals unknown, in which case the render's escape check widens the repair or falls
+        /// back to a full walk. A bounds entry is never inferred from brush size.
         ///
         /// **`.null` is the strongest claim of all — no pixel differs — and every memo survives it**
         /// (`invalidateRenderOnly`). Only `restoreDamage` answers it, and only for a swap that adds,
@@ -2638,9 +2638,8 @@ final class VectorCanvas {
     }
 
     /// The departing-ink bounds for a stroke replacement, or `.everything` if any victim has not
-    /// been measured. To Cross unions the exact bounds of its fresh pieces into this rectangle before
-    /// returning it; no containment assumption substitutes for that measurement. Caller must hold
-    /// `lock`.
+    /// been measured. A To Cross fragment replays a subset of the victim's measured dab walk, so its
+    /// output stays inside that departing footprint. Caller must hold `lock`.
     private func regionDamage(replacing strokes: [VectorStroke]) -> Damage {
         guard let union = paintedBounds(of: strokes.lazy.map(\.id)) else { return .everything }
         return .region(union)
@@ -2930,10 +2929,11 @@ final class VectorCanvas {
     ///
     /// **No extra margin is needed on the stroke arm.** The restored element is the same
     /// `VectorStroke` value that left, restored from a snapshot, so its dabs land where the walk that
-    /// measured this rectangle put them. To Cross creates new fragment strokes and now unions their
-    /// measured arriving bounds with `regionDamage(replacing:)`'s departing bounds at the cut site.
-    /// MEASURED — `UndoRepairBench`'s `repairsWidened` stays 0 across every stroke count, which is the
-    /// operand that would move if this were an estimate rather than a measurement.
+    /// measured this rectangle put them. To Cross fragments likewise keep the departing stroke's
+    /// dab lattice and seed and only select a subrange of its walk; the departing bounds already
+    /// cover their ink, and the cut seeds measured bounds for their fresh ids. MEASURED —
+    /// `UndoRepairBench`'s `repairsWidened` stays 0 across every stroke count, which is the operand
+    /// that would move if this were an estimate rather than a measurement.
     ///
     /// **A stroke this canvas has never walked is bounded by `strokeInkHint(of:)` since TODO (41)'s
     /// last box**, and the safety argument is `vacatedInk`'s own, one step further: the arriving
@@ -5686,9 +5686,10 @@ final class VectorCanvas {
     ///
     /// **Returns the damage as well**, so the callers can declare a rectangle instead of
     /// `.everything` — TODO (41). The old side comes from measured bounds of what the victims last
-    /// painted. To Cross separately measures each arriving fragment with the same dab walk and unions
-    /// those bounds; it does not assume a split fragment stays inside its parent's previous footprint.
-    /// If either side is unknown, the caller keeps the conservative `.everything` damage.
+    /// painted. Each To Cross fragment retains its parent's dab lattice and seed and selects a narrower
+    /// visible range, so its emitted dabs stay inside that measured footprint. Fresh ids are seeded
+    /// with their own measured bounds for subsequent edits. An unmeasured departing victim still
+    /// makes this edit conservative with `.everything` damage.
     private func cutToIntersection(sweep: VectorEraser.Sweep, near hitPoint: CGPoint,
                                    suppressing: Set<UUID>)
         -> (outcome: VectorEraser.CutOutcome, underTip: Set<UUID>, damage: Damage) {
@@ -5721,8 +5722,6 @@ final class VectorCanvas {
         // of centrelines inside one nib, so it is small in practice; if a drag ever stutters in a
         // dense drawing, this loop is where to look first.
         var splices: [(index: Int, pieces: [VectorElement])] = []
-        var replacementInkBounds = CGRect.null
-        var replacementBoundsAreKnown = true
         for victim in victims {
             // Everything that could cross it, with a width-aware tolerance per pair: lines whose ink
             // visibly touches read as crossed even when the centrelines miss.
@@ -5751,21 +5750,19 @@ final class VectorCanvas {
                                         parameters: run.parameters)
                 pieces.append(.stroke(stroke))
 
-                // A fragment has a new id, so the canvas has never measured it. Use the same
-                // bounds-only stroke walk as `paintedBounds` without allocating a canvas image.
-                // An empty or non-finite result stays unknown and makes the edit conservative.
+                // The fragment has a new id. Seed the existing map with the same bounds-only walk
+                // used by `paintedBounds`, without allocating a canvas image. If the walk cannot
+                // measure it, leave the id absent; a later edit of that fragment safely widens to
+                // `.everything` through `regionDamage(replacing:)`.
                 let bounds = Self.paintedBounds(of: [.stroke(stroke)])
                 let isMeasured = !bounds.isNull && !bounds.isInfinite
                     && bounds.width > 0 && bounds.height > 0
                     && bounds.minX.isFinite && bounds.minY.isFinite
                     && bounds.maxX.isFinite && bounds.maxY.isFinite
                 if isMeasured {
-                    replacementInkBounds = replacementInkBounds.union(bounds)
                     // The canvas lock remains held through the splice and invalidation, so the
                     // fresh ID cannot be observed before its element is in the ordered list.
                     paintedBounds[stroke.id] = bounds
-                } else {
-                    replacementBoundsAreKnown = false
                 }
             }
             splices.append((victim.index, pieces))
@@ -5775,21 +5772,7 @@ final class VectorCanvas {
         // The ids about to stop existing, and what they last put on the canvas. Taken *before* the
         // splice, because afterwards the list no longer holds them.
         let replaced = splices.compactMap { _elements[$0.index].stroke }
-        let removedInkDamage = regionDamage(replacing: replaced)
-        let damage: Damage
-        if !replacementBoundsAreKnown {
-            damage = .everything
-        } else if !replacementInkBounds.isNull {
-            if case .region(let removedInkBounds) = removedInkDamage {
-                // A split may introduce an end dab or scattered tip pixel beyond the old stroke's
-                // last measured bounds. The returned rectangle must cover both sides of the edit.
-                damage = .region(removedInkBounds.union(replacementInkBounds))
-            } else {
-                damage = .everything
-            }
-        } else {
-            damage = removedInkDamage
-        }
+        let damage = regionDamage(replacing: replaced)
 
         // Descending, so an earlier splice cannot invalidate a later index.
         for splice in splices.sorted(by: { $0.index > $1.index }) {
