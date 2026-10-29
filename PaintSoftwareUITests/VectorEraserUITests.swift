@@ -459,26 +459,19 @@ final class CuttingModesUITests: VectorEraserTestSupport {
 
     // MARK: - Which cutting mode previews, and why they differ
 
-    /// **Cut previews live; To Cross does not, and does not need to.** The two look identical to the
-    /// artist — ink vanishing under the finger — and get there by opposite routes, which is the
-    /// whole content of this test.
+    /// **Both cutting modes preview live, through different sources of truth.** The artist sees ink
+    /// vanish under the finger in both; Cut previews the pending edit, while To Cross previews each
+    /// real committed cut through the current damage window.
     ///
     /// - **Cut** (`.cutPoints`) commits nothing until lift, so a copy of the layer's render is put
     ///   on screen with the doomed spans erased out of it: role `replacement`, frames climbing
     ///   through the drag. This is `.erase`'s mechanism, not `.cutToIntersection`'s — it mutates no
     ///   geometry and forces no cold re-render.
-    /// - **To Cross** (`.cutToIntersection`) commits a *real* cut on every touch sample, so the
-    ///   canvas render already is the feedback. A scratch would be a canvas-sized allocation showing
-    ///   what is on screen already: role `none`, zero frames.
+    /// - **To Cross** (`.cutToIntersection`) commits a *real* cut on every touch sample. Its
+    ///   replacement picture uses the same admitted damage window as other native edits, avoiding
+    ///   a full-canvas request for every cut while preserving exact ordered-list output.
     ///
-    /// **This test asserted the opposite until 2026-08-22**, and its old doc comment argued that
-    /// both cutting modes previewing nothing was deliberate, costing "a canvas-sized allocation and
-    /// a full-canvas composite per touch sample for no visible effect". The premise was wrong for
-    /// Cut and the owner overruled it: *"the to cut eraser does not have live feedback like the to
-    /// cross eraser, it only applies when the eraser is lifted"*, and then, after an investigation,
-    /// *"I still would like it to be live feedback."* There was a visible effect. It was the ink not
-    /// going away.
-    func testCutPreviewsLiveAndToCrossStillDoesNot() throws {
+    func testCutAndToCrossBothPreviewLiveWithDifferentCommitTiming() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         addVectorLayer(app)
@@ -516,10 +509,11 @@ final class CuttingModesUITests: VectorEraserTestSupport {
         selectVectorEraserMode(app, "To Cross")
         dragAcrossTheLine()
         let toCross = gestureTrace(canvas)
-        XCTAssertEqual(toCross?.role, "none",
-                       "To Cross must allocate no preview scratch: it has already committed real "
-                       + "cuts during the drag, so the canvas render is the feedback")
-        XCTAssertEqual(toCross?.frames, 0, "…and so must publish no preview frames")
+        XCTAssertEqual(toCross?.role, "replacement",
+                       "To Cross commits real cuts during the drag and presents their ordered list "
+                       + "through the measured bounded replacement window")
+        XCTAssertGreaterThan(toCross?.frames ?? 0, 0,
+                             "A successful cut must publish its current replacement window before lift")
     }
 
     /// **One gesture, one undo step, and undo puts the whole line back.** The preview and the commit
@@ -671,7 +665,15 @@ final class CuttingModesUITests: VectorEraserTestSupport {
     /// intersections at all is deleted whole.
     func testMode3ActsOnEveryLineOneDragCrossesUnderASingleUndo() throws {
         let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        let window = app.windows.firstMatch
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "The public To Cross route uses the owner's landscape canvas layout")
+        let collapse = app.buttons["timeline.collapseButton"]
+        XCTAssertTrue(collapse.waitForExistence(timeout: 5), "PREMISE: the expanded timeline can be collapsed")
+        collapse.tap()
+        XCTAssertTrue(collapse.waitForNonExistence(timeout: 5),
+                      "PREMISE: the timeline finishes collapsing before the drawing fixture")
         addVectorLayer(app)
 
         let canvas = app.otherElements["canvas.host"]
@@ -680,6 +682,11 @@ final class CuttingModesUITests: VectorEraserTestSupport {
             drawLine(on: canvas, from: CGVector(dx: dx, dy: 0.35), to: CGVector(dx: dx, dy: 0.65))
         }
         XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.strokes, 3, "Setup: three separate lines")
+        for dx in [0.35, 0.5, 0.65] {
+            XCTAssertFalse(isWhitish(rgbaPixel(of: canvas, dx: dx, dy: 0.5)),
+                           "PREMISE: each target line is visibly drawn before To Cross")
+        }
+        attachScreenshot(XCUIScreen.main, "mode3-window-before-three-cuts")
 
         selectVectorEraserMode(app, "To Cross")
         // A wider nib and a deliberate, slow sweep. Mode 3 resolves at the tip, so a line is only
@@ -688,18 +695,35 @@ final class CuttingModesUITests: VectorEraserTestSupport {
         // XCUITest's synthesized input, not of the driver (which is covered sample-by-sample in
         // `VectorEraserLogicTests`); this test is about the drag reaching every line it crosses.
         setEraserSize(app, normalized: 0.35)
+        assertAboveTheDock(app, canvas, dy: 0.5, "The three-cut Mode 3 drag row")
+        assertBelowTheToolbar(app, canvas, dy: 0.5, "The three-cut Mode 3 drag row")
         dragOnCanvas(app, from: CGVector(dx: 0.25, dy: 0.5), to: CGVector(dx: 0.78, dy: 0.5))
 
+        let live = gestureTrace(canvas)
+        XCTAssertEqual(live?.role, "replacement",
+                       "Single-cel To Cross uses the bounded native replacement for live feedback")
+        XCTAssertGreaterThan(live?.frames ?? 0, 1,
+                             "Three separated cuts must each update the window during this one drag")
         let after = vectorMarkerViaPanel(app, layerIndex: 1)
         XCTAssertEqual(after?.strokes, 0,
                        "One drag across three uncrossed lines should delete all three — reading 2 "
                        + "means the drag only acted where it started, i.e. it resolved on lift "
                        + "rather than per crossing")
         XCTAssertEqual(after?.erases, 0, "Mode 3 is destructive: it never retains a punch")
+        for dx in [0.35, 0.5, 0.65] {
+            XCTAssertTrue(waitUntilBlank(canvas, dx: dx, dy: 0.5, timeout: 10),
+                          "PREMISE: each cut line is absent from the rendered canvas")
+        }
+        attachScreenshot(XCUIScreen.main, "mode3-window-after-three-cuts")
 
         app.buttons["sideToolbar.undoButton"].tap()
         XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.strokes, 3,
                        "The whole drag is one undo entry, so a single undo brings back all three")
+        for dx in [0.35, 0.5, 0.65] {
+            XCTAssertTrue(waitUntil(canvas, CGVector(dx: dx, dy: 0.5), { !self.isWhitish($0) }, timeout: 10),
+                          "Undo restores each visible target line")
+        }
+        attachScreenshot(XCUIScreen.main, "mode3-window-after-single-undo")
     }
 
     /// The other half of Mode 3: with crossings present, a touch removes the span of the touched

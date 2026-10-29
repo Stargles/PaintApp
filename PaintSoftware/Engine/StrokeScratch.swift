@@ -131,6 +131,18 @@ final class StrokeScratch: DabTarget {
                                  damage: damage)
     }
 
+    /// Whether this replacement currently contains a successfully rendered picture for all of the
+    /// supplied damage. The admitted window and its existing failure latch are the validity record;
+    /// a refused later growth can retain an older image, but that image is not current for the new
+    /// damage and must not be presented or handed off.
+    func hasCurrentReplacementWindow(covering damage: CGRect) -> Bool {
+        guard case .replacing = role, !damage.isNull, !damage.isInfinite,
+              damage.width > 0, damage.height > 0,
+              case .success = lastMutationResult,
+              windowRect.contains(damage) else { return false }
+        return renderedCelContent != nil
+    }
+
     /// **The stroke's own opacity — BRUSH.md §2.11's cap, applied once when the window merges.**
     /// Stored rather than passed to `commit`, because the display needs the same number (`.additive`
     /// shows the window at this alpha, `.subtractive` punches the backdrop with it) and two callers

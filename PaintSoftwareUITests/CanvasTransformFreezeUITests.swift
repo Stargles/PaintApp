@@ -172,21 +172,25 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
     /// `CanvasContainerView` — a value layer is active, so there is no stroke view to hit — and binds
     /// `canvas.touchCounter` and none of pan, pinch, rotation, the two taps or the catch-all.
     ///
-    /// **Reproduced on the owner's own path:** the Blend Mode / Effect menu the change was made in,
-    /// open over a value layer grading Lens Blur, and a two-finger drag on the canvas beside it. The
-    /// menu does not swallow a two-finger touch the way it swallows one finger's stroke
-    /// (`MENU_PRESENTATION_CENSUS.md` measured only the stroke): the drag pans, UIKit dismisses the
-    /// menu under it, and nothing transforms the canvas again. A `.popover` — the Views menu, before
-    /// it became an `AnchoredMenu` — did the same, whether UIKit dismissed it because two fingers
-    /// landed together outside it, or the catch-all's zero-duration press closed it on the first of
-    /// two fingers landing 20 ms apart. MEASURED red on `cbd248f` for both.
-    ///
-    /// What makes it pass is `CanvasView.Coordinator.replaceStrandedRecognizers`, which swaps fresh
-    /// recognizers in for stranded ones as the drag lifts, and — for the Views menu — there being no
-    /// UIKit presentation to strand anything at all.
-    func testCanvasStillTransformsAfterATwoFingerDragUnderAnOpenMenu() throws {
+    /// The earlier OLD and FIXED runs both stopped at the initial “pan under the menu” premise.
+    /// The OLD run's screen recording shows the layer context menu still present just before the
+    /// first two-finger gesture and gone just after it, while the settings panel remains. That does
+    /// not prove the gesture reached the canvas or stranded its recognizers. Treat this first gesture
+    /// as menu dismissal, then check that the canvas still transforms with the menu gone. Preserve
+    /// simultaneous and 20 ms staggered landings for both menus. This is a continuity check, not a
+    /// reproduced freeze or watchdog-recovery trigger.
+    func testCanvasStillTransformsAfterTwoFingerGestureDismissesOpenMenu() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
+        let window = app.windows.firstMatch
+        let landscape = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            window.exists && window.frame.width > window.frame.height
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [landscape], timeout: 5), .completed,
+                       "PREMISE: the menu-dismissal workflow is laid out in landscape")
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "PREMISE: the actual app window is wider than it is tall")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
@@ -197,30 +201,30 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         XCTAssertEqual(app.buttons["layerOptions.blendModeButton"].value as? String, "lensblur",
                        "PREMISE: the active layer is a value layer grading Lens Blur, as the owner's was")
 
-        let menus: [(name: String, open: (XCUIApplication) -> Void)] = [
-            ("the Blend Mode / Effect menu", openEffectMenu),
-            ("the Views menu", openViewsMenu),
+        let menus: [(name: String, open: (XCUIApplication) -> Void, entry: (XCUIApplication) -> XCUIElement)] = [
+            ("the Blend Mode / Effect menu", openEffectMenu, { $0.buttons["layerOptions.blendMode.multiply"] }),
+            ("the Views menu", openViewsMenu, { $0.buttons["viewMenu.addButton"] }),
         ]
         for menu in menus {
             for (stagger, fingers) in [(0.0, "two fingers landing together"),
                                        (0.02, "two fingers landing 20 ms apart")] {
                 let shape = "\(menu.name), \(fingers)"
                 menu.open(app)
-                let before = readTransform(app)
                 try panAboveTheDock(app, canvas, stagger: stagger)
-                XCTAssertNotEqual(readTransform(app), before, "PREMISE (\(shape)): the drag under the menu pans the canvas")
+                XCTAssertTrue(menu.entry(app).waitForNonExistence(timeout: 3),
+                              "PREMISE (\(shape)): the two-finger gesture dismisses the open menu")
 
                 closeMenusAndRail(app)
-                try assertPinchMovesCanvas(app, canvas,
-                                           "THE BUG (\(shape)): nothing transforms the canvas after a two-finger drag under an open menu")
-                // The same drag with nothing open is the control: it has to leave the canvas alive.
+                let beforeNextPan = readTransform(app)
                 try panAboveTheDock(app, canvas, stagger: stagger, delta: CGVector(dx: -30, dy: -20))
+                XCTAssertNotEqual(readTransform(app), beforeNextPan,
+                                  "CONTINUITY (\(shape)): the next bare-canvas pan transforms after the menu is dismissed")
                 try assertPinchMovesCanvas(app, canvas,
-                                           "CONTROL (\(shape)): the same drag with nothing open stranded the canvas")
+                                           "CONTROL (\(shape)): a following pinch still transforms the canvas")
             }
         }
         // What is drawn, not only what is stored: the canvas the four drags and eight pinches left.
-        attachScreenshot(app, "after-two-finger-drags-under-open-menus")
+        attachScreenshot(XCUIScreen.main, "after-two-finger-drags-under-open-menus-landscape")
     }
 
     /// Opens the active layer's options from the rail and its Blend Mode / Effect `Menu`, and asserts

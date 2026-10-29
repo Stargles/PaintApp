@@ -558,7 +558,10 @@ class PaintUITestCase: XCTestCase {
     /// did nothing". The panel opens 375 pt tall on a portrait iPad (`TimelinePanelSize`) and a settings card
     /// stands up to ~300 pt above it, so there the middle of the host is under the card.
     func dockTop(_ app: XCUIApplication, _ canvas: XCUIElement) -> Double {
-        let host = canvas.frame
+        dockTop(app, hostFrame: canvas.frame)
+    }
+
+    func dockTop(_ app: XCUIApplication, hostFrame host: CGRect) -> Double {
         let panel = app.otherElements["timeline.panel"]
         var top = panel.exists ? panel.frame.minY : host.maxY
         let card = app.descendants(matching: .any)["bottomDock.card"].firstMatch
@@ -609,7 +612,10 @@ class PaintUITestCase: XCTestCase {
     /// centred on a host that runs the whole height of the window, so the bar covers the paper's own top
     /// — 7% of it on the owner's 810 pt iPad, 5% on the 13-inch simulator.
     func toolbarBottom(_ app: XCUIApplication, _ canvas: XCUIElement) -> Double {
-        let host = canvas.frame
+        toolbarBottom(app, hostFrame: canvas.frame)
+    }
+
+    func toolbarBottom(_ app: XCUIApplication, hostFrame host: CGRect) -> Double {
         let bar = app.buttons["toolbar.galleryButton"].frame
         // The bar is its buttons plus 8 pt of padding (`TopToolbar`), and a touch inside the buttons'
         // own frames never reaches the canvas.
@@ -1699,7 +1705,8 @@ class PaintUITestCase: XCTestCase {
     /// fingers down 10–20 ms apart, in two events, on every gesture in the file.
     ///
     /// - Parameters:
-    ///   - from, to: where each finger lands and where it lifts, in screen points.
+    ///   - from, to: points in the app's logical frame space. The conversion below maps them to the
+    ///     portrait event coordinates expected by the private pointer-event API exactly once.
     ///   - stagger: how long after `a` the second finger lands.
     ///   - duration: how long the travel takes, after the second finger is down.
     ///   - steps: how many intermediate positions each finger reports on the way.
@@ -1730,7 +1737,9 @@ class PaintUITestCase: XCTestCase {
     /// is up pinches where none is — halfway up the space above the dock (`aboveTheDock`), left of the
     /// rail. Both fingers land in one event, as `pinch` lands them.
     func pinchAboveTheDock(_ app: XCUIApplication, _ element: XCUIElement, scale: CGFloat) throws {
-        let centre = element.coordinate(withNormalizedOffset: aboveTheDock(app, element, x: 0.16, y: 0.5)).screenPoint
+        let frame = element.frame
+        let dock = dockTop(app, hostFrame: frame)
+        let centre = logicalAppPoint(in: frame, normalizedOffset: CGVector(dx: 0.16, dy: dock * 0.5))
         let spread: CGFloat = 40
         try twoFingerGesture(from: (CGPoint(x: centre.x - spread, y: centre.y), CGPoint(x: centre.x + spread, y: centre.y)),
                              to: (CGPoint(x: centre.x - spread * scale, y: centre.y),
@@ -1738,16 +1747,65 @@ class PaintUITestCase: XCTestCase {
                              stagger: 0, duration: 0.5)
     }
 
-    /// **A two-finger pan above the dock, whose fingers land in two separate touch events `stagger` seconds
-    /// apart — the way a hand lands on glass, and the one shape `pinch`/`rotate` cannot make.** Both
-    /// fingers start left of the rail, in the space above the dock (`aboveTheDock`), and travel `delta`
-    /// points together.
+    /// Returns a logical app-frame point using the same measured frame used by geometry assertions.
+    /// Avoids mixing a separately-read element frame with `XCUICoordinate.screenPoint` during rotation.
+    func logicalAppPoint(in frame: CGRect, normalizedOffset: CGVector) -> CGPoint {
+        CGPoint(x: frame.minX + frame.width * normalizedOffset.dx,
+                y: frame.minY + frame.height * normalizedOffset.dy)
+    }
+
+    /// **A two-finger pan in the currently exposed canvas band**, with the two fingers landing in
+    /// separate touch events `stagger` seconds apart. Both starts and their translated endpoints stay
+    /// between the toolbar and the timeline/docked card, so the whole gesture reaches the canvas.
     func panAboveTheDock(_ app: XCUIApplication, _ canvas: XCUIElement, stagger: TimeInterval,
                          delta: CGVector = CGVector(dx: 60, dy: 40)) throws {
-        func end(_ start: CGPoint) -> CGPoint { CGPoint(x: start.x + delta.dx, y: start.y + delta.dy) }
-        let start = (a: canvas.coordinate(withNormalizedOffset: aboveTheDock(app, canvas, x: 0.10, y: 0.25)).screenPoint,
-                     b: canvas.coordinate(withNormalizedOffset: aboveTheDock(app, canvas, x: 0.22, y: 0.5)).screenPoint)
-        try twoFingerGesture(from: start, to: (end(start.a), end(start.b)), stagger: stagger, duration: 0.4, steps: 8)
+        let host = canvas.frame
+        guard host.width > 0, host.height > 0 else {
+            XCTFail("PREMISE: canvas host has no measurable frame: \(host)")
+            return
+        }
+        let toolbar = app.buttons["toolbar.galleryButton"].frame
+        let timeline = app.otherElements["timeline.panel"]
+        let card = app.descendants(matching: .any)["bottomDock.card"].firstMatch
+        let toolbarEdge = toolbarBottom(app, hostFrame: host)
+        let dockEdge = dockTop(app, hostFrame: host)
+        let margin = 8.0 / Double(host.height)
+        let exposedLow = toolbarEdge + margin
+        let exposedHigh = dockEdge - margin
+        let deltaY = Double(delta.dy / host.height)
+        let startLow = max(exposedLow, exposedLow - deltaY)
+        let startHigh = min(exposedHigh, exposedHigh - deltaY)
+        let measuredFrames = "window=\(app.windows.firstMatch.frame), host=\(host), toolbar=\(toolbar), "
+            + "timeline=\(timeline.exists ? timeline.frame : .zero), card=\(card.exists ? card.frame : .zero), "
+            + "toolbarBottom=\(toolbarEdge), dockTop=\(dockEdge), exposed=\(exposedLow)...\(exposedHigh), "
+            + "startBand=\(startLow)...\(startHigh), delta=\(delta)"
+        guard startLow < startHigh else {
+            let attachment = XCTAttachment(string: measuredFrames)
+            attachment.name = "Measured canvas pan corridor"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            XCTFail("PREMISE: no exposed canvas corridor can contain this pan; \(measuredFrames)")
+            return
+        }
+
+        let rowA = startLow + (startHigh - startLow) * 0.25
+        let rowB = startLow + (startHigh - startLow) * 0.5
+        let start = (a: logicalAppPoint(in: host, normalizedOffset: CGVector(dx: 0.10, dy: rowA)),
+                     b: logicalAppPoint(in: host, normalizedOffset: CGVector(dx: 0.22, dy: rowB)))
+        func end(_ point: CGPoint) -> CGPoint { CGPoint(x: point.x + delta.dx, y: point.y + delta.dy) }
+        func hostRow(_ point: CGPoint) -> Double { Double((point.y - host.minY) / host.height) }
+        let finish = (a: end(start.a), b: end(start.b))
+        let rows = [hostRow(start.a), hostRow(start.b), hostRow(finish.a), hostRow(finish.b)]
+        let geometry = measuredFrames + "\nappStart=\(start), appFinish=\(finish), hostRows=\(rows)"
+        let attachment = XCTAttachment(string: geometry)
+        attachment.name = "Measured canvas pan corridor in app space"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let allClear = rows.allSatisfy { $0 >= exposedLow && $0 <= exposedHigh }
+        XCTAssertTrue(allClear, "PREMISE: every pan start/end must clear toolbar and dock by 8pt; "
+                      + "rows=\(rows), points=\(start)/\(finish); \(geometry)")
+        guard allClear else { return }
+        try twoFingerGesture(from: start, to: finish, stagger: stagger, duration: 0.4, steps: 8)
     }
 
     /// **One finger drags while a second lands on the glass beside it** — the shape of TODO (146)'s

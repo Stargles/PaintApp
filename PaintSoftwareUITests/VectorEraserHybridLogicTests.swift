@@ -1149,6 +1149,114 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         XCTAssertLessThan(outside[3], 16, "The replacement leaves pixels outside its footprint untouched")
     }
 
+    func testModeThreeCommittedCutsStayExactInOneBoundedWindow() throws {
+        let size = CGSize(width: 512, height: 512)
+        let victims = [CGFloat(32), 64, 96].map { x in
+            VectorStroke(brush: TestBrushes.hardRound,
+                color: CodableColor(red: 0.1, green: 0.3, blue: 0.95, alpha: 1), size: 8, opacity: 1,
+                samples: StrokeSamples([VectorSample(x: x, y: 24, pressure: 1),
+                                        VectorSample(x: x, y: 104, pressure: 1)], channels: .pressureOnly),
+                seed: 23)
+        }
+        let reference = VectorStreamElement(naturalSize: CGSize(width: 18, height: 10), host: "fixture",
+            port: 47301, sourceLabel: "Mode 3 window reference", rendersInPlace: true,
+            transform: LayerTransform(position: CGPoint(x: 64, y: 64), scale: 1, rotation: 0))
+        let source = VectorCanvas(size: size,
+            elements: [VectorElement.stream(reference)] + victims.map { VectorElement.stroke($0) })
+        let referenceImage = UIGraphicsImageRenderer(size: reference.naturalSize,
+            format: PixelOps.transparentFormat()).image { context in
+                UIColor.red.setFill()
+                context.fill(CGRect(origin: .zero, size: reference.naturalSize))
+            }
+        XCTAssertTrue(source.setStreamFrame(id: reference.id, image: referenceImage, index: 1),
+                      "PREMISE: the captured in-place reference is available")
+        _ = try XCTUnwrap(source.render(), "PREMISE: an ordinary displayed cel has its real base memo")
+        let baseRasterizations = source.rasterizations
+        let original = source.elements
+        let frozen = source.freezeDisplay(quality: .full, referenceIDs: [reference.id])
+        let scratch = StrokeScratch(canvasSize: size, role: .replacing,
+            celContent: StrokeScratch.CelContent(backing: nil,
+                ink: .ordinary(source: frozen, elements: original, rewriting: []), placement: .identity))
+        var driver = VectorEraser.IntersectionDriver()
+        var damage = CGRect.null
+        var firstWindow: CGRect?
+
+        for point in [CGPoint(x: 32, y: 64), CGPoint(x: 64, y: 64), CGPoint(x: 96, y: 64)] {
+            let result = source.cutToIntersection(atCanvasPoint: point, brush: TestBrushes.hardRound,
+                                                  size: 16, suppressing: driver.suppressed)
+            driver.accept(result.outcome, underTip: result.underTip)
+            guard case .cut = result.outcome else {
+                XCTFail("PREMISE: each separated Mode 3 target is cut on its sample")
+                return
+            }
+            guard case .region(let changed) = source.lastDamage else {
+                XCTFail("PREMISE: each committed cut reports bounded region damage")
+                return
+            }
+            damage = damage.isNull ? changed : damage.union(changed)
+            XCTAssertTrue(scratch.replaceVectorDisplay(elements: source.elements, rewriting: [], damage: damage),
+                          "The current ordered list must publish after each real cut")
+            XCTAssertTrue(scratch.hasCurrentReplacementWindow(covering: damage),
+                          "The same owner query used by the view accepts each successfully rendered window")
+            let shown = try XCTUnwrap(scratch.renderedCelContent)
+            XCTAssertTrue(shown.window.contains(damage), "The admitted window covers all cuts so far")
+            XCTAssertEqual(scratch.windowPixelCount, 0,
+                           "Mode 3 uses the native replacement image without a second raster scratch")
+            if let firstWindow {
+                XCTAssertTrue(shown.window.contains(firstWindow),
+                              "A later cut grows the same geometric window around prior admitted damage")
+            } else {
+                firstWindow = shown.window
+            }
+            XCTAssertLessThan(shown.window.width * shown.window.height, size.width * size.height,
+                              "Separated cuts keep the presentation local to their measured damage")
+
+            let committed = VectorCanvas(size: size, elements: source.elements)
+            let expected = try XCTUnwrap(committed.freezeDisplay(quality: .full,
+                referenceIDs: [reference.id]).render(quality: .full))
+            let crop = try XCTUnwrap(expected.cgImage?.cropping(to: shown.window))
+            let expectedWindow = UIImage(cgImage: crop, scale: expected.scale, orientation: .up)
+            let parity = try XCTUnwrap(RasterVectorParity.report(raster: expectedWindow,
+                                                                  vector: shown.image, size: shown.window.size))
+            XCTAssertTrue(parity.isExact, "Every intermediate replacement matches the committed list: \(parity.diagnostic)")
+        }
+
+        XCTAssertEqual(source.strokes.count, 0, "PREMISE: all three per-sample cuts committed")
+        let finalCanvas = VectorCanvas(size: size, elements: source.elements)
+        let finalDisplay = try XCTUnwrap(finalCanvas.freezeDisplay(quality: .full,
+            referenceIDs: [reference.id]).render(quality: .full))
+        let finalBytes = try XCTUnwrap(RasterVectorParity.premultipliedBytes(of: finalDisplay, size: size))
+        let referenceOffset = (64 * Int(size.width) + 64) * 4
+        XCTAssertGreaterThan(finalBytes[referenceOffset], 220,
+                             "The captured reference remains visible in its original display-list slot")
+        XCTAssertLessThan(finalBytes[referenceOffset + 1], 64)
+        XCTAssertEqual(source.rasterizations, baseRasterizations,
+                       "Successful cuts add no full-canvas rasterization beyond the already visible base")
+        if case .needsRasterize = source.cachedRender() {} else {
+            XCTFail("The bounded preview leaves the live canvas memo invalidated for the normal lift render")
+        }
+        let lastWindow = try XCTUnwrap(scratch.renderedCelContent)
+        XCTAssertNotNil(firstWindow)
+        XCTAssertFalse(scratch.hasCurrentReplacementWindow(covering: .null),
+                       "Unknown damage must never validate an otherwise healthy replacement window")
+        let unrelatedDamage = CGRect(x: 400, y: 400, width: 8, height: 8)
+        XCTAssertFalse(scratch.windowRect.contains(unrelatedDamage), "PREMISE: this separate damage is outside the admitted window")
+        XCTAssertFalse(scratch.hasCurrentReplacementWindow(covering: unrelatedDamage),
+                       "A window is not current for pixels outside its admitted bounds")
+        XCTAssertFalse(scratch.replaceCelContent(
+            ink: .derived(DerivedCelContent(identity: "mode3-refused-growth", render: { _ in nil }), .full),
+            damage: CGRect(x: 112, y: 48, width: 8, height: 32)),
+            "A failed later window draw must not publish over the last valid picture")
+        XCTAssertTrue(scratch.windowRect.contains(damage), "A refused growth retains the last admitted window")
+        XCTAssertFalse(scratch.hasCurrentReplacementWindow(covering: damage),
+                       "A retained old picture after failed growth is not a current replacement")
+        XCTAssertTrue(scratch.renderedCelContent?.image === lastWindow.image,
+                      "The retained image is stale after refusal and production must fall back to the canvas render")
+        if case .failure = scratch.lastMutationResult {} else {
+            XCTFail("The refused growth must stay latched so the old image is not treated as current")
+        }
+    }
+
     func testScratchRefusedDisplaySourcePublishesNoWindowAndReturnsFailure() {
         let size = CGSize(width: 32, height: 32)
         let scratch = StrokeScratch(canvasSize: size, role: .replacing,

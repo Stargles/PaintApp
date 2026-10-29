@@ -16,8 +16,8 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
 | Simple vector Liquify | Point-only version installed and owner-confirmed; complex vector material path removed | Final combined checks and current performance measurements |
 | Mend interior/attached vector strokes and Mend All Fills | Installed; public fill/Mend All workflows, outline and uncertain-join checks passed | Current Release cost/memory checks, including whole-layer work |
 | Smart father–grandfather saving | Newest clock-bucket retention installed; failed-save retry/safe-exit correction integrated | Combined checks and real-scene storage/device confirmation |
-| Test1 rapid-erasing crash | Crash reports/recordings preserved; owner confirms To Cross and rapid removal of many strokes | Determine actual allocation/latency cause; current installed-build physical evidence |
-| Drawing/erasing lag | Unnecessary ordinary drawing wait removed; native bounded eraser window integrated | Combined/Release checks, Mode3 follow-up and new iPad confirmation |
+| Test1 rapid-erasing crash | To Cross bounded-window candidate passed whole112, four mapped source controls, and clean normal35 at740e; source/look evidence preserved | Determine actual allocation/latency cause; current installed-build physical evidence |
+| Drawing/erasing lag | Ordinary single-cel To Cross uses the bounded replacement window; whole112, four mapped controls, and clean normal35 passed at740e | Final combined/Release checks and new iPad confirmation |
 | Move needs repeated taps in Test | Required vector-picture acquisition corrected; copied Test passed one-tap Move | Final combined checks and device confirmation |
 | Small Move boxes | Reachable body/grip arbitration corrected and separately checked | Final combined checks |
 | Move Set Down drawing gap | Old gap reproduced; existing lifted-picture owner now lasts until finished frame is shown | Final combined checks and device confirmation |
@@ -34,13 +34,15 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
 
 ### Current evidence and decisions
 
-- **Crash and lag:** Test1 is4096²; Kevin says rapid To Cross erasing triggers the failure. The
-  black screen/spinner returned to Home Screen. System reports show display-server memory pressure,
-  but no confirmed allocation origin. A first copied-scene capture made only3 cuts; the stronger
-  capture made36. It triggered16 full4096² picture assignments. This is simulator work, not a
-  physical crash diagnosis. Immediate remaining ink looked black rather than the Recolour red;
-  the next diagnostic checks the settled result and actual index-rebuild work. Protected input,
-  flight, unique Test1 route and save-stage evidence are preserved.
+- **Crash and lag:** Test1 is4096²; Kevin confirms rapid To Cross erasing triggers the failure. The
+  crash cause remains unproved. The simulator Test1 capture made36 cuts and produced25 full4096²
+  picture outputs; immediate dark ink became Recolour red at rest, so no persistent Recolour loss was
+  found. The separate740 candidate replaces repeated per-sample full-base work with the admitted
+  native window on ordinary single-cel To Cross. It passed whole112, four mapped direct assertion
+  controls, and a clean normal35 rebuild; root inspected white paper, all three removed lines, Undo,
+  and effect-pan images. These are simulator component results, not a physical crash diagnosis or
+  final Release/performance qualification. Preserve the Test1 input/flight and obtain fresh owner
+  readiness before another device workflow.
 - **Move and stream:** only repeated-tap Move was reported as specific to Test. Stream displacement
   occurs after release or Set Down. For the brief Move-exit gap, Kevin explicitly prefers the
   existing lifted drawing remain visible until the compositor's finished picture is shown.
@@ -70,31 +72,33 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
   readiness before a further device restart. Automatic renewal must preserve installed6fb while
   main is older and advance its source/artifact/profile state only after a successful install.
 
-**Mode3 source follow-up recorded before implementation:** copied Test1 produces repeated full-canvas
-base work during successful ordinary To Cross cuts. Review a minimal extension of the existing native
-replacement window and held-picture handoff, preserving real per-sample cuts/Undo, captured references,
-poses and refusal fallback. No parallel cache, service, timer or new per-feature state. Universal
-multi-layer erasing remains a separate existing route unless its owners can reuse this safely. Measure
-actual work/output before claiming latency benefit; no simulator observation establishes the crash cause.
+**Mode3 source follow-up:** the740 candidate reuses the existing replacement window, CelContentPicture,
+and UnlandedInk for ordinary single-cel To Cross. Per-sample cut resolution, one-gesture Undo,
+captured references/poses, and refusal fallback remain. Four mapped controls reached their intended
+assertions and the restored source rebuilt cleanly for normal35; whole112 and normal35 are component
+checks only. No parallel cache/service/timer/state was added. Universal multi-layer erasing remains on
+its existing route. Measure final Release work before claiming a latency benefit; no simulator result
+establishes the crash cause.
 
-**Current assembled-build boundary:** composed7cc stopped at compilation before any tests ran:
-`FillFootprintBench.swift:249` supplied a rectangle where path subtraction requires a path. The
-fixture-only correction is in progress in the isolated composed tree; it is not a product outcome.
-Release copied-Test1 baselinec62 passed1/1 with36 cuts and25 full picture landings. Point-index
-rebuild body timing is much smaller in Release; no index redesign or physical crash claim follows.
+**Current assembled-build boundary:** d30a's normal146 stopped at145pass/1fail because a pan crossed
+the still-open Duplicate/Bake layer-options popup; the corrected740 fixture closed that popup through
+its public control and the whole112 slice passed. The earlier7cc compile failure was a CGRect/CGPath
+mistake in the benchmark fixture, later corrected. Release copied-Test1 capture1 passed with36 cuts and25
+full picture landings; its timings do not prove owner-device performance or crash cause.
 
-**Composed d30a result:** normal146 ran145pass/1fail/0skip with source731 exact. Sole recorded
-failure is an obstructed effect-bar pan: the second finger crossed the still-open Duplicate/Bake
-layer-options popup. Repair that fixture through its existing close control; no product pan rejection
-is established. Separately, root LOOK found the Mode3 after-three-cuts whole-screen PNG black where
-white paper was expected, while its blank-pixel checks passed and Undo screenshot restored white
-paper/three lines. Preserve the result and investigate capture/oracle/empty-vector handoff before
-accepting any drawn-output or performance claim. Candidate remains unharvested; no new install.
+**Composed d30a result:** the earlier normal146 was145pass/1fail/0skip with exact source731. Its only
+failure was the obstructed effect-bar pan; the corrected740 fixture closes the Duplicate/Bake popup.
+The740 whole112 passed and raw/normalized image review confirmed white paper after all three cuts and
+restored lines after Undo; the apparent black view came from image metadata/display. The full-screen
+and element-pixel evidence has been reconciled. Keep the old packet immutable; no product visual fix or
+crash cause was established.
 
-**Latest validation:** corrected740e whole112 is GREEN112/112/0skip with exact source731. Root
-confirmed white paper/all3cuts and Undo restoration from normalized image data; the apparent black
-canvas was screenshot metadata/display, not a demonstrated product defect. Four deliberate controls
-and a clean normal rebuild are now running; candidate remains separate until those checks finish.
+**Latest validation:** at740e the corrected whole112 passed112/112 with0 skips and exact source731.
+All four reviewed fault controls reached their mapped assertion failures; the driver restored every
+tracked source entry after each. `xcodebuild clean` then preceded a clean Debug normal35 run, which
+passed35/35 with0 skips and exact source731. Root inspected true white paper after cuts, Undo
+restoration, and effect-pan crops. Candidate harvest is component evidence only; final Release, full
+fast/UI, performance and device gates remain open.
 
 ### Work queue
 
@@ -106,7 +110,7 @@ and a clean normal rebuild are now running; candidate remains separate until tho
    owners. Keep coherent compiler-isolation candidates out until their whole boundary is reviewed.
 4. Qualify the exact assembled source: static/lint/project checks, complete fast tier in Debug and
    Release, affected UI classes, required deliberate controls, and the full phase gate. Count actual
-   methods; new cost tests bring static full count6061, fast5447.
+   methods; Mode3 and opt-in cost witnesses bring static full count6062, fast5448.
 5. Run paired Release fill/effect and current Mend/Liquify measurements with correct output and
    honest memory limits. Never call counted cache bytes whole process/device memory.
 6. Complete Windows gates once its external state changes; no repeated unreachable-host polling.

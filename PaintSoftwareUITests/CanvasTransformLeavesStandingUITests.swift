@@ -46,8 +46,17 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
     /// the canvas through the catch-all's zero-duration press, which began on the first finger and
     /// closed the rail the bar hung off.
     func testAnEffectLayersSettingsBarSurvivesATwoFingerPanAndAPinch() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
+        let window = app.windows.firstMatch
+        let landscape = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            window.exists && window.frame.width > window.frame.height
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [landscape], timeout: 5), .completed,
+                       "PREMISE: the effect settings workflow is laid out in landscape")
+        XCTAssertGreaterThan(window.frame.width, window.frame.height,
+                             "PREMISE: the actual app window is wider than it is tall")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
@@ -58,6 +67,19 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
                       "PREMISE: the effect settings bar is up the moment the effect layer is current, with no tap")
         XCTAssertEqual(title.label, "Brightness / Contrast")
         attachScreenshot(app, "effect-bar-up")
+
+        // The effect settings card belongs to the selected value layer, but its separate options
+        // popover still covers the canvas. Dismiss only that popover before asking two fingers to pan;
+        // keep the layer rail open for the explicit close later in this workflow.
+        let optionsClose = app.buttons["layerOptions.close"]
+        XCTAssertTrue(optionsClose.waitForExistence(timeout: 5),
+                      "PREMISE: the unrelated layer-options popover is still open")
+        optionsClose.tap()
+        XCTAssertTrue(app.staticTexts["layerOptions.title"].waitForNonExistence(timeout: 5),
+                      "PREMISE: the layer-options popover closed")
+        XCTAssertTrue(title.waitForExistence(timeout: 5),
+                      "PREMISE: closing layer options leaves the effect settings card visible")
+        attachScreenshot(app, "effect-bar-up-options-closed-landscape")
 
         try assertTheMenuSurvivesTheTransforms(app, canvas, "the effect settings bar") { title.exists }
 

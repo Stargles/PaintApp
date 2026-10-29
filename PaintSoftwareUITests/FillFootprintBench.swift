@@ -244,9 +244,10 @@ final class FillFootprintBench: XCTestCase {
             (0..<celCount).map { (start: $0, length: 1) })
         let field = CGRect(x: 10, y: 10, width: 44, height: 44)
         let hole = CGRect(x: 20, y: 20, width: 8, height: 8)
+        let holePath = CGPath(rect: hole, transform: nil)
         let bodyGap = CGPath(rect: CGRect(x: 32, y: 16, width: 4, height: 16), transform: nil)
         let attachedGap = CGPath(rect: CGRect(x: 8, y: 42, width: 28, height: 4), transform: nil)
-        let initialPath = CGPath(rect: field, transform: nil).subtracting(hole, using: .winding)
+        let initialPath = CGPath(rect: field, transform: nil).subtracting(holePath, using: .winding)
             .subtracting(bodyGap, using: .winding).subtracting(attachedGap, using: .winding)
         var vectors: [VectorCanvas] = []
         var originals: [Data] = []

@@ -14,12 +14,13 @@ enum VectorScratchRole {
     /// A paint stroke: the scratch holds only this stroke's ink, shown *over* the canvas render. The
     /// canvas itself is untouched until lift.
     case overlay
-    /// Eraser preview: Mode 1 punches removal coverage from the captured display, while Modes 2 and
-    /// 4 render an updated ordered native display list. The window stands in for the committed render
-    /// there, so `StrokeCanvasView.showOverlays` punches the base out beneath it.
+    /// Eraser preview: Mode 1 punches removal coverage from the captured display; Modes 2 and 4
+    /// render an updated ordered native display list; ordinary single-cel Mode 3 renders its
+    /// committed per-sample list through measured damage. The window stands in for the committed
+    /// render there, so `StrokeCanvasView.showOverlays` punches the base out beneath it.
     case replacement
-    /// Mode 3: nothing is drawn into the scratch. It commits during the drag, so the canvas render
-    /// alone is truth and a scratch would show what is already on screen.
+    /// Universal Mode 3: this view owns only one cel while the gesture edits several. It keeps the
+    /// existing manager-owned presentation path instead of presenting a single-cel scratch.
     case none
 
     /// Name used in `StrokeCanvasView.lastVectorGestureTrace`.
@@ -103,9 +104,11 @@ struct VectorPreviewPlan: Equatable {
 /// Whether `StrokeCanvasView.refreshDisplay` may put the committed render on screen now, or has to
 /// rasterize it somewhere else first — RENDER.md stage 2's other half.
 ///
-/// **The problem it solves.** At pen-up the committed cel is re-stamped, dab by dab, into a fresh
-/// canvas-sized bitmap on the main thread (RENDER.md §3.1's first row; PERFORMANCE.md item 10
-/// MEASURED the vector eraser's Mode 3 at ~95 ms a sample doing exactly this). §2.13 rules that *"a
+/// **The problem it solves.** At pen-up the committed cel can be re-stamped, dab by dab, into a fresh
+/// canvas-sized bitmap on the main thread (RENDER.md §3.1's first row; PERFORMANCE.md item 10 records
+/// the pre-window full-render baseline at ~95 ms for a cut sample). The ordinary single-cel Mode 3
+/// candidate skips that request while its bounded replacement is current; this type still handles
+/// fallback and lift renders. §2.13 rules that *"a
 /// canvas that shows the previous composite for a split second after pen-up is acceptable, provided
 /// the main thread never freezes"*, which is permission to move the rasterize and keep the finished
 /// stroke's own scratch on screen until it lands.
@@ -165,8 +168,8 @@ enum DeferredVectorRender {
             // will be refused, so a newer one has to start regardless. It is not wasted work either
             // — the older one asks the canvas for its version before rasterizing anything, and gets
             // nil (`VectorCanvas.render(quality:ifStillAtVersion:)`), so being superseded costs a
-            // lock acquisition. That is what keeps a fast Mode 3 drag from queueing a canvas-sized
-            // render per touch sample.
+            // lock acquisition. On the fallback path, that is what keeps a fast Mode 3 drag from
+            // queueing a canvas-sized render per touch sample while an older one is pending.
             // A required picture waits on the canvas's existing rasterize lock/memo, even when
             // the asynchronous request is already queued. The Move latch cannot use a stale hole.
             return pending == version && !waitingForTheRender ? .wait : .rasterize(version: version)

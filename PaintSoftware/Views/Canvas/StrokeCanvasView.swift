@@ -244,8 +244,8 @@ final class StrokeCanvasView: CanvasPlaneView {
 
     /// Mode 2's preview walks the gesture one **increment** at a time — the previously stored sample
     /// to the one just admitted — so each touch sample asks about the footprint it has just added
-    /// rather than about the whole gesture so far. Without that the probe walk would grow with the
-    /// length of the drag, which is the shape of cost that made Mode 3 unaffordable.
+    /// rather than about the whole gesture so far. Without that, every new sample would repeat the
+    /// probe walk over all the samples that came before it.
     ///
     /// A capsule chain over the whole gesture is exactly the union of the chains over its
     /// increments (consecutive capsules share their endpoints), so punching increment by increment
@@ -1107,6 +1107,14 @@ final class StrokeCanvasView: CanvasPlaneView {
             installedRevision = interpolationPresentation.coverage?.revision
             if installedRevision == nil, heldEdit == nil { unlandedInk.removeAll() }
         case .committedRender:
+            // A single-cel To Cross cut has already changed the ordered document list. While its
+            // bounded replacement window still covers every measured cut, that picture is the
+            // authoritative display for the changed area; asking the canvas for a full base on
+            // every UIKit sample would duplicate the same work at canvas resolution.
+            if hasCurrentIntersectionWindow {
+                showOverlays(scratch)
+                return false
+            }
             let cached = vectorCanvas.cachedRender()
             switch DeferredVectorRender.step(for: cached, pending: pendingVectorRenderVersion,
                                              hostIsBlanked: hostIsBlanked,
@@ -1412,6 +1420,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     var onDisplayInkChanged: (() -> Void)?
 
     private func showOverlays(_ scratch: StrokeScratch?) {
+        let scratch = showableScratch(scratch)
         let shown = scratch?.renderedCelContent
         guard scratch?.celContent == nil || shown != nil else { return }
         defer { onDisplayInkChanged?() }
@@ -2379,8 +2388,10 @@ final class StrokeCanvasView: CanvasPlaneView {
         // At an in-between the eraser is always Mode 1: Modes 2/3 edit stored geometry, and an
         // in-between has none (it's derived). Mode 1 is itself a stroke, so it rides `localEdits`
         // like any other.
-        vectorScratchRole = Self.scratchRole(tool: strokeTool,
-                                             mode: inBetweenCelID != nil ? .erase : vectorEraserMode)
+        vectorScratchRole = Self.scratchRole(tool: strokeTool)
+        if gestureIsUniversal && vectorEraserMode == .cutToIntersection {
+            vectorScratchRole = .none
+        }
         // The vector scratch freezes the displayed list by value so reference frames and editable
         // ink keep their captured order, while backing pixels remain on their independent pose.
         scratch = {
@@ -2427,19 +2438,15 @@ final class StrokeCanvasView: CanvasPlaneView {
 
     /// Which preview strategy a gesture on a vector layer uses — see `VectorScratchRole`.
     ///
-    /// **Modes 1, 2 and 4 use `.replacement`.** Mode 1 shows its removal coverage; Modes 2 and 4
-    /// show an updated ordered native display list. None changes the document until lift. Mode 3 is
-    /// different: it commits real cuts per sample and re-renders the layer
-    /// ([PERFORMANCE.md](../../PERFORMANCE.md) item 10).
-    ///
-    /// Mode 3 keeps `.none`, and must: it has already changed the document by the time the next
-    /// refresh runs, so the canvas render genuinely is the truth for it, and a scratch would be a
-    /// canvas-sized allocation showing what is already on screen.
-    private static func scratchRole(tool: StrokeTool, mode: VectorEraserMode) -> VectorScratchRole {
+    /// **Modes 1–4 use `.replacement` on a single cel.** Mode 1 shows removal coverage, Modes 2/4
+    /// show an ordered native display list without mutating the document, and ordinary Mode 3 shows
+    /// each committed cut through its measured damage window. Universal Mode 3 remains `.none`
+    /// because its mutations span cels and this view owns only one cel's captured content.
+    private static func scratchRole(tool: StrokeTool) -> VectorScratchRole {
         switch tool {
         case .brush: return .overlay
         case .liquify: return .replacement
-        case .eraser: return mode == .cutToIntersection ? .none : .replacement
+        case .eraser: return .replacement
         }
     }
 
@@ -2474,7 +2481,38 @@ final class StrokeCanvasView: CanvasPlaneView {
         if case .cut = resolved.outcome {
             vectorContentChanged = true
             foldGestureDamage(canvas)
+            if !gestureIsUniversal { updateIntersectionWindow(in: canvas) }
         }
+    }
+
+    /// Refreshes the current single-cel To Cross result through the existing bounded replacement
+    /// owner. A refused render leaves the previous window unpublished for this gesture; the normal
+    /// committed renderer then supplies the fallback.
+    private var usesSingleCelIntersectionWindow: Bool {
+        strokeTool == .eraser && vectorEraserMode == .cutToIntersection
+            && inBetweenCelID == nil && !gestureIsUniversal
+    }
+
+    private func updateIntersectionWindow(in canvas: VectorCanvas) {
+        guard usesSingleCelIntersectionWindow,
+              let damage = vectorGestureDamage, !damage.isNull, damage.width > 0, damage.height > 0,
+              let scratch else { return }
+        _ = scratch.replaceVectorDisplay(elements: canvas.elements, rewriting: [], damage: damage)
+    }
+
+    /// The current replacement is authoritative only while its admitted window contains the full
+    /// measured damage and the latest native draw succeeded. This is derived from existing gesture,
+    /// scratch and damage state; no second preview version or cache is kept.
+    private var hasCurrentIntersectionWindow: Bool {
+        guard usesSingleCelIntersectionWindow, vectorContentChanged,
+              let damage = vectorGestureDamage, !damage.isNull, damage.width > 0, damage.height > 0,
+              let scratch else { return false }
+        return scratch.hasCurrentReplacementWindow(covering: damage)
+    }
+
+    private func showableScratch(_ candidate: StrokeScratch?) -> StrokeScratch? {
+        guard usesSingleCelIntersectionWindow else { return candidate }
+        return hasCurrentIntersectionWindow ? candidate : nil
     }
 
     /// `resolveIntersectionCut` under the universal eraser: every session's cel, each with its own
@@ -2653,7 +2691,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         // so the *next* stroke's scratch cannot take this one's place on screen. Nothing is held for
         // an in-between, whose base is a derived frame with a version of its own.
         if vectorContentChanged, inBetweenCelID == nil {
-            holdUnlandedInk(from: scratch, at: vectorCanvas.version)
+            holdUnlandedInk(from: showableScratch(scratch), at: vectorCanvas.version)
         }
         endScratch()
         currentVectorSamples = StrokeSamples(channels: .captured)
@@ -2712,8 +2750,8 @@ final class StrokeCanvasView: CanvasPlaneView {
 
     /// Shows Mode 3's footprint ring at `point` in canvas space, or hides it.
     ///
-    /// Mode 3 sets `vectorScratchRole == .none` and so paints nothing at all during a drag, which was
-    /// tolerable while the eraser's size only decided how far it could *reach*. Since 2026-08-18
+    /// The universal Mode 3 route has no single-cel preview window and paints nothing during a drag,
+    /// which was tolerable while the eraser's size only decided how far it could *reach*. Since 2026-08-18
     /// Mode 3's size **is** its selection radius — every stroke whose centreline the circle covers is
     /// cut, and every crossing inside it is erased through — so an unseen radius turns the tool into
     /// guesswork: the artist would be aiming a 50-point selection circle they cannot see. Modes 1 and
@@ -2793,8 +2831,8 @@ final class StrokeCanvasView: CanvasPlaneView {
             }
             return
         }
-        // Live feedback: a paint stroke's dabs, Mode 1's removal coverage, or Modes 2/4's bounded
-        // ordered display list. Mode 3 has no scratch content — it has already cut for real.
+        // Live feedback: a paint stroke's dabs, Mode 1's removal coverage, Modes 2/4's ordered list,
+        // or ordinary Mode 3's current committed list inside its measured damage window.
         guard let scratch, !isNoScratchRole else { return }
         if strokeTool == .eraser, inBetweenCelID == nil, let vectorCanvas, vectorEraserMode == .cutPoints {
             previewCutSpans(to: point, pressure: pressure, in: vectorCanvas, into: scratch)

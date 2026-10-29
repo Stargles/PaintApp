@@ -109,24 +109,18 @@ final class VectorPreviewPlanLogicTests: XCTestCase {
 
     // MARK: - Role 3 of 3: .none, which must not regress either
 
-    /// Mode 3 previews nothing at all: it commits real cuts during the drag, so the canvas render
-    /// alone is truth. One render, no scratch layer, no frames — and **regardless of whether a
-    /// scratch texture exists**, which it does: `beginVectorStroke` allocates an empty one for every
-    /// role. The role is what suppresses the preview, not the absence of a texture, and a plan that
-    /// keyed off the texture would light up a layer full of nothing on every touch sample.
-    ///
-    /// **Mode 2 used to be here too, and moved to `.replacement` on 2026-08-22** — it commits on
-    /// lift, so before then it showed the artist nothing for the whole drag. `.none` is now Mode 3
-    /// alone. See `VectorScratchRole`.
-    func testMode3PreviewsNothingEvenThoughAScratchExists() {
+    /// The universal Mode 3 route previews nothing through this single-cel plan: it edits multiple
+    /// canvases and keeps its manager-owned presentation path. Ordinary single-cel Mode 3 uses
+    /// `.replacement`. This pins `.none` independently of whether a scratch texture exists; the
+    /// role suppresses it, not the texture's absence.
+    func testNoScratchRoleSuppressesPreviewEvenWhenScratchExists() {
         for hasScratch in [false, true] {
             let plan = VectorPreviewPlan.forVectorLayer(role: .none,
                                                         hasScratch: hasScratch,
                                                         hasInterpolationImage: false)
             XCTAssertEqual(plan.base, .committedRender, "hasScratch=\(hasScratch)")
             XCTAssertFalse(plan.showsScratchLayer,
-                           "'.none' must add no layer, and so publish no frames — which "
-                           + "VectorEraserUITests asserts as 0. hasScratch=\(hasScratch)")
+                           "'.none' must add no layer or publish frames. hasScratch=\(hasScratch)")
         }
     }
 

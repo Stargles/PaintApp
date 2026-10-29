@@ -70,7 +70,7 @@ benchmark — which is why none has ever been under the microscope.
 | Load decodes and rasterizes every cel | O(cel count) — no longer serial, and no longer on main for the gallery's open (item 9) | `ProjectStore.load` / `loadInBackground` |
 | `UndoHistory.maxCost` | Was a hardcoded literal; device-derived as of item 13, still canvas-independent | `UndoHistory.swift` |
 | Compositor fixed per-call overhead | A fixed term, paid twice per sandwich rebuild — the two mid-stroke halves; the rest picture is read from the bake | `RenderTree.swift:429-431`, paid in `CanvasView.startSandwichRebuild` |
-| Mode 3 eraser re-stamps the whole vector layer per cut | O(total dabs in the layer) | `VectorLayer.swift:615-634`, `:1160-1214` |
+| Mode 3 fallback/universal erase re-stamps the whole vector layer per cut | O(total dabs in the layer) | `VectorLayer.swift:615-634`, `:1160-1214` |
 
 Two independent device tables record that per-composite intercept and they do not quite agree:
 `RenderTree.swift:429-431` has CoreGraphics 3.9 ms / Metal 7.3 ms, `Compositor.swift:32-33` has 4.2 /
@@ -548,13 +548,13 @@ render against the live one.
 opening wait and (c)'s deliberate behaviour change — cel blocks arriving blank and filling in —
 were checked together and read as loading rather than as broken. Accepted as designed.
 
-**10. Measure the Mode 3 eraser (`cutToIntersection`) live-drag cost. — MEASURED, 2026-08-20.**
+**10. Measure the Mode 3 eraser (`cutToIntersection`) live-drag cost. — HISTORICAL BASELINE, MEASURED 2026-08-20.**
 `recordVectorSample` calls `resolveIntersectionCut` on **every** sample
 (`StrokeCanvasView.swift:905-923`, the call at `:921` — line numbers moved since this item was
 written, the mechanism did not); on a cut, `VectorCanvas.cutToIntersection` calls `invalidate()`
-(`VectorLayer.swift:652` → `:389-393`), nilling the cached image, so the next `refreshDisplay`
-re-stamps every stored stroke in the layer through `BrushStamper`. The cost is O(total dabs),
-completely independent of canvas resolution.
+(`VectorLayer.swift:652` → `:389-393`), nilling the cached image. The measured path then re-stamped
+every stored stroke in the layer through `BrushStamper`. Its cost was O(total dabs), completely
+independent of canvas resolution.
 *Why it is here at all, honestly stated*: this item's original motivation was that it was the leading
 hypothesis for why the owner's 17 fps report did not fit the ~98 fps the area model predicts at
 2048×1024. **That hypothesis is no longer needed** — the report was taken at 4096² (§6), and the area
@@ -583,21 +583,17 @@ contention; the isolated 94.6 ms is the more trustworthy of the two and is what 
 Take this as an order-of-magnitude figure, not a decimal-precision one — the machine was not the
 96.7%-idle standard item 4b's table used, and this path was not re-taken idle before writing it down
 given the queueing three concurrent agents already imposed.
-*What it means*: a cache hit is free; a cut sample costs essentially the whole re-stamp of a
-~150-element layer, ~95 ms, on a canvas-resolution-independent path. A real Mode 3 drag crossing
-several strokes therefore pays this once per crossing, not once per gesture — the drag measured here
-paid it 50 times in 5.2 s of simulated dragging, i.e. roughly a fifth of the wall-clock time of the
-gesture was spent re-stamping a layer whose *content* did not need to change on 49 of those 50
-occasions (only the underlying geometry did; the cache is coarser than the edit).
-*Win if fixed*: unmeasured — any fix (finer-grained invalidation, or re-stamping only the changed
-region) touches three-mode eraser machinery rewritten hours before this measurement was taken
-(`tmp/crosseraser`), and this item's brief was explicitly measure-only. **Do not fix it now.**
-*Where it ranks*: real and now quantified, but narrow — it fires only mid-Mode-3-drag, over a layer
-with enough accumulated geometry to make a re-stamp expensive, and only on the samples that actually
-cross a stroke. It is not a floor on every frame the way the sandwich snapshot (item 4b/9(b)) is.
-**9(b) is now done (2026-08-20) and this is the item that gains most by it**: at 94.6 ms a cut sample
-is four times the whole cold sandwich rebuild, so it is the largest single-frame cost left anywhere in
-the app. Scope a fix once the eraser rewrite has settled.
+*What it means at the measured baseline*: a cache hit is free; explicitly requesting a render after
+a cut costs essentially the whole re-stamp of a ~150-element layer, ~95 ms, on a canvas-resolution-
+independent path. The harness paid it 50 times in 5.2 s of simulated dragging; this measured the
+renderer cost of the former per-cut base request, not the current replacement-window candidate.
+*Current candidate*: the ordinary single-cel path can present each committed cut through the existing
+bounded replacement window and skip the full-base request while that window covers measured damage.
+This source candidate is not yet compiled, run, or performance-qualified; it makes no speedup or
+crash-cause claim. Universal erase and stale/refused-window cases retain the full-render path.
+*Scope*: 94.6 ms per explicitly requested cut render was four times the whole cold sandwich rebuild
+at this historical baseline. The window candidate's draw work and current-source cost have not been
+measured, and this baseline does not establish a physical crash cause.
 *Verified*: `testCutToIntersectionLiveDragCostPerSample`, `PerfBaselineTests.swift`.
 
 **17. Mode 2/4 live preview — bounded ordered display-list rendering.** Source work now presents the

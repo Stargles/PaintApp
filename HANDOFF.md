@@ -7,34 +7,16 @@ has been established. Do not request device interaction before he is back unless
 
 ## Current state and next action
 
-1. **Check native authority first:** `/Users/juliapark/PaintWork/s54-final-qualification/root-next-gates.json`.
-   Currently `/root/eraser_window_source` owns one four-control batch at740e plus a clean normal35
-   rebuild. No other compiler/simulator/device work until all children join and authority returns.
-2. **Root integration:** `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch
-   `tmp/s54-qualified-integration`. Code through6eb7c5c2; current docs through e8e0366a (before this
-   commit). Source731, static fast5447/full6061. Main/origin remainsafd2030c; installed6fb unchanged.
-   No main merge, push or new install. The new Mode3/gesture candidate is NOT harvested.
+1. **Native qualification:** root owns native authority again. The four mapped Mode3 controls at740e each failed at their intended assertion, with exact source restoration after each. A clean rebuild then passed the whole `VectorEraserHybridLogicTests`31 + `CuttingModesUITests`4 selection:35/35,0 skips, source731. No native/compiler job is active.
+2. **Root integration:** `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch `tmp/s54-qualified-integration`. The reviewed Mode3 candidate is being harvested from immutable740e source; source remains731. Expected static totals after harvest are fast5448/full6062. Main/origin and installed build are unchanged. No main merge, push or install.
 3. **Candidate:** `/Users/juliapark/PaintWork/PaintApp-s55-effect-bar-fixture`, clean baseline
    `740e25900ebf82267197b417625ae240c9624329` before fault-driver mutations. Source731,
    fast5448/full6062. Ordinary single-cel To Cross reuses StrokeScratch's native replacement window,
    CelContentPicture and UnlandedInk. Real cuts/Undo remain; unknown/refused damage safely falls back;
    universal remains on its existing route. No new cache, service, stored feature flag or schema.
-4. **Normal proof:** strict whole112 GREEN112/112/0skip at740e (Mode3sixclasses104 + whole effect/
-   transform continuity8); root inspected erased white paper and retained controls. Earlier d30a146
-   had145pass/1obstructed-pan failure: fingerB hit the still-open Duplicate/Bake popup.740 corrects
-   only that fixture through its close control and actual landscape assertion. Other34 shared-helper
-   cases already passed unchanged in146. Earlier7cc compiled0 due a new benchmark CGRect/CGPath
-   type mistake, corrected byd30a. Preserve original packets; do not relabel them green.
-5. **Image evidence:** Mode3 after-cut PNG appeared black in a viewer, but original RGB was white.
-   EXIF/XMP8 caused preview trouble; normalized copy shows white paper/all3linesgone, Undo restores3.
-   No product empty-canvas fix was justified. App-element effect screenshots also have conflicting
-   crop/orientation metadata; an unapplied test-only XCUIScreen attachment patch is prepared for
-   the final UI run. Keep originals and evaluate actual pixels/frames before changing product code.
-6. **Next controls:** `/s55-recorded-regressions/eraser-mode3-window-faults-740e2590/` targets per-cut
-   update, failure latch, containment and unknown-damage refusal. After intended failures and exact
-   source731 restoration, rebuild normal35; root independently classifies actual assertions. No
-   mutation result is claimed yet. Then select-harvest reviewed changes, apply pure cleanup below,
-   run final fast Debug/Release, affected/full UI and remaining performance/consumer gates.
+4. **Normal proof:** strict whole112 GREEN112/112/0skip at740e; root inspected erased white paper and retained controls. Earlier d30a146 had145pass/1 obstructed-pan fixture failure;740 corrects that fixture through its close control and landscape check. The prior7cc compile-only failure is preserved as history.
+5. **Image evidence:** root reviewed full-screen captures of white paper after the three cuts, the Undo restoration, and retained effect crops. The earlier apparent black canvas was an EXIF/XMP8 preview issue; original pixels were white. No empty-canvas fix was justified. The test-only full-screen attachment patch is applied separately from the candidate harvest.
+6. **Remaining gates:** the candidate is component-qualified only. Full assembled Debug/Release fast tier, other affected UI classes, final Release cost measurements, and owner-device drives remain pending. The simulator evidence does not identify the physical crash cause. The four direct controls are complete. Next, harvest reviewed changes, apply pure cleanup below, then run final fast Debug/Release, affected UI, and remaining performance/consumer gates.
 7. **Real-scene evidence:** copied Test1 c62 Debug1 and Release1 passed. Both36cuts/864calls; Release
    index rebuild median1.665ms vs Debug13.789ms (single descriptive captures), so no index redesign.
    Release produced25 full4096² outputs. Root verified immediateBLACK ink becomesRED at public rest;
@@ -145,8 +127,8 @@ The previous complete handoff is byte-exact at
 
 Joined-phase owned56C cache cleanup preserved11,112 container entries and reclaimed4,287,086,592bytes; retained artwork/active bundles exact after boot. Receipt: `~/PaintWork/s55-recorded-regressions/owned56C-cache-cleanup-before-final-gates-20261029/`.
 
-Mode3 follow-up: c62 selected1 passed; immediate ink BLACK becomes RED after public rest (root inspected both), so no persistent Recolour loss. Actual cut/index/render analysis is next. Source-authorized assessment/candidate may reuse existing native replacement-window/UnlandedInk owners for ordinary To Cross, with exact finite damage/admission fallback and no new service/cache/state. Universal remains separately scoped. No physical cause claim.
+Mode3 follow-up: the ordinary single-cel To Cross path now uses the existing bounded replacement-window and UnlandedInk owners. Four source controls failed at their intended assertions, then the clean35-test selection passed. Root inspected white paper/cuts/Undo/effect crops. This does not establish a physical crash cause; Release-wide and owner-device gates remain.
 
-Current next gate: isolated composition7cc (8 source paths plus3status docs fromd86) attempted normal146 but stopped at FillFootprintBench:249 CGRect/CGPath type mismatch,0tests; strict extractor correctly refused missing cases. Fixture repair is assigned in composed tree; no integration source harvest yet. c62 Release actual1/1 passed with36cuts/25full outputs and37index rebuilds (median1.665ms body only, descriptive); root inspected immediateBLACK/restRED. No index redesign or physical cause. Read-only11-file/590line presentation-value review found no demonstrated defect; evidence: `~/PaintWork/s55-recorded-regressions/presentation-value-owner-review-d86bf317/`.
+Current next gate: harvest the reviewed740e candidate files and PERFORMANCE.md into integration, preserving all other source entries; apply the reviewed pure cleanup and full-screen attachment patches as separate commits. Then reconcile static counts and run only after root grants the next native gate.
 
-Latest: composed d30a normal146=145pass/1fail/0skip, strict731 exact. Failed effect-bar pan touched Duplicate/Bake layer-options popup (source-only fixture repair assigned). Root LOOK after-three-cuts whole-screenPNG9F43D894 shows blackpaper despite passing pixelblank checks; before/Undo whitepaper+3lines. CR checking channels/alpha/video, E checking emptyvector handoff/probe source. DO NOT harvest/claimdrawnpositive until reconciled. All native returned root. Fourfaultrecipes d30prepared/UNRUN; no qualifiedallgreenbaseline yet.
+Latest: 740e strict whole112 GREEN, four exact controls RED as intended, clean rebuild whole35 GREEN (731 source entries); evidence is in `/Users/juliapark/PaintWork/s55-recorded-regressions/eraser-mode3-window-faults-740e2590/` and `/Users/juliapark/PaintWork/s55-recorded-regressions/mode3-composed-normal35-after-controls-740e2590/`. No broad integration or device qualification is claimed.
