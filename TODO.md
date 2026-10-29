@@ -34,6 +34,15 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
 
 ## New audit findings — recorded October 29 before implementation
 
+- [ ] Complete video Split refusal propagation before qualifying numeric candidate8f94. Independent
+  review79 found Bake Video, Stream Bake, generic Bake and merge-alignment consumers ignore splitCel
+  refusal and then assume one-frame/boundary-split cels. Preflight the whole structural plan through
+  shared split/crop preparation before history/pixels/tracks change; refuse atomically via existing
+  notice, no catch-and-continue or partial-success result. Preserve rounded unchanged crops as success
+  (already corrected8f94). Add a finite real caller witness for admitted input whose child clock
+  cannot be admitted, plus unchanged layout/elements/history/pixels on refusal. Review report keeps
+  the corrected positive-head example; the earlier negative example was withdrawn.
+
 - [ ] Remove measured avoidable cost in the unshipped small-dab candidate before final qualification.
   Identical Release5×4000 batches: old/candidate1pt boundary0.517/1.344µs, center0.503/0.776;
   5.9pt0.687/11.444 (~16.66×);20pt2.127/2.208 (small difference not attributed beyond noise).
