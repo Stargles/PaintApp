@@ -91,7 +91,7 @@ final class ObjectTransformLogicTests: XCTestCase {
             for scale in [CGFloat(0.3), 1, 3] {
                 let frame = upright(scale: scale, rotation: rotation)
                 for entry in frame.handleLayout(rotationOffset: 36) {
-                    XCTAssertEqual(frame.handle(nearest: entry.position, reach: 1, rotationOffset: 36),
+                    XCTAssertEqual(frame.target(at: entry.position, reach: 1, rotationOffset: 36),
                                    entry.handle,
                                    "a probe on the drawn position of \(entry.handle) must find it "
                                    + "(scale \(scale), rotation \(rotation))")
@@ -145,13 +145,89 @@ final class ObjectTransformLogicTests: XCTestCase {
         XCTAssertEqual(small.target(at: nearerTheRight, reach: 22, rotationOffset: 36), .topRight)
     }
 
+    /// A square this small has no reachable move band if every point within grip reach is assigned
+    /// to a corner. Preserve the four exact corner targets while allowing its center to translate;
+    /// a normal box must keep every drawn target and its center unchanged.
+    func testSmallSquareKeepsAReachableMoveBodyBetweenItsCornerGrips() {
+        let side = CGFloat(16.4926 * sqrt(2.0))
+        let small = ObjectTransformFrame(
+            transform: LayerTransform(position: CGPoint(x: 100, y: 100), scale: 1, rotation: 0),
+            contentSize: CGSize(width: side, height: side))
+        let center = small.centre
+        XCTAssertEqual(hypot(center.x - small.corners[0].x, center.y - small.corners[0].y),
+                       16.4926, accuracy: 1e-4,
+                       "the fixture matches the observed center-to-corner clearance")
+        XCTAssertTrue(small.contains(center), "the center is an interior body point")
+        XCTAssertLessThan(hypot(center.x - small.corners[0].x, center.y - small.corners[0].y), 22,
+                          "the observed center lies inside the source-defined grip reach")
+
+        XCTAssertEqual(small.target(at: center, reach: 22, rotationOffset: 36), .body,
+                       "the center is the only interior point farthest from all four grips")
+        for (index, handle) in [ObjectTransformFrame.Handle.topLeft, .topRight, .bottomRight,
+                                .bottomLeft].enumerated() {
+            XCTAssertEqual(small.target(at: small.corners[index], reach: 22, rotationOffset: 36),
+                           handle, "an exact corner remains its own grip")
+        }
+        let topLeft = small.corners[0]
+        let tie = CGPoint(x: (center.x + topLeft.x) / 2, y: (center.y + topLeft.y) / 2)
+        XCTAssertEqual(small.target(at: tie, reach: 22, rotationOffset: 36), .topLeft,
+                       "equal-distance overlap stays with the grip")
+
+        let ordinary = upright()
+        XCTAssertEqual(ordinary.target(at: ordinary.centre, reach: 22, rotationOffset: 36), .body)
+        for entry in ordinary.handleLayout(rotationOffset: 36) {
+            XCTAssertEqual(ordinary.target(at: entry.position, reach: 22, rotationOffset: 36),
+                           entry.handle, "normal-size drawn target remains unchanged")
+        }
+    }
+
+    func testSmallMoveBodyUsesTheRefittedVisibleCenterInsteadOfItsPivot() throws {
+        let small = ObjectTransformFrame(
+            transform: LayerTransform(position: CGPoint(x: 100, y: 100), scale: 1, rotation: 0),
+            contentSize: CGSize(width: 16.4926 * sqrt(2), height: 16.4926 * sqrt(2)),
+            contentOffset: CGPoint(x: 16, y: 16))
+        let visibleCenter = small.projected(.zero)
+        XCTAssertNotEqual(visibleCenter, small.centre,
+                          "the fixture separates the refitted body center from the transform pivot")
+        XCTAssertTrue(small.contains(visibleCenter))
+        let nearestGripDistance = try XCTUnwrap(small.handleLayout(rotationOffset: 0)
+            .map { hypot(visibleCenter.x - $0.position.x, visibleCenter.y - $0.position.y) }.min())
+        let pivotDistance = hypot(visibleCenter.x - small.centre.x, visibleCenter.y - small.centre.y)
+        XCTAssertGreaterThan(pivotDistance, nearestGripDistance,
+                             "the old pivot metric would choose the nearer grip here, while the visible-center metric is zero")
+        XCTAssertEqual(small.target(at: visibleCenter, reach: 22, rotationOffset: 36), .body,
+                       "the interior point closest to the visible body center translates")
+
+        let nearCorner = CGPoint(x: small.corners[0].x + 3, y: small.corners[0].y + 3)
+        XCTAssertTrue(small.contains(nearCorner))
+        XCTAssertEqual(small.target(at: nearCorner, reach: 22, rotationOffset: 36), .topLeft,
+                       "refitting does not steal a genuinely nearer corner grip")
+    }
+
+    func testSmallDistortedMoveBodyUsesTheProjectiveVisibleCenter() throws {
+        let quad = Quad(CGPoint(x: -12, y: -12), CGPoint(x: 12, y: -12),
+                        CGPoint(x: 8, y: 12), CGPoint(x: -12, y: 12))
+        let small = ObjectTransformFrame(
+            transform: LayerTransform(position: CGPoint(x: 100, y: 100), scale: 1, rotation: 0),
+            contentSize: CGSize(width: 24, height: 24), distortQuad: quad)
+        let centerInQuad = try XCTUnwrap(small.distortResidue?.map(.zero))
+        let visibleCenter = small.projected(centerInQuad)
+        XCTAssertTrue(small.contains(visibleCenter), "the mapped source center lies in the distorted body")
+        XCTAssertEqual(small.target(at: visibleCenter, reach: 22, rotationOffset: 36), .body,
+                       "body arbitration follows the quad's diagonal intersection")
+        XCTAssertEqual(small.target(at: small.corners[0], reach: 22, rotationOffset: 36), .topLeft,
+                       "the distorted exact corner remains its grip")
+        let nearCorner = CGPoint(x: small.corners[0].x + 2, y: small.corners[0].y + 2)
+        XCTAssertEqual(small.target(at: nearCorner, reach: 22, rotationOffset: 36), .topLeft,
+                       "the distorted near-corner target remains a grip")
+    }
+
     func testAProbeBeyondReachFindsNothing() {
         let frame = upright()
         let corner = frame.corners[0]
         // Outward along the diagonal, so it is outside the box as well as out of reach — otherwise
         // the answer would legitimately be the move band.
         let outside = CGPoint(x: corner.x - 30, y: corner.y - 30)
-        XCTAssertNil(frame.handle(nearest: outside, reach: 22, rotationOffset: 36))
         XCTAssertNil(frame.target(at: outside, reach: 22, rotationOffset: 36))
     }
 
@@ -687,7 +763,7 @@ final class ObjectTransformLogicTests: XCTestCase {
             }
             // And the drift guard, restated on a turned box: a probe on a drawn grip finds it.
             for entry in byBox.handleLayout(rotationOffset: 36) {
-                XCTAssertEqual(byBox.handle(nearest: entry.position, reach: 1, rotationOffset: 36),
+                XCTAssertEqual(byBox.target(at: entry.position, reach: 1, rotationOffset: 36),
                                entry.handle, "\(entry.handle) at box angle \(angle)")
             }
         }

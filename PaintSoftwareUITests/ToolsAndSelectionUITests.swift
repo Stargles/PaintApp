@@ -791,6 +791,83 @@ final class SelectionAndMoveUITests: PaintUITestCase {
                        "the stroke the loop crossed became two independent strokes")
     }
 
+    /// A finger on the center of a tiny lassoed selection should translate it, even while the
+    /// corner grips are within reach. The same compact outline remains after the drag and the ink
+    /// is visible at its translated position when Done sets it down.
+    func testSmallLassoMoveBodyTranslatesWithoutGrowingTheSelection() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(app.windows.element(boundBy: 0).frame.width,
+                             app.windows.element(boundBy: 0).frame.height,
+                             "the cold canvas is created in owner-landscape orientation")
+
+        openBrushLibrary(app)
+        tapWhenHittable(app.buttons["brushPanel.group.Basics"], "The public Basics brush group")
+        let opaqueRound = app.buttons["brushPanel.brush.Opaque Round"]
+        XCTAssertTrue(opaqueRound.waitForExistence(timeout: 5), "the public Opaque Round brush is available")
+        if !opaqueRound.isSelected { tapWhenHittable(opaqueRound, "The Opaque Round brush") }
+        XCTAssertTrue(opaqueRound.isSelected, "the short setup stroke uses the opaque round brush")
+        setBrushSize(app, normalized: 0.1)
+        app.buttons["toolbar.brushButton"].tap()
+
+        let paper = paperRect(in: canvas)
+        let center = onHost(paper, 0.5, 0.32)
+        let source = CGVector(dx: center.dx + paper.width * 0.004,
+                              dy: center.dy + paper.height * 0.004)
+        dragOnCanvas(app,
+                     from: CGVector(dx: center.dx - paper.width * 0.006,
+                                    dy: center.dy - paper.height * 0.006),
+                     to: CGVector(dx: center.dx + paper.width * 0.006,
+                                  dy: center.dy + paper.height * 0.006))
+        XCTAssertTrue(isInk(rgbaPixel(of: canvas, at: source)),
+                      "PREMISE: a visible short diagonal gives the small selection real ink")
+
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangleMode = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangleMode.waitForExistence(timeout: 5))
+        rectangleMode.tap()
+        dragOnCanvas(app,
+                     from: CGVector(dx: center.dx - paper.width * 0.04,
+                                    dy: center.dy - paper.height * 0.04),
+                     to: CGVector(dx: center.dx + paper.width * 0.04,
+                                  dy: center.dy + paper.height * 0.04))
+
+        app.buttons["toolbar.moveButton"].tap()
+        let done = app.buttons["moveBar.doneButton"]
+        XCTAssertTrue(done.waitForExistence(timeout: 10), "the selected ink is held in its Move box")
+        let before = try XCTUnwrap(settledMoveBox(app), "PREMISE: the compact selection hull is published")
+        let screenHalfDiagonal = hypot(before.width * canvas.frame.width / 2,
+                                       before.height * canvas.frame.height / 2)
+        XCTAssertLessThan(screenHalfDiagonal, 22,
+                          "PREMISE: the center lies inside the nearest corner grip's 22-point reach")
+        attachScreenshot(XCUIScreen.main, "small-move-before-center-drag")
+
+        let requestedOffset = CGVector(dx: 0, dy: 0.08)
+        dragOnCanvas(app, from: CGVector(dx: before.midX, dy: before.midY),
+                     to: CGVector(dx: before.midX + requestedOffset.dx,
+                                  dy: before.midY + requestedOffset.dy))
+        let after = try XCTUnwrap(settledMoveBox(app), "PREMISE: the box settles after the center drag")
+        XCTAssertGreaterThan(after.midY - before.midY, 0.025,
+                             "the center drag translated the small box")
+        XCTAssertEqual(after.width, before.width, accuracy: 0.01,
+                       "a body drag does not grow the box horizontally")
+        XCTAssertEqual(after.height, before.height, accuracy: 0.01,
+                       "a body drag does not grow the box vertically")
+        attachScreenshot(XCUIScreen.main, "small-move-after-center-drag")
+
+        let landed = CGVector(dx: source.dx + after.midX - before.midX,
+                              dy: source.dy + after.midY - before.midY)
+        done.tap()
+        let sourceIsClear = waitUntil(canvas, source, { isWhitish($0) }, timeout: 10)
+        let translatedInkIsDrawn = waitUntil(canvas, landed, { isInk($0) }, timeout: 10)
+        attachScreenshot(XCUIScreen.main, "small-move-after-set-down")
+        XCTAssertTrue(sourceIsClear, "the original location is clear after Done sets the selection down")
+        XCTAssertTrue(translatedInkIsDrawn,
+                      "the translated ink is visibly drawn after Done sets the selection down")
+    }
+
     /// Switching out of Move must not uncover the unrendered source hole. The slow render seam gives
     /// the existing floating picture a visible interval in which to hand off to the committed base.
     func testMoveExitToBrushKeepsMovedInkVisibleUntilBaseRender() throws {

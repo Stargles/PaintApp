@@ -11,7 +11,7 @@ that is insufficient burst coverage. Actual cut counts and queued-picture lifeti
 Kevin confirms **To Cross** and is asleep until12pm; no physical crash cause is established.
 
 - Integration: `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch
-  `tmp/s54-qualified-integration`, assembled source through `ea8608e59013070176d91ec408ce4556bc37b498` (later commits are queue records); 731
+  `tmp/s54-qualified-integration`, assembled source through ea860 plus the qualified three-path small-Move harvest fromf33; 731
   source entries.
 
 - Recording's four-path harvest is integrated. Component evidence: Debug75 and Release75 green; two
@@ -47,8 +47,10 @@ Kevin confirms **To Cross** and is asleep until12pm; no physical crash cause is 
   Kevin’s rapid-erasing crash clue or establish a physical cause. Evidence:
   `/Users/juliapark/PaintWork/s55-recorded-regressions/test1-Mode3-current-303790c7/`.
 
-- Separate small-Move body/grip arbitration fix7522 passed65/65 with three inspected pictures.
-  Deliberate controls3 are active; root owns the sole native slot. This is separate from repeated
+- Separate small-Move body/grip arbitration fixf33 is harvested:77/77 (64model+whole13public),
+  three actual fault targets across pinned runs, restored normal64/64, and inspected pictures.
+  The earlier8x8 offset-control target was unhit and remains uncredited; strengthened16x16 passed.
+  Root owns the sole native slot. This is separate from repeated
   Move taps and Move-exit picture retirement. Consult `root-next-gates.json` before lifecycle work.
 
 - Text’s stronger Select All witness has not reached its color assertions: the small editor box

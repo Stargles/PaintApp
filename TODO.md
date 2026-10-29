@@ -12,8 +12,8 @@ No crash cause is established.
 **Current qualification status:** Export/Resize/Gradient are integrated after179/179,13 intended
 fault controls plus one first-target-only deadline control, nine inspected pictures and normal49/49.
 The copied Test scene passed a cold single-Move replay. The current-support square-hole Mend witness
-passed1/1; whole29 passed, its classifier control exposed both the448-ring and uncertain-join targets, and normal1 rebuilt green. Separate small-Move body/grip correction7522
-passed65/65 with three inspected pictures; its three controls are active. Text’s Select All route
+passed1/1; whole29 passed, its classifier control exposed both the448-ring and uncertain-join targets, and normal1 rebuilt green. Separate small-Move body/grip correctionf33 is harvested after77/77 (64model+whole13public),
+three direct fault targets and normal64/64; current pictures inspected. Text’s Select All route
 has not reached its color assertions because the small fixture overlaps transform handles; a
 test-only enlarged, clearance-qualified fixture is prepared. Final assembled Debug/Release, whole
 affected UI, performance and device confirmation remain. No new main merge, push or install.

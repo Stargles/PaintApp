@@ -418,6 +418,16 @@ struct ObjectTransformFrame: Equatable {
                 CGPoint(x: hw, y: hh), CGPoint(x: -hw, y: hh)].map(projected)
     }
 
+    /// The center of the visible body, which can differ from the transform pivot after a refit.
+    /// A projective quad maps the source rectangle's center to the intersection of its diagonals.
+    private var visibleBodyCenter: CGPoint? {
+        if let distortResidue {
+            guard let localCenter = distortResidue.map(.zero) else { return nil }
+            return projected(localCenter)
+        }
+        return projected(.zero)
+    }
+
     /// The box in its own local space — the rectangle `distortQuad` is measured against, and the
     /// source of the homography it implies. `Quad.rect(localBox)` is exactly the four corners the
     /// undistorted branch of `corners` above builds, in the same order.
@@ -536,19 +546,16 @@ struct ObjectTransformFrame: Equatable {
         }
     }
 
-    /// Where every drawn handle sits in canvas space — **the single source of truth that both the
-    /// overlay's rebuild and its hit test read**, which is `TextFrame.handleLayout`'s first
-    /// discipline and the reason the two cannot drift apart.
+    /// Where every drawn handle sits in canvas space — the single source the overlay rebuild and
+    /// shared target resolver read, so a grip that is drawn is the grip the target resolves.
     ///
     /// `rotationOffset` is how far a knob stands off the edge it belongs to. It arrives already
     /// divided by `canvasScale`, because it is a *screen*-point figure and this function works in
     /// canvas points — a handle is chrome and belongs to the screen, so the view owns the constant
     /// and the geometry owns the direction.
     ///
-    /// **Both knobs take the same offset**, which is what keeps this signature — and therefore
-    /// `handle(nearest:reach:rotationOffset:)`, `target(at:reach:rotationOffset:)`, the overlay's
-    /// `claimsTouch` and `point(inside:)` — exactly what it was when there was one knob. A second
-    /// parameter would have rippled through five call sites to say "36" twice.
+    /// **Both knobs take the same offset**, so the target resolver, overlay's `claimsTouch` and
+    /// `point(inside:)` read the same layout while the overlay owns the screen-point constant.
     func handleLayout(rotationOffset: CGFloat) -> [(handle: Handle, position: CGPoint)] {
         guard !isEmpty else { return [] }
         let c = corners
@@ -592,23 +599,6 @@ struct ObjectTransformFrame: Equatable {
         return CGPoint(x: bottomCentre.x - sin(r) * offset, y: bottomCentre.y + cos(r) * offset)
     }
 
-    /// The drawn handle **nearest** `point` within `reach`, not merely the first whose target
-    /// contains it.
-    ///
-    /// `TextFrame.handle(nearest:reach:rotationOffset:)`'s second discipline, and it bites here too:
-    /// the reach is 22 screen points and the knob stands off 36, so on a box scaled down to a
-    /// thumbnail the knob, the top-left corner and the top-right corner all cover the same finger.
-    /// First-match would answer with whichever the layout happened to list first.
-    func handle(nearest point: CGPoint, reach: CGFloat, rotationOffset: CGFloat) -> Handle? {
-        var best: (handle: Handle, distance: CGFloat)?
-        for entry in handleLayout(rotationOffset: rotationOffset) {
-            let distance = hypot(point.x - entry.position.x, point.y - entry.position.y)
-            guard distance <= reach else { continue }
-            if best == nil || distance < best!.distance { best = (entry.handle, distance) }
-        }
-        return best?.handle
-    }
-
     /// Whether `point` is inside the box — the move band's whole hit test. Answered by mapping the
     /// point back into the box's own axes rather than by a polygon walk, which is exact for the
     /// rotated rectangle a `LayerTransform` can express and needs no winding rule.
@@ -622,15 +612,21 @@ struct ObjectTransformFrame: Equatable {
         return abs(local.x) <= contentSize.width / 2 && abs(local.y) <= contentSize.height / 2
     }
 
-    /// What a touch at `point` grabs: the nearest drawn grip within reach, else the move band, else
-    /// nothing. **On the model, not in the view**, so the ordering — grips beat the band even where
-    /// they overlap it — is a tested rule rather than the order two `if`s happen to be written in.
+    /// What a touch at `point` grabs. In a small box the body and grips can overlap: the closer
+    /// target wins, with a tie going to the grip. **On the model, not in the view**, so the shared
+    /// ordering is tested rather than depending on which view callback asks first.
     func target(at point: CGPoint, reach: CGFloat, rotationOffset: CGFloat) -> Handle? {
-        if let handle = handle(nearest: point, reach: reach, rotationOffset: rotationOffset) {
-            return handle
+        let insideAllowedBody = allowedHandles.contains(.body) && contains(point)
+        var nearest: (handle: Handle, distance: CGFloat)?
+        for entry in handleLayout(rotationOffset: rotationOffset) {
+            let distance = hypot(point.x - entry.position.x, point.y - entry.position.y)
+            guard distance <= reach else { continue }
+            if nearest == nil || distance < nearest!.distance { nearest = (entry.handle, distance) }
         }
-        guard allowedHandles.contains(.body) else { return nil }
-        return contains(point) ? .body : nil
+        guard let nearest else { return insideAllowedBody ? .body : nil }
+        guard insideAllowedBody, let visibleBodyCenter else { return nearest.handle }
+        let bodyDistance = hypot(point.x - visibleBodyCenter.x, point.y - visibleBodyCenter.y)
+        return bodyDistance < nearest.distance ? .body : nearest.handle
     }
 
     /// `point` expressed in the box's own local, centred, unrotated, unscaled space. Nil when the
