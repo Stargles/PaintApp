@@ -3129,3 +3129,31 @@ log explicitly reports user authorization is required for the image read. Root i
 The test queried app accessibility before answering SpringBoard, blocking before Move/Bake. This is
 a test permission-handling gap; no lazy-provider or Bake failure is demonstrated. Correct the test
 through the existing SpringBoard permission pattern, preserving the input and all drawn assertions.
+
+## Enabled performance HUD leaves its display link alive after editor exit — October29
+
+Whole-body/caller review confirms DrawingView owns PerfHUD as StateObject and is removed on return
+to Gallery. PerfHUD starts its PerfMonitor, whose CADisplayLink strongly retains its target monitor;
+the monitor also owns the link. PerfMonitor.deinit cannot break that cycle, and the HUD currently
+has no owner-release stop. Thus an enabled HUD can leave per-frame callbacks after editor exit.
+Correct cleanup at the existing HUD ownership boundary; avoid a second display-link service,
+persistent counter or generic proxy for this single owner. Audit receipt:
+`s55-recorded-regressions/runtime-lifetimes-8-740e.md` in PaintWork. No physical crash attribution.
+
+## Placed-picture PNG save loses its intrinsic scale — October29
+
+The actual current writer/reader discriminator b437 failed rendered-canvas equality after saving a
+right-oriented, scale2 UIImage. Source size1×1.5/scale2/orientation3/CG3×2 became decoded/model
+size2×3/scale1/orientation3/CG3×2; the placement scale remained12, so the drawn picture grew.
+Orientation survives this PNG route. This is an image-unit conversion bug at the existing PNG/ref
+encoding boundary, not evidence that a new saved field or permissive decoder is needed. Correct
+encoding must preserve the physical quad and pixels; preserving the raw placement scalar is not a
+valid invariant when the image’s intrinsic units change. Package reader/format stay unchanged unless
+source review establishes otherwise. Evidence: `two-temp-diagnostics-b4377638/native-run01/`
+under PaintWork. Fix proposal, actual package matrix, old-encoder control and combined gates remain.
+
+Cold red-ink follow-up: b437’s exact retained package was rendered independently through the full
+vector renderer. Both earlier blue strokes render, but the kept64² PNG has zero red-dominant pixels
+anywhere (root rawRGBA scan and actual picture inspection). This rules out a display-handoff-only
+explanation; trace the shared small-brush renderer/culling/coverage before changing the fixture or
+adding minimum-width inflation. No physical crash attribution.

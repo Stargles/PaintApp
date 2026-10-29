@@ -7,49 +7,63 @@ has been established. Do not request device interaction before he is back unless
 
 ## Current state and next action
 
-1. **Native authority:** inspect the live owner at
-   `~/PaintWork/s54-final-qualification/root-next-gates.json` before any compiler, simulator or
-   device action. It is currently delegated for Bake checks; no concurrent native work.
-2. **Integration:** `~/PaintWork/PaintApp-s54-qualified-integration`, branch
-   `tmp/s54-qualified-integration`, source commit `b381f2dc`. Source731, fast5448/full6062.
-   Main/origin `afd2030c` and installed6fb are unchanged; no merge, push or install.
-3. **Rapid To Cross erasing:** ordinary single-cel cuts reuse the existing StrokeScratch replacement
-   window, CelContentPicture and UnlandedInk. Whole112 passed, four mapped controls reached their
-   intended assertions, and clean normal35 passed at740e. Harvest8b2d, cleanup7d5 and full-screen
-   attachment correctionf47 are integrated. Universal and safe unknown/refused-window fallback
-   remain. A paired same-input Release A/B is next; source-only A/B are materialized. Do not infer
-   reduced work or a physical crash cause before measurement.
-4. **Real scene:** copied Test1 is4096², frame3/Vector3,527elements. Single Release capture made36
-   cuts and25 full-picture outputs; index rebuild median1.665ms is descriptive simulator evidence.
-   Immediate dark ink settled to red. Original31 files remain protected. See the current Mode3 map
-   and paired proposal under `~/PaintWork/s55-recorded-regressions/`.
-5. **New audit finding:** Bake discarded placed UIImage orientation. OLD selected1 failed only at
-   the final drawn-pixel equality. Candidate `d3ec4b8f` in `PaintApp-s55-bake-orientation` preserves
-   the original orientation in the existing return; whole BakeLogicTests25 passed and root
-   independently reconciled the result. Public UI1 stopped before Move/Bake on an unanswered iOS Paste authorization prompt
-   (recording and system log agree); no retry or signal. A test-only prompt-handling correction and
-   controls remain pending. No new state, normalization buffer or saved-format change.
-6. **Strict-text recovery:** b381 cold selected1 on fresh8BBB failed at the new red-pixel premise,
-   before Cancel/Versions/Restore. Both blue cores passed; the retained unsaved package contains
-   red stroke data, which does not establish visible red ink. Source/evidence triage confirms the saved path crosses the probe; brush appearance and
-   presentation remain under investigation. No recovery qualification or product cause is claimed. Full result, prepared input and final
-   complete AUT archive are retained in `strict-text-cold-b381f2dc-8bbb3d8f/native-run01/`.
-7. **Audit:** current whole-file receipts and caller traces are external; no code-quality percentage
-   follows from file counts. Narrow unused projection/hit-test code was removed; exact rotation
-   arithmetic reused. Further source review continues. Previous component proofs remain valid at
-   their named pins; do not repeat them without a changed seam or unresolved concern.
-8. **Next gates:** finish/review Bake, then paired Mode3 Release work. Harvest only qualified source;
-   reconcile exact fast counts and run assembled Debug/Release fast tiers, affected public routes,
-   consumer controls, Release Mend/Liquify costs, and the full phase gate. Physical confirmation
-   needs fresh saved/unlocked readiness. Windows is still externally unavailable; no repoll.
-9. **Storage:** at the joined boundary, disposable fresh8BBB was retired after independent package
-   and complete AUT archive verification. Exact owned56 caches were then cleaned after all11,436
-   container entries were archived/hash-verified;1,318,694,912bytes recovered, retained artwork and
-   bundles exact after boot. Receipt: `owned56C-cache-cleanup-bake-gate-20261029/`. Check free space
-   at each phase; normal runner requires over10GiB. Never scan cloud folders or change TCC.
+1. **Continue; do not park.** Kevin confirms rapid To Cross erasing and is asleep until noon Toronto
+   (16:00UTC). No fresh disruptive iPad action is authorized by prior consumed readiness. Current
+   native owner/scope is authoritative in `~/PaintWork/s54-final-qualification/root-next-gates.json`.
+   It now delegates the PerfHUD old-cycle control and conditional restored normal9 to
+   `/root/eraser_window_source`. All other agents are source-only.
+2. **Integration:** `~/PaintWork/PaintApp-s54-qualified-integration`, `tmp/s54-qualified-integration`,
+   documentation HEAD28caa250 before this update; runtime source is byte-identical to b381f2dc.
+   Source731, fast5448/full6062. Main/origin afd2030c and installed6fb are unchanged. No new source
+   harvest, merge, push or iPad install in this continuation.
+3. **To Cross:** integrated window candidate passed112, four mapped controls and clean35 at740e.
+   Real Test1 Release A1da7e and B101ab each passed1/rootstrict731. B1 used seven native windows,
+   then missing measurements for newly-ID'd cut fragments caused `.everything` atv8. Local full
+   render requests fell36→29. Cached assignments are not allocations; no speed/crash-cause claim.
+   B2/A2 are paused for central completed-walk counts and exact-input instrumentation. No permanent
+   bounds-policy fix is approved from an inferred rectangle.
+4. **Geometry evidence:** A1post539 vsB1post541 elements from identical527 input. Two RoughInk seeds
+   retain different ink intervals; this is not just AA. The older13d `.saving` checkpoint matches
+   all541 B1 elements after normalization, but its durable project stayed527. Thus the difference
+   predates B1; current0.1-point logs cannot explain it. Actual full-precision replay is pending.
+   See B1's `a1-b1-vector-geometry-review.md`; preserve all original and checkpoint packages.
+5. **Missing red ink:** exact saved3-sample size1 OpaqueRound stroke was rendered independently at
+   b437. The kept64² picture contains no red pixels; both blue controls render. CR localized the
+   likely cause to point-sampled tiny radial-gradient dabs. A bounded shared-primitive coverage
+   correction/matrix is source work; no width inflation, whole-canvas supersampling or new feature
+   cache. Keep old witnesses. The cold recovery check never reached Cancel/Restore; it is unqualified.
+6. **Placed images:** b437 actual package roundtrip proves UIImage scale2→1 while orientation3
+   survives, doubling natural size at unchanged placement scale. H is composing a narrow existing
+   ImageRef encoder-unit correction with the separately proven Bake-orientation correction. No
+   schema/key/decoder change is proposed. Preserve physical quad/pixels, not a raw local scalar.
+   Old lost runtime scale cannot be inferred. Permanent package matrix and public Paste→Bake→
+   Gallery/reopen checks are being prepared; no current-source runtime qualification yet.
+7. **PerfHUD:** source62ff6735 in `PaintApp-s55-perfhud-lifecycle` moves stop to the existing HUD
+   owner's deinit and removes unreachable monitor-deinit cleanup. Root added existing PerfHUD.swift
+   to shared UITest sources. Normal2 passed2/2/rootstrict731; root inspected enabled55fps and hidden
+   afterGallery. Earliercccf compile0 and999/98f ambiguous inherited AX-id failures are preserved;
+   final source selects unique visible FPS text and removes the TEMP AX dump. E now runs old-cycle
+   control then, only if exact intendedRED/source restored, cleanDebug normal9 (wholeTopBar8+logic1).
+8. **Diagnostics:** `PaintApp-s55-two-temp-diagnostics` b437 selected2Debug failed2/2 as described
+   above, source731 exact. These methods are unharvestable TEMP diagnostics. Old0a/7b sources remain
+   frozen. Renderer/PNG evidence: `~/PaintWork/s55-recorded-regressions/two-temp-diagnostics-b4377638/`.
+9. **Storage:** completed owned15B offline cleanup preserved6,880 container entries in verified
+   240,148,620B archive SHAa89d6c..., reclaimed1,008,570,368B, then boot-verified artwork/bundles and
+   left15BShutdown. Own56 is Booted for current gates. Earlier56 cleanup recovered1,318,694,912B.
+   Use existing exact-cache/archive helpers; normal runner requires >10GiB. Closed-result dedup's
+   old994 allowlist is not a new-session plan. Never scan cloud folders, alterTCC or deleteOSswap.
+10. **Screenshot pitfall:** full captures can have EXIF/XMP8 and preview black despite millions of
+    white rawRGB pixels. Preserve originals; losslessly rotate and strip metadata into a separate
+    diagnostic copy before concluding a canvas went black. Root normalized the HUD-afterGallery
+    capture and inspected the complete white paper/controls with HUD off. No app fix was justified.
+11. **Next:** finish qualified fixes/controls and harvest only reviewed source, then exact assembled
+    Debug/Release fast tiers, affected whole UI classes/full phase gate, existing UI47/mask/graph
+    controls and Release Mend/Liquify/full-raster measurements. Prior component receipts are reused.
+    Windows remains externally unavailable (no repeated probe); physical confirmation waits for
+    fresh readiness. Canonical unfinished asks remain whole in TODO until the qualified main merge.
 
-Owner-facing queue: the top of TODO.md. Detailed immutable results live under PaintWork, not in
-this handoff. Keep source-only, integrated, qualified and installed distinct.
+Detailed active state is the live root-next-gates JSON and its byte-exact archived predecessors.
+Keep source-only, integrated, qualified and installed distinct. No physical crash cause is proved.
 
 ## Installed build and protected originals
 

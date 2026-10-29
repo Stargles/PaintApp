@@ -34,6 +34,22 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
 
 ### Current evidence and decisions
 
+- **Current check:** the HUD release and public Gallery/reopen checks passed. Its old-cycle control
+  and restored whole-menu checks are next. New picture-save and tiny-brush fixes remain isolated
+  source work; none is installed. The Test1 eraser comparison saved seven local full-render
+  requests before a conservative fallback; all-owner work and input variability still need checks.
+
+- **Picture saving audit:** an actual save/reload showed a scale2 placed picture doubling in drawn
+  size. Its PNG keeps rotation but reloads at scale1; the placement needs correct image-unit
+  conversion. Fix and package round-trip checks are pending; no new saved format is proposed.
+- **Missing new ink:** the exact saved red stroke also disappears in an independent full render,
+  so the investigation now targets shared small-brush rendering rather than only preview handoff.
+
+- **Architecture/performance audit:** the optional performance readout can leave its frame counter
+  running after returning to Gallery. Its display link retains its monitor, so monitor-deinit
+  cleanup is unreachable. Move teardown to the existing HUD owner; logic release proof, public
+  HUD/Gallery check and final qualification are pending. No crash-cause claim.
+
 - **Bake audit:** a pasted picture could lose its rotation when baked. OLD drawn-pixel reproduction
   failed as expected; the one-line orientation-preserving candidate passed25 logic checks. Public
   UI1 stopped on an unanswered iOS Paste prompt before Bake; a test-only prompt correction, controls
