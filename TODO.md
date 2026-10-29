@@ -93,12 +93,12 @@ restored lines after Undo; the apparent black view came from image metadata/disp
 and element-pixel evidence has been reconciled. Keep the old packet immutable; no product visual fix or
 crash cause was established.
 
-**Latest validation:** at740e the corrected whole112 passed112/112 with0 skips and exact source731.
-All four reviewed fault controls reached their mapped assertion failures; the driver restored every
-tracked source entry after each. `xcodebuild clean` then preceded a clean Debug normal35 run, which
-passed35/35 with0 skips and exact source731. Root inspected true white paper after cuts, Undo
-restoration, and effect-pan crops. Candidate harvest is component evidence only; final Release, full
-fast/UI, performance and device gates remain open.
+**Latest validation:** candidate740e whole112 passed112/112 with0 skips; all four reviewed controls
+reached their mapped assertion failures; then a clean Debug normal35 passed35/35 with0 skips. Root
+inspected white paper after cuts, Undo restoration and effect-pan crops. Candidate files are now
+harvested into integration in separate source, cleanup and screenshot commits. Static integration census
+is731 source entries, fast5448/full6062; identifier/helper checks pass. The assembled integration has
+not been compiled or run. Final Release, full fast/UI, performance and device gates remain open.
 
 ### Work queue
 

@@ -8,7 +8,7 @@ has been established. Do not request device interaction before he is back unless
 ## Current state and next action
 
 1. **Native qualification:** root owns native authority again. The four mapped Mode3 controls at740e each failed at their intended assertion, with exact source restoration after each. A clean rebuild then passed the whole `VectorEraserHybridLogicTests`31 + `CuttingModesUITests`4 selection:35/35,0 skips, source731. No native/compiler job is active.
-2. **Root integration:** `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch `tmp/s54-qualified-integration`. The reviewed Mode3 candidate is being harvested from immutable740e source; source remains731. Expected static totals after harvest are fast5448/full6062. Main/origin and installed build are unchanged. No main merge, push or install.
+2. **Root integration:** `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch `tmp/s54-qualified-integration`, currently `f47b76e0`. Harvest `8b2d7f21` copied the ten reviewed Mode3 source/test files and PERFORMANCE.md from immutable740e; the five-file cleanup is separate commit `7d5e212a`, and the full-screen attachment change is separate commit `f47b76e0`. Static source731, fast5448/full6062. Main/origin and installed build are unchanged; no main merge, push or install.
 3. **Candidate:** `/Users/juliapark/PaintWork/PaintApp-s55-effect-bar-fixture`, clean baseline
    `740e25900ebf82267197b417625ae240c9624329` before fault-driver mutations. Source731,
    fast5448/full6062. Ordinary single-cel To Cross reuses StrokeScratch's native replacement window,
@@ -16,19 +16,14 @@ has been established. Do not request device interaction before he is back unless
    universal remains on its existing route. No new cache, service, stored feature flag or schema.
 4. **Normal proof:** strict whole112 GREEN112/112/0skip at740e; root inspected erased white paper and retained controls. Earlier d30a146 had145pass/1 obstructed-pan fixture failure;740 corrects that fixture through its close control and landscape check. The prior7cc compile-only failure is preserved as history.
 5. **Image evidence:** root reviewed full-screen captures of white paper after the three cuts, the Undo restoration, and retained effect crops. The earlier apparent black canvas was an EXIF/XMP8 preview issue; original pixels were white. No empty-canvas fix was justified. The test-only full-screen attachment patch is applied separately from the candidate harvest.
-6. **Remaining gates:** the candidate is component-qualified only. Full assembled Debug/Release fast tier, other affected UI classes, final Release cost measurements, and owner-device drives remain pending. The simulator evidence does not identify the physical crash cause. The four direct controls are complete. Next, harvest reviewed changes, apply pure cleanup below, then run final fast Debug/Release, affected UI, and remaining performance/consumer gates.
+6. **Remaining gates:** the candidate is component-qualified only. Full assembled Debug/Release fast tier, other affected UI classes, final Release cost measurements, and owner-device drives remain pending. The simulator evidence does not identify the physical crash cause. The four direct controls are complete. Run the final assembled fast Debug/Release tiers, affected UI classes, and remaining performance/consumer gates after root grants them.
 7. **Real-scene evidence:** copied Test1 c62 Debug1 and Release1 passed. Both36cuts/864calls; Release
    index rebuild median1.665ms vs Debug13.789ms (single descriptive captures), so no index redesign.
    Release produced25 full4096² outputs. Root verified immediateBLACK ink becomesRED at public rest;
    no persistent Recolour loss. Same-ID input527→539 elements; protected original31 files unchanged.
    Paired same-source Release A/B proposal is external and UNRUN at
    `~/PaintWork/s55-recorded-regressions/mode3-window-release-paired-d30a7d14-v3/`.
-8. **Cleanup/audit:** external unapplied five-file patch
-   `interaction-owner-cleanup-candidate-d30a7d14-reviewed.patch` removes unused projection protocol/
-   adapters and hit-test local, reuses exact RotationAngle bearing math and updates stale comments.
-   Apply only after current fault freeze, then final gates.43 explicit whole-file receipts reconcile
-   old ledger whole31→73 and unknown153→111; not a correctness percentage. Current batch reports:
-   `continuation-whole-file-receipt-addendum-740e.{md,json}`. Source findings require actual callers;
+8. **Cleanup/audit:** separate commit `7d5e212a` removes the unused projection protocol/adapters and hit-test local, reuses the exact RotationAngle bearing math, and updates stale comments. The reviewed external patch remains archived as provenance. 43 explicit whole-file receipts reconcile old ledger whole31→73 and unknown153→111; not a correctness percentage. Current batch reports: `continuation-whole-file-receipt-addendum-740e.{md,json}`. Source findings require actual callers;
    ProcessRunner's speculative output-growth concern was refuted by its fixed short commands.
 9. **Existing integrated work:** saving retry/clock buckets, strict package/Trash ownership, raster/
    mask/video/stream bounds, Undo/numeric/brush/curve/text, repeated-tap Move, Move-exit handoff,
@@ -129,6 +124,6 @@ Joined-phase owned56C cache cleanup preserved11,112 container entries and reclai
 
 Mode3 follow-up: the ordinary single-cel To Cross path now uses the existing bounded replacement-window and UnlandedInk owners. Four source controls failed at their intended assertions, then the clean35-test selection passed. Root inspected white paper/cuts/Undo/effect crops. This does not establish a physical crash cause; Release-wide and owner-device gates remain.
 
-Current next gate: harvest the reviewed740e candidate files and PERFORMANCE.md into integration, preserving all other source entries; apply the reviewed pure cleanup and full-screen attachment patches as separate commits. Then reconcile static counts and run only after root grants the next native gate.
+Current next gate: root reviews the harvested source and static results, then grants final assembled Debug/Release fast/UI gates. This integration turn ran only static census and UI identifier/helper checks; it did not compile or run native tests.
 
-Latest: 740e strict whole112 GREEN, four exact controls RED as intended, clean rebuild whole35 GREEN (731 source entries); evidence is in `/Users/juliapark/PaintWork/s55-recorded-regressions/eraser-mode3-window-faults-740e2590/` and `/Users/juliapark/PaintWork/s55-recorded-regressions/mode3-composed-normal35-after-controls-740e2590/`. No broad integration or device qualification is claimed.
+Latest: harvested integration atf47b76e0 has source731, fast5448/full6062. Static census and both UI lint checks pass. Candidate proofs remain strict whole112 GREEN, four exact controls RED as intended, and clean whole35 GREEN at740e; receipts are under `/Users/juliapark/PaintWork/s55-recorded-regressions/eraser-mode3-window-faults-740e2590/` and `/Users/juliapark/PaintWork/s55-recorded-regressions/mode3-composed-normal35-after-controls-740e2590/`. No assembled integration tests, full fast tier, Release measurement, or device qualification was run.
