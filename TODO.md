@@ -6,13 +6,13 @@
 **New owner evidence, October29:** the crash seems to occur when erasing many brushstrokes quickly.
 The existing copied-Test1 capture had20 gestures but only3 actual cuts (77 centerline misses), so it
 does not cover that burst. Measure actual successful erasures, queued renders and picture lifetimes
-on the real copied scene. The eraser-option clarification is pending; independent tracing continues.
+on the real copied scene. Kevin confirms **To Cross** and will be asleep until12pm; independent work continues.
 No crash cause is established.
 
 **Current qualification status:** Export/Resize/Gradient are integrated after179/179,13 intended
 fault controls plus one first-target-only deadline control, nine inspected pictures and normal49/49.
 The copied Test scene passed a cold single-Move replay. The current-support square-hole Mend witness
-passed1/1; whole29 and its classifier control remain. Separate small-Move body/grip correction7522
+passed1/1; whole29 passed, its classifier control exposed both the448-ring and uncertain-join targets, and normal1 rebuilt green. Separate small-Move body/grip correction7522
 passed65/65 with three inspected pictures; its three controls are active. Text’s Select All route
 has not reached its color assertions because the small fixture overlaps transform handles; a
 test-only enlarged, clearance-qualified fixture is prepared. Final assembled Debug/Release, whole

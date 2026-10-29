@@ -8,7 +8,7 @@ history and original evidence remain in Git and the named packets.
 
 Kevin’s newest crash clue: rapidly erasing many brushstrokes. Existing303 only made3 actual cuts;
 that is insufficient burst coverage. Actual cut counts and queued-picture lifetimes are next.
-The eraser-option question is pending; no physical crash cause is established.
+Kevin confirms **To Cross** and is asleep until12pm; no physical crash cause is established.
 
 - Integration: `/Users/juliapark/PaintWork/PaintApp-s54-qualified-integration`, branch
   `tmp/s54-qualified-integration`, assembled source through `ea8608e59013070176d91ec408ce4556bc37b498` (later commits are queue records); 731
@@ -36,7 +36,8 @@ The eraser-option question is pending; no physical crash cause is established.
 
 - Current-support square-hole Mend witness050 passed1/1:96-square/448-ring/Reach40; ambiguous
   x18 refused, clear auxiliary x70 mended. Only its permanent test was harvested atea860; product
-  unchanged. WholeFillMend29 and one classifier control remain. Historical cap reports concern the
+  unchanged. WholeFillMend29 passed; the classifier control exposed both448-ring/uncertain-join
+  targets, and restored normal1 passed. Performance gates remain. Historical cap reports concern the
   retired distance-wave algorithm.
 
 - Fresh copied Test passed a cold lasso → one Move tap → Set Down → visible drawing replay. The
