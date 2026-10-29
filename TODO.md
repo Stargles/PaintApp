@@ -37,7 +37,9 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
 - **Current check:** the HUD release and public Gallery/reopen checks passed; restoring the old
   cleanup failed the release assertion, then all eight menu checks and the release check passed.
   This four-path component is integrated. New picture-save and tiny-brush fixes remain isolated;
-  the corrected whole66 small-brush class is running after a quantified sub-byte test correction.
+  the corrected whole66 small-brush class also finished65/66. Broader matrix failures
+  exposed a real coverage/transition problem in that isolated candidate; a bitmap-coordinate
+  sentinel and simpler bounded-area redesign are pending. No tiny-dab code is harvested.
   PNG/Bake normal68 reached67pass/1test-setupfailure: the test reopened Actions and committed
   its own pasted float before checking Set Down. No Bake pixel assertion was reached in that method.
   None of this newer work is installed. The Test1 eraser comparison saved seven local full-render
