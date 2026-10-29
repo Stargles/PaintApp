@@ -138,6 +138,11 @@ final class TextSessionUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let host = canvas.frame
         _ = writeWords("Hello", app, canvas)
+        let space = app.keys["space"]
+        XCTAssertTrue(space.waitForExistence(timeout: 5), "PREMISE: the live software keyboard exposes Space")
+        space.tap()
+        typeIntoTextBox("Kevin", app, at: .zero)
+        XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: both words remain in the same live text box")
         let paper = visiblePaperRect(app, in: canvas)
         let visible = CGRect(x: host.minX + paper.minX * host.width,
                              y: host.minY + paper.minY * host.height,
@@ -162,8 +167,80 @@ final class TextSessionUITests: PaintUITestCase {
         func isRedInk(_ p: RGBA) -> Bool { isRed(p) }
         func isBlackInk(_ p: RGBA) -> Bool { isInk(p) }
         let black = try settled { try count(isBlackInk) }
-        XCTAssertGreaterThan(black, 40, "PREMISE: the words are black on the paper")
+        XCTAssertGreaterThan(black, 40, "PREMISE: both words are black on the paper")
         XCTAssertEqual(try count(isRedInk), 0, "PREMISE: and nothing on the paper is red")
+
+        // Select one measured word first so Select All is a distinct native edit-menu action.
+        // The test uses the actual visible glyphs and clears every text-box grip, rather than an
+        // assumed point inside the word.
+        let ink = try inkReading(canvas, in: window)
+        XCTAssertGreaterThan(ink.ink, 40, "PREMISE: the text is visibly drawn before selection")
+        let boxValues = readField(app, "textbox:").split(separator: ",").compactMap { Double($0) }
+        XCTAssertEqual(boxValues.count, 4, "PREMISE: the live text exposes its drawn box")
+        let box = CGRect(x: host.minX + CGFloat(boxValues[0]) * host.width,
+                         y: host.minY + CGFloat(boxValues[1]) * host.height,
+                         width: CGFloat(boxValues[2]) * host.width,
+                         height: CGFloat(boxValues[3]) * host.height)
+        let grips = [CGPoint(x: box.minX, y: box.minY), CGPoint(x: box.midX, y: box.minY),
+                     CGPoint(x: box.maxX, y: box.minY), CGPoint(x: box.maxX, y: box.midY),
+                     CGPoint(x: box.maxX, y: box.maxY), CGPoint(x: box.midX, y: box.maxY),
+                     CGPoint(x: box.minX, y: box.maxY), CGPoint(x: box.minX, y: box.midY)]
+        let sample = canvasWindow(window, in: canvas)
+        let pixels = try pixelProbe(canvas)
+        var inkColumns = [Bool](repeating: false, count: 320)
+        for xi in 0..<320 {
+            let x = sample.minX + sample.width * Double(xi) / 320
+            inkColumns[xi] = (0..<120).contains { yi in
+                isInk(pixels(x, sample.minY + sample.height * Double(yi) / 120))
+            }
+        }
+        let firstInkColumn = try XCTUnwrap(inkColumns.firstIndex(of: true), "PREMISE: sampled text has a first glyph column")
+        let lastInkColumn = try XCTUnwrap(inkColumns.lastIndex(of: true), "PREMISE: sampled text has a last glyph column")
+        var interwordGap: Range<Int>?
+        var column = firstInkColumn
+        while column <= lastInkColumn {
+            if inkColumns[column] { column += 1; continue }
+            let start = column
+            while column <= lastInkColumn && !inkColumns[column] { column += 1 }
+            let gap = start..<column
+            if gap.count > (interwordGap?.count ?? 0) { interwordGap = gap }
+        }
+        let gap = try XCTUnwrap(interwordGap, "PREMISE: the two drawn words have a measured gap")
+        XCTAssertGreaterThanOrEqual(gap.count, 2, "PREMISE: the measured word gap is wider than sampling error")
+        let firstWordEndColumn = (gap.lowerBound + gap.upperBound) / 2
+        let firstWordEnd = host.minX + (sample.minX + sample.width * Double(firstWordEndColumn) / 320) * host.width
+        var selectionPoint: CGPoint?
+        var clearance: CGFloat = 0
+        for xi in 0..<320 {
+            for yi in 0..<120 {
+                let x = sample.minX + sample.width * Double(xi) / 320
+                let y = sample.minY + sample.height * Double(yi) / 120
+                let point = CGPoint(x: host.minX + x * host.width, y: host.minY + y * host.height)
+                guard point.x < firstWordEnd, box.contains(point), isInk(pixels(x, y)) else { continue }
+                let distance = grips.map { hypot(point.x - $0.x, point.y - $0.y) }.min() ?? 0
+                if distance > clearance {
+                    clearance = distance
+                    selectionPoint = point
+                }
+            }
+        }
+        XCTAssertGreaterThan(clearance, 22 + 0.0001 * hypot(host.width, host.height),
+                             "PREMISE: visible ink in the first word clears every text grip")
+        let selectWordAt = try XCTUnwrap(selectionPoint, "PREMISE: measured ink in the first word")
+        assertAboveTheDock(app, canvas, dy: (selectWordAt.y - host.minY) / host.height,
+                           "the public word selection")
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: selectWordAt.x, dy: selectWordAt.y)).doubleTap()
+        XCTAssertTrue(app.menuItems["Cut"].waitForExistence(timeout: 5),
+                      "PREMISE: the native edit menu selected the measured first word")
+        let selectAll = app.menuItems["Select All"]
+        XCTAssertTrue(selectAll.waitForExistence(timeout: 5),
+                      "PREMISE: the native edit menu offers Select All beyond the selected word")
+        selectAll.tap()
+        XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: Select All leaves the text editor active")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5),
+                      "PREMISE: Select All keeps the same software keyboard available")
+        attachScreenshot(XCUIScreen.main, "text-select-all-before-colour")
 
         let swatch = app.buttons["textPanel.colorSwatch"]
         XCTAssertTrue(swatch.waitForExistence(timeout: 5), "the Text panel has a Colour swatch")
@@ -182,6 +259,7 @@ final class TextSessionUITests: PaintUITestCase {
         tapAway(app)
         XCTAssertTrue(square.waitForNonExistence(timeout: 5), "a touch outside closes the panel again")
         XCTAssertTrue(waitForTextState(app, "editing"), "…and the box is still open to write in (text:\(readTextState(app)))")
+        XCTAssertTrue(app.keyboards.firstMatch.exists, "PREMISE: the software keyboard remains open after picking colour")
 
         let value = swatch.value as? String ?? ""
         XCTAssertEqual(value.count, 6, "the swatch reads the colour that was picked, opaque (\(value))")
@@ -194,8 +272,8 @@ final class TextSessionUITests: PaintUITestCase {
         let deadline = Date().addingTimeInterval(10)
         var red = try count(isRedInk)
         while red <= 40, Date() < deadline { Thread.sleep(forTimeInterval: 0.4); red = try count(isRedInk) }
-        XCTAssertGreaterThan(red, 40, "the words being written are drawn in the colour that was picked (red pixels \(red))")
-        XCTAssertLessThan(try count(isBlackInk), black / 5, "…and no longer in black")
+        XCTAssertGreaterThan(red, 40, "the whole selected text window shows the picked colour (red pixels \(red))")
+        XCTAssertLessThan(try count(isBlackInk), black / 5, "…and no selected words remain black")
         attachScreenshot(XCUIScreen.main, "text-drawn-in-the-picked-colour")
     }
 
