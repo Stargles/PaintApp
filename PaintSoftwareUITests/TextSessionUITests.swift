@@ -170,9 +170,8 @@ final class TextSessionUITests: PaintUITestCase {
         XCTAssertGreaterThan(black, 40, "PREMISE: both words are black on the paper")
         XCTAssertEqual(try count(isRedInk), 0, "PREMISE: and nothing on the paper is red")
 
-        // Select one measured word first so Select All is a distinct native edit-menu action.
-        // The test uses the actual visible glyphs and clears every text-box grip, rather than an
-        // assumed point inside the word.
+        // Put a caret in the actual visible gap between the two words, then open the native edit menu
+        // from that caret. A selected-word menu omits UIKit's Select All action on this iPad.
         let ink = try inkReading(canvas, in: window)
         XCTAssertGreaterThan(ink.ink, 40, "PREMISE: the text is visibly drawn before selection")
         let boxValues = readField(app, "textbox:").split(separator: ",").compactMap { Double($0) }
@@ -181,10 +180,6 @@ final class TextSessionUITests: PaintUITestCase {
                          y: host.minY + CGFloat(boxValues[1]) * host.height,
                          width: CGFloat(boxValues[2]) * host.width,
                          height: CGFloat(boxValues[3]) * host.height)
-        let grips = [CGPoint(x: box.minX, y: box.minY), CGPoint(x: box.midX, y: box.minY),
-                     CGPoint(x: box.maxX, y: box.minY), CGPoint(x: box.maxX, y: box.midY),
-                     CGPoint(x: box.maxX, y: box.maxY), CGPoint(x: box.midX, y: box.maxY),
-                     CGPoint(x: box.minX, y: box.maxY), CGPoint(x: box.minX, y: box.midY)]
         let sample = canvasWindow(window, in: canvas)
         let pixels = try pixelProbe(canvas)
         var inkColumns = [Bool](repeating: false, count: 320)
@@ -207,48 +202,24 @@ final class TextSessionUITests: PaintUITestCase {
         }
         let gap = try XCTUnwrap(interwordGap, "PREMISE: the two drawn words have a measured gap")
         XCTAssertGreaterThanOrEqual(gap.count, 2, "PREMISE: the measured word gap is wider than sampling error")
-        let firstWordEndColumn = (gap.lowerBound + gap.upperBound) / 2
-        let firstWordEnd = host.minX + (sample.minX + sample.width * Double(firstWordEndColumn) / 320) * host.width
-        var selectionPoint: CGPoint?
-        var clearance: CGFloat = 0
-        for xi in 0..<320 {
-            for yi in 0..<120 {
-                let x = sample.minX + sample.width * Double(xi) / 320
-                let y = sample.minY + sample.height * Double(yi) / 120
-                let point = CGPoint(x: host.minX + x * host.width, y: host.minY + y * host.height)
-                guard point.x < firstWordEnd, box.contains(point), isInk(pixels(x, y)) else { continue }
-                let distance = grips.map { hypot(point.x - $0.x, point.y - $0.y) }.min() ?? 0
-                if distance > clearance {
-                    clearance = distance
-                    selectionPoint = point
-                }
-            }
-        }
-        XCTAssertGreaterThan(clearance, 22 + 0.0001 * hypot(host.width, host.height),
-                             "PREMISE: visible ink in the first word clears every text grip")
-        let selectWordAt = try XCTUnwrap(selectionPoint, "PREMISE: measured ink in the first word")
-        assertAboveTheDock(app, canvas, dy: (selectWordAt.y - host.minY) / host.height,
-                           "the public word selection")
-        app.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: selectWordAt.x, dy: selectWordAt.y)).doubleTap()
-        XCTAssertTrue(app.menuItems["Cut"].waitForExistence(timeout: 5),
-                      "PREMISE: the native edit menu selected the measured first word")
+        let gapColumn = (gap.lowerBound + gap.upperBound) / 2
+        let gapX = sample.minX + sample.width * Double(gapColumn) / 320
+        let caretPoint = CGPoint(x: host.minX + gapX * host.width, y: box.midY)
+        XCTAssertTrue(box.insetBy(dx: 4, dy: 4).contains(caretPoint),
+                      "PREMISE: the measured interword caret point is inside the text box, clear of its grips")
+        assertAboveTheDock(app, canvas, dy: (caretPoint.y - host.minY) / host.height,
+                           "the public caret placement")
+        let caret = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: caretPoint.x, dy: caretPoint.y))
+        caret.tap()
+        XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: tapping the gap places a caret in the live editor")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5),
+                      "PREMISE: placing the caret keeps the software keyboard active")
+        caret.press(forDuration: 1.0)
         let selectAll = app.menuItems["Select All"]
-        let menuDeadline = Date().addingTimeInterval(5)
-        if !selectAll.exists {
-            let forward = app.buttons["Forward"]
-            let remaining = max(0, menuDeadline.timeIntervalSinceNow)
-            guard forward.waitForExistence(timeout: remaining) else {
-                XCTFail("PREMISE: the native edit menu offers its next action page")
-                return
-            }
-            forward.tap()
-        }
-        let selectAllIsAvailable = selectAll.waitForExistence(
-            timeout: max(0, menuDeadline.timeIntervalSinceNow))
-        XCTAssertTrue(selectAllIsAvailable,
-                      "PREMISE: the native edit menu offers the real Select All action")
-        guard selectAllIsAvailable else { return }
+        XCTAssertTrue(selectAll.waitForExistence(timeout: 5),
+                      "PREMISE: the caret's native edit menu offers Select All")
+        guard selectAll.exists else { return }
         selectAll.tap()
         XCTAssertTrue(waitForTextState(app, "editing"), "PREMISE: Select All leaves the text editor active")
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5),
