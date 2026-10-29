@@ -115,6 +115,45 @@ final class InterpolationModelLogicTests: XCTestCase {
         XCTAssertTrue(decoded.guideStrokes.isEmpty)
     }
 
+    /// MotionGroup has four required fields in the current format. Defaults in its direct
+    /// initializer are for new in-memory groups; malformed persisted fields must fail loudly.
+    func testMotionGroupRequiresEveryCurrentFieldWhenDecoding() throws {
+        let initialized = MotionGroup(displayName: "Defaulted",
+                                      tagColor: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        XCTAssertEqual(initialized.mode, .auto, "The direct initializer keeps its new-group default")
+
+        let data = try encoded(MotionGroup(id: UUID(), displayName: "Moving ink",
+                                           tagColor: CodableColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1),
+                                           mode: .clean))
+        let valid = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let wrongTypes: [String: Any] = [
+            "id": 42,
+            "displayName": 42,
+            "tagColor": "not a color",
+            "mode": 42
+        ]
+
+        for field in ["id", "displayName", "tagColor", "mode"] {
+            var missing = valid
+            missing.removeValue(forKey: field)
+            XCTAssertThrowsError(try JSONDecoder().decode(MotionGroup.self,
+                                                            from: JSONSerialization.data(withJSONObject: missing)),
+                                 "A current MotionGroup missing \(field) must fail")
+
+            var null = valid
+            null[field] = NSNull()
+            XCTAssertThrowsError(try JSONDecoder().decode(MotionGroup.self,
+                                                            from: JSONSerialization.data(withJSONObject: null)),
+                                 "A current MotionGroup with null \(field) must fail")
+
+            var wrongType = valid
+            wrongType[field] = try XCTUnwrap(wrongTypes[field])
+            XCTAssertThrowsError(try JSONDecoder().decode(MotionGroup.self,
+                                                            from: JSONSerialization.data(withJSONObject: wrongType)),
+                                 "A current MotionGroup with the wrong type for \(field) must fail")
+        }
+    }
+
     /// A cel manifest predating the recipe file simply has no such key, which must decode as "an
     /// ordinary, non-interpolated cel".
     func testCelManifestWithoutInterpolationFileDecodesAsNil() throws {

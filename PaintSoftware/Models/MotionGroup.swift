@@ -40,18 +40,4 @@ struct MotionGroup: Identifiable, Codable, Equatable {
         self.tagColor = tagColor
         self.mode = mode
     }
-
-    private enum CodingKeys: String, CodingKey {
-        case id, displayName, tagColor, mode
-    }
-
-    /// Hand-written to the repo's usual rule: a group saved before a field existed still loads.
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decode(UUID.self, forKey: .id)
-        displayName = try c.decodeIfPresent(String.self, forKey: .displayName) ?? ""
-        tagColor = try c.decodeIfPresent(CodableColor.self, forKey: .tagColor)
-            ?? CodableColor(red: 1, green: 0, blue: 0, alpha: 1)
-        mode = try c.decodeIfPresent(GroupInterpolation.self, forKey: .mode) ?? .auto
-    }
 }
