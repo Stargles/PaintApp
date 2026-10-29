@@ -195,7 +195,8 @@ final class BrushEngineLogicTests: XCTestCase {
     /// `CGContext.setAlpha`. These tests pin the resulting alpha profile so that substitution can't
     /// silently drift: if someone re-bakes alpha into the stops, or the two techniques turn out not
     /// to compose the way `RasterLayerTexture.dabGradients` documents, the rendered dab changes and
-    /// these fail. Nothing else in the suite looks at stamped pixel values.
+    /// these fail. The tiny-round regressions below cover integrated pixel energy and geometry at
+    /// the other end of the raster's footprint range.
 
     /// Reads a texture's pixels back as straight (un-premultiplied) RGBA bytes.
     private func rgbaPixels(of texture: RasterLayerTexture) -> (bytes: [UInt8], width: Int, height: Int)? {
@@ -375,6 +376,367 @@ final class BrushEngineLogicTests: XCTestCase {
         return (CGFloat(pixels.bytes[i]) / 255 / a,
                 CGFloat(pixels.bytes[i + 1]) / 255 / a,
                 CGFloat(pixels.bytes[i + 2]) / 255 / a)
+    }
+
+    private func redEnergy(_ pixels: (bytes: [UInt8], width: Int, height: Int),
+                           pixelArea: CGFloat = 1) -> CGFloat {
+        var total: CGFloat = 0
+        for index in stride(from: 0, to: pixels.bytes.count, by: 4) {
+            total += CGFloat(pixels.bytes[index]) / 255
+        }
+        return total / pixelArea
+    }
+
+    private func redPixelBounds(_ pixels: (bytes: [UInt8], width: Int, height: Int),
+                                scaleX: CGFloat = 1, scaleY: CGFloat = 1) -> CGRect? {
+        var minX = pixels.width, minY = pixels.height, maxX = -1, maxY = -1
+        for y in 0..<pixels.height {
+            for x in 0..<pixels.width where pixels.bytes[(y * pixels.width + x) * 4] > 0 {
+                minX = min(minX, x); minY = min(minY, y)
+                maxX = max(maxX, x); maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= minX, maxY >= minY else { return nil }
+        return CGRect(x: CGFloat(minX) / scaleX, y: CGFloat(minY) / scaleY,
+                      width: CGFloat(maxX - minX + 1) / scaleX,
+                      height: CGFloat(maxY - minY + 1) / scaleY)
+    }
+
+    /// Upper bound on integrated-energy loss across the two 8-bit RGBA rasterizations in
+    /// `renderedRoundDab` and `rgbaPixels`. Each supported pixel can lose at most half an alpha
+    /// quantum at either stage; normalize device pixels back to user-space area like `redEnergy`.
+    private func rgbaQuantizationEnergyBound(radius: CGFloat, center: CGPoint,
+                                             scaleX: CGFloat, scaleY: CGFloat,
+                                             flipY: Bool) -> CGFloat {
+        let centerDeviceX = center.x * scaleX
+        let centerDeviceY = flipY ? 64 * scaleY - center.y * scaleY : center.y * scaleY
+        let firstX = Int(floor(centerDeviceX - radius * scaleX))
+        let lastX = Int(ceil(centerDeviceX + radius * scaleX))
+        let firstY = Int(floor(centerDeviceY - radius * scaleY))
+        let lastY = Int(ceil(centerDeviceY + radius * scaleY))
+        var supportedPixels = 0
+
+        for y in firstY..<lastY {
+            // Raw bitmap rows are top-first. With an unflipped CTM, convert those rows back to
+            // logical y; with a y-flipped CTM, the CTM and storage reversal cancel.
+            let pixelY0 = !flipY ? (64 * scaleY - CGFloat(y + 1)) / scaleY
+                                 : CGFloat(y) / scaleY
+            let pixelY1 = !flipY ? (64 * scaleY - CGFloat(y)) / scaleY
+                                 : CGFloat(y + 1) / scaleY
+            let minY = min(pixelY0, pixelY1), maxY = max(pixelY0, pixelY1)
+            let nearestY = center.y < minY ? minY - center.y
+                : (center.y > maxY ? center.y - maxY : 0)
+            for x in firstX..<lastX {
+                let minX = CGFloat(x) / scaleX, maxX = CGFloat(x + 1) / scaleX
+                let nearestX = center.x < minX ? minX - center.x
+                    : (center.x > maxX ? center.x - maxX : 0)
+                if hypot(nearestX, nearestY) < radius { supportedPixels += 1 }
+            }
+        }
+
+        return CGFloat(supportedPixels) / 255 / (scaleX * scaleY)
+    }
+
+    private func maximumAlphaDifference(_ lhs: (bytes: [UInt8], width: Int, height: Int),
+                                        _ rhs: (bytes: [UInt8], width: Int, height: Int)) -> CGFloat {
+        guard lhs.width == rhs.width, lhs.height == rhs.height else { return 1 }
+        var difference: CGFloat = 0
+        for index in stride(from: 3, to: lhs.bytes.count, by: 4) {
+            difference = max(difference,
+                             abs(CGFloat(lhs.bytes[index]) - CGFloat(rhs.bytes[index])) / 255)
+        }
+        return difference
+    }
+
+    private func renderedRoundDab(radius: CGFloat, center: CGPoint,
+                                  scaleX: CGFloat, scaleY: CGFloat, flipY: Bool = false,
+                                  hardness: CGFloat = 0.8, alpha: CGFloat = 1,
+                                  blendMode: CGBlendMode = .normal, background: UIColor? = nil)
+        -> (pixels: (bytes: [UInt8], width: Int, height: Int), hits: Int, misses: Int)? {
+        let width = Int(64 * scaleX), height = Int(64 * scaleY)
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let cache = DabGradientCache()
+        let image = bytes.withUnsafeMutableBytes { raw -> CGImage? in
+            guard let context = CGContext(data: raw.baseAddress, width: width, height: height,
+                                          bitsPerComponent: 8, bytesPerRow: width * 4,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+                return nil
+            }
+            if let background {
+                context.setFillColor(background.cgColor)
+                context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            }
+            if flipY {
+                context.translateBy(x: 0, y: CGFloat(height))
+                context.scaleBy(x: scaleX, y: -scaleY)
+            } else {
+                context.scaleBy(x: scaleX, y: scaleY)
+            }
+            cache.stamp(into: context, at: center, radius: radius, color: .red, alpha: alpha,
+                        hardness: hardness, blendMode: blendMode)
+            return context.makeImage()
+        }
+        guard let image,
+              let pixels = rgbaPixels(of: UIImage(cgImage: image), width: width, height: height) else {
+            return nil
+        }
+        return (pixels, cache.hits, cache.misses)
+    }
+
+    /// The saved 1pt Opaque Round stroke is the first case. Other sizes and raster scales pin both
+    /// sides of the pixel-sampling boundary: coverage stays integrated and bounded without changing
+    /// the requested circle's geometric radius. The integrated-energy oracle includes the
+    /// maximum RGBA8 quantization error for each pixel the radial support touches; a mathematically
+    /// nonzero subpixel dab can be smaller than half a byte in every supported pixel.
+    func testTinyRoundDabCoverageTracksDevicePixelsAndSubpixelPhase() {
+        let diameters: [CGFloat] = [0.1, 0.5, 0.75, 1, 1.2, 1.4, 1.414, 1.416,
+                                    1.5, 1.68, 1.69, 2, 2.002]
+        let phases = [CGPoint(x: 32, y: 32), CGPoint(x: 32.5, y: 32.5),
+                      CGPoint(x: 32.25, y: 32.75)]
+        let scales: [(CGFloat, CGFloat, Bool)] = [(1, 1, false), (2, 2, false),
+                                                  (3, 3, false), (2, 1, false),
+                                                  (2, 1, true)]
+        let hardness: CGFloat = 0.8
+        let meanCoverage = (1 + hardness + hardness * hardness) / 3
+
+        for diameter in diameters {
+            let radius = diameter / 2
+            for (scaleX, scaleY, flipY) in scales {
+                for center in phases {
+                    guard let rendered = renderedRoundDab(radius: radius, center: center,
+                                                          scaleX: scaleX, scaleY: scaleY,
+                                                          flipY: flipY) else {
+                        return XCTFail("Could not render radius \(radius) at \(scaleX)×\(scaleY)")
+                    }
+                    let pixels = rendered.pixels
+                    let expectedEnergy = .pi * radius * radius * meanCoverage
+                    let energy = redEnergy(pixels, pixelArea: scaleX * scaleY)
+                    let quantizationBound = rgbaQuantizationEnergyBound(
+                        radius: radius, center: center, scaleX: scaleX, scaleY: scaleY,
+                        flipY: flipY)
+                    XCTAssertGreaterThan(energy + quantizationBound, expectedEnergy * 0.65,
+                                         "The radial profile must retain integrated coverage for diameter \(diameter), phase \(center), at \(scaleX)×\(scaleY)")
+                    XCTAssertLessThan(energy - quantizationBound, expectedEnergy * 1.35,
+                                      "Coverage must stay close to the unchanged radial profile's area")
+
+                    let geometricBounds = dabCircleBounds(at: center, radius: radius)
+                    if let measured = redPixelBounds(pixels, scaleX: scaleX, scaleY: scaleY) {
+                        let actual = !flipY
+                            ? CGRect(x: measured.minX, y: 64 - measured.maxY,
+                                     width: measured.width, height: measured.height)
+                            : measured
+                        XCTAssertGreaterThanOrEqual(actual.minX, geometricBounds.minX - 1 / scaleX - 0.001)
+                        XCTAssertGreaterThanOrEqual(actual.minY, geometricBounds.minY - 1 / scaleY - 0.001)
+                        XCTAssertLessThanOrEqual(actual.maxX, geometricBounds.maxX + 1 / scaleX + 0.001)
+                        XCTAssertLessThanOrEqual(actual.maxY, geometricBounds.maxY + 1 / scaleY + 0.001)
+                    } else {
+                        let symmetricIntegerDot = diameter == 0.1
+                            && center.x == 32 && center.y == 32
+                            && scaleX == 1 && scaleY == 1 && !flipY
+                        XCTAssertTrue(symmetricIntegerDot,
+                                      "Only the documented 0.1pt integer-phase 1× case may have no RGBA8-supported pixel")
+                        if symmetricIntegerDot {
+                            XCTAssertLessThan(expectedEnergy / 4, 0.5 / 255,
+                                              "Each of the four symmetric pixel quadrants is below one half-byte, so RGBA8 may round every one to zero")
+                        }
+                        XCTAssertLessThanOrEqual(expectedEnergy * 0.65, quantizationBound,
+                                                 "A fully quantized-away dab is allowed only when the supported pixels' RGBA8 rounding bound covers its integrated energy")
+                    }
+
+                    let centerDeviceX = center.x * scaleX
+                    let centerDeviceY = flipY ? CGFloat(pixels.height) - center.y * scaleY
+                                              : center.y * scaleY
+                    let columns = Int(ceil(centerDeviceX + radius * scaleX))
+                        - Int(floor(centerDeviceX - radius * scaleX))
+                    let rows = Int(ceil(centerDeviceY + radius * scaleY))
+                        - Int(floor(centerDeviceY - radius * scaleY))
+                    let deviceRadius = radius * max(scaleX, scaleY)
+                    let areaPathExpected = deviceRadius < 3 && columns > 0 && columns <= 7
+                        && rows > 0 && rows <= 7
+                    let pureAreaExpected = areaPathExpected && deviceRadius <= 1
+                    XCTAssertEqual(rendered.misses, pureAreaExpected ? 0 : 1,
+                                   "Pure area coverage needs no gradient; the transition and larger dabs share the existing cached native gradient")
+                    XCTAssertLessThanOrEqual(rendered.hits, 1)
+                }
+            }
+        }
+
+        // A narrow device-space ellipse must be integrated over its actual support intersection;
+        // sampling only the full pixel can miss every sample even though the dab is representable.
+        for center in phases {
+            guard let rendered = renderedRoundDab(radius: 0.05, center: center,
+                                                  scaleX: 20, scaleY: 1) else {
+                return XCTFail("Could not render the bounded thin anisotropic dab")
+            }
+            let expectedEnergy = .pi * 0.05 * 0.05 * meanCoverage
+            let energy = redEnergy(rendered.pixels, pixelArea: 20)
+            XCTAssertGreaterThan(energy, expectedEnergy * 0.65)
+            XCTAssertLessThan(energy, expectedEnergy * 1.35)
+            XCTAssertEqual(rendered.misses, 0,
+                           "The thin support must use bounded local coverage instead of disappearing between pixel centers")
+        }
+
+        // The old half-pixel-diagonal boundary is no longer a switch: both neighbouring radii use
+        // phase-aware integration, so the complete pixel profile changes only by the radius delta.
+        let sampleBoundary = sqrt(0.5)
+        for center in phases {
+            guard let below = renderedRoundDab(radius: sampleBoundary.nextDown, center: center,
+                                               scaleX: 1, scaleY: 1),
+                  let above = renderedRoundDab(radius: sampleBoundary.nextUp, center: center,
+                                               scaleX: 1, scaleY: 1) else {
+                return XCTFail("Could not render the pixel-sample boundary pair")
+            }
+            XCTAssertLessThan(maximumAlphaDifference(below.pixels, above.pixels), 0.02,
+                              "A dab must not disappear or jump at the nearest-sample distance for phase \(center)")
+        }
+
+        // Both radii remain on the integrated path; verify that a small radius change does not
+        // create a profile jump when no point-sample-error threshold is involved.
+        guard let smaller = renderedRoundDab(radius: 2.961, center: CGPoint(x: 32, y: 32),
+                                             scaleX: 1, scaleY: 1),
+              let larger = renderedRoundDab(radius: 2.962, center: CGPoint(x: 32, y: 32),
+                                            scaleX: 1, scaleY: 1) else {
+            return XCTFail("Could not render the nearby integrated-coverage profiles")
+        }
+        XCTAssertLessThan(maximumAlphaDifference(smaller.pixels, larger.pixels), 0.03,
+                          "The integrated profile must vary smoothly with dab radius")
+
+        // The actual cached gradient handoff occurs at three device pixels. Compare its complete
+        // per-pixel output against the integrated path on the low side of that boundary.
+        for center in [CGPoint(x: 32.5, y: 32.5), CGPoint(x: 32.25, y: 32.75)] {
+            guard let below = renderedRoundDab(radius: CGFloat(1).nextDown, center: center,
+                                               scaleX: 3, scaleY: 3),
+                  let above = renderedRoundDab(radius: CGFloat(1).nextUp, center: center,
+                                               scaleX: 3, scaleY: 3) else {
+                return XCTFail("Could not render the three-device-pixel cutoff pair")
+            }
+            XCTAssertLessThan(maximumAlphaDifference(below.pixels, above.pixels), 0.02,
+                              "The last locally corrected dab must meet the existing radial path at three device pixels")
+        }
+    }
+
+    /// The area/native transition is one source, so its alpha scales once and its two passes never
+    /// add to existing ink. Compare production pixels with source-over/destination-out arithmetic;
+    /// the full-alpha operand also proves that convex mixing retains a completely covered core.
+    func testTinyRoundTransitionBlendsOnceAtRequestedAlpha() {
+        let fixtures: [(CGFloat, CGFloat, CGFloat, Bool)] = [
+            (1.25, 1, 1, false), (2, 1, 1, false), (2.75, 1, 1, false),
+            (1, 2, 2, false), (2 / 3, 3, 3, false), (1, 2, 1, true)
+        ]
+        let center = CGPoint(x: 32.25, y: 32.75)
+        let requested: CGFloat = 0.37
+        for (radius, scaleX, scaleY, flipY) in fixtures {
+            guard let source = renderedRoundDab(radius: radius, center: center,
+                                                scaleX: scaleX, scaleY: scaleY, flipY: flipY,
+                                                hardness: 1),
+                  let painted = renderedRoundDab(radius: radius, center: center,
+                                                 scaleX: scaleX, scaleY: scaleY, flipY: flipY,
+                                                 hardness: 1, alpha: requested, background: .blue),
+                  let erased = renderedRoundDab(radius: radius, center: center,
+                                                scaleX: scaleX, scaleY: scaleY, flipY: flipY,
+                                                hardness: 1, alpha: requested,
+                                                blendMode: .destinationOut, background: .blue) else {
+                return XCTFail("Could not render the transition's normal/eraser composition")
+            }
+            var maximumPaintError: CGFloat = 0
+            var maximumEraseError: CGFloat = 0
+            var maximumSourceAlpha: CGFloat = 0
+            for index in stride(from: 0, to: source.pixels.bytes.count, by: 4) {
+                let sourceAlpha = CGFloat(source.pixels.bytes[index + 3]) / 255
+                maximumSourceAlpha = max(maximumSourceAlpha, sourceAlpha)
+                let appliedAlpha = sourceAlpha * requested
+                let paintedExpected: [CGFloat] = [appliedAlpha, 0, 1 - appliedAlpha, 1]
+                let erasedExpected: [CGFloat] = [0, 0, 1 - appliedAlpha, 1 - appliedAlpha]
+                for channel in 0..<4 {
+                    maximumPaintError = max(maximumPaintError,
+                        abs(CGFloat(painted.pixels.bytes[index + channel]) / 255 - paintedExpected[channel]))
+                    maximumEraseError = max(maximumEraseError,
+                        abs(CGFloat(erased.pixels.bytes[index + channel]) / 255 - erasedExpected[channel]))
+                }
+            }
+            XCTAssertEqual(maximumSourceAlpha, 1, accuracy: 1 / 255,
+                           "The transition's convex weights must retain an opaque hard core")
+            // One byte for the full-alpha reference and one for the scaled/composited result.
+            XCTAssertLessThanOrEqual(maximumPaintError, 2 / 255,
+                                     "Normal blending must apply the combined source once at its requested alpha")
+            XCTAssertLessThanOrEqual(maximumEraseError, 2 / 255,
+                                     "Erasing must remove the same combined source coverage once at its requested alpha")
+        }
+    }
+
+    /// The one-point saved profile must survive the production vector-render path. These paths cover
+    /// the original horizontal stroke, integer/half/fractional phases, and vertical/diagonal walks;
+    /// geometry remains exactly one point wide while its pixels acquire nonzero integrated coverage.
+    func testOnePointVectorStrokesKeepCoverageWithoutWideningGeometry() throws {
+        let paths: [(String, [CGPoint])] = [
+            ("saved-horizontal", [CGPoint(x: 35.25, y: 27), CGPoint(x: 47.25, y: 27),
+                                   CGPoint(x: 51.25, y: 27)]),
+            ("half-pixel-horizontal", [CGPoint(x: 20, y: 27.5), CGPoint(x: 36, y: 27.5)]),
+            ("fractional-horizontal", [CGPoint(x: 20.25, y: 27.25), CGPoint(x: 36.25, y: 27.25)]),
+            ("vertical", [CGPoint(x: 27, y: 20), CGPoint(x: 27, y: 36)]),
+            ("diagonal", [CGPoint(x: 20.5, y: 20.5), CGPoint(x: 31.8137085, y: 31.8137085)])
+        ]
+        let red = CodableColor(red: 1, green: 0, blue: 0, alpha: 1)
+        let brush = Brush(name: "One-point round coverage", tip: .round, size: 1, opacity: 1,
+                          dab: BrushDabSettings(size: 1, flow: 1, spacing: 0.05, hardness: 0.8),
+                          stroke: BrushStrokeSettings(stabilization: 0),
+                          modulations: BrushModulations())
+        XCTAssertEqual(brush.dabValues(atPressure: 1).size, 1, accuracy: 0.0001)
+
+        // The first path is the exact decoded brush profile and sample sequence from the retained
+        // Test1 package. Keep the other paths synthetic so phase and orientation coverage is broad.
+        let savedProfileData = Data(#"{"opacity":1,"preset":{"opacity":1,"stroke":{"stabilization":0.2,"blendMode":"normal"},"size":1,"modulations":[{"output":"size","input":{"kind":"pressure"},"modules":[{"kind":"curveRamp","curve":{"keys":[{"interpolation":"linear","frame":0,"value":0.75,"outHandle":{"deltaValue":0,"deltaFrames":0},"tangentMode":"vector","inHandle":{"deltaValue":0,"deltaFrames":0}},{"interpolation":"linear","frame":1024,"value":1,"outHandle":{"deltaFrames":0,"deltaValue":0},"tangentMode":"vector","inHandle":{"deltaFrames":0,"deltaValue":0}}],"step":1}}],"amount":0.15}],"dab":{"spacing":0.05,"density":1,"flow":1,"size":0.85,"hueShift":0,"scatterAlong":0,"angle":{"jitter":0,"base":0,"directionFollow":0},"saturationShift":0,"scatterAcross":0,"brightnessShift":0,"hardness":0.8},"id":"B7051000-0000-4000-A000-000000000012","name":"Opaque Round","tip":{"kind":"round"}},"size":1}"#.utf8)
+        let savedBrush = try JSONDecoder().decode(ToolProfile.self, from: savedProfileData).preset
+
+        for (name, points) in paths {
+            let strokeBrush = name == "saved-horizontal" ? savedBrush : brush
+            let stroke = VectorStroke(
+                id: name == "saved-horizontal"
+                    ? UUID(uuidString: "1C2B2CA8-2BCC-4021-9929-7C29ADA6B3AC")! : UUID(),
+                brush: strokeBrush, color: red, size: 1, opacity: 1,
+                samples: StrokeSamples(points: points),
+                seed: name == "saved-horizontal" ? 4_883_679_283_720_077_707 : 1)
+            if name == "saved-horizontal" {
+                XCTAssertEqual(stroke.samples.positions, points)
+                XCTAssertEqual(stroke.seed, 4_883_679_283_720_077_707)
+                XCTAssertEqual(stroke.brush.dabValues(atPressure: 1).size, 1, accuracy: 0.0001)
+            }
+            let geometry = VectorStrokeRenderWalk(stroke).geometry().bounds
+            let minX = points.map(\.x).min()!, maxX = points.map(\.x).max()!
+            let minY = points.map(\.y).min()!, maxY = points.map(\.y).max()!
+            XCTAssertEqual(geometry.minX, minX - 0.5, accuracy: 0.001, "\(name) geometry left")
+            XCTAssertEqual(geometry.maxX, maxX + 0.5, accuracy: 0.001, "\(name) geometry right")
+            XCTAssertEqual(geometry.minY, minY - 0.5, accuracy: 0.001, "\(name) geometry top")
+            XCTAssertEqual(geometry.maxY, maxY + 0.5, accuracy: 0.001, "\(name) geometry bottom")
+
+            let canvas = VectorCanvas(size: CGSize(width: 64, height: 64), strokes: [stroke])
+            let image = try XCTUnwrap(canvas.render(quality: .full, resolution: 1), "\(name) render")
+            let cg = try XCTUnwrap(image.cgImage, "\(name) bitmap")
+            guard let pixels = rgbaPixels(of: image, width: cg.width, height: cg.height),
+                  let actual = redPixelBounds(pixels) else {
+                return XCTFail("\(name) produced no readable red pixels")
+            }
+            if name == "saved-horizontal" {
+                let attachment = XCTAttachment(image: image)
+                attachment.name = "tiny-round-saved-stroke-corrected-render"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+                let probeAlphaIndex = (26 * pixels.width + 43) * 4 + 3
+                let probeCoverage = CGFloat(pixels.bytes[probeAlphaIndex]) / 255
+                XCTAssertGreaterThan(probeCoverage, 0.05,
+                                     "The saved stroke's original pixel probe must regain partial coverage; it need not be opaque")
+            }
+            let pathLength = zip(points, points.dropFirst()).reduce(CGFloat.zero) { total, pair in
+                total + hypot(pair.1.x - pair.0.x, pair.1.y - pair.0.y)
+            }
+            XCTAssertGreaterThan(redEnergy(pixels), pathLength * 0.3,
+                                 "\(name) keeps nonzero integrated ink coverage")
+            XCTAssertGreaterThanOrEqual(actual.minX, geometry.minX - 1.001, "\(name) raster left")
+            XCTAssertGreaterThanOrEqual(actual.minY, geometry.minY - 1.001, "\(name) raster top")
+            XCTAssertLessThanOrEqual(actual.maxX, geometry.maxX + 1.001, "\(name) raster right")
+            XCTAssertLessThanOrEqual(actual.maxY, geometry.maxY + 1.001, "\(name) raster bottom")
+        }
     }
 
     // MARK: - Display list: `VectorElement`

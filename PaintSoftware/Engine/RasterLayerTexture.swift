@@ -252,7 +252,9 @@ enum DabProbe {
 /// `α` across the core and `α·(1-s)` through the falloff; a full-alpha gradient under `setAlpha(α)`
 /// yields the same two functions scaled by `α`. CG's global alpha multiplies *source* alpha, so this
 /// holds for `.destinationOut` erasing as well as `.normal` painting. `BrushEngineLogicTests` pins
-/// the resulting alpha profile so the equivalence can't silently drift.
+/// the resulting alpha profile so the equivalence can't silently drift. When pixel-centre samples
+/// materially miss the radial profile's integrated coverage, `stamp` estimates coverage in each
+/// intersected pixel and blends toward that area estimate without changing the ellipse or its bounds.
 ///
 /// What is left in the key — colour and hardness — is fixed for the duration of any one stroke, so
 /// the steady-state hit rate is one miss per stroke and a hit for every dab after it.
@@ -288,6 +290,16 @@ final class DabGradientCache {
         return distanceFraction <= core ? 1 : (1 - distanceFraction) / (1 - core)
     }
 
+    private static func coverage(dx: CGFloat, dy: CGFloat, radius: CGFloat, hardness: CGFloat) -> CGFloat {
+        let radiusSquared = radius * radius
+        let distanceSquared = dx * dx + dy * dy
+        guard distanceSquared < radiusSquared else { return 0 }
+        let core = min(1, max(0, hardness))
+        let coreRadius = radius * core
+        guard distanceSquared > coreRadius * coreRadius else { return 1 }
+        return coverage(distanceFraction: sqrt(distanceSquared) / radius, hardness: core)
+    }
+
     func stamp(into ctx: CGContext, at point: CGPoint, radius: CGFloat, color: UIColor,
                alpha: CGFloat, hardness: CGFloat, blendMode: CGBlendMode) {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, ignoredAlpha: CGFloat = 0
@@ -298,6 +310,11 @@ final class DabGradientCache {
         // non-dynamic color rather than one whose components depend on the ambient trait collection.
         color.getRed(&r, green: &g, blue: &b, alpha: &ignoredAlpha)
         let coreFraction = max(0, min(hardness, 1))
+        if stampSmallDab(ctx, at: point, radius: radius, red: r, green: g, blue: b,
+                         alpha: alpha, hardness: coreFraction, blendMode: blendMode) {
+            return
+        }
+
         guard let gradient = gradient(red: r, green: g, blue: b, coreFraction: coreFraction) else { return }
 
         ctx.saveGState()
@@ -310,6 +327,144 @@ final class DabGradientCache {
         ctx.drawRadialGradient(gradient, startCenter: point, startRadius: 0,
                                endCenter: point, endRadius: radius, options: [])
         ctx.restoreGState()
+    }
+
+    /// Integrates the radial profile over device pixels when a dab's support spans only a few cells.
+    /// The fixed 8×8 quadrature visits at most seven by seven cells and retains no buffer. Through
+    /// one device-pixel radius it supplies all coverage; from there to the three-pixel ceiling a
+    /// smoothstep blends into the actual cached gradient, meeting its native pixel profile exactly.
+    /// The two weighted sources add inside a bounded transparency layer, then blend into the parent
+    /// once. Two ordinary source-over passes would underfill the opaque core; adding into the parent
+    /// would alter existing ink. The convex weights instead preserve both coverage and dab alpha.
+    private func stampSmallDab(_ ctx: CGContext, at point: CGPoint, radius: CGFloat,
+                               red: CGFloat, green: CGFloat, blue: CGFloat,
+                               alpha: CGFloat, hardness: CGFloat,
+                               blendMode: CGBlendMode) -> Bool {
+        let transform = ctx.ctm
+        let scaleX = abs(transform.a), scaleY = abs(transform.d)
+        guard transform.b == 0, transform.c == 0, scaleX > 0, scaleY > 0,
+              radius.isFinite, radius > 0 else { return false }
+        let deviceRadius = radius * max(scaleX, scaleY)
+        guard deviceRadius.isFinite, deviceRadius < 3 else { return false }
+        let footprint = dabCircleBounds(at: point, radius: radius)
+        let deviceX0 = transform.a * footprint.minX + transform.tx
+        let deviceX1 = transform.a * footprint.maxX + transform.tx
+        let deviceY0 = transform.d * footprint.minY + transform.ty
+        let deviceY1 = transform.d * footprint.maxY + transform.ty
+        let minDeviceX = min(deviceX0, deviceX1), maxDeviceX = max(deviceX0, deviceX1)
+        let minDeviceY = min(deviceY0, deviceY1), maxDeviceY = max(deviceY0, deviceY1)
+        let firstPixelXValue = floor(minDeviceX), lastPixelXValue = ceil(maxDeviceX)
+        let firstPixelYValue = floor(minDeviceY), lastPixelYValue = ceil(maxDeviceY)
+        let columnExtent = lastPixelXValue - firstPixelXValue
+        let rowExtent = lastPixelYValue - firstPixelYValue
+        guard deviceX0.isFinite, deviceX1.isFinite, deviceY0.isFinite, deviceY1.isFinite,
+              columnExtent.isFinite, rowExtent.isFinite,
+              columnExtent > 0, rowExtent > 0, columnExtent <= 7, rowExtent <= 7,
+              let firstPixelX = Int(exactly: firstPixelXValue),
+              let lastPixelX = Int(exactly: lastPixelXValue),
+              let firstPixelY = Int(exactly: firstPixelYValue),
+              let lastPixelY = Int(exactly: lastPixelYValue) else { return false }
+
+        let (columns, columnOverflow) = lastPixelX.subtractingReportingOverflow(firstPixelX)
+        let (rows, rowOverflow) = lastPixelY.subtractingReportingOverflow(firstPixelY)
+        guard !columnOverflow, !rowOverflow,
+              columns > 0, rows > 0, columns <= 7, rows <= 7 else { return false }
+
+        let cellX0 = (CGFloat(firstPixelX) - transform.tx) / transform.a
+        let cellX1 = (CGFloat(lastPixelX) - transform.tx) / transform.a
+        let cellY0 = (CGFloat(firstPixelY) - transform.ty) / transform.d
+        let cellY1 = (CGFloat(lastPixelY) - transform.ty) / transform.d
+        guard cellX0.isFinite, cellX1.isFinite, cellY0.isFinite, cellY1.isFinite else { return false }
+        let cellWidth = abs(cellX1 - cellX0), cellHeight = abs(cellY1 - cellY0)
+        guard cellWidth.isFinite, cellHeight.isFinite else { return false }
+        let cellBounds = CGRect(x: min(cellX0, cellX1), y: min(cellY0, cellY1),
+                                width: cellWidth, height: cellHeight)
+        let transition = max(0, (deviceRadius - 1) / 2)
+        let nativeWeight = transition * transition * (3 - 2 * transition)
+        let nativeGradient = nativeWeight > 0
+            ? gradient(red: red, green: green, blue: blue, coreFraction: hardness) : nil
+        guard nativeWeight == 0 || nativeGradient != nil else { return true }
+
+        ctx.saveGState()
+        ctx.setBlendMode(blendMode)
+        ctx.setAlpha(alpha)
+        if let nativeGradient {
+            // Outward rounding happened in device space: this layer stays at most 7×7 cells and
+            // leaves the native gradient on its original sample phase under scaled/flipped CTMs.
+            ctx.clip(to: cellBounds)
+            ctx.beginTransparencyLayer(in: cellBounds, auxiliaryInfo: nil)
+            ctx.setBlendMode(.plusLighter)
+            ctx.setAlpha(nativeWeight)
+            ctx.drawRadialGradient(nativeGradient, startCenter: point, startRadius: 0,
+                                   endCenter: point, endRadius: radius, options: [])
+        }
+        let areaAlpha = nativeGradient == nil ? alpha : 1 - nativeWeight
+        ctx.setFillColor(red: red, green: green, blue: blue, alpha: 1)
+
+        for y in firstPixelY..<lastPixelY {
+            let userY0 = (CGFloat(y) - transform.ty) / transform.d
+            let userY1 = (CGFloat(y + 1) - transform.ty) / transform.d
+            let minY = min(userY0, userY1), maxY = max(userY0, userY1)
+            let nearestDY = point.y < minY ? minY - point.y
+                : (point.y > maxY ? point.y - maxY : 0)
+            let farthestDY = max(abs(minY - point.y), abs(maxY - point.y))
+
+            for x in firstPixelX..<lastPixelX {
+                let userX0 = (CGFloat(x) - transform.tx) / transform.a
+                let userX1 = (CGFloat(x + 1) - transform.tx) / transform.a
+                let minX = min(userX0, userX1), maxX = max(userX0, userX1)
+                let nearestDX = point.x < minX ? minX - point.x
+                    : (point.x > maxX ? point.x - maxX : 0)
+                let farthestDX = max(abs(minX - point.x), abs(maxX - point.x))
+                let nearestDistance = hypot(nearestDX, nearestDY)
+                let farthestDistance = hypot(farthestDX, farthestDY)
+
+                let areaCoverage: CGFloat
+                if farthestDistance <= radius * hardness {
+                    areaCoverage = 1
+                } else if nearestDistance >= radius {
+                    areaCoverage = 0
+                } else {
+                    // Only integrate the dab's AABB intersection with this device pixel. A full
+                    // pixel grid can miss a representable tiny ellipse when the support is much
+                    // thinner than one pixel; weighting by the intersected device area preserves
+                    // that subpixel support without allocating a mask.
+                    let overlapX0 = max(CGFloat(x), minDeviceX)
+                    let overlapX1 = min(CGFloat(x + 1), maxDeviceX)
+                    let overlapY0 = max(CGFloat(y), minDeviceY)
+                    let overlapY1 = min(CGFloat(y + 1), maxDeviceY)
+                    let overlapArea = max(0, overlapX1 - overlapX0) * max(0, overlapY1 - overlapY0)
+                    guard overlapArea > 0 else { continue }
+                    let overlapUserX0 = (overlapX0 - transform.tx) / transform.a
+                    let overlapUserX1 = (overlapX1 - transform.tx) / transform.a
+                    let overlapUserY0 = (overlapY0 - transform.ty) / transform.d
+                    let overlapUserY1 = (overlapY1 - transform.ty) / transform.d
+                    let minOverlapUserX = min(overlapUserX0, overlapUserX1)
+                    let minOverlapUserY = min(overlapUserY0, overlapUserY1)
+                    let userStepX = abs(overlapUserX1 - overlapUserX0) / 8
+                    let userStepY = abs(overlapUserY1 - overlapUserY0) / 8
+                    var sampledArea: CGFloat = 0
+                    for subY in 0..<8 {
+                        let sampleUserY = minOverlapUserY + (CGFloat(subY) + 0.5) * userStepY
+                        for subX in 0..<8 {
+                            let sampleUserX = minOverlapUserX + (CGFloat(subX) + 0.5) * userStepX
+                            sampledArea += Self.coverage(dx: sampleUserX - point.x,
+                                                         dy: sampleUserY - point.y,
+                                                         radius: radius, hardness: hardness)
+                        }
+                    }
+                    areaCoverage = sampledArea / 64 * overlapArea
+                }
+
+                guard areaCoverage > 0 else { continue }
+                ctx.setAlpha(areaAlpha * areaCoverage)
+                ctx.fill(CGRect(x: min(userX0, userX1), y: min(userY0, userY1),
+                                width: abs(userX1 - userX0), height: abs(userY1 - userY0)))
+            }
+        }
+        if nativeGradient != nil { ctx.endTransparencyLayer() }
+        ctx.restoreGState()
+        return true
     }
 
     private func gradient(red: CGFloat, green: CGFloat, blue: CGFloat, coreFraction: CGFloat) -> CGGradient? {

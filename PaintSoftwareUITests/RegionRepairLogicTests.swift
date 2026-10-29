@@ -295,6 +295,13 @@ final class RegionRepairLogicTests: XCTestCase {
         XCTAssertEqual(cut.outcome, .cut, "the fixture must actually cut something")
         XCTAssertTrue(isRegion(toCross.lastDamage),
                       "Mode 3 — the owner's *To Cross* eraser — is the one that pays this per touch sample")
+
+        let neverDrawnToCross = Self.canvas(12)
+        let unmeasuredCut = neverDrawnToCross.cutToIntersection(atCanvasPoint: Self.cellCentre(0),
+                                                                 brush: Self.brush(), size: 14)
+        XCTAssertEqual(unmeasuredCut.outcome, .cut, "the unmeasured To Cross fixture must still cut")
+        XCTAssertEqual(neverDrawnToCross.lastDamage, .everything,
+                       "An unrendered victim has no measured bounds, so Mode 3 must keep its conservative fallback")
     }
 
     // MARK: - (2) Byte identity, three ways

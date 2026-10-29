@@ -34,6 +34,12 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
 
 ### Current evidence and decisions
 
+- **Eraser/brush source assembly:** root reviewed the fragment-bounds source and bounded tiny-dab
+  transition. Whole BrushEngine67 passed with source731 exact. Their five production/test paths
+  are assembled for a combined native baseline; no diagnostic sentinel/temporary cost method was
+  harvested. Fragment bounds124, mutation controls, public1pt and matched cost still remain. The
+  arrival-union control is sensitivity-unproven and unknown-fragment defense has no fixture credit.
+
 - **Picture component assembly:** f422 public Paste/Multiply/Bake/save/reopen passed1/1; root
   verified source731 and inspected all three owner-landscape captures. The six-cell arrangement
   stays correct. Its five source/test paths are now assembled into the integration candidate;
