@@ -58,6 +58,14 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
   covering only the undersampled footprint; keep existing energy/geometry/thin-axis/pixel tests
   strict, add the actual new handoff boundary, no radius inflation/cache/state/flags or pixel-oracle
   relaxation. A1–1.5device-pixel transition is a hypothesis for measurement, not a fixed product rule.
+**Small-dab boundary premise checked, October29:** TEMP69 probe passed1/rootstrict731. All six
+new failed anisotropic rows match native CoreGraphics byte-for-byte at identical radii, including
+both sides of the original near-boundary pair. Native itself jumps0.0706–0.0745 there; the new
+absolute continuity assertion assumed a guarantee the original renderer does not have. Preserve
+failed471 and replace only this new assertion with a per-pixel bound on additional profile change
+relative to the exact native pair. Keep exact endpoint equality and all67 previous tests unchanged.
+No production guesses or global tolerance relaxation; this is a corrected test premise.
+
 - [ ] Resolve the valid fractional-projective Parallax resize blocker before qualifying52424454.
   Independent review proves Fit100²→400×200, share0.5, perspective quad gives a point~20pt too far
   right. Existing added Parallax test used share1/pure translation and misses it. Add a drawn finite
