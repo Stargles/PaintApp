@@ -1772,14 +1772,6 @@ final class CanvasManager: ObservableObject {
     /// reason a dab publishes nothing (RENDER.md §5.2).
     var strokeIsLive = false
 
-    /// Rough retained-byte estimate for an image held by an undo/redo closure, used to feed
-    /// `UndoHistory`'s memory-budgeted trimming. Precision doesn't matter here — this only needs to
-    /// be in the right ballpark so a handful of full-canvas snapshots don't silently balloon memory.
-    static func approximateImageCost(_ image: UIImage?) -> Int {
-        guard let cg = image?.cgImage else { return 0 }
-        return cg.width * cg.height * 4
-    }
-
     static func approximateSourceCost(_ source: RasterSource?) -> Int {
         guard let source else { return 0 }
         return RasterSurface.byteCount(width: Int(source.size.width), height: Int(source.size.height)) ?? Int.max
@@ -2951,7 +2943,7 @@ final class CanvasManager: ObservableObject {
     /// array's own slack rounded up, and the 64 is the dictionary entry plus the id string. The number
     /// matters only in that it is *small*: a 40-key curve is under 4 KiB, so a session that keyframes
     /// heavily costs the history what a couple of structural edits do, rather than what one 16 MiB
-    /// whole-cel snapshot does. `CanvasManager.approximateImageCost` is the same kind of estimate for
+    /// whole-cel snapshot does. `CanvasManager.approximateSourceCost` is the same kind of estimate for
     /// the other extreme, and says the same thing about precision.
     private static func trackUndoCost(_ curve: AnimationCurve?) -> Int {
         guard let curve else { return 0 }

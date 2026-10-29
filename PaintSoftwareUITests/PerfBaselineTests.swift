@@ -404,7 +404,7 @@ final class PerfBaselineTests: XCTestCase {
     /// **How many strokes stay undoable**, which is what 5.5 is really about.
     ///
     /// `UndoHistory` trims by retained bytes, not step count, so the per-step cost *is* the undo
-    /// depth. While a stroke retained two whole-canvas images, `approximateImageCost` charged
+    /// depth. While a stroke retained two whole-canvas images, their RGBA pixel area charged
     /// `w × h × 4` twice — ~33.6 MB per stroke at 2048², ~128 MB at 4000² — so a 300 MB budget held
     /// about 8 strokes on the default canvas and **two** on a large one, regardless of how small the
     /// strokes were. This fills the budget with many small strokes and asserts they are all still
@@ -612,7 +612,10 @@ final class PerfBaselineTests: XCTestCase {
         }
         let origin = rect.origin
         let beforeCount = from.count, afterCount = to.count
-        let cost = CanvasManager.approximateImageCost(beforePatch) + CanvasManager.approximateImageCost(afterPatch)
+        guard let patchBytes = RasterSurface.byteCount(width: Int(rect.width), height: Int(rect.height)) else {
+            return XCTFail("The fixture's RGBA patch must have a representable byte count")
+        }
+        let cost = UndoBudget.addingCost(patchBytes, patchBytes)
         manager.recordUndo(label: .brushStroke, cost: cost, undo: {
             do {
                 try raster.restore(patch: beforePatch, at: origin).get()

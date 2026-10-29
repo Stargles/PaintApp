@@ -941,3 +941,7 @@ cause remains unproved and needs fresh readiness.
 The historical Mend-cap result is superseded by the connected-stroke/Mend All Fills work. Exact
 canonical square-hole verification remains pending; do not credit the older cap pictures as proof of
 that case. Disk maintenance recovered3.116GB with12,578 archived app-data entries preserved.
+
+October29 source cleanup: ordered image history leaves approximateImageCost with only a benchmark
+caller. Retire that production helper and stale comments; its finite cropped-RGBA fixture uses the
+existing checked pixel byte count/addition directly. Existing PerfBaseline/final fast gates pending.
