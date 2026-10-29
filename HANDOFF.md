@@ -26,8 +26,9 @@ has been established. Do not request device interaction before he is back unless
 5. **New audit finding:** Bake discarded placed UIImage orientation. OLD selected1 failed only at
    the final drawn-pixel equality. Candidate `d3ec4b8f` in `PaintApp-s55-bake-orientation` preserves
    the original orientation in the existing return; whole BakeLogicTests25 passed and root
-   independently reconciled the result. Public UI1 failed at Paste/app main-loop responsiveness,
-   before Move or Bake; no retry or signal. Input/display tracing and controls remain pending. No new state, normalization buffer or saved-format change.
+   independently reconciled the result. Public UI1 stopped before Move/Bake on an unanswered iOS Paste authorization prompt
+   (recording and system log agree); no retry or signal. A test-only prompt-handling correction and
+   controls remain pending. No new state, normalization buffer or saved-format change.
 6. **Strict-text recovery:** b381 cold selected1 on fresh8BBB failed at the new red-pixel premise,
    before Cancel/Versions/Restore. Both blue cores passed; the retained unsaved package contains
    red stroke data, which does not establish visible red ink. Source/evidence triage confirms the saved path crosses the probe; brush appearance and

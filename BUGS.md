@@ -3115,7 +3115,7 @@ attempt, not its cause or the recovery behavior. Preserve the assertion and orig
 brush appearance and shared vector display/landing before any fix or retry. Evidence is under
 `s55-recorded-regressions/strict-text-cold-b381f2dc-8bbb3d8f/native-run01/` in PaintWork.
 
-## Oriented-picture public Bake witness stops at Paste — October29
+## Public Bake witness leaves the iOS Paste permission prompt unanswered — October29
 
 The d3ec public cold UI passed runner pasteboard-orientation/display-size premises, launched at
 owner landscape and sent Actions → Paste. It then failed at the next app snapshot because the main
@@ -3123,3 +3123,9 @@ run loop did not respond for30seconds; no Move/Bake/image equality assertion ran
 source731 unchanged. No external signal/retry; the bounded later log query found no matching crash,
 watchdog or jetsam. Investigate actual Paste ingress/representation and image insertion before any
 product fix. Preserve the failing witness and recording; do not count it as Bake qualification.
+
+Paste follow-up: the actual recording shows the system “Allow Paste” prompt; the bounded system
+log explicitly reports user authorization is required for the image read. Root inspected that frame.
+The test queried app accessibility before answering SpringBoard, blocking before Move/Bake. This is
+a test permission-handling gap; no lazy-provider or Bake failure is demonstrated. Correct the test
+through the existing SpringBoard permission pattern, preserving the input and all drawn assertions.

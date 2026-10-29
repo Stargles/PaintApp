@@ -36,8 +36,8 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
 
 - **Bake audit:** a pasted picture could lose its rotation when baked. OLD drawn-pixel reproduction
   failed as expected; the one-line orientation-preserving candidate passed25 logic checks. Public
-  UI1 failed at Paste/app responsiveness before Bake; input/display tracing, controls and assembled
-  qualification remain. This is part of the architecture/effects audit.
+  UI1 stopped on an unanswered iOS Paste prompt before Bake; a test-only prompt correction, controls
+  and assembled qualification remain. This is part of the architecture/effects audit.
 - **Recovery gate:** the fresh strict-text run stopped at its new red-ink drawing premise before
   Cancel/Restore. Its inputs and outputs are preserved; the failure is being traced rather than
   counted as a recovery pass.
