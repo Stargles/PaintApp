@@ -3095,3 +3095,31 @@ Recording copy finding: corrected via in-place optional/dictionary mutation, now
 75 logic checks passed in both Debug and Release; two original-copy controls reached their two
 resource assertions; public4 passed and both graph pictures were inspected. No measured timing/RSS
 improvement or attribution to ordinary drawing/crash is claimed. Final assembled gates remain.
+
+## Bake discards a placed picture’s orientation — October29
+
+The ordinary placed-image Bake route graded raw CGImage pixels and returned UIImage.orientation.up,
+although drawing the placed image respects its original orientation. A committed OLD logic witness
+rendered an asymmetric right-oriented picture before/after the public model Bake: visible premises
+passed and final drawn pixels differed. Candidate d3ec4b8f preserves the input imageOrientation in
+that existing return, retaining scale and raw processing; whole25 passed. Public UI, meaningful
+controls and assembled gates remain; do not claim this is installed or changes saved format.
+
+## Cold damaged-text scene accepts new ink without exposing its body — October29
+
+At integration b381, the fresh strict-text recovery UI failed its visible-red-body premise before
+Cancel/Versions/Restore. Existing blue cores passed. Retained unsaved data contains pure-red size1
+Opaque Round samples (35.25,27),(47.25,27),(51.25,27) on64²; the .68/.42 probe lies on that body.
+The actual recording near timeout shows only a pale first dab. This proves a failed visible-drawing
+attempt, not its cause or the recovery behavior. Preserve the assertion and original result; trace
+brush appearance and shared vector display/landing before any fix or retry. Evidence is under
+`s55-recorded-regressions/strict-text-cold-b381f2dc-8bbb3d8f/native-run01/` in PaintWork.
+
+## Oriented-picture public Bake witness stops at Paste — October29
+
+The d3ec public cold UI passed runner pasteboard-orientation/display-size premises, launched at
+owner landscape and sent Actions → Paste. It then failed at the next app snapshot because the main
+run loop did not respond for30seconds; no Move/Bake/image equality assertion ran. Exact1 failed,
+source731 unchanged. No external signal/retry; the bounded later log query found no matching crash,
+watchdog or jetsam. Investigate actual Paste ingress/representation and image insertion before any
+product fix. Preserve the failing witness and recording; do not count it as Bake qualification.

@@ -34,6 +34,14 @@ merged or pushed**. Separate passing checks do not qualify that complete build.
 
 ### Current evidence and decisions
 
+- **Bake audit:** a pasted picture could lose its rotation when baked. OLD drawn-pixel reproduction
+  failed as expected; the one-line orientation-preserving candidate passed25 logic checks. Public
+  UI1 failed at Paste/app responsiveness before Bake; input/display tracing, controls and assembled
+  qualification remain. This is part of the architecture/effects audit.
+- **Recovery gate:** the fresh strict-text run stopped at its new red-ink drawing premise before
+  Cancel/Restore. Its inputs and outputs are preserved; the failure is being traced rather than
+  counted as a recovery pass.
+
 - **Crash and lag:** Test1 is4096²; Kevin confirms rapid To Cross erasing triggers the failure. The
   crash cause remains unproved. The simulator Test1 capture made36 cuts and produced25 full4096²
   picture outputs; immediate dark ink became Recolour red at rest, so no persistent Recolour loss was
