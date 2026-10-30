@@ -220,7 +220,7 @@ final class ProjectStorageIntegrityLogicTests: XCTestCase {
             XCTAssertNil(ProjectStore.load(from: package), "No backup cannot make malformed fields default to a valid group")
             XCTAssertEqual(try fileBytes(package), damagedBytes, "Without an intact backup every original package byte remains in place")
             let gallery = try XCTUnwrap(ProjectStore.listProjects(in: package.deletingLastPathComponent()).first {
-                $0.url == package
+                $0.url.standardizedFileURL.path == package.standardizedFileURL.path
             })
             XCTAssertTrue(gallery.isCorrupted, "The exact original package remains visible as damaged in Gallery")
             XCTAssertTrue(ProjectBackupManager.listTrash().isEmpty, "A damaged package with no replacement is never displaced into Trash")
