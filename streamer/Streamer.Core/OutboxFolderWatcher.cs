@@ -12,7 +12,7 @@ namespace Streamer.Core;
 /// same thing, but STREAM.md §7 names only these two destinations, so Failed lands in
 /// refused\ too; see STREAM.md's note on this default.
 /// </summary>
-public sealed class OutboxFolderWatcher : IDisposable
+public sealed class OutboxFolderWatcher : IAsyncDisposable
 {
     private readonly string _root;
     private readonly FileOutbox _outbox;
@@ -20,6 +20,9 @@ public sealed class OutboxFolderWatcher : IDisposable
     private readonly FileSystemWatcher _watcher;
     private readonly object _gate = new();
     private readonly HashSet<string> _queued = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<Task> _readiness = new();
+    private readonly CancellationTokenSource _lifetime = new();
+    private Task? _disposeTask;
 
     public string SentFolder { get; }
     public string RefusedFolder { get; }
@@ -42,16 +45,20 @@ public sealed class OutboxFolderWatcher : IDisposable
             IncludeSubdirectories = false,
             NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
         };
-        _watcher.Created += (_, e) => _ = TryQueueAsync(e.FullPath);
-        _watcher.Renamed += (_, e) => _ = TryQueueAsync(e.FullPath);
-        _watcher.Error += (_, e) => _log($"OutboxFolderWatcher: watcher error: {e.GetException().Message}");
+        _watcher.Created += (_, e) => QueueWhenReady(e.FullPath);
+        _watcher.Renamed += (_, e) => QueueWhenReady(e.FullPath);
+        _watcher.Error += (_, e) =>
+        {
+            lock (_gate)
+                if (_disposeTask == null) _log($"OutboxFolderWatcher: watcher error: {e.GetException().Message}");
+        };
         _watcher.EnableRaisingEvents = true;
 
         // Anything already sitting there from before this process started (e.g. the app
         // was not running when a Copy-Item landed a file).
         foreach (var existing in SafeTopLevelFiles(_root))
         {
-            _ = TryQueueAsync(existing);
+            QueueWhenReady(existing);
         }
     }
 
@@ -61,37 +68,63 @@ public sealed class OutboxFolderWatcher : IDisposable
         catch (Exception e) { _log($"OutboxFolderWatcher: could not list {root}: {e.Message}"); return Array.Empty<string>(); }
     }
 
-    private async Task TryQueueAsync(string path)
+    private void QueueWhenReady(string path)
     {
         if (Directory.Exists(path)) return; // defensive; IncludeSubdirectories is off
         string name = Path.GetFileName(path);
         lock (_gate)
         {
-            if (!_queued.Add(name)) return; // already in flight through this watcher
+            if (_disposeTask != null || !_queued.Add(name)) return;
+            var task = Task.Run(() => TryQueueAsync(path, name, _lifetime.Token));
+            _readiness.Add(task);
+            _ = task.ContinueWith(completed =>
+            {
+                // TryQueueAsync reports failures. Observing here also retires a faulting log callback.
+                _ = completed.Exception;
+                lock (_gate) _readiness.Remove(completed);
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
-        if (!await WaitUntilStableAsync(path).ConfigureAwait(false))
+    }
+
+    private async Task TryQueueAsync(string path, string name, CancellationToken ct)
+    {
+        try
         {
-            lock (_gate) { _queued.Remove(name); }
-            return; // vanished before it settled, or never became readable
+            if (!await WaitUntilStableAsync(path, ct).ConfigureAwait(false))
+            {
+                lock (_gate) _queued.Remove(name);
+                return;
+            }
+            ct.ThrowIfCancellationRequested();
+            _log($"OutboxFolderWatcher: queuing {path}");
+            _outbox.Enqueue(path);
         }
-        _log($"OutboxFolderWatcher: queuing {path}");
-        _outbox.Enqueue(path);
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            lock (_gate) _queued.Remove(name);
+        }
+        catch (Exception error)
+        {
+            lock (_gate) _queued.Remove(name);
+            _log($"OutboxFolderWatcher: could not prepare {path}: {error.Message}");
+        }
     }
 
     /// <summary>SSH's Copy-Item and a plain drag both write bytes into the destination
     /// path directly rather than renaming a temp file in, so "Created" can fire before
     /// the file is complete. Poll size-stable-and-openable instead of racing FileOutbox's
     /// own read against an in-progress writer.</summary>
-    private async Task<bool> WaitUntilStableAsync(string path)
+    private async Task<bool> WaitUntilStableAsync(string path, CancellationToken ct)
     {
         long lastSize = -1;
-        for (int i = 0; i < 100; i++) // ~10s ceiling
+        while (true)
         {
+            ct.ThrowIfCancellationRequested();
             if (!File.Exists(path)) return false;
             long size;
             try { size = new FileInfo(path).Length; }
-            catch (IOException) { await Task.Delay(100).ConfigureAwait(false); continue; }
-            if (size == lastSize && size > 0)
+            catch (IOException) { await Task.Delay(100, ct).ConfigureAwait(false); continue; }
+            if (size == lastSize)
             {
                 try
                 {
@@ -101,36 +134,39 @@ public sealed class OutboxFolderWatcher : IDisposable
                 catch (IOException) { /* still held open by the writer */ }
             }
             lastSize = size;
-            await Task.Delay(100).ConfigureAwait(false);
+            await Task.Delay(100, ct).ConfigureAwait(false);
         }
-        return File.Exists(path); // give up waiting for stability but still try
     }
 
     private void OnTransferUpdated(object? sender, OutboundFileEventArgs e)
     {
-        if (!IsDirectlyInWatchedRoot(e.Path)) return; // not one of ours (drop box / Ctrl+V path)
-
-        string name = Path.GetFileName(e.Path);
-        string destFolder;
-        switch (e.State)
+        lock (_gate)
         {
-            case OutboundFileState.Inserted: destFolder = SentFolder; break;
-            case OutboundFileState.Refused: destFolder = RefusedFolder; break;
-            case OutboundFileState.Failed: destFolder = RefusedFolder; break;
-            default: return; // Queued / Sending — not terminal yet
-        }
+            if (_disposeTask != null) return;
+            if (!IsDirectlyInWatchedRoot(e.Path)) return; // not one of ours (drop box / Ctrl+V path)
 
-        lock (_gate) { if (!_queued.Remove(name)) return; } // already handled, or not ours
+            string name = Path.GetFileName(e.Path);
+            string destFolder;
+            switch (e.State)
+            {
+                case OutboundFileState.Inserted: destFolder = SentFolder; break;
+                case OutboundFileState.Refused: destFolder = RefusedFolder; break;
+                case OutboundFileState.Failed: destFolder = RefusedFolder; break;
+                default: return; // Queued / Sending — not terminal yet
+            }
 
-        try
-        {
-            string dest = UniqueDestination(destFolder, name);
-            if (File.Exists(e.Path)) File.Move(e.Path, dest);
-            _log($"OutboxFolderWatcher: {name} -> {dest} ({e.State})");
-        }
-        catch (Exception ex)
-        {
-            _log($"OutboxFolderWatcher: could not move {e.Path} to {destFolder}: {ex.Message}");
+            if (!_queued.Remove(name)) return; // already handled, or not ours
+
+            try
+            {
+                string dest = UniqueDestination(destFolder, name);
+                if (File.Exists(e.Path)) File.Move(e.Path, dest);
+                _log($"OutboxFolderWatcher: {name} -> {dest} ({e.State})");
+            }
+            catch (Exception ex)
+            {
+                _log($"OutboxFolderWatcher: could not move {e.Path} to {destFolder}: {ex.Message}");
+            }
         }
     }
 
@@ -159,9 +195,23 @@ public sealed class OutboxFolderWatcher : IDisposable
         }
     }
 
-    public void Dispose()
+    public ValueTask DisposeAsync()
+    {
+        lock (_gate) return new(_disposeTask ??= Task.Run(DisposeCoreAsync));
+    }
+
+    private async Task DisposeCoreAsync()
     {
         _watcher.Dispose();
         _outbox.TransferUpdated -= OnTransferUpdated;
+        _lifetime.Cancel();
+        Task[] pending;
+        lock (_gate) pending = _readiness.ToArray();
+        try { await Task.WhenAll(pending).ConfigureAwait(false); }
+        finally
+        {
+            _lifetime.Dispose();
+            lock (_gate) _queued.Clear();
+        }
     }
 }

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.ExceptionServices;
 using Streamer.Core.Protocol;
 
 namespace Streamer.Core;
@@ -30,6 +31,7 @@ public sealed class GstProcess : ICapturePipeline
     private readonly string _gstLaunchExe;
     private readonly Func<int, string> _buildArgs; // takes the bound loopback port, returns full args
     private readonly Action<string> _log;
+    private readonly Func<Process, Task> _waitForExit;
 
     private TcpListener? _listener;
     private Process? _process;
@@ -52,10 +54,15 @@ public sealed class GstProcess : ICapturePipeline
     public bool IsRunning => _isRunning;
 
     public GstProcess(string gstLaunchExe, Func<int, string> buildArgs, Action<string>? log = null)
+        : this(gstLaunchExe, buildArgs, log, process => process.WaitForExitAsync()) { }
+
+    internal GstProcess(string gstLaunchExe, Func<int, string> buildArgs, Action<string>? log,
+        Func<Process, Task> waitForExit)
     {
         _gstLaunchExe = gstLaunchExe;
         _buildArgs = buildArgs;
         _log = log ?? (_ => { });
+        _waitForExit = waitForExit;
     }
 
     public Task StartAsync()
@@ -115,16 +122,27 @@ public sealed class GstProcess : ICapturePipeline
     /// fields, and a pipeline left running would keep capturing the screen for as long as the app lives.</summary>
     private async Task RunOnceAsync(CancellationToken ct)
     {
+        Exception? failure = null;
         try
         {
             await StreamOnceAsync(ct).ConfigureAwait(false);
         }
-        finally
+        catch (Exception error) { failure = error; }
+        try { await StopOwnedProcessAsync().ConfigureAwait(false); }
+        catch (Exception cleanup)
         {
-            await StopOwnedProcessAsync().ConfigureAwait(false);
-            _listener?.Stop();
-            _listener = null;
+            failure = failure == null ? cleanup
+                : new AggregateException("Capture attempt and process cleanup failed", failure, cleanup);
         }
+        var listener = _listener;
+        _listener = null;
+        try { listener?.Stop(); }
+        catch (Exception cleanup)
+        {
+            failure = failure == null ? cleanup
+                : new AggregateException("Capture attempt and listener cleanup failed", failure, cleanup);
+        }
+        if (failure != null) ExceptionDispatchInfo.Capture(failure).Throw();
     }
 
     private async Task StreamOnceAsync(CancellationToken ct)
@@ -151,9 +169,19 @@ public sealed class GstProcess : ICapturePipeline
         // starting and EnableRaisingEvents/Exited being armed — a pipeline that fails
         // to launch at all (bad gst-launch path, malformed pipeline string) can exit
         // within microseconds.
-        _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-        _process.Exited += (_, _) => processExited.TrySetResult();
-        _process.Start();
+        var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+        process.Exited += (_, _) => processExited.TrySetResult();
+        try
+        {
+            if (!process.Start()) throw new InvalidOperationException("The capture process did not start");
+        }
+        catch (Exception original)
+        {
+            try { process.Dispose(); }
+            catch (Exception cleanup) { throw new AggregateException("Capture launch and cleanup failed", original, cleanup); }
+            throw;
+        }
+        _process = process;
         _readerLifetime = CancellationTokenSource.CreateLinkedTokenSource(ct);
         _readers = Task.WhenAll(
             DrainStreamAsync(_process.StandardError, isError: true, _readerLifetime.Token),
@@ -235,23 +263,37 @@ public sealed class GstProcess : ICapturePipeline
         var process = _process;
         if (process == null) return;
         _process = null;
+        Exception? failure = null;
         try
         {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-            catch (InvalidOperationException) { /* already exited */ }
-            await process.WaitForExitAsync().ConfigureAwait(false);
-            if (await Task.WhenAny(_readers, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false) != _readers)
+            try
             {
-                _readerLifetime?.Cancel();
-                process.StandardOutput.Close(); process.StandardError.Close();
+                try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+                catch (InvalidOperationException) { /* already exited */ }
+                await _waitForExit(process).ConfigureAwait(false);
             }
-            await _readers.ConfigureAwait(false);
+            catch (Exception error) { failure = error; }
+            try
+            {
+                if (await Task.WhenAny(_readers, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false) != _readers)
+                {
+                    _readerLifetime?.Cancel();
+                    process.StandardOutput.Close(); process.StandardError.Close();
+                }
+                await _readers.ConfigureAwait(false);
+            }
+            catch (Exception cleanup)
+            {
+                failure = failure == null ? cleanup
+                    : new AggregateException("Process exit and output cleanup failed", failure, cleanup);
+            }
         }
         finally
         {
             _readerLifetime?.Dispose(); _readerLifetime = null;
             process.Dispose();
         }
+        if (failure != null) ExceptionDispatchInfo.Capture(failure).Throw();
     }
 
     public async ValueTask DisposeAsync()

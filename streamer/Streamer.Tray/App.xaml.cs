@@ -373,7 +373,7 @@ public partial class App : System.Windows.Application
         Finish(() => _mainWindow?.RetirePresentation());
         Finish(() => _trayIcon?.Dispose());
         Finish(() => _lockPoller?.Dispose());
-        Finish(() => _outboxWatcher?.Dispose());
+        if (_outboxWatcher != null) await Join(() => _outboxWatcher.DisposeAsync().AsTask()).ConfigureAwait(false);
         if (_fileOutbox != null) await Join(() => _fileOutbox.DisposeAsync().AsTask()).ConfigureAwait(false);
         if (_mdns != null) await Join(() => _mdns.DisposeAsync().AsTask()).ConfigureAwait(false);
         if (_server != null) await Join(() => _server.StopAsync()).ConfigureAwait(false);
