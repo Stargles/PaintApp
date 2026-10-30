@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using Streamer.Core.Protocol;
 
 namespace Streamer.Core;
@@ -28,6 +29,7 @@ public sealed class StreamerSession : IAsyncDisposable
     private readonly object _gate = new();
 
     private ICapturePipeline? _pipeline;
+    private NativeMethods.SafePowerRequestHandle? _powerRequest;
     private readonly Func<CaptureSource, CancellationToken, Task<ICapturePipeline>> _createPipeline;
     private CancellationToken _clientRun;
     private readonly SemaphoreSlim _transition = new(1, 1);
@@ -79,6 +81,11 @@ public sealed class StreamerSession : IAsyncDisposable
     public void AddSink(IFrameSink sink)
     {
         lock (_gate) _sinks.Add(sink);
+    }
+
+    public void RemoveSink(IFrameSink sink)
+    {
+        lock (_gate) _sinks.Remove(sink);
     }
 
     public async Task ProbeEncoderAsync(CancellationToken ct = default)
@@ -214,26 +221,36 @@ public sealed class StreamerSession : IAsyncDisposable
             return;
         }
         if (run.IsCancellationRequested) { await pipeline.DisposeAsync().ConfigureAwait(false); return; }
-        pipeline.AccessUnitReady += async (e, ct) =>
+        NativeMethods.SafePowerRequestHandle request;
+        try { request = NativeMethods.AcquirePowerRequest("PaintStreamer screen capture"); }
+        catch (Exception original)
         {
-            _rate.Note(e.Unit.Bytes.Length);
-            ulong ptsUs = (ulong)_sessionClock.Elapsed.TotalMicroseconds;
-            IFrameSink[] sinks;
-            lock (_gate) sinks = _sinks.ToArray();
-            foreach (var sink in sinks)
-                await sink.OnVideoFrameAsync(e.Unit.Keyframe, ptsUs, e.Unit.Bytes, ct).ConfigureAwait(false);
-        };
-        pipeline.UnexpectedExit += (_, reason) => BroadcastStatus(reason);
-        pipeline.Started += (_, _) => BroadcastStatus();
-        lock (_gate) _pipeline = pipeline;
-        await pipeline.StartAsync().ConfigureAwait(false);
-        // Keep the display (and system) awake for as long as a pipeline is meant to be
-        // running -- see NativeMethods.SetThreadExecutionState's doc comment for the
-        // MEASURED reason this exists: a 60s AC display timeout on the laptop, and
-        // SetCursorPos (unlike real hardware input) does not reset it, so the capture
-        // stayed "live" while the physical display went black underneath it.
-        NativeMethods.SetThreadExecutionState(
-            NativeMethods.ES_CONTINUOUS | NativeMethods.ES_SYSTEM_REQUIRED | NativeMethods.ES_DISPLAY_REQUIRED);
+            try { await pipeline.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception cleanup) { throw new AggregateException("Capture preparation and cleanup failed", original, cleanup); }
+            throw;
+        }
+        lock (_gate) { _pipeline = pipeline; _powerRequest = request; }
+        try
+        {
+            pipeline.AccessUnitReady += async (e, ct) =>
+            {
+                _rate.Note(e.Unit.Bytes.Length);
+                ulong ptsUs = (ulong)_sessionClock.Elapsed.TotalMicroseconds;
+                IFrameSink[] sinks;
+                lock (_gate) sinks = _sinks.ToArray();
+                foreach (var sink in sinks)
+                    await sink.OnVideoFrameAsync(e.Unit.Keyframe, ptsUs, e.Unit.Bytes, ct).ConfigureAwait(false);
+            };
+            pipeline.UnexpectedExit += (_, reason) => BroadcastStatus(reason);
+            pipeline.Started += (_, _) => BroadcastStatus();
+            await pipeline.StartAsync().ConfigureAwait(false);
+        }
+        catch (Exception original)
+        {
+            try { await StopPipelineAsync().ConfigureAwait(false); }
+            catch (Exception cleanup) { throw new AggregateException("Capture start and cleanup failed", original, cleanup); }
+            throw;
+        }
     }
 
     private async Task<ICapturePipeline> CreateGstPipelineAsync(CaptureSource source, CancellationToken ct)
@@ -366,13 +383,20 @@ public sealed class StreamerSession : IAsyncDisposable
     private async Task StopPipelineAsync()
     {
         ICapturePipeline? old;
-        lock (_gate) { old = _pipeline; _pipeline = null; }
-        if (old != null) await old.DisposeAsync().ConfigureAwait(false);
-        // Release the keep-awake request set in RestartPipelineAsync -- ES_CONTINUOUS
-        // alone (no ES_SYSTEM_REQUIRED / ES_DISPLAY_REQUIRED) clears this thread's own
-        // prior request without touching any other process's. Safe to call even if no
-        // pipeline was actually running (pause with nothing picked, etc).
-        NativeMethods.SetThreadExecutionState(NativeMethods.ES_CONTINUOUS);
+        NativeMethods.SafePowerRequestHandle? request;
+        lock (_gate) { old = _pipeline; _pipeline = null; request = _powerRequest; _powerRequest = null; }
+        Exception? stopError = null;
+        try { if (old != null) await old.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception error) { stopError = error; }
+        finally
+        {
+            try { if (request != null) NativeMethods.ReleasePowerRequest(request); }
+            catch (Exception powerError) when (stopError != null)
+            {
+                throw new AggregateException("Capture stop and power cleanup failed", stopError, powerError);
+            }
+        }
+        if (stopError != null) ExceptionDispatchInfo.Capture(stopError).Throw();
     }
 
     public void BroadcastStatus(string? reason = null)

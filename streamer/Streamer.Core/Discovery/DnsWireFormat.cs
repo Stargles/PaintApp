@@ -31,6 +31,7 @@ internal static class DnsName
         int pos = start;
         int consumedAtStart = -1;
         int jumps = 0;
+        int expandedLength = 1; // Include the root octet, even when reached through a pointer.
         while (true)
         {
             if (pos >= buffer.Length) throw new FormatException("DNS name runs past the end of the message");
@@ -43,6 +44,7 @@ internal static class DnsName
                 pos = ((lengthByte & 0x3F) << 8) | buffer[pos + 1];
                 continue;
             }
+            if ((lengthByte & 0xC0) != 0) throw new FormatException("reserved DNS label prefix");
             if (lengthByte == 0)
             {
                 if (consumedAtStart == -1) consumedAtStart = (pos - start) + 1;
@@ -50,6 +52,8 @@ internal static class DnsName
             }
             pos++;
             if (pos + lengthByte > buffer.Length) throw new FormatException("DNS label runs past the end of the message");
+            expandedLength += 1 + lengthByte;
+            if (expandedLength > 255) throw new FormatException("expanded DNS name exceeds 255 octets");
             labels.Add(Encoding.ASCII.GetString(buffer, pos, lengthByte));
             pos += lengthByte;
         }

@@ -29,6 +29,7 @@ public partial class App : System.Windows.Application
     // (streamer.ps1 sources reaches kevin's session with exactly such a one-off task while the
     // main task may already be up) and must not fight this guard.
     private SingleInstanceGuard? _singleInstance;
+    private Task? _teardownTask;
 
     /// <summary>STREAM.md §7 stage 4 deliverable 3: the CLI's remote hand, since a
     /// second process (an SSH session) cannot reach the running app's own drop box.</summary>
@@ -335,10 +336,13 @@ public partial class App : System.Windows.Application
         };
         var menu = new System.Windows.Forms.ContextMenuStrip();
         menu.Items.Add("Open", null, (_, _) => ShowMainWindow());
-        menu.Items.Add("Quit", null, (_, _) =>
+        menu.Items.Add("Quit", null, async (_, _) =>
         {
             log("Quit from tray menu");
-            Shutdown(0);
+            int exitCode = 0;
+            try { await TearDownAsync().ConfigureAwait(true); }
+            catch { exitCode = 1; } // TearDownCoreAsync records failures before closing the logger.
+            Shutdown(exitCode);
         });
         _trayIcon.ContextMenuStrip = menu;
         _trayIcon.DoubleClick += (_, _) => ShowMainWindow();
@@ -350,17 +354,40 @@ public partial class App : System.Windows.Application
         catch { return -1; }
     }
 
-    protected override async void OnExit(ExitEventArgs e)
+    private Task TearDownAsync() => _teardownTask ??= TearDownCoreAsync();
+
+    private async Task TearDownCoreAsync()
     {
-        _trayIcon?.Dispose();
-        _lockPoller?.Dispose();
-        _outboxWatcher?.Dispose();
-        if (_fileOutbox != null) await _fileOutbox.DisposeAsync().ConfigureAwait(false);
-        if (_mdns != null) await _mdns.DisposeAsync().ConfigureAwait(false);
-        if (_server != null) await _server.StopAsync().ConfigureAwait(false);
-        if (_session != null) await _session.DisposeAsync().ConfigureAwait(false);
-        _singleInstance?.Dispose();
-        _logger?.Dispose();
+        List<Exception>? failures = null;
+        void Finish(Action cleanup)
+        {
+            try { cleanup(); }
+            catch (Exception error) { (failures ??= new()).Add(error); }
+        }
+        async Task Join(Func<Task> cleanup)
+        {
+            try { await cleanup().ConfigureAwait(false); }
+            catch (Exception error) { (failures ??= new()).Add(error); }
+        }
+
+        Finish(() => _mainWindow?.RetirePresentation());
+        Finish(() => _trayIcon?.Dispose());
+        Finish(() => _lockPoller?.Dispose());
+        Finish(() => _outboxWatcher?.Dispose());
+        if (_fileOutbox != null) await Join(() => _fileOutbox.DisposeAsync().AsTask()).ConfigureAwait(false);
+        if (_mdns != null) await Join(() => _mdns.DisposeAsync().AsTask()).ConfigureAwait(false);
+        if (_server != null) await Join(() => _server.StopAsync()).ConfigureAwait(false);
+        if (_session != null) await Join(() => _session.DisposeAsync().AsTask()).ConfigureAwait(false);
+        Finish(() => _singleInstance?.Dispose());
+        if (failures != null) Finish(() => _logger?.Log(new AggregateException("Shutdown cleanup failed", failures).ToString()));
+        Finish(() => _logger?.Dispose());
+        if (failures != null) throw new AggregateException("Shutdown cleanup failed", failures);
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        try { TearDownAsync().GetAwaiter().GetResult(); }
+        catch { e.ApplicationExitCode = 1; }
         base.OnExit(e);
     }
 }

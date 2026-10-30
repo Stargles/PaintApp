@@ -87,6 +87,23 @@ public class ClipboardImageStoreTests : IDisposable
         Assert.Equal(1, decoded.Width);
     }
 
+    [Fact]
+    public void PastesWithTheSameTimestampKeepBothOriginalPngs()
+    {
+        var timestamp = new DateTimeOffset(2026, 9, 13, 10, 30, 0, 123, TimeSpan.Zero);
+        byte[] firstPixels = SolidBgra32(1, 1, b: 0, g: 0, r: 255, a: 255);
+        byte[] secondPixels = SolidBgra32(1, 1, b: 255, g: 0, r: 0, a: 255);
+        string firstPath = ClipboardImageStore.Save(_tmpDir, firstPixels, 1, 1, 4, timestamp);
+        byte[] originalFirstPng = File.ReadAllBytes(firstPath);
+        byte[] expectedSecondPng = ClipboardImageStore.EncodePng(secondPixels, 1, 1, 4);
+
+        string secondPath = ClipboardImageStore.Save(_tmpDir, secondPixels, 1, 1, 4, timestamp);
+
+        Assert.Equal(originalFirstPng, File.ReadAllBytes(firstPath));
+        Assert.NotEqual(firstPath, secondPath);
+        Assert.Equal(expectedSecondPng, File.ReadAllBytes(secondPath));
+    }
+
     [Theory]
     [InlineData(0, 1)]
     [InlineData(1, 0)]

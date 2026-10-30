@@ -339,7 +339,7 @@ app — §8.
 
 **Three things only the hardware taught (stage 3)**: the laptop's display sleeps after 60 s on AC and
 WGC keeps capturing a black desktop with a live cursor on it, so the streamer holds
-`SetThreadExecutionState(ES_DISPLAY_REQUIRED)` while a pipeline runs — without it the feature's own
+a handle-scoped `PowerCreateRequest` with both SystemRequired and DisplayRequired while a pipeline runs — without it the feature's own
 use case (walk away, rotoscope from the iPad) goes black in a minute; a window source produces frames
 only while that window is not fully occluded (z-order matters; inherent to WGC, so the picker should
 say so if the picture stops); and `show-border=false` works from an unpackaged exe (§8 closed).
@@ -730,9 +730,8 @@ Laptop → iPad: on FILE_END, if a document is open, `kind == "image"` → `inse
 reason:"No document is open on the iPad"`. The insert is exactly the picker's, Move-box lift included.
 
 iPad → laptop: `ExportSheet` gains **Send to Computer** beside the existing destination, enabled only
-while a client is connected; it sends the immutable `.finished` product's file and reports the laptop's
-FILE_RESULT only if that product is still current. Its callback retains the source through completion;
-resetting/re-exporting cannot change the pending sender's bytes or republish its old progress/result.
+while a client is connected; it sends the `.finished(url)` file and reports the laptop's FILE_RESULT
+in the sheet.
 
 **iPad half built, stage 4.** `ScreenStreamClient` owns both directions: FILE_BEGIN opens a temp file
 in a new `StreamTransferStore` directory (Application Support, beside `VideoImportStore` — never

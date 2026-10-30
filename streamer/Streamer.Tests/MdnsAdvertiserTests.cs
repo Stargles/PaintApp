@@ -150,6 +150,70 @@ public class MdnsAdvertiserTests
         Assert.False(MdnsAdvertiser.IsPaintstreamQuery(header, MdnsAdvertiser.ServiceType, MdnsAdvertiser.ServiceDomain));
     }
 
+    [Fact]
+    public void ANameMayOccupy255ExpandedWireOctetsButNot256()
+    {
+        string prefix = $"{new string('a', 63)}.{new string('b', 63)}.{new string('c', 63)}";
+        string maximumName = $"{prefix}.{new string('d', 61)}";
+        byte[] maximumQuery = BuildQuery(maximumName, qtype: 12);
+
+        var decoded = DnsName.Decode(maximumQuery, 12);
+        Assert.Equal(maximumName, decoded.Name);
+        Assert.Equal(255, decoded.Consumed); // Four length octets, 250 label octets, and the root.
+
+        byte[] overlongQuery = BuildQuery($"{prefix}.{new string('d', 62)}", qtype: 12);
+        Assert.Throws<FormatException>(() => DnsName.Decode(overlongQuery, 12));
+    }
+
+    [Fact]
+    public void ACompressedNameConsumesItsPointerBeforeTheNextMatchingQuQuestion()
+    {
+        const string otherService = "_airplay._tcp.local";
+        byte[] original = BuildQuery(new[]
+        {
+            (otherService, (ushort)12),
+            ("_paintstream._tcp.local", (ushort)12),
+        }, unicastResponseRequested: true);
+        // The first name has 19 ASCII characters: its dots become length octets, plus
+        // the first length and root. Its QTYPE/QCLASS then end at byte 37.
+        const int compressedQuestionAt = 37;
+        var bytes = new List<byte>(original);
+        bytes.InsertRange(compressedQuestionAt, new byte[] { 0xC0, 0x0C, 0, 12, 0, 1 });
+        byte[] query = bytes.ToArray();
+        BinaryPrimitives.WriteUInt16BigEndian(query.AsSpan(4, 2), 3);
+
+        var decoded = DnsName.Decode(query, compressedQuestionAt);
+        Assert.Equal(otherService, decoded.Name);
+        Assert.Equal(2, decoded.Consumed);
+        Assert.True(MdnsAdvertiser.IsPaintstreamQuery(query, MdnsAdvertiser.ServiceType,
+            MdnsAdvertiser.ServiceDomain, out bool requestedUnicast));
+        Assert.True(requestedUnicast);
+    }
+
+    [Fact]
+    public void CompressionCannotHideAnOverlongExpandedName()
+    {
+        string name = $"{new string('a', 63)}.{new string('b', 63)}.{new string('c', 63)}.{new string('d', 62)}";
+        var bytes = new List<byte>(BuildQuery(name, qtype: 12));
+        int pointerAt = bytes.Count;
+        bytes.AddRange(new byte[] { 0xC0, 0x0C }); // Backward pointer to the 256-octet name.
+        byte[] query = bytes.ToArray();
+
+        Assert.Throws<FormatException>(() => DnsName.Decode(query, pointerAt));
+    }
+
+    [Theory]
+    [InlineData(0x40)]
+    [InlineData(0x80)]
+    public void ReservedLabelPrefixesAreRefusedEvenWithEnoughPayload(int prefix)
+    {
+        byte[] name = new byte[prefix + 2];
+        name[0] = (byte)prefix;
+        Array.Fill(name, (byte)'a', 1, prefix);
+        // The trailing root and all payload bytes are present; truncation cannot explain refusal.
+        Assert.Throws<FormatException>(() => DnsName.Decode(name, 0));
+    }
+
     /// <summary>A minimal DNS query datagram: header (QDCOUNT = questions.Length) then each
     /// question's name/QTYPE/QCLASS. Hand-built rather than reusing <c>DnsMessageWriter</c> (an
     /// answer writer, not a query writer) so this test fixture does not depend on the very code

@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -57,6 +56,13 @@ public partial class MainWindow : Window, IFrameSink
 
     private readonly System.Collections.ObjectModel.ObservableCollection<TransferRowViewModel> _transfers = new();
     private readonly Dictionary<string, TransferRowViewModel> _rowsByPath = new();
+    private readonly object _presentationGate = new();
+    // One replaceable progress summary per attempt. A terminal -> Queued boundary
+    // seals the previous summary, since its history row must survive a busy dispatcher.
+    private readonly Dictionary<string, List<(OutboundFileEventArgs Latest, bool StartsOver)>> _pendingTransfers = new();
+    private StatusMessage? _pendingStatus;
+    private DispatcherOperation? _presentationOperation;
+    private bool _presentationClosed;
 
     // Set in OnSourceInitialized (the HWND does not exist before then) and torn down in
     // OnClosed. STREAM.md §4.5: this class is the only place that touches a window handle
@@ -167,27 +173,82 @@ public partial class MainWindow : Window, IFrameSink
 
     private void ClearTransfersButton_Click(object sender, RoutedEventArgs e)
     {
+        lock (_presentationGate) _pendingTransfers.Clear();
         _transfers.Clear();
         _rowsByPath.Clear();
     }
 
     private void FileOutbox_TransferUpdated(object? sender, OutboundFileEventArgs e)
     {
-        Dispatcher.Invoke(() =>
+        lock (_presentationGate)
+        {
+            if (_presentationClosed) return;
+            bool startsOver = e.State == OutboundFileState.Queued && e.BytesSent == 0;
+            if (!_pendingTransfers.TryGetValue(e.Path, out var attempts))
+                _pendingTransfers[e.Path] = attempts = new();
+            if (attempts.Count == 0 || (startsOver && IsTerminal(attempts[^1].Latest.State)))
+                attempts.Add((e, startsOver));
+            else
+                attempts[^1] = (e, startsOver || attempts[^1].StartsOver);
+            QueuePresentationLocked();
+        }
+    }
+
+    private void QueuePresentationLocked()
+    {
+        _presentationOperation ??= Dispatcher.InvokeAsync(PresentPending);
+    }
+
+    private void PresentPending()
+    {
+        StatusMessage? status;
+        (OutboundFileEventArgs Latest, bool StartsOver)[] transfers;
+        lock (_presentationGate)
+        {
+            _presentationOperation = null;
+            if (_presentationClosed) return;
+            status = _pendingStatus; _pendingStatus = null;
+            transfers = _pendingTransfers.Values.SelectMany(attempts => attempts).ToArray(); _pendingTransfers.Clear();
+        }
+        if (status != null)
+        {
+            EncoderText.Text = _session.Encoder != null ? $"Encoder: {_session.Encoder.ElementName}" : "Encoder: (none)";
+            string client = _server.HasClient ? "iPad connected" : "no client connected";
+            StatusText.Text = status.Streaming
+                ? $"Live — {status.Source.Name} ({status.Width}x{status.Height}) — {client}"
+                : $"Not streaming — {status.Reason ?? "no reason given"} — {client}";
+        }
+        foreach (var (e, startsOver) in transfers)
         {
             _rowsByPath.TryGetValue(e.Path, out var row);
-            bool startingOver = e.State == OutboundFileState.Queued && e.BytesSent == 0 && (row == null || row.Terminal);
-            if (startingOver)
+            if (startsOver && (row == null || row.Terminal))
             {
                 row = new TransferRowViewModel(Path.GetFileName(e.Path));
                 _rowsByPath[e.Path] = row;
-                _transfers.Insert(0, row); // most recent first
+                _transfers.Insert(0, row);
             }
-            if (row == null) return; // shouldn't happen — an update with no matching row and no fresh Queued
+            if (row == null) continue;
             row.StatusText = DescribeState(e);
-            row.Terminal = e.State is OutboundFileState.Inserted or OutboundFileState.Refused or OutboundFileState.Failed;
-        });
+            row.Terminal = IsTerminal(e.State);
+        }
     }
+
+    internal void RetirePresentation()
+    {
+        lock (_presentationGate)
+        {
+            if (_presentationClosed) return;
+            _presentationClosed = true;
+            _pendingStatus = null; _pendingTransfers.Clear();
+            _presentationOperation?.Abort(); _presentationOperation = null;
+        }
+        _fileOutbox.TransferUpdated -= FileOutbox_TransferUpdated;
+        _session.RemoveSink(this);
+        _rateTimer.Stop();
+    }
+
+    private static bool IsTerminal(OutboundFileState state) =>
+        state is OutboundFileState.Inserted or OutboundFileState.Refused or OutboundFileState.Failed;
 
     private static string DescribeState(OutboundFileEventArgs e) => e.State switch
     {
@@ -294,28 +355,18 @@ public partial class MainWindow : Window, IFrameSink
 
     public void OnStatus(StatusMessage status)
     {
-        Dispatcher.Invoke(() =>
+        lock (_presentationGate)
         {
-            EncoderText.Text = _session.Encoder != null ? $"Encoder: {_session.Encoder.ElementName}" : "Encoder: (none)";
-            string client = _server.HasClient ? "iPad connected" : "no client connected";
-            StatusText.Text = status.Streaming
-                ? $"Live — {status.Source.Name} ({status.Width}x{status.Height}) — {client}"
-                : $"Not streaming — {status.Reason ?? "no reason given"} — {client}";
-        });
+            if (_presentationClosed) return;
+            _pendingStatus = status;
+            QueuePresentationLocked();
+        }
     }
 
     public Task OnVideoFrameAsync(bool keyframe, ulong ptsUs, ReadOnlyMemory<byte> accessUnit, CancellationToken ct)
     {
         // The rate timer already updates this window; video delivery needs no Dispatcher work.
         return Task.CompletedTask;
-    }
-
-    protected override void OnClosing(CancelEventArgs e)
-    {
-        // App.xaml.cs's Closing handler already cancels + hides; this override exists
-        // only so the rate timer does not keep firing needlessly while hidden — it's
-        // cheap either way, so left running is fine. No-op override kept for clarity.
-        base.OnClosing(e);
     }
 
     // ---- STREAM.md §4.5: session-lock / display-power window messages. This is the
@@ -384,6 +435,7 @@ public partial class MainWindow : Window, IFrameSink
 
     protected override void OnClosed(EventArgs e)
     {
+        RetirePresentation();
         IntPtr hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd != IntPtr.Zero) NativeInterop.WTSUnRegisterSessionNotification(hwnd);
         if (_powerNotificationHandle != IntPtr.Zero) NativeInterop.UnregisterPowerSettingNotification(_powerNotificationHandle);

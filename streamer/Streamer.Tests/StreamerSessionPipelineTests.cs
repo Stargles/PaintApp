@@ -196,4 +196,203 @@ public class StreamerSessionPipelineTests
         await session.DisposeAsync();
     }
 
+    [Fact]
+    public void DisconnectOnAnotherThreadReleasesTheStartingThreadsKeepAwakeState()
+    {
+        // The API returns the calling thread's previous state; ES_CONTINUOUS alone clears it.
+        // Keep this probe test-local so retiring the production thread API does not retire the witness.
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", EntryPoint = "SetThreadExecutionState", SetLastError = true)]
+        static extern uint ProbeExecutionState(uint flags);
+        const uint continuous = 0x80000000, required = 0x00000001 | 0x00000002;
+        var timeout = TimeSpan.FromSeconds(10);
+        using var started = new ManualResetEventSlim();
+        using var stopped = new ManualResetEventSlim();
+        var pipeline = new FakePipeline();
+        var session = new StreamerSession(@"C:\nonexistent", _ => { },
+            (_, _) => Task.FromResult<ICapturePipeline>(pipeline));
+        Exception? startError = null, stopError = null;
+        uint initialClear = 0, afterDisconnect = 0, finalClear = 0;
+        bool startInline = false, stopInline = false;
+        var startingThread = new Thread(() =>
+        {
+            try
+            {
+                initialClear = ProbeExecutionState(continuous);
+                session.SetSourceAsync(Source()).WaitAsync(timeout).GetAwaiter().GetResult();
+                var connect = session.OnClientConnectedAsync();
+                startInline = connect.IsCompleted;
+                connect.WaitAsync(timeout).GetAwaiter().GetResult();
+                started.Set();
+                if (!stopped.Wait(timeout)) throw new TimeoutException("The disconnect did not finish");
+                afterDisconnect = ProbeExecutionState(continuous);
+            }
+            catch (Exception error) { startError = error; }
+            finally
+            {
+                try { finalClear = ProbeExecutionState(continuous); }
+                catch (Exception error) { startError ??= error; }
+                started.Set();
+            }
+        }) { IsBackground = true };
+        var stoppingThread = new Thread(() =>
+        {
+            try
+            {
+                var disconnect = session.OnClientDisconnectedAsync();
+                stopInline = disconnect.IsCompleted;
+                disconnect.WaitAsync(timeout).GetAwaiter().GetResult();
+            }
+            catch (Exception error) { stopError = error; }
+            finally { stopped.Set(); }
+        }) { IsBackground = true };
+        bool startReady = false, stopLaunched = false, startJoined = false, stopJoined = false;
+        startingThread.Start();
+        try
+        {
+            startReady = started.Wait(timeout);
+            if (startReady && startError == null)
+            {
+                stoppingThread.Start();
+                stopLaunched = true;
+                stopJoined = stoppingThread.Join(timeout);
+            }
+        }
+        finally
+        {
+            stopped.Set();
+            startJoined = startingThread.Join(timeout);
+            if (stopLaunched && !stopJoined) stopJoined = stoppingThread.Join(timeout);
+            session.DisposeAsync().AsTask().WaitAsync(timeout).GetAwaiter().GetResult();
+        }
+        Assert.True(startReady && startJoined && stopJoined, "Both owned threads must finish");
+        Assert.Null(startError);
+        Assert.Null(stopError);
+        Assert.True(startInline && stopInline, "Completed fake transitions must stay on their calling threads");
+        Assert.True(pipeline.Stopped);
+        Assert.NotEqual(0u, initialClear);
+        Assert.NotEqual(0u, afterDisconnect);
+        Assert.NotEqual(0u, finalClear);
+        Assert.Equal(0u, afterDisconnect & required);
+    }
+
+}
+
+public class StreamerSessionPowerOwnershipTests
+{
+    private sealed class GatedPipeline : ICapturePipeline
+    {
+        public readonly TaskCompletionSource StartedGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public readonly TaskCompletionSource AllowStart = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public readonly TaskCompletionSource StoppingGate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public readonly TaskCompletionSource AllowStop = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Exception? StartError, StopError;
+        public bool IsRunning => true;
+        public int DisposeCount;
+        public event Func<AccessUnitEventArgs, CancellationToken, Task>? AccessUnitReady { add { } remove { } }
+        public event EventHandler<string>? UnexpectedExit { add { } remove { } }
+        public event EventHandler? Started { add { } remove { } }
+        public async Task StartAsync()
+        {
+            StartedGate.TrySetResult();
+            await AllowStart.Task;
+            if (StartError != null) throw StartError;
+        }
+        public async Task StopAsync()
+        {
+            StoppingGate.TrySetResult();
+            await AllowStop.Task;
+            if (StopError != null) throw StopError;
+        }
+        public async ValueTask DisposeAsync() { DisposeCount++; await StopAsync(); }
+    }
+
+    private static NativeMethods.SafePowerRequestHandle? Request(StreamerSession session) =>
+        (NativeMethods.SafePowerRequestHandle?)typeof(StreamerSession)
+            .GetField("_powerRequest", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(session);
+    private static CaptureSource Source(string id) =>
+        new() { Kind = SourceKind.Monitor, Id = id, Name = "Owned test source", Width = 64, Height = 64 };
+
+    [Theory]
+    [InlineData("disconnect")]
+    [InlineData("pause")]
+    [InlineData("source")]
+    [InlineData("blocked")]
+    [InlineData("dispose")]
+    [InlineData("stop-failure")]
+    public async Task TheRequestLivesThroughStartingAndStopThenClosesForEveryPipelineExit(string exit)
+    {
+        var pipeline = new GatedPipeline();
+        var stopFailure = new InvalidOperationException("test-local stop failure");
+        if (exit == "stop-failure") pipeline.StopError = stopFailure;
+        int creates = 0;
+        var session = new StreamerSession(@"C:\unused", createPipeline: (_, _) =>
+            Task.FromResult<ICapturePipeline>(creates++ == 0 ? pipeline : new FakePipeline()));
+        Task? connect = null, stop = null;
+        NativeMethods.SafePowerRequestHandle? request = null;
+        try
+        {
+            await session.SetSourceAsync(Source("first"));
+            connect = session.OnClientConnectedAsync();
+            await pipeline.StartedGate.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            request = Request(session);
+            Assert.True(request is { IsClosed: false, IsInvalid: false });
+            pipeline.AllowStart.TrySetResult();
+            await connect.WaitAsync(TimeSpan.FromSeconds(10));
+            stop = exit switch
+            {
+                "pause" => session.HandleControlAsync(new ControlMessage { Cmd = ControlMessage.Pause }),
+                "source" => session.SetSourceAsync(Source("second")),
+                "blocked" => session.SetEnvironmentBlockedAsync(true, "test-local locked state"),
+                "dispose" => session.DisposeAsync().AsTask(),
+                _ => session.OnClientDisconnectedAsync(),
+            };
+            await pipeline.StoppingGate.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(request!.IsClosed);
+            pipeline.AllowStop.TrySetResult();
+            var error = await Record.ExceptionAsync(() => stop.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Same(exit == "stop-failure" ? stopFailure : null, error);
+            Assert.True(request.IsClosed);
+            Assert.Equal(1, pipeline.DisposeCount);
+        }
+        finally
+        {
+            pipeline.AllowStart.TrySetResult(); pipeline.AllowStop.TrySetResult();
+            if (connect != null) { try { await connect; } catch { } }
+            if (stop != null) { try { await stop; } catch { } }
+            try { await session.DisposeAsync(); }
+            catch (Exception error) when (ReferenceEquals(error, stopFailure)) { }
+            request?.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task AFailedStartDisposesThePipelineAndItsAcquiredRequest()
+    {
+        var failure = new InvalidOperationException("test-local start failure");
+        var pipeline = new GatedPipeline { StartError = failure };
+        var session = new StreamerSession(@"C:\unused", createPipeline: (_, _) => Task.FromResult<ICapturePipeline>(pipeline));
+        Task? connect = null;
+        NativeMethods.SafePowerRequestHandle? request = null;
+        try
+        {
+            await session.SetSourceAsync(Source("first"));
+            connect = session.OnClientConnectedAsync();
+            await pipeline.StartedGate.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            request = Request(session);
+            pipeline.AllowStop.TrySetResult(); pipeline.AllowStart.TrySetResult();
+            var error = await Record.ExceptionAsync(() => connect.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Same(failure, error);
+            Assert.True(request is { IsClosed: true });
+            Assert.Null(Request(session));
+            Assert.Equal(1, pipeline.DisposeCount);
+        }
+        finally
+        {
+            pipeline.AllowStart.TrySetResult(); pipeline.AllowStop.TrySetResult();
+            if (connect != null) { try { await connect; } catch { } }
+            await session.DisposeAsync();
+            request?.Dispose();
+        }
+    }
 }

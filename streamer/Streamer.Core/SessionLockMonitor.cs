@@ -14,7 +14,7 @@ namespace Streamer.Core;
 ///
 /// A locked session and a dark display are tracked independently because they can
 /// coincide or diverge (a lock eventually dims the display too; a display can go dark
-/// on its own if <c>ES_DISPLAY_REQUIRED</c> ever lapses) but only one reason is ever
+/// on its own if its display power request ever lapses) but only one reason is ever
 /// reported: a lock wins, because it is the expected, unremarkable cause (any idle
 /// laptop locks) while an unlocked session losing its display is the surprising one
 /// worth naming on its own.

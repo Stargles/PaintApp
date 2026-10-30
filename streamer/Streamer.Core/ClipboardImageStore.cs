@@ -25,8 +25,21 @@ public static class ClipboardImageStore
         string name = $"{(timestamp ?? DateTimeOffset.Now):yyyyMMdd-HHmmss-fff}.png";
         string path = Path.Combine(clipboardFolder, name);
         byte[] png = EncodePng(bgra32Pixels, width, height, strideBytes);
-        File.WriteAllBytes(path, png);
-        return path;
+        while (true)
+        {
+            FileStream destination;
+            try
+            {
+                destination = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            }
+            catch (IOException) when (File.Exists(path))
+            {
+                path = Path.Combine(clipboardFolder, $"{Path.GetFileNameWithoutExtension(name)}-{Guid.NewGuid():N}.png");
+                continue;
+            }
+            using (destination) destination.Write(png);
+            return path;
+        }
     }
 
     /// <summary>The conversion itself, split out so a test can assert on the bytes
