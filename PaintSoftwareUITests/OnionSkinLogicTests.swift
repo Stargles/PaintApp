@@ -1153,6 +1153,62 @@ final class OnionSkinLogicTests: XCTestCase {
                           "30% and 100% must cut differently — the bug this pins made every opacity cut fully")
     }
 
+    func testBehindUsesAnimatedOpacityWithoutChangingTheStoredBase() throws {
+        let keyed = twoCelManager()
+        let control = twoCelManager()
+        let target = KeyframeTarget.layer(id: keyed.layers[0].id)
+        XCTAssertEqual(keyed.setTargetChannelKeys(target, frame: 0, values: [TargetChannel.opacity.id: 1]), 1)
+        XCTAssertEqual(keyed.setTargetChannelKeys(target, frame: 8, values: [TargetChannel.opacity.id: 0.3]), 1)
+        XCTAssertEqual(keyed.layers[0].opacity, 1, "Keying opacity must leave its stored base alone")
+
+        func picture(_ manager: CanvasManager) throws
+            -> (ghost: [UInt8], ink: [UInt8], clip: [UInt8], seen: [UInt8], crossing: UInt8) {
+            let size = CanvasFixture.canvasSize
+            let frames = try XCTUnwrap(OnionSkinSettingsSource().frames(for: manager))
+            XCTAssertEqual(frames.count, 1, "PREMISE: the other drawing supplies exactly one ghost")
+            let ghost = try XCTUnwrap(OnionSkinFrame.composite(frames, size: size))
+            let ink = try XCTUnwrap(manager.onionSkinInkToSubtract(at: size))
+            let ghostCrossing = alpha(alphaGrid(of: ghost), 25, 25)
+            let inkCrossing = alpha(alphaGrid(of: ink), 25, 25)
+            XCTAssertGreaterThan(ghostCrossing, 0, "PREMISE: the ghost reaches the crossing")
+            XCTAssertEqual(inkCrossing, 255, "PREMISE: current drawn ink covers the crossing")
+            let clip = try XCTUnwrap(OnionSkinClip.mask(layerMask: nil, subtracting: ink, size: size,
+                                                        opacity: manager.onionSkinInkOpacity))
+            let seen = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { _ in
+                ghost.draw(in: CGRect(origin: .zero, size: size))
+                UIImage(cgImage: clip).draw(in: CGRect(origin: .zero, size: size),
+                                           blendMode: .destinationIn, alpha: 1)
+            }
+            return (try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(ghost.cgImage))),
+                    try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(ink.cgImage))),
+                    try XCTUnwrap(CanvasFixture.rgbaBytes(clip)),
+                    try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(seen.cgImage))),
+                    alpha(alphaGrid(of: seen), 25, 25))
+        }
+
+        for (frame, opacity) in [(8, 0.3), (0, 1.0)] {
+            keyed.goToFrame(frame)
+            control.goToFrame(frame)
+            control.layers[0].opacity = opacity
+            let node = try XCTUnwrap(keyed.renderTree(atFrame: frame).first { $0.id == keyed.layers[0].id })
+            XCTAssertEqual(node.opacity, opacity, "PREMISE: the actual artwork node resolves this key's opacity")
+            XCTAssertEqual(keyed.layers[0].opacity, 1, "Scrubbing and drawing the ghost do not bake the curve into its base")
+            let actual = try picture(keyed)
+            let expected = try picture(control)
+            XCTAssertEqual(actual.ghost, expected.ghost, "PREMISE: both documents draw the same neighboring ink")
+            XCTAssertEqual(actual.ink, expected.ink, "PREMISE: both documents subtract the same current drawing")
+            XCTAssertEqual(actual.clip, expected.clip, "A keyed Behind clip exactly matches the same unkeyed opacity")
+            XCTAssertEqual(actual.seen, expected.seen, "The ghost actually drawn through that clip must match byte for byte")
+            if frame == 8 {
+                XCTAssertGreaterThan(expected.crossing, 0, "The unkeyed 30% control visibly leaves ghost ink at the crossing")
+                XCTAssertGreaterThan(actual.crossing, 0, "The keyed 30% drawing must leave that same visible ghost")
+            } else {
+                XCTAssertEqual(expected.crossing, 0, "The unkeyed 100% control fully cuts the crossing")
+                XCTAssertEqual(actual.crossing, 0, "The keyed 100% drawing must still cut the crossing fully")
+            }
+        }
+    }
+
     /// The empty-layer case, which is the one an animator meets first: a blank drawing has no ink,
     /// so there is nothing for the ghost to be behind and Behind must look exactly like In Front.
     func testAnEmptyCurrentLayerLeavesTheGhostWhole() {

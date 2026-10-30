@@ -253,7 +253,7 @@ extension CanvasManager {
     /// every call; nothing here is ever read except alongside a non-nil ink, so an out-of-range index
     /// answers the harmless "no cut" value instead of trapping.
     var onionSkinInkOpacity: CGFloat {
-        layers.indices.contains(currentLayerIndex) ? CGFloat(layers[currentLayerIndex].opacity) : 1
+        layers.indices.contains(currentLayerIndex) ? CGFloat(layers[currentLayerIndex].opacity(atFrame: currentFrame)) : 1
     }
 }
 
