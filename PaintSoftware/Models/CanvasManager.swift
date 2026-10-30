@@ -1449,6 +1449,28 @@ final class CanvasManager: ObservableObject {
     /// three features reached the owner's iPad unusable behind a green model-level suite, and the
     /// one thing none of those suites could reach was the path an artist actually walks. All of it
     /// but the photo picker is on this side of the line now.
+    /// Loads the selected photo through the picker-provided transfer, then uses the existing
+    /// image import. The current-selection closure belongs to that view's task lifetime.
+    @MainActor
+    @discardableResult
+    func importCustomBrush(loadingData loadData: () async throws -> Data?,
+                           whileCurrent isCurrent: () -> Bool) async throws -> Brush {
+        func requireCurrent() throws {
+            try Task.checkCancellation()
+            guard isCurrent() else { throw CancellationError() }
+        }
+        try requireCurrent()
+        let data: Data?
+        do { data = try await loadData() }
+        catch {
+            try requireCurrent()
+            throw BrushTipImport.Failure.couldNotLoadImage
+        }
+        try requireCurrent()
+        guard let data, let image = UIImage(data: data) else { throw BrushTipImport.Failure.couldNotLoadImage }
+        return try importCustomBrush(from: image)
+    }
+
     @discardableResult
     func importCustomBrush(from image: UIImage) throws -> Brush {
         let brush = Brush(name: DefaultName.next(stem: "Custom", among: customBrushes.map(\.name)),

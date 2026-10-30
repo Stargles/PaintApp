@@ -516,6 +516,153 @@ final class BrushTipLogicTests: XCTestCase {
                        "…and thin. A round or square tip inks this pixel; the imported one must not.")
     }
 
+    // MARK: - The selected photo owns its asynchronous import
+
+    @MainActor
+    private final class PendingPhoto {
+        let started: XCTestExpectation
+        private var continuation: CheckedContinuation<Data?, Error>?
+
+        init(_ started: XCTestExpectation) { self.started = started }
+
+        func load() async throws -> Data? {
+            try await withCheckedThrowingContinuation { continuation in
+                self.continuation = continuation
+                started.fulfill()
+            }
+        }
+
+        func finish(_ result: Result<Data?, Error>) throws {
+            let pending = try XCTUnwrap(continuation, "The real import reached its photo transfer")
+            continuation = nil
+            pending.resume(with: result)
+        }
+    }
+
+    private static func photoData(vertical: Bool) throws -> Data {
+        let width: CGFloat = vertical ? 40 : 200, height: CGFloat = vertical ? 200 : 40
+        let picture = Self.picture(width: width, height: height, opaque: true) { context in
+            context.setFillColor(UIColor.black.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        return try XCTUnwrap(picture.pngData())
+    }
+
+    @MainActor
+    func testASupersededPhotoCannotReplaceTheNewerBrushAssetOrItsDrawnTip() async throws {
+        let manager = CanvasFixture.manager()
+        let assets = Set(BrushStorage.shared.fileNames())
+        defer { for name in Set(BrushStorage.shared.fileNames()).subtracting(assets) { BrushStorage.shared.remove(name) } }
+        let notice = manager.notice?.code
+        var selected = "A"
+        let first = PendingPhoto(expectation(description: "A transfer started"))
+        let a = Task { @MainActor in
+            try await manager.importCustomBrush(loadingData: { try await first.load() },
+                                                whileCurrent: { selected == "A" })
+        }
+        await fulfillment(of: [first.started], timeout: 2)
+        selected = "B"
+        let second = PendingPhoto(expectation(description: "B transfer started"))
+        let b = Task { @MainActor in
+            try await manager.importCustomBrush(loadingData: { try await second.load() },
+                                                whileCurrent: { selected == "B" })
+        }
+        await fulfillment(of: [second.started], timeout: 2)
+        try second.finish(.success(try Self.photoData(vertical: true)))
+        let latest = try await b.value
+        XCTAssertEqual(manager.toolProfiles.brush.preset.id, latest.id, "PREMISE: the current B import selected its actual brush")
+        try first.finish(.success(try Self.photoData(vertical: false)))
+        do {
+            _ = try await a.value
+            XCTFail("A superseded photo must cancel before it imports an asset or changes the current brush")
+        } catch is CancellationError {} catch { XCTFail("A superseded photo must not publish an import error: \(error)") }
+
+        XCTAssertEqual(manager.customBrushes.map(\.id), [latest.id], "Only the current photo becomes a project brush")
+        XCTAssertEqual(manager.toolProfiles.brush.preset.id, latest.id, "Older A cannot replace B's active preset")
+        XCTAssertEqual(Set(BrushStorage.shared.fileNames()).subtracting(assets).count, 1,
+                       "Only the current photo writes a tip asset")
+        XCTAssertEqual(manager.notice?.code, notice)
+        let texture = RasterLayerTexture(size: CGSize(width: 200, height: 200))
+        BrushStamper.stampStroke(into: texture,
+            samples: StrokeSamples([VectorSample(point: CGPoint(x: 100, y: 100), pressure: 1)], channels: .pressureOnly),
+            brush: manager.toolProfiles.brush.preset, color: .black, brushSize: 120,
+            brushOpacity: 1, random: DabRandom(seed: 5))
+        let pixels = try XCTUnwrap(Self.rgba(of: texture))
+        XCTAssertGreaterThan(Self.alpha(pixels, 100, 145), 200, "The next real stroke keeps B's tall tip")
+        XCTAssertEqual(Self.alpha(pixels, 145, 100), 0, "The next real stroke does not switch to A's horizontal tip")
+    }
+
+    @MainActor
+    func testAStalePhotoFailureIsCancelledInsteadOfReplacingTheCurrentImportResult() async throws {
+        let manager = CanvasFixture.manager()
+        let assets = Set(BrushStorage.shared.fileNames())
+        defer { for name in Set(BrushStorage.shared.fileNames()).subtracting(assets) { BrushStorage.shared.remove(name) } }
+        let notice = manager.notice?.code
+        var selected = "A"
+        let first = PendingPhoto(expectation(description: "Old photo transfer started"))
+        let a = Task { @MainActor in
+            try await manager.importCustomBrush(loadingData: { try await first.load() },
+                                                whileCurrent: { selected == "A" })
+        }
+        await fulfillment(of: [first.started], timeout: 2)
+        selected = "B"
+        let latest = try await manager.importCustomBrush(loadingData: { try Self.photoData(vertical: true) },
+                                                        whileCurrent: { selected == "B" })
+        try first.finish(.failure(CocoaError(.fileReadCorruptFile)))
+        do {
+            _ = try await a.value
+            XCTFail("An old read failure must not complete as a successful import")
+        } catch is CancellationError {} catch { XCTFail("The old read failure must not escape as the current error: \(error)") }
+        XCTAssertEqual(manager.toolProfiles.brush.preset.id, latest.id)
+        XCTAssertEqual(manager.customBrushes.map(\.id), [latest.id])
+        XCTAssertEqual(Set(BrushStorage.shared.fileNames()).subtracting(assets).count, 1)
+        XCTAssertEqual(manager.notice?.code, notice)
+    }
+
+    @MainActor
+    func testCancelledPhotoTransfersPublishNeitherSuccessNorFailure() async throws {
+        for fail in [false, true] {
+            let manager = CanvasFixture.manager()
+            let original = manager.toolProfiles.brush.preset.id
+            let notice = manager.notice?.code
+            let assets = Set(BrushStorage.shared.fileNames())
+            defer { for name in Set(BrushStorage.shared.fileNames()).subtracting(assets) { BrushStorage.shared.remove(name) } }
+            let pending = PendingPhoto(expectation(description: "Photo transfer started before cancellation"))
+            let task = Task { @MainActor in
+                try await manager.importCustomBrush(loadingData: { try await pending.load() }, whileCurrent: { true })
+            }
+            await fulfillment(of: [pending.started], timeout: 2)
+            task.cancel()
+            if fail { try pending.finish(.failure(CocoaError(.fileReadCorruptFile))) }
+            else { try pending.finish(.success(try Self.photoData(vertical: true))) }
+            do {
+                _ = try await task.value
+                XCTFail("A cancelled view task cannot import a photo after its transfer returns")
+            } catch is CancellationError {} catch { XCTFail("Cancellation cannot become a visible read error: \(error)") }
+            XCTAssertTrue(manager.customBrushes.isEmpty, "A cancelled transfer creates no project brush")
+            XCTAssertEqual(manager.toolProfiles.brush.preset.id, original)
+            XCTAssertEqual(Set(BrushStorage.shared.fileNames()), assets, "A cancelled transfer writes no tip asset")
+            XCTAssertEqual(manager.notice?.code, notice)
+        }
+    }
+
+    @MainActor
+    func testACurrentPhotoReadFailureStillRefusesWithoutImportingAnything() async throws {
+        let manager = CanvasFixture.manager()
+        let original = manager.toolProfiles.brush.preset.id
+        let assets = Set(BrushStorage.shared.fileNames())
+        let unreadable: [Data?] = [nil, Data([1, 2, 3])]
+        for data in unreadable {
+            do {
+                _ = try await manager.importCustomBrush(loadingData: { data }, whileCurrent: { true })
+                XCTFail("A current unreadable photo must refuse")
+            } catch BrushTipImport.Failure.couldNotLoadImage {} catch { XCTFail("Expected the existing photo-read failure presentation: \(error)") }
+        }
+        XCTAssertTrue(manager.customBrushes.isEmpty)
+        XCTAssertEqual(manager.toolProfiles.brush.preset.id, original)
+        XCTAssertEqual(Set(BrushStorage.shared.fileNames()), assets)
+    }
+
     // MARK: - What an import is normalised into
 
     /// **A non-square picture is letterboxed, not stretched.** `BuiltInBrushTexture`'s ruling is that

@@ -34,13 +34,11 @@ struct BrushSettingsPanel: View {
             accessory: { importErrorRow },
             addMenuItems: { importButton }
         )
-        // The picker is raised from a menu row, so it cannot be the `PhotosPicker` button itself — the
-        // row goes away with its menu the moment it is tapped, and a picker presented from a view
-        // that has gone has nowhere to stand. The flag is the whole of that indirection; everything
-        // past `loadTransferable` is exactly what it was.
+        // The picker stays attached to the panel after its menu row goes away. Its selected item
+        // owns the transfer task, including cancellation on a new selection or panel dismissal.
         .photosPicker(isPresented: $isPickingCustomBrush, selection: $customBrushPickerItem, matching: .images)
-        .onChange(of: customBrushPickerItem) { _, newItem in
-            Task { await importCustomBrush(newItem) }
+        .task(id: customBrushPickerItem) { [item = customBrushPickerItem] in
+            await importCustomBrush(item)
         }
     }
 
@@ -73,23 +71,29 @@ struct BrushSettingsPanel: View {
     /// second definition to keep in step, and — the reason that matters — nothing in a `View` is
     /// reachable from the logic tier, so a rule written here is a rule no test can drive. All that is
     /// left is the four failures the artist can act on.
+    @MainActor
     private func importCustomBrush(_ item: PhotosPickerItem?) async {
         guard let item else { return }
-        guard let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else {
-            await MainActor.run { importError = "Couldn't read that image" }
-            return
-        }
-        await MainActor.run {
-            do {
-                try canvasManager.importCustomBrush(from: image)
-                importError = nil
-            } catch BrushTipImport.Failure.blankMask {
+        do {
+            try await canvasManager.importCustomBrush(
+                loadingData: { try await item.loadTransferable(type: Data.self) },
+                whileCurrent: { customBrushPickerItem == item })
+            guard !Task.isCancelled, customBrushPickerItem == item else { return }
+            importError = nil
+            customBrushPickerItem = nil
+        } catch {
+            guard !(error is CancellationError), !Task.isCancelled, customBrushPickerItem == item else { return }
+            switch error {
+            case BrushTipImport.Failure.couldNotLoadImage:
+                importError = "Couldn't read that image"
+            case BrushTipImport.Failure.blankMask:
                 importError = "That image is blank — a brush needs dark marks on a light background, or its own transparency"
-            } catch BrushTipImport.Failure.couldNotWrite(let error) {
-                importError = "Couldn't save the brush texture: \(error.localizedDescription)"
-            } catch {
+            case BrushTipImport.Failure.couldNotWrite(let failure):
+                importError = "Couldn't save the brush texture: \(failure.localizedDescription)"
+            default:
                 importError = "Couldn't convert that image to a brush texture"
             }
+            customBrushPickerItem = nil
         }
     }
 

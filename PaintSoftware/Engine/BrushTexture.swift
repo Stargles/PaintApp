@@ -655,6 +655,8 @@ enum BrushTipImport {
     static let border = 2
 
     enum Failure: Error {
+        /// The photo transfer failed or did not contain a readable image.
+        case couldNotLoadImage
         /// The picked item could not be drawn at all.
         case unreadableImage
         /// It could be drawn and every pixel of the result is clear — a white-on-white scan, or a

@@ -7,8 +7,8 @@ import XCTest
 /// features that shipped unusable behind a green model-level suite, and names the reason: *"not one
 /// [test] asserted what is drawn, or whether an artist can reach the feature"*. This file is the
 /// answer for this one. Every test starts from a **cold launch with no library file on disk**
-/// (`-resetBrushLibrary`) and constructs no state a fixture could reach that a finger could not — the
-/// only inputs are taps.
+/// (`-resetBrushLibrary`). Public controls supply the edits; the full photo-import method explicitly
+/// requires one controlled picture staged in Photos by root before launch.
 final class BrushMenuUITests: PaintUITestCase {
 
     /// A cold launch with the library file deleted, landing in a new document.
@@ -241,8 +241,8 @@ final class BrushMenuUITests: PaintUITestCase {
 
     /// **The importer's new home works from a cold start** — §2.21 and §7.1's `+`.
     ///
-    /// The photo library itself is not driven (a UI test cannot put an image in the picker), so what
-    /// this pins is the half that moved: the row that was below six sliders, below the fold, is now
+    /// This small check opens and cancels the picker. It pins the half that moved: the row that was
+    /// below six sliders, below the fold, is now
     /// one tap from the first thing the menu shows, and it still raises the picker rather than being
     /// an inert label. The import *rule* — what a tip file must be, which brush stamps it, where it
     /// lands — is `CanvasManager.importCustomBrush`'s and is tested at the logic tier.
@@ -261,6 +261,107 @@ final class BrushMenuUITests: PaintUITestCase {
         let cancel = app.buttons["Cancel"]
         XCTAssertTrue(cancel.waitForExistence(timeout: 10), "Tapping it must actually raise the picker")
         cancel.tap()
+    }
+
+    /// Root stages photo-tip-vertical-bar-40x200.png as the newest Photos item before this method.
+    /// Selecting the same real picker cell twice must make two selected presets and the same tip.
+    func testAColdPhotoTipImportAndSamePhotoReimportSelectAndDrawTheirVerticalTip() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetBrushLibrary"]
+        XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 256, height: 256),
+                                      orientationBeforeCreatingCanvas: .landscapeLeft))
+        XCTAssertEqual(app.windows.firstMatch.frame.size, CGSize(width: 1080, height: 810),
+                       "PREMISE: the actual photo tip is drawn at the owner's landscape size")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        var dimensions: [(width: Double, height: Double)] = []
+        openBrushMenu(app)
+        tapWhenHittable(app.buttons["brushPanel.group.Texture"], "The group that receives an unnamed import")
+        for index in 0..<2 {
+            tapWhenHittable(app.buttons["brushPanel.addButton"], "The brush + button")
+            tapWhenHittable(app.buttons["brushPanel.importCustomBrush"], "Import Custom Brush")
+            let cancel = app.buttons["Cancel"]
+            XCTAssertTrue(cancel.waitForExistence(timeout: 10), "The public system Photos picker must be presented")
+            let picker = app.scrollViews["photosView_content_scroll_view"]
+            let photos = picker.images.matching(identifier: "PXGGridLayout-Info")
+            XCTAssertTrue(photos.firstMatch.waitForExistence(timeout: 10),
+                          "PREMISE: root staged the controlled newest photo in the real picker grid")
+            let window: XCUIElement = app.windows.firstMatch
+            let windowFrame: CGRect = window.frame
+            let viewport: CGRect = picker.frame.intersection(windowFrame)
+            XCTAssertFalse(viewport.isEmpty, "PREMISE: the actual picker viewport is on screen")
+            var targetPhoto: XCUIElement?
+            var targetFrame: CGRect = .null
+            for photo in photos.allElementsBoundByIndex {
+                let frame: CGRect = photo.frame
+                guard !frame.isEmpty, viewport.contains(frame) else { continue }
+                let earlierRow: Bool = frame.minY < targetFrame.minY
+                let earlierColumn: Bool = frame.minY == targetFrame.minY && frame.minX < targetFrame.minX
+                if targetFrame.isNull || earlierRow || earlierColumn {
+                    targetPhoto = photo
+                    targetFrame = frame
+                }
+            }
+            let photo: XCUIElement = try XCTUnwrap(targetPhoto, "PREMISE: a complete real photo tile is visible inside the picker")
+            let targetInfo: XCTAttachment = XCTAttachment(string: "asset: \(photo.label); frame: \(targetFrame); picker: \(viewport); window: \(windowFrame)")
+            targetInfo.name = "photo-tip-import-\(index + 1)-observed-target-bounds"
+            targetInfo.lifetime = .keepAlways; add(targetInfo)
+            attachScreenshot(XCUIScreen.main, "photo-tip-import-\(index + 1)-picker-controlled-first-asset-owner-screen")
+            // The remote asset's Image supplies bounds; the actual touch targets its visible tile.
+            window.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: targetFrame.midX - windowFrame.minX, dy: targetFrame.midY - windowFrame.minY)).tap()
+            XCTAssertTrue(cancel.waitForNonExistence(timeout: 10), "The selected photo returns to the public brush menu")
+
+            let imported = app.buttons["brushPanel.brush.Custom \(index + 1)"]
+            XCTAssertTrue(imported.waitForExistence(timeout: 20),
+                          "Each completion, including the same photo again, must create its visible preset")
+            guard imported.exists else { return }
+            XCTAssertTrue(imported.isSelected, "The real imported preset must become the active brush")
+            if index == 1 {
+                XCTAssertFalse(app.buttons["brushPanel.brush.Custom 1"].isSelected,
+                               "Reimport selects the new preset rather than leaving the first active")
+            }
+            XCTAssertFalse(app.staticTexts["brushPanel.importError"].exists)
+            attachScreenshot(XCUIScreen.main, "photo-tip-import-\(index + 1)-selected-preset-owner-screen")
+        }
+        // Keep the same panel alive across both picker selections; a teardown must not reset the
+        // item for the test. Draw both resulting presets afterwards through ordinary controls.
+        for index in 0..<2 {
+            openBrushLibrary(app)
+            let imported = app.buttons["brushPanel.brush.Custom \(index + 1)"]
+            XCTAssertTrue(imported.waitForExistence(timeout: 5))
+            if !imported.isSelected { tapWhenHittable(imported, "The imported preset to draw") }
+            XCTAssertTrue(imported.isSelected)
+            setBrushSize(app, normalized: CGFloat(59) / 199)
+            app.buttons["toolbar.brushButton"].tap()
+            XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5))
+
+            let paper = visiblePaperRect(app, in: canvas)
+            let x = Double(paper.midX)
+            let y = Double(paper.minY + paper.height * (index == 0 ? 0.30 : 0.68))
+            let halfWidth = Double(paper.width * 0.13), halfHeight = Double(paper.height * 0.13)
+            assertAboveTheDock(app, canvas, dy: y + halfHeight, "the complete imported vertical tip")
+            assertBelowTheToolbar(app, canvas, dy: y - halfHeight, "the complete imported vertical tip")
+            let point = CGVector(dx: x, dy: y)
+            XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: point)), "PREMISE: each imported tip lands on fresh white paper")
+            canvas.coordinate(withNormalizedOffset: point).press(forDuration: 0.1)
+            XCTAssertNotNil(waitForPixel(canvas, at: point) { self.isInk($0) }, "The imported photo brush must draw on the canvas")
+            let window = CGRect(x: x - halfWidth, y: y - halfHeight, width: 2 * halfWidth, height: 2 * halfHeight)
+            let probe = try settledProbe(canvas, window: window)
+            let width = inkedWidth(probe, row: y, from: x - halfWidth, to: x + halfWidth) * Double(canvas.frame.width)
+            let height = inkedHeight(probe, column: x, from: y - halfHeight, to: y + halfHeight) * Double(canvas.frame.height)
+            XCTAssertGreaterThan(width, 2, "The controlled tip has actual painted width")
+            XCTAssertGreaterThan(height, 20, "The controlled tip has actual painted height")
+            XCTAssertGreaterThan(height, width * 3, "The drawn photo is the tall narrow staged tip, not a round/default brush")
+            dimensions.append((width, height))
+            attachScreenshot(XCUIScreen.main, "photo-tip-import-\(index + 1)-drawn-vertical-tip-owner-screen")
+        }
+        XCTAssertEqual(dimensions.count, 2)
+        guard dimensions.count == 2 else { return }
+        XCTAssertEqual(dimensions[0].width, dimensions[1].width, accuracy: 3,
+                       "Importing the same real photo again keeps its drawn width")
+        XCTAssertEqual(dimensions[0].height, dimensions[1].height, accuracy: 3,
+                       "Importing the same real photo again keeps its drawn height")
     }
 
     /// **TODO (111) — a Favourites folder holding the owner's five**, from a cold start with nothing
