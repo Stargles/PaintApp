@@ -268,8 +268,8 @@ extension CanvasManager {
 ///
 /// **Persisted with the document since TODO (77)**, as part of `EditorStateManifest`: onion skin is a
 /// way of looking at a drawing rather than part of it, and the way the artist was looking at this
-/// drawing is what the round trip through the gallery has to bring back. `Codable` is synthesized;
-/// a record this build cannot decode reads as the defaults (see `EditorStateManifest.init(from:)`).
+/// drawing is what the round trip through the gallery has to bring back. Current settings decode
+/// strictly through the package's existing damage/recovery boundary.
 /// **What the Behind placement subtracts, named but not yet drawn.**
 ///
 /// `CanvasManager.onionSkinInkRequest(at:)` resolves one on the main actor — which cel, at what
@@ -537,6 +537,35 @@ struct OnionSkinSettings: Equatable, Codable {
     }
 }
 
+extension OnionSkinSettings {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        neighbourhood = try c.decode(Neighbourhood.self, forKey: .neighbourhood)
+        placement = try c.decode(Placement.self, forKey: .placement)
+        previousCount = try c.decode(Int.self, forKey: .previousCount)
+        nextCount = try c.decode(Int.self, forKey: .nextCount)
+        let range = 0...Self.maxSkinsPerSide
+        guard range.contains(previousCount) else {
+            throw DecodingError.dataCorruptedError(forKey: .previousCount, in: c,
+                debugDescription: "A skin count is outside the existing per-side range.")
+        }
+        guard range.contains(nextCount) else {
+            throw DecodingError.dataCorruptedError(forKey: .nextCount, in: c,
+                debugDescription: "A skin count is outside the existing per-side range.")
+        }
+        loops = try c.decode(Bool.self, forKey: .loops)
+        colouring = try c.decode(Colouring.self, forKey: .colouring)
+        resolution = try c.decode(Resolution.self, forKey: .resolution)
+        previousTint = try c.decode(CodableColor.self, forKey: .previousTint)
+        nextTint = try c.decode(CodableColor.self, forKey: .nextTint)
+        isOpacityLinked = try c.decode(Bool.self, forKey: .isOpacityLinked)
+        linkedPrevious = try c.decode(OnionSkinRampEnds.self, forKey: .linkedPrevious)
+        linkedNext = try c.decode(OnionSkinRampEnds.self, forKey: .linkedNext)
+        freePreviousOpacities = try c.decode([Double].self, forKey: .freePreviousOpacities)
+        freeNextOpacities = try c.decode([Double].self, forKey: .freeNextOpacities)
+    }
+}
+
 /// The onion settings publish independently from `CanvasManager`, so changing opacity updates the
 /// canvas and its panel without invalidating every editor view. Persistence still stores the plain
 /// `OnionSkinSettings` value through `CanvasManager.onionSkin`.
@@ -659,12 +688,12 @@ enum OnionSkinPlanner {
                 baseOffset = 0
             }
             return (1...count).map { d in
-                let raw = anchor + step * (d - 1 + baseOffset)
+                let raw = Int128(anchor) + Int128(step) * (Int128(d) - 1 + Int128(baseOffset))
                 let index: Int?
                 if loops {
-                    index = positiveModulo(raw, spans.count)
+                    index = Int(exactly: positiveModulo(raw, Int128(spans.count)))
                 } else {
-                    index = spans.indices.contains(raw) ? raw : nil
+                    index = Int(exactly: raw).flatMap { spans.indices.contains($0) ? $0 : nil }
                 }
                 return index == currentCelIndex ? nil : index
             }
@@ -674,16 +703,19 @@ enum OnionSkinPlanner {
             // names. Empty leading/trailing gaps are not part of the cycle: a cycle that spent its
             // first three frames blank because the artist started drawing at frame 3 would otherwise
             // wrap through them.
-            let low = spans.map(\.start).min() ?? 0
-            let high = spans.map(\.end).max() ?? 0
+            // A query may leave Int even when every cel end fits. Reduce loop positions on the
+            // wide layer extent first; a nonlooped position outside Int is simply an empty slot.
+            let low = Int128(spans.map(\.start).min() ?? 0)
+            let high = Int128(spans.map(\.end).max() ?? 0)
             let span = high - low
             return (1...count).map { d in
-                var frame = currentFrame + step * d
+                var frame = Int128(currentFrame) + Int128(step) * Int128(d)
                 if loops {
                     guard span > 0 else { return nil }
                     frame = low + positiveModulo(frame - low, span)
                 }
-                guard let index = spans.firstIndex(where: { $0.covers(frame) }) else { return nil }
+                guard let narrowed = Int(exactly: frame),
+                      let index = spans.firstIndex(where: { $0.covers(narrowed) }) else { return nil }
                 return index == currentCelIndex ? nil : index
             }
         }
@@ -692,7 +724,7 @@ enum OnionSkinPlanner {
     /// `a mod n` with a non-negative result. Swift's `%` follows the sign of the dividend, so
     /// `-1 % 3` is -1 and a wrap written with it walks off the front of the array on the very first
     /// previous slot at index 0 — the exact off-by-one this whole feature invites.
-    static func positiveModulo(_ a: Int, _ n: Int) -> Int {
+    static func positiveModulo(_ a: Int128, _ n: Int128) -> Int128 {
         guard n > 0 else { return 0 }
         let r = a % n
         return r < 0 ? r + n : r

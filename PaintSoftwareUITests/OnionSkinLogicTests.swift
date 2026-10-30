@@ -606,6 +606,132 @@ final class OnionSkinLogicTests: XCTestCase {
             neighbourhood: .drawings, loops: true, side: .previous, count: 0), [])
     }
 
+    private func frameDomainManager(_ spans: [(start: Int, length: Int)]) throws -> CanvasManager {
+        let manager = twoCelManager()
+        let size = CanvasFixture.canvasSize
+        manager.layers[0].cels = try spans.enumerated().map { index, span in
+            let valid = span.length > 0 && !span.start.addingReportingOverflow(span.length).overflow
+            _ = try XCTUnwrap(valid ? span : nil, "PREMISE: every input cel has a positive, exactly representable span")
+            let stroke = index.isMultiple(of: 2) ? opaqueRedStroke() : opaqueBlueStroke()
+            return Cel(id: UUID(), startFrame: span.start, frameCount: span.length, raster: .empty(size: size),
+                       vector: VectorCanvas(size: size, elements: [.stroke(stroke)]))
+        }
+        manager.onionSkin.neighbourhood = .frames
+        manager.onionSkin.setOpacityLinked(false)
+        manager.onionSkin.previousCount = OnionSkinSettings.maxSkinsPerSide
+        manager.onionSkin.nextCount = OnionSkinSettings.maxSkinsPerSide
+        for side in OnionSkinSettings.Side.allCases {
+            for slot in 1...OnionSkinSettings.maxSkinsPerSide {
+                manager.onionSkin.setOpacity(1, slot: slot, on: side)
+            }
+        }
+        manager.onionSkin.previousCount = 0
+        manager.onionSkin.nextCount = 0
+        return manager
+    }
+
+    /// Reads the real settings source and proves that a neighbor query changed no drawing or history.
+    private func frameDomainPictures(_ manager: CanvasManager) throws -> (sources: [[UInt8]], skins: [[UInt8]]) {
+        func drawnPictures() throws -> [[UInt8]] {
+            try manager.layers[0].cels.map { cel in
+                let image = try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: CanvasFixture.canvasSize))
+                _ = try XCTUnwrap(hasVisibleContent(image) ? image : nil, "PREMISE: every cel really draws distinguishable ink")
+                return try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(image.cgImage)))
+            }
+        }
+        let ids = manager.layers[0].cels.map(\.id)
+        let spans = manager.layers[0].cels.map { [$0.startFrame, $0.frameCount] }
+        let elements = manager.layers[0].cels.map { $0.vector?.elements.map(\.id) ?? [] }
+        let versions = manager.layers[0].cels.map { $0.vector?.version }
+        let history = manager.history.undoStack.count
+        let frame = manager.currentFrame
+        let settings = manager.onionSkin
+        let sources = try drawnPictures()
+        XCTAssertNotEqual(sources[0], sources[1], "PREMISE: neighboring red and blue cels are visibly different")
+        let frames = try XCTUnwrap(OnionSkinSettingsSource().frames(for: manager))
+        let skins = try frames.map { try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap($0.image.cgImage))) }
+        XCTAssertEqual(manager.layers[0].cels.map(\.id), ids)
+        XCTAssertEqual(manager.layers[0].cels.map { [$0.startFrame, $0.frameCount] }, spans)
+        XCTAssertEqual(manager.layers[0].cels.map { $0.vector?.elements.map(\.id) ?? [] }, elements)
+        XCTAssertEqual(manager.layers[0].cels.map { $0.vector?.version }, versions)
+        XCTAssertEqual(manager.history.undoStack.count, history)
+        XCTAssertEqual(manager.currentFrame, frame)
+        XCTAssertEqual(manager.onionSkin, settings)
+        XCTAssertEqual(try drawnPictures(), sources, "The exact drawn pixels survive a read-only neighbor query")
+        return (sources, skins)
+    }
+
+    func testFrameSkinsPastTheIntegerEndAreEmptyWithoutChangingTheScene() throws {
+        let manager = try frameDomainManager([(Int.max - 4, 1), (Int.max - 3, 1), (Int.max - 2, 2)])
+        manager.goToFrame(Int.max - 1)
+        manager.onionSkin.nextCount = 2
+        manager.onionSkin.loops = false
+        let pictures = try frameDomainPictures(manager)
+        XCTAssertTrue(pictures.skins.isEmpty, "Both future columns are past the admitted drawing; the second is beyond Int")
+    }
+
+    func testFrameSkinsAcrossWideNegativeAndPositiveExtentsKeepTheirDrawnNeighbors() throws {
+        let manager = try frameDomainManager([(-5, 3), (Int.max - 2, 2)])
+        manager.goToFrame(0)
+        manager.onionSkin.previousCount = 5
+        manager.onionSkin.loops = false
+        let pictures = try frameDomainPictures(manager)
+        XCTAssertEqual(pictures.skins, Array(repeating: pictures.sources[0], count: 3),
+                       "Frames -3,-4,-5 show the same red drawing; -1 and -2 are empty, despite the wide layer extent")
+    }
+
+    func testLoopedFrameSkinsReduceWidePositionsAndExtentsBeforeNarrowing() throws {
+        let nearEnd = try frameDomainManager([(Int.max - 4, 1), (Int.max - 3, 1), (Int.max - 2, 2)])
+        nearEnd.goToFrame(Int.max - 1)
+        nearEnd.onionSkin.nextCount = 2
+        nearEnd.onionSkin.loops = true
+        let next = try frameDomainPictures(nearEnd)
+        XCTAssertEqual(next.skins, [next.sources[1], next.sources[0]],
+                       "The out-of-Int second slot wraps to blue, drawn under the nearer red slot")
+
+        let wide = try frameDomainManager([(-1, 1), (Int.max - 2, 2)])
+        wide.goToFrame(0)
+        wide.onionSkin.previousCount = 3
+        wide.onionSkin.loops = true
+        let previous = try frameDomainPictures(wide)
+        XCTAssertEqual(previous.skins, [previous.sources[1], previous.sources[1], previous.sources[0]],
+                       "A cycle wider than Int wraps -2 and -3 to the blue tail while -1 remains red")
+    }
+
+    func testSavedSkinCountsKeepTheExistingFiveSlotContractAndEveryRequiredField() throws {
+        for (previous, next) in [(0, 5), (5, 0), (1, 3)] {
+            var settings = OnionSkinSettings()
+            settings.previousCount = previous
+            settings.nextCount = next
+            XCTAssertEqual(try JSONDecoder().decode(OnionSkinSettings.self, from: JSONEncoder().encode(settings)), settings)
+        }
+        for side in OnionSkinSettings.Side.allCases {
+            for count in [-1, 6, Int.max] {
+                var settings = OnionSkinSettings()
+                if side == .previous { settings.previousCount = count } else { settings.nextCount = count }
+                let data = try JSONEncoder().encode(settings)
+                XCTAssertThrowsError(try JSONDecoder().decode(OnionSkinSettings.self, from: data)) { error in
+                    guard case DecodingError.dataCorrupted(let context) = error else {
+                        return XCTFail("A decoded out-of-contract count must be damaged metadata")
+                    }
+                    XCTAssertEqual(context.codingPath.last?.stringValue, side == .previous ? "previousCount" : "nextCount")
+                }
+            }
+        }
+        let data = try JSONEncoder().encode(OnionSkinSettings())
+        let complete = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        for field in complete.keys {
+            var missing = complete
+            missing.removeValue(forKey: field)
+            XCTAssertThrowsError(try JSONDecoder().decode(OnionSkinSettings.self,
+                from: JSONSerialization.data(withJSONObject: missing)))
+            var null = complete
+            null[field] = NSNull()
+            XCTAssertThrowsError(try JSONDecoder().decode(OnionSkinSettings.self,
+                from: JSONSerialization.data(withJSONObject: null)))
+        }
+    }
+
     // MARK: - Resolution and memory ceiling
 
     /// The resolution rule: the artist's fraction, floored at a readable size, never scaled up.

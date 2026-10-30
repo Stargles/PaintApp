@@ -1952,4 +1952,68 @@ final class ProjectSaveLogicTests: XCTestCase {
             XCTAssertEqual(cel.endFrame, end, "Admission preserves representable timing exactly, with no scene cap or saturation")
         }
     }
+
+    func testDamagedSavedOnionCountsRefuseTheRealPackageAndUseExistingRecovery() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let raster = manager.layers[0].cels[0].raster
+        raster.beginStroke()
+        raster.stampCircle(at: CGPoint(x: 20, y: 24), radius: 5, color: .red, alpha: 1, hardness: 1)
+        raster.endStroke()
+        let expected = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(raster.renderToUIImage().get().cgImage)))
+        XCTAssertTrue(stride(from: 3, to: expected.count, by: 4).contains { expected[$0] > 0 },
+                      "PREMISE: the saved package contains actual drawn pixels")
+        let url = projectURL(name: "Checked Onion Counts")
+        saveAndWait(manager, to: url)
+        _ = try XCTUnwrap(ProjectStore.load(from: url), "PREMISE: the actual current package opens before its counts are damaged")
+        ProjectBackupManager.refreshLatestSnapshot(projectURL: url, projectID: manager.projectID)
+        let latest = ProjectBackupManager.latestSnapshotURL(directory: ProjectBackupManager.backupsDirectory(projectID: manager.projectID))
+        let backupReady = ProjectBackupManager.validateProjectForRestore(at: latest)
+        XCTAssertTrue(backupReady, "PREMISE: an actual complete readable backup exists")
+        guard backupReady else { return }
+        let manifestURL = url.appendingPathComponent("manifest.json")
+        let original = try Data(contentsOf: manifestURL)
+        func packageBytes() throws -> [String: Data] {
+            let paths = try XCTUnwrap(FileManager.default.subpaths(atPath: url.path))
+            var result: [String: Data] = [:]
+            for path in paths {
+                let file = url.appendingPathComponent(path)
+                if try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
+                    result[path] = try Data(contentsOf: file)
+                }
+            }
+            return result
+        }
+        for field in ["previousCount", "nextCount"] {
+            for count in [-1, 6, Int.max] {
+                var json = try XCTUnwrap(JSONSerialization.jsonObject(with: original) as? [String: Any])
+                var editor = try XCTUnwrap(json["editorState"] as? [String: Any])
+                var onion = try XCTUnwrap(editor["onionSkin"] as? [String: Any])
+                onion[field] = count
+                editor["onionSkin"] = onion
+                json["editorState"] = editor
+                let damaged = try JSONSerialization.data(withJSONObject: json, options: .sortedKeys)
+                try damaged.write(to: manifestURL)
+                let before = try packageBytes()
+                var refused = false
+                do { _ = try JSONDecoder().decode(ProjectManifest.self, from: damaged) }
+                catch DecodingError.dataCorrupted(let context) {
+                    refused = context.codingPath.last?.stringValue == field
+                }
+                catch { return XCTFail("The exact onion count must refuse through its existing metadata decoder") }
+                XCTAssertTrue(refused, "Out-of-contract current counts are damage, not silently reset settings")
+                guard refused else { return }
+                XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: url))
+                XCTAssertNil(ProjectStore.load(from: url))
+                XCTAssertEqual(try packageBytes(), before, "Refusal preserves every original package file")
+            }
+        }
+        let damagedManifest = try Data(contentsOf: manifestURL)
+        ProjectBackupManager.repairCorruptedProjects()
+        let restored = try XCTUnwrap(ProjectStore.load(from: url), "The existing recovery owner restores its readable backup")
+        let actual = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(restored.layers[0].cels[0].raster.renderToUIImage().get().cgImage)))
+        XCTAssertEqual(actual, expected, "Recovery preserves every actual drawn pixel")
+        let damagedCopy = try XCTUnwrap(ProjectBackupManager.listTrash().first { $0.id.contains("__corrupt__") })
+        XCTAssertEqual(try Data(contentsOf: damagedCopy.url.appendingPathComponent("manifest.json")), damagedManifest,
+                       "Recovery keeps the exact damaged package in Trash")
+    }
 }
