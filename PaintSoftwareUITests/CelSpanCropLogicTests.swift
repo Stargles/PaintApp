@@ -145,14 +145,16 @@ final class CelSpanCropLogicTests: XCTestCase {
     /// key's frame.
     ///
     /// Watched failing with `cropped(toFrameCount:)`'s `>=` changed to `>`: the first crop is empty.
-    func testAKeyOnTheFrameJustPastTheNewEndIsOutside() {
+    func testAKeyOnTheFrameJustPastTheNewEndIsOutside() throws {
         let manager = fixture()
-        XCTAssertEqual(manager.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 9).frames, [9])
+        let shortened = try XCTUnwrap(manager.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 9))
+        XCTAssertEqual(shortened.frames, [9])
         XCTAssertEqual(keyFrames(manager), [0, 4, 8])
         XCTAssertEqual(shownDX(manager, atFrame: 8)!, 80, accuracy: 1e-9)
 
         let again = fixture()
-        XCTAssertTrue(again.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 10).isEmpty)
+        let unchanged = try XCTUnwrap(again.resizeCelRightEdge(layerIndex: 1, celIndex: 0, newEndFrame: 10))
+        XCTAssertTrue(unchanged.isEmpty)
         XCTAssertEqual(keyFrames(again), [0, 4, 9], "a key on the last frame the block covers is inside")
     }
 
