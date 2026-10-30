@@ -696,13 +696,17 @@ final class ActionRecorder: ObservableObject {
             .appendingPathComponent("Recordings", isDirectory: true)
     }
 
-    /// `<prefix>-yyyyMMdd-HHmmss.jsonl` — `recording-` for Record My Actions, `flight-` for the flight
+    /// `<prefix>-yyyyMMdd-HHmmss-<UUID>.jsonl` — `recording-` for Record My Actions, `flight-` for the flight
     /// recorder, so the list says which is which at a glance.
     private static func newRecordingURL(prefix: String) throws -> URL {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent(recordingFilename(prefix: prefix))
+    }
+
+    static func recordingFilename(prefix: String, at date: Date = Date()) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd-HHmmss"
-        return directory.appendingPathComponent("\(prefix)-\(formatter.string(from: Date())).jsonl")
+        return "\(prefix)-\(formatter.string(from: date))-\(UUID().uuidString).jsonl"
     }
 
     func refreshRecordings() {
