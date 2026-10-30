@@ -122,7 +122,7 @@ extension CanvasManager {
         // each position in it.
         let blocks = ordered.map { layers[layerIndex].cels[$0] }
         let origin = blocks[0].startFrame
-        let gaps = zip(blocks, blocks.dropFirst()).map { $0.1.startFrame - $0.0.endFrame }
+        let gaps = zip(blocks, blocks.dropFirst()).map { Int128($0.1.startFrame) - Int128($0.0.endFrame) }
 
         // Two statements, not `permuted.insert(permuted.remove(at: from), at: to)`: that reads and
         // mutates `permuted` in one expression, which is an overlapping exclusive access.
@@ -130,13 +130,17 @@ extension CanvasManager {
         let moved = permuted.remove(at: from)
         permuted.insert(moved, at: to)
 
+        var proposed: [(index: Int, start: Int)] = []
+        var cursor = Int128(origin)
+        for (position, index) in permuted.enumerated() {
+            guard let start = Int(exactly: cursor),
+                  let end = Cel.checkedEndFrame(startFrame: start, frameCount: layers[layerIndex].cels[index].frameCount) else { return }
+            proposed.append((index, start))
+            cursor = Int128(end)
+            if position < gaps.count { cursor += gaps[position] }
+        }
         withStructureUndo(label: .shuffleFrame) {
-            var cursor = origin
-            for (position, index) in permuted.enumerated() {
-                layers[layerIndex].cels[index].startFrame = cursor
-                cursor += layers[layerIndex].cels[index].frameCount
-                if position < gaps.count { cursor += gaps[position] }
-            }
+            for entry in proposed { layers[layerIndex].cels[entry.index].startFrame = entry.start }
             layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
         }
     }
@@ -172,6 +176,9 @@ extension CanvasManager {
         // geometry still attached would be a cel the target layer's tools cannot touch. Refuse
         // instead, rather than moving it into a state nothing can edit.
         if case .needsRasterization = verdict, canvasSize == nil { return false }
+        var landing = layers[sourceIndex].cels[celIndex]
+        landing.startFrame = landingFrame(inLayer: targetIndex, startFrame: startFrame)
+        guard let pushed = pushedCelStarts(inLayer: targetIndex, placing: landing) else { return false }
         // A block that is about to be flattened takes `rasterizeLayer`'s hazard with it: the
         // `PixelOps.rasterize` below honours a float's suppression and `cel.vector = nil` then
         // destroys the geometry, so a float still open on this cel is baked away as a hole — the
@@ -200,10 +207,10 @@ extension CanvasManager {
                 cel.interpolation = nil
             }
 
-            cel.startFrame = landingFrame(inLayer: targetIndex, startFrame: startFrame)
+            cel.startFrame = landing.startFrame
+            for entry in pushed { layers[targetIndex].cels[entry.index].startFrame = entry.start }
             layers[targetIndex].cels.append(cel)
             layers[targetIndex].cels.sort { $0.startFrame < $1.startFrame }
-            pushOverlappingCels(inLayer: targetIndex, after: cel.id)
 
             // Recipes address a cel as (layer, cel) — see `CelRef` — so a block that changes layers
             // takes every reference to it along, or the keyframes it feeds silently stop resolving.
@@ -219,7 +226,7 @@ extension CanvasManager {
 
     /// Where a block dropped at `startFrame` actually lands on a layer: never straddling the block
     /// it was dropped onto, so it either takes that block's place or follows it. Whatever it
-    /// displaces is pushed along afterwards rather than overwritten (`pushOverlappingCels`).
+    /// displaces is pushed along afterwards rather than overwritten (`pushedCelStarts`).
     private func landingFrame(inLayer layerIndex: Int, startFrame: Int) -> Int {
         var landing = max(startFrame, 0)
         for cel in layers[layerIndex].cels.sorted(by: { $0.startFrame < $1.startFrame }) {
@@ -232,29 +239,23 @@ extension CanvasManager {
         return landing
     }
 
-    /// Slides blocks later until nothing overlaps the newly-landed one, preserving their order and
-    /// their lengths. Only ever pushes forward: a drop adds content to a layer, so the blocks that
-    /// were already there make room rather than being trimmed away.
-    private func pushOverlappingCels(inLayer layerIndex: Int, after celID: UUID) {
-        guard let landedIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }) else { return }
-        let landed = layers[layerIndex].cels[landedIndex]
-
-        // Selected by start frame rather than by position in the sorted order, and with `>=` so a
-        // block the newcomer landed exactly on top of is included. Two cels sharing a start frame
-        // sort against each other arbitrarily, so a position-based walk could start *after* the very
-        // block it needs to push and leave the overlap in place.
+    /// Prepares the starts that make room for a landed block, preserving order and lengths.
+    /// No block moves until every resulting end is admitted. A drop only pushes forward:
+    /// the blocks already there make room rather than being trimmed away.
+    private func pushedCelStarts(inLayer layerIndex: Int, placing landed: Cel) -> [(index: Int, start: Int)]? {
+        guard var cursor = Cel.checkedEndFrame(startFrame: landed.startFrame, frameCount: landed.frameCount) else { return nil }
         let following = layers[layerIndex].cels.indices
-            .filter { $0 != landedIndex && layers[layerIndex].cels[$0].startFrame >= landed.startFrame }
+            .filter { layers[layerIndex].cels[$0].startFrame >= landed.startFrame }
             .sorted { layers[layerIndex].cels[$0].startFrame < layers[layerIndex].cels[$1].startFrame }
-
-        var cursor = landed.endFrame
+        var proposed: [(index: Int, start: Int)] = []
         for index in following {
             let cel = layers[layerIndex].cels[index]
             guard cel.startFrame < cursor else { cursor = cel.endFrame; continue }
-            layers[layerIndex].cels[index].startFrame = cursor
-            cursor += cel.frameCount
+            guard let end = Cel.checkedEndFrame(startFrame: cursor, frameCount: cel.frameCount) else { return nil }
+            proposed.append((index, cursor))
+            cursor = end
         }
-        layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
+        return proposed
     }
 
     /// Re-points every interpolation reference to a cel that has changed layers.

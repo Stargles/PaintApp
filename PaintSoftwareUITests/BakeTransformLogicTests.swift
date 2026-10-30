@@ -869,4 +869,13 @@ final class BakeTransformLogicTests: XCTestCase {
         XCTAssertEqual(manager.renderTreeAndPoses(atFrame: 0).poses[0]?.affine?.tx ?? 0, 17, accuracy: 1e-9,
                        "Asking without a layer changed nothing in the document")
     }
+
+    func testALoopLongerThanANearIntegerEndBlockHasNothingToBake() {
+        let fx = walkerUnderALoop(period: 5, bar: (Int.max - 2)..<Int.max)
+        let history = fx.manager.history.undoStack.count
+        XCTAssertEqual(fx.manager.bakeLayer(id: fx.loop), .refused(.nothingToBake([])),
+                       "The period exceeds the block; no unchecked start+period is needed")
+        XCTAssertEqual(fx.manager.history.undoStack.count, history)
+        XCTAssertEqual(fx.manager.layers.count, 2)
+    }
 }

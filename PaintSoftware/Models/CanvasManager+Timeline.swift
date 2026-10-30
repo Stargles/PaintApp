@@ -11,7 +11,7 @@ extension CanvasManager {
 
     func activeCelIndex(inLayer layerIndex: Int, atFrame frame: Int) -> Int? {
         guard layers.indices.contains(layerIndex) else { return nil }
-        return layers[layerIndex].cels.firstIndex { frame >= $0.startFrame && frame < $0.startFrame + $0.frameCount }
+        return layers[layerIndex].cels.firstIndex { frame >= $0.startFrame && frame < $0.endFrame }
     }
 
     /// The cel at `currentFrame` on `layerIndex`, **creating a one-frame block there if the frame is
@@ -99,12 +99,13 @@ extension CanvasManager {
     /// non-positive lengths here, and `resizeCel*`/`splitCel` all clamp to at least one frame). They
     /// return early and never reach this function with that value.
     func clampedCelLength(layerIndex: Int, startFrame: Int, maxLength: Int) -> Int? {
+        guard maxLength > 0 else { return nil }
         var length = maxLength
         let laterStarts = layers[layerIndex].cels.map(\.startFrame).filter { $0 >= startFrame }
         if let nextStart = laterStarts.min() {
-            length = min(length, nextStart - startFrame)
+            length = Int(min(Int128(length), Int128(nextStart) - Int128(startFrame)))
         }
-        return length > 0 ? length : nil
+        return Cel.checkedEndFrame(startFrame: startFrame, frameCount: length) != nil ? length : nil
     }
 
     @discardableResult
@@ -364,7 +365,8 @@ extension CanvasManager {
         guard !cels.contains(where: { $0.startFrame <= frame && frame < $0.endFrame }) else { return nil }
         let lower = cels.filter { $0.endFrame <= frame }.map(\.endFrame).max() ?? 0
         let upper = cels.filter { $0.startFrame > frame }.map(\.startFrame).min() ?? contentEndFrame
-        return lower ..< max(upper, frame + 1)
+        guard let tappedEnd = Cel.checkedEndFrame(startFrame: frame, frameCount: 1) else { return nil }
+        return lower ..< max(upper, tappedEnd)
     }
 
     func extendCelToEnd(layerIndex: Int, celIndex: Int) {
@@ -555,7 +557,7 @@ extension CanvasManager {
         let baseline = gestureSnapshot?.layers ?? layers
         guard baseline.indices.contains(layerIndex), baseline[layerIndex].cels.indices.contains(celIndex) else { return nil }
         let baselineCel = baseline[layerIndex].cels[celIndex]
-        let requestedStart = min(newStartFrame, baselineCel.endFrame - 1)
+        let requestedStart = Int128(min(newStartFrame, baselineCel.endFrame - 1))
 
         // Predecessors this push could reach, nearest first — the direction the cascade walks.
         let predecessors = baseline[layerIndex].cels.enumerated()
@@ -567,11 +569,11 @@ extension CanvasManager {
         // overlap so its new end sits exactly at the running cursor, then continue from its new
         // (earlier) start. The first predecessor the cursor doesn't reach stops the walk — cels never
         // overlap each other at baseline, so if that one isn't pushed, nothing further back is either.
-        var provisional: [(index: Int, newStart: Int, frameCount: Int)] = []
+        var provisional: [(index: Int, newStart: Int128, frameCount: Int)] = []
         var cursor = requestedStart
         for (index, predecessor) in predecessors {
-            guard predecessor.endFrame > cursor else { break }
-            let newStart = cursor - predecessor.frameCount
+            guard Int128(predecessor.endFrame) > cursor else { break }
+            let newStart = cursor - Int128(predecessor.frameCount)
             provisional.append((index, newStart, predecessor.frameCount))
             cursor = newStart
         }
@@ -583,27 +585,36 @@ extension CanvasManager {
         // cascade uniformly can't introduce a new overlap with an un-pushed predecessor further back:
         // the cascade only ever moves later by this shift, i.e. away from them, never toward.
         let deficit = max(0, -cursor)
-        let clampedStart = requestedStart + deficit
+        guard let clampedStart = Int(exactly: requestedStart + deficit),
+              let length = Int(exactly: Int128(baselineCel.endFrame) - Int128(clampedStart)),
+              Cel.checkedEndFrame(startFrame: clampedStart, frameCount: length) != nil else { return nil }
+        var pushed: [(index: Int, newStart: Int, frameCount: Int)] = []
+        for entry in provisional {
+            guard let start = Int(exactly: entry.newStart + deficit),
+                  Cel.checkedEndFrame(startFrame: start, frameCount: entry.frameCount) != nil else { return nil }
+            pushed.append((entry.index, start, entry.frameCount))
+        }
 
         guard let videoCrop = videoCropEdit(for: baselineCel.vector,
-            length: baselineCel.endFrame - clampedStart, anchoredAt: .tail) else {
+            length: length, anchoredAt: .tail) else {
             raise(.videoTimingRefused)
             return nil
         }
 
-        layers[layerIndex].cels[celIndex].startFrame = clampedStart
-        layers[layerIndex].cels[celIndex].frameCount = baselineCel.endFrame - clampedStart
-        // The span is written above, so the crop reads the new origin; the keys come from the
-        // baseline so the drag is idempotent, and shift by the distance the origin moved.
-        layers[layerIndex].cels[celIndex].transformTracks = baselineCel.transformTracks
-        var crop = layers[layerIndex].cels[celIndex]
-            .cropPoseKeysToSpan(shiftingKeysBy: baselineCel.startFrame - clampedStart)
+        var resized = layers[layerIndex].cels[celIndex]
+        resized.startFrame = clampedStart
+        resized.frameCount = length
+        resized.transformTracks = baselineCel.transformTracks
+        var crop = resized.cropPoseKeysToSpan(shiftingKeysBy: baselineCel.startFrame - clampedStart)
+        layers[layerIndex].cels[celIndex] = resized
 
-        let pushedIndices = Set(provisional.map(\.index))
-        for entry in provisional {
+        let pushedIndices = Set(pushed.map(\.index))
+        for entry in pushed {
             guard layers[layerIndex].cels.indices.contains(entry.index) else { continue }
-            layers[layerIndex].cels[entry.index].startFrame = entry.newStart + deficit
-            layers[layerIndex].cels[entry.index].frameCount = entry.frameCount
+            var shifted = layers[layerIndex].cels[entry.index]
+            shifted.startFrame = entry.newStart
+            shifted.frameCount = entry.frameCount
+            layers[layerIndex].cels[entry.index] = shifted
         }
         // Every predecessor the cascade *didn't* reach this call is written back to its own baseline
         // — not left alone — so a call that pushed it earlier (a bigger drag, or an earlier `.changed`
@@ -611,8 +622,10 @@ extension CanvasManager {
         // wherever the largest push so far put it.
         for (index, predecessor) in predecessors where !pushedIndices.contains(index) {
             guard layers[layerIndex].cels.indices.contains(index) else { continue }
-            layers[layerIndex].cels[index].startFrame = predecessor.startFrame
-            layers[layerIndex].cels[index].frameCount = predecessor.frameCount
+            var restored = layers[layerIndex].cels[index]
+            restored.startFrame = predecessor.startFrame
+            restored.frameCount = predecessor.frameCount
+            layers[layerIndex].cels[index] = restored
         }
         // **TODO (62), reversed (txcrop):** a `.transform` layer's own tracks crop to its blocks too
         // — computed only now, after every pushed predecessor of *this* layer is in its final
@@ -707,42 +720,48 @@ extension CanvasManager {
         guard baseline.indices.contains(layerIndex), baseline[layerIndex].cels.indices.contains(celIndex) else { return nil }
         let baselineCel = baseline[layerIndex].cels[celIndex]
         let clampedEnd = max(newEndFrame, baselineCel.startFrame + 1)
+        guard let length = Int(exactly: Int128(clampedEnd) - Int128(baselineCel.startFrame)),
+              Cel.checkedEndFrame(startFrame: baselineCel.startFrame, frameCount: length) != nil else { return nil }
 
-        guard let videoCrop = videoCropEdit(for: baselineCel.vector,
-            length: clampedEnd - baselineCel.startFrame, anchoredAt: .head) else {
-            raise(.videoTimingRefused)
-            return nil
-        }
-
-        layers[layerIndex].cels[celIndex].startFrame = baselineCel.startFrame
-        layers[layerIndex].cels[celIndex].frameCount = clampedEnd - baselineCel.startFrame
-        layers[layerIndex].cels[celIndex].transformTracks = baselineCel.transformTracks
-        var crop = layers[layerIndex].cels[celIndex].cropPoseKeysToSpan()
-
-        // Successors this push could reach, nearest first, from the same baseline the resized cel's
-        // own new end was just computed from.
+        // Admit the complete successor cascade before changing the resized block or any neighbour.
         let successors = baseline[layerIndex].cels.enumerated()
             .filter { $0.offset != celIndex && $0.element.startFrame >= baselineCel.endFrame }
             .sorted { $0.element.startFrame < $1.element.startFrame }
-
-        // Walk forward: push every successor the running cursor still overlaps, translating it by
-        // however much (frameCount unchanged) and advancing the cursor past it, exactly mirroring the
-        // left edge's backward walk. The first successor not overlapped stops the cascade — and every
-        // successor at or past that point is written back to its own baseline explicitly, for the
-        // same "give it back on retraction" reason `resizeCelLeftEdge` does.
+        var proposed: [(index: Int, start: Int, frameCount: Int)] = []
         var cursor = clampedEnd
         var pushing = true
         for (index, successor) in successors {
             guard layers[layerIndex].cels.indices.contains(index) else { continue }
+            let start: Int
             if pushing, successor.startFrame < cursor {
-                layers[layerIndex].cels[index].startFrame = cursor
-                layers[layerIndex].cels[index].frameCount = successor.frameCount
-                cursor += successor.frameCount
+                start = cursor
+                guard let end = Cel.checkedEndFrame(startFrame: start, frameCount: successor.frameCount) else { return nil }
+                cursor = end
             } else {
                 pushing = false
-                layers[layerIndex].cels[index].startFrame = successor.startFrame
-                layers[layerIndex].cels[index].frameCount = successor.frameCount
+                start = successor.startFrame
             }
+            proposed.append((index, start, successor.frameCount))
+        }
+
+        guard let videoCrop = videoCropEdit(for: baselineCel.vector,
+            length: length, anchoredAt: .head) else {
+            raise(.videoTimingRefused)
+            return nil
+        }
+
+        var resized = layers[layerIndex].cels[celIndex]
+        resized.startFrame = baselineCel.startFrame
+        resized.frameCount = length
+        resized.transformTracks = baselineCel.transformTracks
+        var crop = resized.cropPoseKeysToSpan()
+        layers[layerIndex].cels[celIndex] = resized
+
+        for entry in proposed {
+            var shifted = layers[layerIndex].cels[entry.index]
+            shifted.startFrame = entry.start
+            shifted.frameCount = entry.frameCount
+            layers[layerIndex].cels[entry.index] = shifted
         }
 
         // **TODO (62), reversed (txcrop):** the right-edge twin of `resizeCelLeftEdge`'s own crop —
@@ -946,9 +965,9 @@ extension CanvasManager {
         let ceiling = layers[layerIndex].cels.enumerated()
             .filter { $0.offset != celIndex && $0.element.startFrame > start }
             .map { $0.element.startFrame }.min()
-        let room = ceiling.map { $0 - start } ?? Int.max
-        let length = max(1, min(wanted, room))
-        guard !start.addingReportingOverflow(length).overflow else { raise(.videoTimingRefused); return }
+        let room = ceiling.map { Int128($0) - Int128(start) } ?? Int128(Int.max)
+        let length = Int(max(1, min(Int128(wanted), room)))
+        guard Cel.checkedEndFrame(startFrame: start, frameCount: length) != nil else { raise(.videoTimingRefused); return }
         var cropEdit: (elements: [VectorElement], rewritten: Set<UUID>)?
         if length != wanted {
             guard let crop = videoCropEdit(elements: elements, length: length, anchoredAt: .head) else {
@@ -972,8 +991,10 @@ extension CanvasManager {
         guard layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex) else { return }
         let cel = layers[layerIndex].cels[celIndex]
         let bounds = neighborBounds(layerIndex: layerIndex, celIndex: celIndex)
-        let maxStart = (bounds.upperBound == Int.max) ? Int.max : bounds.upperBound - cel.frameCount
-        let clampedStart = max(bounds.lowerBound, min(newStartFrame, max(bounds.lowerBound, maxStart)))
+        let maxStart = bounds.upperBound == Int.max ? Int128(Int.max) : Int128(bounds.upperBound) - Int128(cel.frameCount)
+        let start = max(Int128(bounds.lowerBound), min(Int128(newStartFrame), max(Int128(bounds.lowerBound), maxStart)))
+        guard let clampedStart = Int(exactly: start),
+              Cel.checkedEndFrame(startFrame: clampedStart, frameCount: cel.frameCount) != nil else { return }
         layers[layerIndex].cels[celIndex].startFrame = clampedStart
     }
 

@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 import UIKit
 
 /// Pure-logic tests for `CanvasManager.insertStream(host:port:status:)` and the coordinator's tick
@@ -584,5 +585,34 @@ final class StreamInsertLogicTests: XCTestCase {
         fixture.manager.closeFrameBaker()
         XCTAssertTrue(fixture.manager.streamCoordinator.activeEndpoints.isEmpty)
         XCTAssertNil(fixture.manager.streamCoordinator.status(for: StreamEndpoint(host: "laptop", port: 47301)))
+    }
+
+    func testInsertRefusesAnUnrepresentableCelEndBeforeAddingItsLayer() {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.currentFrame = Int.max
+        let ids = manager.layers.map(\.id)
+        let cels = manager.layers.map { $0.cels.map(\.id) }
+        let history = manager.history.undoStack.count
+        XCTAssertNil(manager.insertStream(host: "laptop", port: 47301, status: status()),
+                     "The minimum one-frame block cannot have a representable exclusive end here")
+        XCTAssertEqual(manager.layers.map(\.id), ids)
+        XCTAssertEqual(manager.layers.map { $0.cels.map(\.id) }, cels)
+        XCTAssertEqual(manager.history.undoStack.count, history)
+
+        let accepted = CanvasFixture.manager(layerCount: 1)
+        accepted.currentFrame = Int.max - 2
+        var invalid = false
+        let observation = accepted.$layers.sink { layers in
+            invalid = invalid || layers.contains { layer in layer.cels.contains { cel in
+                cel.frameCount <= 0 || cel.startFrame.addingReportingOverflow(cel.frameCount).overflow
+            } }
+        }
+        XCTAssertNotNil(accepted.insertStream(host: "laptop", port: 47301, status: status()),
+                        "The adjacent representable placement remains accepted")
+        observation.cancel()
+        XCTAssertFalse(invalid, "Stream placement publishes a complete valid span, never a new start with the old scene length")
+        XCTAssertEqual(accepted.layers.last?.cels.first?.startFrame, Int.max - 2)
+        XCTAssertEqual(accepted.layers.last?.cels.first?.frameCount, 1)
+        XCTAssertEqual(accepted.layers.last?.cels.first?.endFrame, Int.max - 1)
     }
 }

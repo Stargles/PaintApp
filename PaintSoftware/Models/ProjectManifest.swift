@@ -597,4 +597,28 @@ struct CelManifest: Codable {
     /// is missing still validates and the atomic save proceeds. Not inheriting that is the whole of
     /// what "add it to the validator on day one" asks.
     var animationFileName: String? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case id, startFrame, frameCount, rasterFileName, rasterOmitted
+        case bakedImageFileName, vectorFileName, interpolationFileName, animationFileName
+    }
+}
+
+extension CelManifest {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        startFrame = try c.decode(Int.self, forKey: .startFrame)
+        frameCount = try c.decode(Int.self, forKey: .frameCount)
+        guard Cel.checkedEndFrame(startFrame: startFrame, frameCount: frameCount) != nil else {
+            throw DecodingError.dataCorruptedError(forKey: .frameCount, in: c,
+                debugDescription: "A cel requires a positive duration and a representable exclusive end frame.")
+        }
+        rasterFileName = try c.decode(String.self, forKey: .rasterFileName)
+        rasterOmitted = try c.decodeIfPresent(Bool.self, forKey: .rasterOmitted)
+        bakedImageFileName = try c.decodeIfPresent(String.self, forKey: .bakedImageFileName)
+        vectorFileName = try c.decodeIfPresent(String.self, forKey: .vectorFileName)
+        interpolationFileName = try c.decodeIfPresent(String.self, forKey: .interpolationFileName)
+        animationFileName = try c.decodeIfPresent(String.self, forKey: .animationFileName)
+    }
 }

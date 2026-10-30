@@ -818,6 +818,7 @@ final class CanvasManager: ObservableObject {
         let sceneEnd = contentEndFrame
         let start = max(currentFrame, 0)
         let blockLength = max(sceneEnd - start, 1)
+        guard Cel.checkedEndFrame(startFrame: start, frameCount: blockLength) != nil else { return nil }
 
         // §2.2. Its own undo step, for `insertVideo`'s reason: the element below is registered
         // against the layer it lands on.
@@ -841,8 +842,10 @@ final class CanvasManager: ObservableObject {
         // shown centred (`placedInLayerSpace`).
         let element = placedInLayerSpace(.stream(drawn), onLayerAt: layerIndex).stream ?? drawn
         let before = vector.elements
-        layers[layerIndex].cels[0].startFrame = start
-        layers[layerIndex].cels[0].frameCount = blockLength
+        var cel = layers[layerIndex].cels[0]
+        cel.startFrame = start
+        cel.frameCount = blockLength
+        layers[layerIndex].cels[0] = cel
         vector.elements = before + [.stream(element)]
         vector.bumpVersion()
         scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: 0)

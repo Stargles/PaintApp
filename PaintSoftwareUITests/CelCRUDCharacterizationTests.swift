@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 import UIKit
 
 /// Characterization tests for the three cel-creating operations in `CanvasManager` —
@@ -872,5 +873,109 @@ final class CelCRUDCharacterizationTests: XCTestCase {
                        "`.preview` resolves the vector tier differently, so it is a different flatten")
         XCTAssertFalse((try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: CGSize(width: 32, height: 32)))) === full,
                        "A different canvas size is a different image, not a scaled one")
+    }
+
+    func testCelCreatorsAndBodyMoveRefuseUnrepresentableEndsWithoutWritingOrHistory() throws {
+        for operation in ["add", "paste", "duplicate", "move"] {
+            let manager = CanvasFixture.manager()
+            CanvasFixture.setCelLayout(manager, layerIndex: 0,
+                [(start: operation == "duplicate" ? Int.max - 3 : 0, length: 3)])
+            let raster = manager.layers[0].cels[0].raster
+            raster.beginStroke()
+            raster.stampCircle(at: CGPoint(x: 12, y: 12), radius: 4, color: .blue, alpha: 1, hardness: 1)
+            raster.endStroke()
+            manager.copyCel(layerIndex: 0, celIndex: 0)
+            let before = manager.layers[0].cels
+            let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(raster.renderToUIImage().get().cgImage)))
+            let history = manager.history.undoStack.count
+            switch operation {
+            case "add": XCTAssertFalse(manager.addCel(layerIndex: 0, startFrame: Int.max - 2, frameCount: 4))
+            case "paste": XCTAssertFalse(manager.pasteCel(layerIndex: 0, startFrame: Int.max - 1))
+            case "duplicate": XCTAssertTrue(manager.duplicateCel(layerIndex: 0, celIndex: 0).isEmpty)
+            case "move":
+                XCTAssertTrue(manager.beginStructureGesture())
+                manager.moveCel(layerIndex: 0, celIndex: 0, newStartFrame: Int.max)
+                manager.commitStructureGesture(label: .moveFrame)
+            default: preconditionFailure("Unknown finite span writer")
+            }
+            XCTAssertEqual(manager.layers[0].cels.map(\.id), before.map(\.id), operation)
+            XCTAssertEqual(manager.layers[0].cels.map(\.startFrame), before.map(\.startFrame), operation)
+            XCTAssertEqual(manager.layers[0].cels.map(\.frameCount), before.map(\.frameCount), operation)
+            XCTAssertEqual(manager.history.undoStack.count, history, "\(operation) refusal owns no history step")
+            XCTAssertEqual(CanvasFixture.rgbaBytes(try XCTUnwrap(raster.renderToUIImage().get().cgImage)), pixels,
+                           "\(operation) refusal preserves the actual drawing")
+        }
+    }
+
+    func testRightResizeAdmitsTheWholeSuccessorCascadeBeforeWriting() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0,
+            [(start: Int.max - 6, length: 2), (start: Int.max - 4, length: 2), (start: Int.max - 2, length: 2)])
+        let before = manager.layers[0].cels
+        let history = manager.history.undoStack.count
+        XCTAssertTrue(manager.beginStructureGesture())
+        XCTAssertNil(manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: Int.max - 3),
+                     "The first pushed neighbour fits; the later one would overflow, so the entire tick refuses")
+        manager.commitStructureGesture(label: .resizeFrame)
+        XCTAssertEqual(manager.layers[0].cels.map(\.startFrame), before.map(\.startFrame))
+        XCTAssertEqual(manager.layers[0].cels.map(\.frameCount), before.map(\.frameCount))
+        XCTAssertEqual(manager.layers[0].cels.map(\.id), before.map(\.id))
+        XCTAssertEqual(manager.history.undoStack.count, history)
+        XCTAssertNil(manager.pendingKeyframeCrop)
+    }
+
+    func testLeftResizeKeepsItsFrameZeroFloorForAnExtremeNegativeRequest() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 2, length: 3), (start: 5, length: 3)])
+        XCTAssertNotNil(manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 1, newStartFrame: Int.min))
+        XCTAssertEqual(manager.layers[0].cels.map(\.startFrame), [0, 3])
+        XCTAssertEqual(manager.layers[0].cels.map(\.frameCount), [3, 5], "Only the existing floor constrains the exact provisional cascade")
+    }
+
+    func testCelCreationKeepsRepresentableNegativeStartsAndRefusesOnlyTheUnrepresentableGapColumn() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: 3)])
+        XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: -5, frameCount: 3))
+        XCTAssertEqual(manager.layers[0].cels.first?.startFrame, -5)
+        XCTAssertEqual(manager.layers[0].cels.first?.endFrame, -2)
+        XCTAssertNil(manager.gapFrameRange(layerIndex: 0, containing: Int.max),
+                     "An exclusive end for the tapped column cannot be represented; no range is invented")
+    }
+
+    func testSuccessfulNearLimitSpanEditsPublishOnlyAdmittedCelsAndKeepEarlierGestureWrites() {
+        let manager = CanvasFixture.manager()
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: Int.max - 10, length: 10)])
+        let history = manager.history.undoStack.count
+        var publishes = 0
+        var invalid = false
+        let observation = manager.$layers.dropFirst().sink { layers in
+            publishes += 1
+            invalid = invalid || layers.contains { layer in layer.cels.contains { cel in
+                cel.frameCount <= 0 || cel.startFrame.addingReportingOverflow(cel.frameCount).overflow
+            } }
+        }
+        XCTAssertTrue(manager.beginStructureGesture())
+        XCTAssertNotNil(manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 0, newStartFrame: Int.max - 1))
+        XCTAssertNotNil(manager.resizeCelLeftEdge(layerIndex: 0, celIndex: 0, newStartFrame: Int.max - 20))
+        XCTAssertEqual(manager.layers[0].cels[0].endFrame, Int.max)
+        XCTAssertNotNil(manager.resizeCelRightEdge(layerIndex: 0, celIndex: 0, newEndFrame: Int.max - 1),
+                        "The right edge restores the gesture baseline start after the earlier left-edge tick")
+        manager.moveCel(layerIndex: 0, celIndex: 0, newStartFrame: Int.max)
+        manager.commitStructureGesture(label: .resizeFrame)
+        XCTAssertFalse(invalid, "Every actual Published cel has a representable end, including between field changes")
+        XCTAssertEqual(publishes, 3, "Each accepted tick publishes its complete cel once; the later refusal publishes nothing")
+        observation.cancel()
+        XCTAssertEqual(manager.layers[0].cels[0].startFrame, Int.max - 10)
+        XCTAssertEqual(manager.layers[0].cels[0].frameCount, 9)
+        XCTAssertEqual(manager.history.undoStack.count, history + 1,
+                       "A later refused write does not erase the earlier accepted gesture or its prior history")
+        guard manager.history.undoStack.count == history + 1 else { return }
+        manager.undo()
+        XCTAssertEqual(manager.layers[0].cels[0].startFrame, Int.max - 10)
+        XCTAssertEqual(manager.layers[0].cels[0].frameCount, 10)
+        XCTAssertEqual(manager.history.undoStack.count, history)
+        manager.redo()
+        XCTAssertEqual(manager.layers[0].cels[0].startFrame, Int.max - 10)
+        XCTAssertEqual(manager.layers[0].cels[0].frameCount, 9)
     }
 }

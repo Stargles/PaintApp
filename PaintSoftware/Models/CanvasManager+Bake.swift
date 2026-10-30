@@ -511,8 +511,9 @@ extension CanvasManager {
         let bakerID = layers[bakerIndex].id
         // Each block's frames after its first cycle: the first is the identity (§5.5), so nothing to write.
         let stretches = layers[bakerIndex].cels.compactMap { cel -> Range<Int>? in
+            guard period < cel.frameCount else { return nil }
             let first = cel.startFrame + period
-            return first < cel.endFrame ? first ..< cel.endFrame : nil
+            return first ..< cel.endFrame
         }
         struct Walks { let with: RenderWalk, without: RenderWalk }
         var walked: [Int: Walks?] = [:]

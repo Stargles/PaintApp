@@ -1885,4 +1885,71 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertTrue(bundled == nil || bundled!.isEmpty,
                       "a bundled tip is in the binary already: \(bundled ?? [])")
     }
+
+    func testAnUnrepresentableCelSpanRefusesTheRealPackageAndUsesExistingBackupRecovery() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let raster = manager.layers[0].cels[0].raster
+        raster.beginStroke()
+        raster.stampCircle(at: CGPoint(x: 20, y: 24), radius: 5, color: .red, alpha: 1, hardness: 1)
+        raster.endStroke()
+        let expected = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(raster.renderToUIImage().get().cgImage)))
+        let url = projectURL(name: "Checked Cel Span")
+        saveAndWait(manager, to: url)
+        XCTAssertNotNil(ProjectStore.load(from: url), "PREMISE: the actual saved drawing opens before timing is damaged")
+        ProjectBackupManager.refreshLatestSnapshot(projectURL: url, projectID: manager.projectID)
+        let latest = ProjectBackupManager.latestSnapshotURL(directory: ProjectBackupManager.backupsDirectory(projectID: manager.projectID))
+        XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: latest), "PREMISE: a complete readable backup exists")
+        let manifestURL = url.appendingPathComponent("manifest.json")
+        let original = try Data(contentsOf: manifestURL)
+        func packageBytes() throws -> [String: Data] {
+            let paths = try XCTUnwrap(FileManager.default.subpaths(atPath: url.path))
+            var result: [String: Data] = [:]
+            for path in paths {
+                let file = url.appendingPathComponent(path)
+                if try file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
+                    result[path] = try Data(contentsOf: file)
+                }
+            }
+            return result
+        }
+        for (start, count) in [(0, 0), (0, -1), (Int.max - 2, 4)] {
+            var json = try XCTUnwrap(JSONSerialization.jsonObject(with: original) as? [String: Any])
+            var layers = try XCTUnwrap(json["layers"] as? [[String: Any]])
+            var cels = try XCTUnwrap(layers[0]["cels"] as? [[String: Any]])
+            cels[0]["startFrame"] = start; cels[0]["frameCount"] = count
+            layers[0]["cels"] = cels; json["layers"] = layers
+            let damaged = try JSONSerialization.data(withJSONObject: json, options: .sortedKeys)
+            try damaged.write(to: manifestURL)
+            let before = try packageBytes()
+            var refused = false
+            do { _ = try JSONDecoder().decode(ProjectManifest.self, from: damaged) }
+            catch DecodingError.dataCorrupted(_) { refused = true }
+            catch { return XCTFail("The exact cel timing, not another fixture field, must refuse: \(error)") }
+            XCTAssertTrue(refused, "A nonpositive duration or unrepresentable exclusive end is unreadable current data")
+            guard refused else { return }
+            XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: url), "A bad span cannot replace a good project through restore")
+            XCTAssertNil(ProjectStore.load(from: url), "The real package refuses before installing invalid runtime cels")
+            XCTAssertEqual(try packageBytes(), before, "Refusal does not rewrite or empty any package file")
+        }
+        let overflowManifest = try Data(contentsOf: manifestURL)
+        ProjectBackupManager.repairCorruptedProjects()
+        let restored = try XCTUnwrap(ProjectStore.load(from: url), "The existing recovery owner restores the readable backup")
+        let actual = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(restored.layers[0].cels[0].raster.renderToUIImage().get().cgImage)))
+        XCTAssertEqual(actual, expected, "Recovery preserves every actual drawn pixel")
+        let damagedCopy = try XCTUnwrap(ProjectBackupManager.listTrash().first { $0.id.contains("__corrupt__") })
+        XCTAssertEqual(try Data(contentsOf: damagedCopy.url.appendingPathComponent("manifest.json")), overflowManifest,
+                       "The exact overflowing package is retained in Trash")
+    }
+
+    func testCelSpanAdmissionKeepsRepresentableNegativeStartsAndTheExactIntegerEnd() throws {
+        for (start, count, end) in [(Int.max - 3, 3, Int.max), (-5, 3, -2), (Int.min, Int.max, -1)] {
+            let manifest = CelManifest(id: UUID(), startFrame: start, frameCount: count, rasterFileName: "r.png", rasterOmitted: true)
+            let read = try JSONDecoder().decode(CelManifest.self, from: JSONEncoder().encode(manifest))
+            let cel = Cel(id: read.id, startFrame: read.startFrame, frameCount: read.frameCount,
+                          raster: .empty(size: CanvasFixture.canvasSize))
+            XCTAssertEqual(cel.startFrame, start)
+            XCTAssertEqual(cel.frameCount, count)
+            XCTAssertEqual(cel.endFrame, end, "Admission preserves representable timing exactly, with no scene cap or saturation")
+        }
+    }
 }

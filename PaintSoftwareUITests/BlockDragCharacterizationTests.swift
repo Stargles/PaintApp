@@ -300,4 +300,40 @@ final class BlockDragCharacterizationTests: XCTestCase {
                        "…at the frame it started on")
         XCTAssertFalse(manager.layers[0].cels.contains { $0.id == moving.id })
     }
+
+    func testCrossLayerDropRefusesALaterPushOverflowBeforeRemovingTheSource() {
+        let manager = self.manager(blocks: [(start: 0, length: 1), (start: 1, length: 3)])
+        manager.addLayer()
+        CanvasFixture.setCelLayout(manager, layerIndex: 1,
+            [(start: Int.max - 4, length: 2), (start: Int.max - 2, length: 2)])
+        let moving = manager.layers[0].cels[1].id
+        let before = manager.layers
+        let history = manager.history.undoStack.count
+        XCTAssertFalse(manager.moveCelToLayer(celID: moving, fromLayer: manager.layers[0].id,
+            toLayer: manager.layers[1].id, startFrame: Int.max - 5),
+            "The landed block and first push fit, but the later push cannot be represented")
+        XCTAssertEqual(manager.layers.map { $0.cels.map(\.id) }, before.map { $0.cels.map(\.id) })
+        XCTAssertEqual(manager.layers.map { $0.cels.map(\.startFrame) }, before.map { $0.cels.map(\.startFrame) })
+        XCTAssertEqual(manager.layers.map { $0.cels.map(\.frameCount) }, before.map { $0.cels.map(\.frameCount) })
+        XCTAssertEqual(manager.history.undoStack.count, history)
+    }
+
+    func testShufflePreflightsItsWholeLayoutAndKeepsAnExactlyRepresentableEnd() {
+        let refused = manager(blocks: [(start: Int.max - 101, length: 1),
+            (start: Int.max - 100, length: 100), (start: Int.max - 100, length: 100)])
+        let before = refused.layers[0].cels
+        let history = refused.history.undoStack.count
+        refused.shuffleCel(layerIndex: 0, celIndex: 0, toOrderIndex: 2)
+        XCTAssertEqual(refused.layers[0].cels.map(\.startFrame), before.map(\.startFrame),
+                       "An admitted overlapping layout must not partially shuffle when a later intermediate end overflows")
+        XCTAssertEqual(refused.layers[0].cels.map(\.id), before.map(\.id))
+        XCTAssertEqual(refused.history.undoStack.count, history)
+
+        let accepted = manager(blocks: [(start: Int.max - 7, length: 2), (start: Int.max - 4, length: 4)])
+        let first = accepted.layers[0].cels[0].id, second = accepted.layers[0].cels[1].id
+        accepted.shuffleCel(layerIndex: 0, celIndex: 1, toOrderIndex: 0)
+        XCTAssertEqual(accepted.layers[0].cels.map(\.id), [second, first])
+        XCTAssertEqual(accepted.layers[0].cels.map(\.startFrame), [Int.max - 7, Int.max - 2])
+        XCTAssertEqual(accepted.contentEndFrame, Int.max, "No arbitrary ceiling rejects an exact end")
+    }
 }

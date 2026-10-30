@@ -146,6 +146,15 @@ struct Cel: Identifiable {
         nonmutating set { tile.image = newValue }
     }
 
+    /// One admitted block has a positive duration and an exactly representable exclusive end.
+    /// Negative starts remain meaningful to existing callers; admission never clips or wraps them.
+    static func checkedEndFrame(startFrame: Int, frameCount: Int) -> Int? {
+        guard frameCount > 0 else { return nil }
+        let end = startFrame.addingReportingOverflow(frameCount)
+        return end.overflow ? nil : end.partialValue
+    }
+
+    /// Admission keeps this nonoptional value exact for every runtime reader.
     var endFrame: Int { startFrame + frameCount }
 
     /// **A one-way answer: true means there is certainly nothing to draw; false means "maybe".**
