@@ -271,9 +271,15 @@ final class VideoBakeLogicTests: XCTestCase {
             XCTAssertEqual(CanvasFixture.nearestLevelIndex(grey, in: Self.levels), 4,
                            "PREMISE: the real short asset holds its last decoded frame at the admitted far-future time")
             let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(beforeImage.cgImage)))
-            let bluePixels = stride(from: 0, to: pixels.count, by: 4).filter {
-                Int(pixels[$0 + 2]) > Int(pixels[$0]) + 100 && Int(pixels[$0 + 2]) > Int(pixels[$0 + 1]) + 100 && pixels[$0 + 3] > 240
-            }.count
+            var bluePixels: Int = 0
+            for offset in stride(from: 0, to: pixels.count, by: 4) {
+                let red: Int = Int(pixels[offset])
+                let green: Int = Int(pixels[offset + 1])
+                let blue: Int = Int(pixels[offset + 2])
+                let alpha: UInt8 = pixels[offset + 3]
+                let blueDominates: Bool = blue > red + 100 && blue > green + 100
+                if blueDominates && alpha > 240 { bluePixels += 1 }
+            }
             XCTAssertGreaterThan(bluePixels, 10, "PREMISE: opaque passenger ink is visibly drawn over the held movie frame")
             let layouts = manager.layers.map { $0.cels.map { [$0.startFrame, $0.frameCount] } }
             let ids = manager.layers.map(\.id), celIDs = manager.layers.map { $0.cels.map(\.id) }
