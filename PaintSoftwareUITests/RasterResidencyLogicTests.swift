@@ -105,6 +105,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         }
         XCTAssertEqual(owner.usage.chargedBytes, 0)
         XCTAssertEqual(owner.usage.registeredCandidateCount, 1, "A live cold version stays eligible")
+        guard owner.usage.registeredCandidateCount == 1 else { return }
         for expectedEvictions in 1...2 {
             try autoreleasepool {
                 XCTAssertEqual(try pixel(XCTUnwrap(live?.resolveImage().get().cgImage)), [255, 0, 0, 255])
@@ -2248,6 +2249,147 @@ extension RasterResidencyLogicTests {
             let owned = try XCTUnwrap(source.resolveImage().get().cgImage)
             XCTAssertEqual(try nativeSamples(owned), fixture.bytes)
             XCTAssertEqual(try CoreGraphicsCompositor.premultipliedBytes(owned, width: 3, height: 2), drawn)
+        }
+    }
+}
+
+
+extension RasterResidencyLogicTests {
+    private struct NativeCheckpointCase {
+        let source: RasterSource
+        let backing: ProjectStore.RasterBacking
+        let bytes: Data
+        let fields: NativeImageFields
+        let pointSize: CGSize
+        var owner: RasterResidency { source.residency }
+    }
+
+    private func nativeCheckpointCase(compressible: Bool) throws -> NativeCheckpointCase {
+        let row = 256, width = 64
+        let encodingScratch = LZ4Block.encodingScratchBytes
+        let decodingScratch = LZ4Block.decodingScratchBytes
+        XCTAssertLessThanOrEqual(encodingScratch, 256 * 1024, "PREMISE: finite fixture supports this codec workspace")
+        XCTAssertLessThanOrEqual(decodingScratch, 256 * 1024, "PREMISE: finite fixture supports this codec workspace")
+        guard encodingScratch <= 256 * 1024, decodingScratch <= 256 * 1024 else {
+            throw NSError(domain: "NativeCheckpointFixture", code: 1)
+        }
+        let height = (max(16 * 1024, encodingScratch) + row - 1) / row
+        let count = row * height
+        var bytes = Data(count: count)
+        bytes.withUnsafeMutableBytes { storage in
+            let samples = storage.bindMemory(to: UInt8.self)
+            var state: UInt32 = 0x6D2B_79F5
+            for index in 0..<samples.count {
+                if compressible { samples[index] = [UInt8(64), 128, 192, 255][index % 4] }
+                else {
+                    state ^= state << 13; state ^= state >> 17; state ^= state << 5
+                    samples[index] = UInt8(truncatingIfNeeded: state)
+                }
+            }
+        }
+        XCTAssertTrue(LZ4Block.compressesWithinCheckpoint(count), "PREMISE: both payloads enter the real compression attempt")
+        let owner = RasterResidency(budgetBytes: max(count * 5, count * 2 + decodingScratch), hasHeadroom: { _ in true })
+        let result = try autoreleasepool {
+            let provider = try NativeFixtureBytes(bytes, releases: NativeReleaseCount()).provider()
+            let cg = try XCTUnwrap(CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                bytesPerRow: row, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue), provider: provider,
+                decode: nil, shouldInterpolate: false, intent: .relativeColorimetric))
+            let image = UIImage(cgImage: cg, scale: 2, orientation: .leftMirrored)
+            let source = try RasterSource.capturePlaced(image, using: owner).get()
+            let backing = try ProjectStore.serializingPackageMutation { try source.checkpointForEviction().get() }
+            XCTAssertTrue(source.releaseResidentPixels())
+            return NativeCheckpointCase(source: source, backing: backing, bytes: bytes,
+                fields: try NativeImageFields(cg), pointSize: image.size)
+        }
+        XCTAssertEqual(owner.usage.chargedBytes, 0)
+        return result
+    }
+
+    private func nativeCheckpointFileBytes(_ url: URL) throws -> Int {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        return try XCTUnwrap(attributes[.size] as? NSNumber).intValue
+    }
+
+    private func assertNativeCheckpointReload(_ fixture: NativeCheckpointCase) throws {
+        try autoreleasepool {
+            let reloaded = try fixture.source.resolveImage().get()
+            let cg = try XCTUnwrap(reloaded.cgImage)
+            XCTAssertEqual(try NativeImageFields(cg), fixture.fields)
+            XCTAssertEqual(try nativeSamples(cg), fixture.bytes)
+            XCTAssertEqual(reloaded.size, fixture.pointSize)
+            XCTAssertEqual(reloaded.scale, 2); XCTAssertEqual(reloaded.imageOrientation, .leftMirrored)
+            XCTAssertTrue(fixture.source.releaseResidentPixels())
+        }
+        XCTAssertEqual(fixture.owner.usage.chargedBytes, 0)
+        XCTAssertEqual(fixture.owner.usage.reservedCheckpointBytes, 0)
+        XCTAssertLessThanOrEqual(fixture.owner.usage.highWaterBytes, fixture.owner.budgetBytes)
+    }
+
+    func testNativeCheckpointCompressesRepeatedSamplesAndReloadsTheirExactNativeLayout() throws {
+        let fixture = try nativeCheckpointCase(compressible: true)
+        let fileBytes = try nativeCheckpointFileBytes(fixture.backing.url)
+        XCTAssertGreaterThan(fileBytes, 0)
+        XCTAssertLessThan(fileBytes, fixture.bytes.count, "Actual headerless checkpoint file proves the compressed branch")
+        guard case .native(let rawCount, let storedCount, let compressed, _) = fixture.backing.payload else {
+            return XCTFail("A private checkpoint must retain its native payload contract")
+        }
+        XCTAssertTrue(compressed); XCTAssertEqual(rawCount, fixture.bytes.count); XCTAssertEqual(storedCount, fileBytes)
+        try assertNativeCheckpointReload(fixture)
+        print("NATIVE_CHECKPOINT compressed raw=\(rawCount) stored=\(fileBytes) encodeScratch=\(LZ4Block.encodingScratchBytes) decodeScratch=\(LZ4Block.decodingScratchBytes)")
+    }
+
+    func testNativeCheckpointStoresIncompressibleSamplesRawAndReloadsTheirExactNativeLayout() throws {
+        let fixture = try nativeCheckpointCase(compressible: false)
+        let fileBytes = try nativeCheckpointFileBytes(fixture.backing.url)
+        XCTAssertEqual(fileBytes, fixture.bytes.count, "Actual headerless file proves raw fallback after a real compression attempt")
+        XCTAssertEqual(try Data(contentsOf: fixture.backing.url), fixture.bytes)
+        guard case .native(let rawCount, let storedCount, let compressed, _) = fixture.backing.payload else {
+            return XCTFail("A private checkpoint must retain its native payload contract")
+        }
+        XCTAssertFalse(compressed); XCTAssertEqual(rawCount, fixture.bytes.count); XCTAssertEqual(storedCount, fileBytes)
+        try assertNativeCheckpointReload(fixture)
+        print("NATIVE_CHECKPOINT raw raw=\(rawCount) stored=\(fileBytes) encodeScratch=\(LZ4Block.encodingScratchBytes) decodeScratch=\(LZ4Block.decodingScratchBytes)")
+    }
+
+    func testNativeCheckpointReadPreadmitsStoredBytesAndScratchAndRefusesOneByteTooTightWithoutLeaks() throws {
+        for compressible in [true, false] {
+            let fixture = try nativeCheckpointCase(compressible: compressible)
+            let fileBytes = try nativeCheckpointFileBytes(fixture.backing.url)
+            let expectedWorkspace = fileBytes + (compressible ? LZ4Block.decodingScratchBytes : 0)
+            let exactBudget = fixture.bytes.count + expectedWorkspace
+            var requests: [(bytes: Int, working: Int, pixels: Int)] = []
+            weak var observed: RasterResidency?
+            let tight = RasterResidency(budgetBytes: exactBudget - 1, hasHeadroom: { count in
+                let usage = observed?.usage
+                requests.append((count, usage?.workingBytes ?? -1, usage?.pixelBytes ?? -1))
+                return true
+            })
+            observed = tight
+            let source = RasterSource.backed(by: fixture.backing, using: tight)
+            XCTAssertThrowsError(try source.resolveImage().get()) { error in
+                XCTAssertEqual(error as? RasterResidency.Failure, .budgetExceeded)
+            }
+            XCTAssertEqual(requests.map { $0.bytes }, [expectedWorkspace, fixture.bytes.count])
+            XCTAssertEqual(requests.map { $0.working }, [0, expectedWorkspace],
+                           "The real stored payload and decode scratch are charged before requesting output pixels")
+            XCTAssertEqual(requests.map { $0.pixels }, [0, 0])
+            XCTAssertEqual(tight.usage.allocations, 0)
+            XCTAssertEqual(tight.usage.chargedBytes, 0, "A refused read releases its preadmitted workspace")
+            XCTAssertEqual(tight.usage.reservedCheckpointBytes, 0)
+            XCTAssertEqual(tight.usage.highWaterBytes, expectedWorkspace)
+            let exact = RasterResidency(budgetBytes: exactBudget, hasHeadroom: { _ in true })
+            let admitted = RasterSource.backed(by: fixture.backing, using: exact)
+            try autoreleasepool {
+                let image = try admitted.resolveImage().get()
+                let cg = try XCTUnwrap(image.cgImage)
+                XCTAssertEqual(try nativeSamples(cg), fixture.bytes)
+                XCTAssertEqual(try NativeImageFields(cg), fixture.fields)
+                XCTAssertTrue(admitted.releaseResidentPixels())
+            }
+            XCTAssertEqual(exact.usage.highWaterBytes, exactBudget, "Exactly the declared workspace plus output is sufficient")
+            XCTAssertEqual(exact.usage.chargedBytes, 0)
+            XCTAssertEqual(fixture.owner.usage.chargedBytes, 0)
         }
     }
 }
