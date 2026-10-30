@@ -18,6 +18,84 @@ import XCTest
 ///   three because the stroke's `.began` already failed them.
 final class FlightRecorderLogicTests: XCTestCase {
 
+    func testSharedRecordingFilenameIsUniqueAtOneWallClockInstantForBothPrefixes() {
+        let date = Date(timeIntervalSinceReferenceDate: 1_234)
+        for prefix in ["flight", "recording"] {
+            let first = ActionRecorder.recordingFilename(prefix: prefix, at: date)
+            let second = ActionRecorder.recordingFilename(prefix: prefix, at: date)
+            XCTAssertNotEqual(first, second)
+            XCTAssertEqual(first.dropLast(43), second.dropLast(43), "same prefix and exact wall-clock timestamp")
+            XCTAssertTrue(first.hasPrefix(prefix + "-"))
+            XCTAssertTrue(first.hasSuffix(".jsonl"))
+            XCTAssertNotNil(UUID(uuidString: String(first.dropLast(6).suffix(36))))
+            XCTAssertNotNil(UUID(uuidString: String(second.dropLast(6).suffix(36))))
+        }
+    }
+
+    @MainActor
+    func testSuccessiveFlightSavesPreserveBothFilesAndContents() throws {
+        let recorder = ActionRecorder.shared
+        var created: [URL] = []
+        defer { for url in created { try? FileManager.default.removeItem(at: url) }; recorder.refreshRecordings() }
+        let first = try XCTUnwrap(recorder.saveFlight(trigger: "filename-first"))
+        created.append(first)
+        let firstBytes = try recordingBytes(at: first, containing: "filename-first")
+        let second = try XCTUnwrap(recorder.saveFlight(trigger: "filename-second"))
+        created.append(second)
+        let secondBytes = try recordingBytes(at: second, containing: "filename-second")
+        XCTAssertNotEqual(first, second, "successive flight dumps have distinct identities")
+        XCTAssertEqual(try Data(contentsOf: first), firstBytes, "the second save cannot replace the first diagnostic")
+        XCTAssertNotEqual(firstBytes, secondBytes)
+        XCTAssertTrue(String(decoding: firstBytes, as: UTF8.self).contains("filename-first"))
+        XCTAssertTrue(String(decoding: secondBytes, as: UTF8.self).contains("filename-second"))
+        XCTAssertTrue(first.lastPathComponent.hasPrefix("flight-"))
+        XCTAssertEqual(first.pathExtension, "jsonl")
+    }
+
+    @MainActor
+    func testSuccessiveActionRecordingsPreserveBothFilesAndContents() throws {
+        let recorder = ActionRecorder.shared
+        try XCTSkipIf(recorder.isRecording, "an existing recording owns the recorder")
+        recorder.refreshRecordings()
+        var known = Set(recorder.recordings.map(\.url))
+        var created: [URL] = []
+        defer { recorder.stop(); for url in created { try? FileManager.default.removeItem(at: url) }; recorder.refreshRecordings() }
+        var saved: [Data] = []
+        for name in ["filename-first-take", "filename-second-take"] {
+            recorder.start(canvasSize: CGSize(width: 64, height: 64), projectName: name)
+            XCTAssertTrue(recorder.isRecording)
+            recorder.note(name)
+            recorder.stop()
+            recorder.refreshRecordings()
+            let fresh = Set(recorder.recordings.map(\.url)).subtracting(known)
+            XCTAssertEqual(fresh.count, 1, "each actual start/stop creates a new file")
+            let url = try XCTUnwrap(fresh.first)
+            created.append(url)
+            known.insert(url)
+            let bytes = try recordingBytes(at: url, containing: "recordingStopped")
+            saved.append(bytes)
+            XCTAssertTrue(String(decoding: bytes, as: UTF8.self).contains(name))
+            XCTAssertTrue(url.lastPathComponent.hasPrefix("recording-"))
+            XCTAssertEqual(url.pathExtension, "jsonl")
+        }
+        XCTAssertEqual(created.count, 2)
+        XCTAssertNotEqual(created[0], created[1])
+        XCTAssertEqual(try Data(contentsOf: created[0]), saved[0], "starting another take cannot truncate the earlier one")
+        XCTAssertNotEqual(saved[0], saved[1])
+    }
+
+    /// Wait for the existing asynchronous writer's terminal content, rather than mistaking file
+    /// existence (created before its first flush) for a completed recording.
+    @MainActor
+    private func recordingBytes(at url: URL, containing marker: String) throws -> Data {
+        let ready = expectation(for: NSPredicate { _, _ in
+            guard let data = try? Data(contentsOf: url) else { return false }
+            return String(decoding: data, as: UTF8.self).contains(marker)
+        }, evaluatedWith: url)
+        wait(for: [ready], timeout: 10)
+        return try Data(contentsOf: url)
+    }
+
     // MARK: - The detector, against the recordings
 
     func testTheDetectorTripsOnTheOwnersRecordingOfTheFrozenCanvas() throws {

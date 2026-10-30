@@ -11,6 +11,43 @@ import XCTest
 /// because it is short.
 final class FlightRecorderUITests: PaintUITestCase {
 
+    func testRepeatedSavesAndActionTakesRemainSeparateInThePublicRecordingsList() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = visiblePaperRect(app, in: canvas)
+        drawLine(on: canvas, from: onHost(paper, 0.25, 0.20), to: onHost(paper, 0.45, 0.20))
+        app.buttons["toolbar.settingsButton"].tap()
+        let disclosure = app.buttons["recorder.recordingsDisclosure"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
+        if disclosure.value as? String != "expanded" { disclosure.tap() }
+        for prefix in ["flight-", "recording-"] {
+            let files = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", prefix))
+            let before = Set(files.allElementsBoundByIndex.map(\.label))
+            for count in 1...2 {
+                if prefix == "flight-" {
+                    app.buttons["recorder.saveFlight"].tap()
+                } else {
+                    let toggle = app.buttons["recorder.toggle"]
+                    toggle.tap()
+                    XCTAssertEqual(toggle.label, "Stop recording actions")
+                    toggle.tap()
+                    XCTAssertEqual(toggle.label, "Record my actions")
+                }
+                let changed = expectation(for: NSPredicate { _, _ in files.count == before.count + count }, evaluatedWith: files)
+                wait(for: [changed], timeout: 10)
+            }
+            let added = Set(files.allElementsBoundByIndex.map(\.label)).subtracting(before)
+            XCTAssertEqual(added.count, 2, "both saves remain individually listed")
+            for name in added {
+                let stem = String(name.dropLast(".jsonl".count))
+                XCTAssertNotNil(UUID(uuidString: String(stem.suffix(36))), "every actual saved diagnostic carries its own UUID")
+            }
+        }
+        attachScreenshot(app, "separate-flight-saves-and-action-recordings-landscape")
+    }
+
     func testSaveLast90SecondsIsReachableFromANewDocumentAndListsTheFile() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
