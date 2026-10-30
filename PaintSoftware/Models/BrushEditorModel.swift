@@ -172,7 +172,15 @@ extension BrushOutput {
     func format(_ value: Double) -> String {
         switch self {
         case .size, .flow, .density, .hardness, .spacing, .saturation, .brightness:
-            return "\(Int((value * 100).rounded()))%"
+            let percentage = (value * 100).rounded()
+            if let integer = Int(exactly: percentage) { return "\(integer)%" }
+            // Keep the locale-free conversion so large integral Doubles retain every decimal digit.
+            if percentage.isFinite {
+                return String(format: "%.0f%%", locale: nil, percentage)
+            }
+            // A finite input large enough to overflow scaling is already an integer. Its exact
+            // decimal percentage is that finite integer followed by two zeros.
+            return String(format: "%.0f", locale: nil, value) + "00%"
         case .angle, .hue:
             return String(format: "%.3f turns", value)
         case .scatterAcross, .scatterAlong:

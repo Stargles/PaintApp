@@ -806,6 +806,72 @@ final class BrushEditorLogicTests: XCTestCase {
         }
     }
 
+    func testPercentFormattingKeepsItsWholeRoundingSignsAndUngroupedDigits() {
+        let outputs: [BrushOutput] = [.size, .flow, .density, .hardness, .spacing, .saturation, .brightness]
+        let rows: [(Double, String)] = [
+            (0, "0%"), (-0.0, "0%"), (-0.0001, "0%"),
+            (0.005, "1%"), (-0.005, "-1%"), (0.015, "2%"), (-0.015, "-2%"),
+            (0.025, "3%"), (-0.025, "-3%"), (0.045, "5%"), (-0.045, "-5%"),
+            (1.005, "100%"), (-1.005, "-100%"), (1.015, "101%"), (-1.015, "-101%"),
+            (1.5, "150%"), (-1.5, "-150%"), (1234.56, "123456%"), (-1234.56, "-123456%")
+        ]
+        for output in outputs {
+            for (value, expected) in rows {
+                XCTAssertEqual(output.format(value), expected,
+                               "Whole percentages retain multiply-then-round, ASCII signs and no grouping")
+            }
+        }
+    }
+
+    func testFiniteTypedPercentagesAndBothIntegerBoundaryNeighborsRemainUnclamped() throws {
+        let outputs: [BrushOutput] = [.size, .flow, .density, .hardness, .spacing, .saturation, .brightness]
+        let boundary = Double(Int.max) / 100
+        let rows: [(Double, String)] = [
+            (boundary.nextDown, "9223372036854774784%"),
+            (boundary, "9223372036854775808%"),
+            (boundary.nextUp, "9223372036854777856%")
+        ]
+        for output in outputs {
+            for sign in [1.0, -1.0] {
+                let prefix = sign < 0 ? "-" : ""
+                let text = prefix + "10000000000000000000000%"
+                let typed = try XCTUnwrap(output.parse(text))
+                XCTAssertEqual(typed, sign * 1e20, "The actual typed decimal remains finite and unclamped")
+                XCTAssertEqual(output.format(typed), text, "A public finite typed gain must format without Int narrowing")
+                for (value, expected) in rows {
+                    XCTAssertEqual(output.format(sign * value), prefix + expected,
+                                   "Both signed Int-boundary neighbors keep the existing rounded Double")
+                }
+            }
+        }
+    }
+
+    func testFinitePercentScalingOverflowKeepsExactNumericSignsAndLargestValues() {
+        let outputs: [BrushOutput] = [.size, .flow, .density, .hardness, .spacing, .saturation, .brightness]
+        let boundary = Double.greatestFiniteMagnitude / 100
+        // Independent IEEE754 decimal goldens: the largest finite value is 2^1024 - 2^971.
+        let largestPercent = "17976931348623157081452742373170435679807056752584499659891747680315726078002853876058955863276687817154045895351438246423432132688946418276846754670353751698604991057655128207624549009038932894407586850845513394230458323690322294816580855933212334827479782620414472316873817718091929988125040402618412485836800"
+        let rows: [(Double, String)] = [
+            (boundary.nextDown, "179769313486231530897721233037308123670616306789073675249892268094006430729083690016351721253485562472381149100800360677385384443039559303319707778831664302202613944879922875676132031068675798593321439621195390289237448346024743081549599456914715570497692457243261573026320039665798467034080499419303926300672"),
+            (boundary, "179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368"),
+            (boundary.nextUp, "179769313486231594515131099456502120217496534838302968649901194474215566122777042702480774576715159367916299178563332900175877601675345204941168658877462238263715015208924398376312856384531737589836310660265606736313194578362320368969182713892459216329954139024669093565798946330522294384257534886519242752000"),
+            (.greatestFiniteMagnitude, largestPercent)
+        ]
+        XCTAssertTrue((boundary * 100).isFinite, "PREMISE: the boundary still has a finite scaled Double")
+        XCTAssertFalse((boundary.nextUp * 100).isFinite, "PREMISE: the adjacent finite input overflows scaling")
+        for output in outputs {
+            for sign in [1.0, -1.0] {
+                let prefix = sign < 0 ? "-" : ""
+                for (value, expected) in rows {
+                    XCTAssertEqual(output.format(sign * value), prefix + expected + "%",
+                                   "Every finite extreme formats as numeric percentage text, never infinity or NaN")
+                }
+                XCTAssertNil(output.parse(prefix + largestPercent + "%"),
+                             "A percentage beyond Double's parse range keeps the existing rejection semantics")
+            }
+        }
+    }
+
     /// **Text that is not a number answers nil rather than zero**, which is what lets the field put
     /// the old value back instead of silencing the row under the artist's fingers. `"-"` is the case
     /// that matters: it is what the field holds one keystroke into a negative gain.

@@ -72,7 +72,7 @@ final class BrushEditorUITests: PaintUITestCase {
 
         drawLine(on: canvas, from: CGVector(dx: 0.35, dy: afterY), to: CGVector(dx: 0.65, dy: afterY))
 
-        let widths = inkedColumnHeights(of: canvas, dx: 0.50, bands: [beforeY, afterY], halfBand: 0.06)
+        let widths = try inkedColumnHeights(of: canvas, dx: 0.50, bands: [beforeY, afterY], halfBand: 0.06)
         XCTAssertGreaterThan(widths[0], 2, "PREMISE: the document's own brush marks the paper")
         XCTAssertGreaterThan(widths[1], widths[0] + 2,
                              "Raising the Size output's base must make the next stroke visibly wider")
@@ -417,6 +417,61 @@ final class BrushEditorUITests: PaintUITestCase {
         XCTAssertLessThan(reduced, atDefault,
                           "A negative gain must make the sensor *reduce* the parameter — "
                           + "\(reduced) against \(atDefault) at the default")
+    }
+
+    func testFiniteHugeFlowBaseAndGainStayVisibleAndAnOrdinaryStrokeStillDraws() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetBrushLibrary"]
+        XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 256, height: 256),
+                                      orientationBeforeCreatingCanvas: .landscapeLeft))
+        XCTAssertEqual(app.windows.firstMatch.frame.size, CGSize(width: 1080, height: 810),
+                       "PREMISE: the typed fields and restored stroke use the owner's landscape size")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        openEditor(app)
+        expand(app, "flow")
+
+        let text = "10000000000000000000000%"
+        let base = app.textFields["brushPanel.base.flow.field"]
+        XCTAssertTrue(base.waitForExistence(timeout: 5))
+        setField(base, to: text + "\n")
+        XCTAssertEqual(base.value as? String, text, "A finite huge typed Base stays exposed without narrowing or a cap")
+        attachScreenshot(XCUIScreen.main, "finite-huge-flow-base-owner-screen")
+        setField(base, to: "100\n")
+        XCTAssertEqual(base.value as? String, "100%")
+
+        let prefix = "brushPanel.gain.flow."
+        let before = app.textFields.matching(NSPredicate(format: "identifier BEGINSWITH %@", prefix))
+            .allElementsBoundByIndex.map(\.identifier)
+        tapWhenHittable(app.buttons["brushPanel.addRow.flow"], "Add a Flow input")
+        let gain = app.textFields.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND NOT (identifier IN %@)",
+            prefix, ".field", before as NSArray)).firstMatch
+        XCTAssertTrue(gain.waitForExistence(timeout: 5), "The new input exposes its own Gain field")
+        setField(gain, to: text + "\n")
+        XCTAssertEqual(gain.value as? String, text, "A finite huge typed Gain stays exposed without narrowing or a cap")
+        setField(gain, to: "-" + text + "\n")
+        XCTAssertEqual(gain.value as? String, "-" + text, "A huge negative Gain keeps its visible sign")
+        attachScreenshot(XCUIScreen.main, "finite-huge-signed-flow-gain-owner-screen")
+        setField(gain, to: "0\n")
+        XCTAssertEqual(gain.value as? String, "0%")
+        closeEverything(app)
+
+        let paper = visiblePaperRect(app, in: canvas)
+        let left = Double(paper.minX + paper.width * 0.3)
+        let right = Double(paper.minX + paper.width * 0.7)
+        let middle = (left + right) / 2
+        let row = Double(paper.minY + paper.height * 0.35)
+        assertAboveTheDock(app, canvas, dy: row, "the restored ordinary stroke")
+        assertBelowTheToolbar(app, canvas, dy: row, "the restored ordinary stroke")
+        let blank = try inkedColumnHeights(of: canvas, dx: middle, bands: [row], halfBand: 0.03)
+        XCTAssertEqual(blank[0], 0, "PREMISE: the ordinary stroke starts on fresh white paper")
+        drawLine(on: canvas, from: CGVector(dx: left, dy: row), to: CGVector(dx: right, dy: row))
+        let arrived = waitForPixel(canvas, at: CGVector(dx: middle, dy: row)) { self.isInk($0) }
+        let painted = try inkedColumnHeights(of: canvas, dx: middle, bands: [row], halfBand: 0.03)
+        attachScreenshot(XCUIScreen.main, "finite-huge-flow-restored-ordinary-stroke-owner-screen")
+        XCTAssertNotNil(arrived, "The restored ordinary stroke must reach the displayed canvas")
+        XCTAssertGreaterThan(painted[0], 2, "After restoring ordinary fields, a real canvas stroke must still draw")
     }
 
     /// **A `random` input carries a Gain exactly as a `pressure` one does, and the screen says the
@@ -792,28 +847,4 @@ final class BrushEditorUITests: PaintUITestCase {
         field.typeText(String(repeating: "\u{8}", count: 10) + text + "\n")
     }
 
-    /// How many rows of one pixel column are inked, inside each of several horizontal bands, from a
-    /// single screenshot — `BrushMenuUITests`' measurement, which exists because at the default
-    /// canvas zoom a real difference in stroke width is under one sample step of a normalised ladder.
-    private func inkedColumnHeights(of element: XCUIElement, dx: Double,
-                                    bands: [Double], halfBand: Double) -> [Int] {
-        guard let cg = element.screenshot().image.cgImage else { return bands.map { _ in -1 } }
-        let width = cg.width, height = cg.height
-        var buffer = [UInt8](repeating: 0, count: height * width * 4)
-        guard let context = CGContext(data: &buffer, width: width, height: height, bitsPerComponent: 8,
-                                      bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
-            return bands.map { _ in -1 }
-        }
-        context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
-        let x = min(max(Int(dx * Double(width)), 0), width - 1)
-        return bands.map { centre in
-            let low = max(Int((centre - halfBand) * Double(height)), 0)
-            let high = min(Int((centre + halfBand) * Double(height)), height - 1)
-            return (low...high).count { row in
-                let offset = row * width * 4 + x * 4
-                return !(buffer[offset] > 240 && buffer[offset + 1] > 240 && buffer[offset + 2] > 240)
-            }
-        }
-    }
 }

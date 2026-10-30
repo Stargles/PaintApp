@@ -1429,6 +1429,22 @@ class PaintUITestCase: XCTestCase {
         return { pixels.pixel(normalizedX: $0, normalizedY: $1) }
     }
 
+    /// Counts nonwhite pixel rows in one displayed column inside each normalized band.
+    /// Reads one screenshot; callers choose bands inside the white paper.
+    func inkedColumnHeights(of element: XCUIElement, dx: Double,
+                            bands: [Double], halfBand: Double) throws -> [Int] {
+        let picture = try XCTUnwrap(ScreenshotPixels(element.screenshot().image))
+        let height = picture.height
+        return bands.map { centre in
+            let low = max(Int((centre - halfBand) * Double(height)), 0)
+            let high = min(Int((centre + halfBand) * Double(height)), height - 1)
+            return (low...high).count { row in
+                let pixel = picture.pixel(normalizedX: dx, normalizedY: (Double(row) + 0.5) / Double(height))
+                return !(pixel.r > 240 && pixel.g > 240 && pixel.b > 240)
+            }
+        }
+    }
+
     /// One screenshot of the canvas, as an "is there ink at this normalized point" probe.
     ///
     /// **Ink is *dark*, not merely "not white", and that distinction cost `DistortUITests` two runs.** The

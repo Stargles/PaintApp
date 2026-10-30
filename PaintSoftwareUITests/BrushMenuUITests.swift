@@ -152,20 +152,66 @@ final class BrushMenuUITests: PaintUITestCase {
                           "Picking the technical pen must reach the ink — its stroke is visibly narrower than the selected 22 pt brush")
     }
 
-    /// How many rows of one pixel column are inked, inside each of several horizontal bands, from a
-    /// **single** screenshot. `halfBand` is the half-height of each band in normalized coordinates.
-    private func inkedColumnHeights(of element: XCUIElement, dx: Double,
-                                    bands: [Double], halfBand: Double) throws -> [Int] {
-        let picture = try XCTUnwrap(ScreenshotPixels(element.screenshot().image))
-        let height = picture.height
-        return bands.map { centre in
-            let low = max(Int((centre - halfBand) * Double(height)), 0)
-            let high = min(Int((centre + halfBand) * Double(height)), height - 1)
-            return (low...high).count { row in
-                let pixel = picture.pixel(normalizedX: dx, normalizedY: (Double(row) + 0.5) / Double(height))
-                return !(pixel.r > 240 && pixel.g > 240 && pixel.b > 240)
+    /// The public one-point endpoint must draw a visible body even when its native radial samples
+    /// sit on the transparent rim. Partial red coverage counts: a one-point stroke need not contain
+    /// an opaque screenshot pixel. The exact retained path/geometry is pinned in the logic suite.
+    func testOnePointOpaqueRoundDrawsVisiblePartialRedBodyFromAColdStart() throws {
+        let size = CGSize(width: 64, height: 64)
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, size: size, orientationBeforeCreatingCanvas: .landscapeLeft))
+        XCTAssertGreaterThan(app.windows.firstMatch.frame.width, app.windows.firstMatch.frame.height,
+                             "The artist's drawing route is landscape")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        openBrushMenu(app)
+        tapWhenHittable(app.buttons["brushPanel.group.Basics"], "The public Basics group")
+        let opaque = app.buttons["brushPanel.brush.Opaque Round"]
+        XCTAssertTrue(opaque.waitForExistence(timeout: 5))
+        if !opaque.isSelected { tapWhenHittable(opaque, "The ordinary opaque round brush") }
+        XCTAssertTrue(opaque.isSelected)
+        setBrushSize(app, normalized: 0) // The public editor's range starts at exactly one point.
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5))
+        setBrushColor(app, hex: "FF0000")
+        waitForTheKeyboardToLeave(app)
+
+        let paper = paperRect(in: canvas, canvasSize: size)
+        let start = onHost(paper, 35.25 / 64, 27.0 / 64)
+        let end = onHost(paper, 51.25 / 64, 27.0 / 64)
+        let middle = onHost(paper, 43.25 / 64, 27.0 / 64)
+        let exposed = visiblePaperRect(app, in: canvas, canvasSize: size)
+        XCTAssertTrue(exposed.contains(CGPoint(x: start.dx, y: start.dy))
+                      && exposed.contains(CGPoint(x: end.dx, y: end.dy)))
+        assertBelowTheToolbar(app, canvas, dy: start.dy, "the one-point red stroke")
+        assertAboveTheDock(app, canvas, dy: start.dy, "the one-point red stroke")
+        XCTAssertTrue(waitUntil(canvas, middle, isWhitish), "PREMISE: the stroke starts on white paper")
+        attachScreenshot(XCUIScreen.main, "cold-one-point-before-owner-landscape")
+
+        drawLine(on: canvas, from: start, to: end)
+        let visible = waitForPixel(canvas, at: middle) { pixel in
+            Int(pixel.r) - max(Int(pixel.g), Int(pixel.b)) > 12
+        }
+        attachScreenshot(XCUIScreen.main, "cold-one-point-red-body-owner-landscape")
+        XCTAssertNotNil(visible, "The one-point brush must leave visible partial red coverage after lift")
+
+        let picture = try XCTUnwrap(ScreenshotPixels(canvas.screenshot().image))
+        let left = onHost(paper, 37.25 / 64, 25.0 / 64)
+        let right = onHost(paper, 49.25 / 64, 29.0 / 64)
+        let first = max(0, Int(left.dx * Double(picture.width)))
+        let last = min(picture.width - 1, Int(right.dx * Double(picture.width)))
+        let low = max(0, Int(left.dy * Double(picture.height)))
+        let high = min(picture.height - 1, Int(right.dy * Double(picture.height)))
+        guard first <= last, low <= high else { return XCTFail("The exposed stroke body must contain screenshot pixels") }
+        let redColumns = (first...last).count { column in
+            (low...high).contains { row in
+                let pixel = picture.pixel(normalizedX: (Double(column) + 0.5) / Double(picture.width),
+                                          normalizedY: (Double(row) + 0.5) / Double(picture.height))
+                return Int(pixel.r) - max(Int(pixel.g), Int(pixel.b)) > 12
             }
         }
+        XCTAssertGreaterThan(Double(redColumns) / Double(last - first + 1), 0.9,
+                             "Partial red ink must cover the stroke's interior body, rather than only its first dab")
     }
 
     /// The public one-point endpoint must draw a visible body even when its native radial samples
