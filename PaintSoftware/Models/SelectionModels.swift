@@ -808,15 +808,8 @@ struct FloatingResizeDrag: Equatable {
 
 // MARK: - What the loop catches
 
-/// The Select panel's voice for the three membership rules (TODO item (23)).
-///
-/// **A second explanation rather than an edit to `LassoMembership.explanation`, and only because the
-/// enum sits in a file this change could not open.** `explanation` is written in Move's voice —
-/// *"Moves only what lies completely inside the loop"* — which was right while the picker lived on
-/// the Move bar and is wrong the moment the same rule also governs Recolour. These sentences name no
-/// tool, which is the whole of item (23): the rule belongs to the selection and the tools obey it.
-/// **`LassoMembership.explanation` now has no caller and should be replaced by this one when
-/// `VectorLayer.swift` is next open.**
+/// The Select panel's voice for the three membership rules (TODO item (23)). The rule belongs to
+/// the selection, so these sentences name no tool: Move and Recolour obey the same choice.
 extension LassoMembership {
     var selectionExplanation: String {
         switch self {

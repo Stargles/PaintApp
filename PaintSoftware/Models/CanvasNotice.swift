@@ -230,6 +230,9 @@ struct CanvasNotice: Identifiable, Equatable {
         /// A video crop or speed cannot be represented on the source clock; the edit is unchanged.
         case videoTimingRefused
 
+        /// Repeat's required prefill cannot fit a period, even though its bar and drawings fit.
+        case repeatPeriodRefused
+
         /// STREAM.md §5.5: Bake Frame on a stream cel refused. `.noFrameYet` is the one an artist
         /// meets — the bar is up before the laptop has sent a picture; `.notOnStreamCel` is a direct
         /// caller's or a test's, since the bar shows only on a cel that holds a stream.
@@ -419,6 +422,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .drawingSourceUnavailable: return "This picture couldn't be prepared right now. Your drawing was kept — try again."
         case .videoBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
         case .videoTimingRefused: return "Couldn't change the video timing — try a shorter crop or a different speed. Nothing was changed."
+        case .repeatPeriodRefused: return "Couldn't choose Repeat — the distance from this bar's start to the drawings' end is too long. Move the bar's start closer, or shorten the drawings beneath it. Nothing was changed."
         case .streamBakeRefused(let refusal): return refusal.phrase
         case .poseBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
         case .bakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
@@ -549,6 +553,7 @@ struct CanvasNotice: Identifiable, Equatable {
         // decodable in it is undone from the block's own edge handles or Adjust Speed row, neither
         // of which is a button this banner could press on the artist's behalf.
         case .videoBakeRefused, .videoTimingRefused: return nil
+        case .repeatPeriodRefused: return nil
         // Nor this one: "no picture yet" is fixed by waiting for the laptop, which is not a button.
         case .streamBakeRefused: return nil
         // Nor this one, for the same reason: neither of its cases names a thing a button could do.
@@ -618,6 +623,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .nodeInputLimit: return "nodeInputLimit"
         case .videoBakeRefused: return "videoBakeRefused"
         case .videoTimingRefused: return "videoTimingRefused"
+        case .repeatPeriodRefused: return "repeatPeriodRefused"
         case .streamBakeRefused: return "streamBakeRefused"
         case .poseBakeRefused: return "poseBakeRefused"
         case .bakeRefused: return "bakeRefused"

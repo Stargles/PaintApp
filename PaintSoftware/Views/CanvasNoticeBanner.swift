@@ -118,7 +118,7 @@ struct CanvasNoticeBanner: View {
         case .fillsMended, .noFillGapsToMend: return "paintbrush.pointed"
         // A fourth: the artist asked to bake a video and an unreadable file or an empty crop
         // stopped it, which reads the same as the fill and the save refusals above.
-        case .videoBakeRefused, .videoTimingRefused: return "exclamationmark.triangle"
+        case .videoBakeRefused, .videoTimingRefused, .repeatPeriodRefused: return "exclamationmark.triangle"
         // And a fifth of the same shape: Bake on an animated block, refused.
         case .poseBakeRefused: return "exclamationmark.triangle"
         // A sixth: Bake on an effect, colour or transformation layer, refused.

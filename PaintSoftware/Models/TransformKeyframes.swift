@@ -869,16 +869,20 @@ extension CanvasManager {
     /// drawings beneath end** (§2 ruling 11), inside the same undo step.
     func setTransformLayerMode(_ target: KeyframeTarget, to mode: TransformLayerMode) {
         guard var pose = containerPose(of: target), pose.mode != mode else { return }
+        if mode == .repeat, pose.repeatPeriod == 0, case .layer(let id) = target,
+           let index = layers.firstIndex(where: { $0.id == id }) {
+            guard let period = suggestedRepeatPeriod(forLayer: index) else {
+                raise(.repeatPeriodRefused)
+                return
+            }
+            pose.repeatPeriod = period
+        }
         pose.mode = mode
         // **The shake's seed is minted the first time the pose enters Shake** (§5.4: *"minted at
         // creation"*), inside the same undo step as the pick, so two shake layers differ from birth
         // and one is stable from its first frame. A seed already minted is kept — leaving Shake and
         // coming back is the same shake, `valueFill`'s own asymmetry.
         if mode == .shake, pose.shakeSeed == 0 { pose.shakeSeed = Self.freshShakeSeed() }
-        if mode == .repeat, pose.repeatPeriod == 0, case .layer(let id) = target,
-           let index = layers.firstIndex(where: { $0.id == id }) {
-            pose.repeatPeriod = suggestedRepeatPeriod(forLayer: index)
-        }
         withStructureUndo(label: .transformLayerMode) {
             applyContainerPose(pose, target: target)
         }
@@ -890,8 +894,9 @@ extension CanvasManager {
     /// cels covers; the period is that end less the block's start, so a walk on frames 1–8 under a
     /// bar starting at 1 pre-fills 8. Never below 1, and the block's own length when nothing beneath
     /// ends after the block starts (a loop of the whole bar, which is the identity — the honest
-    /// default when there is nothing to loop yet).
-    func suggestedRepeatPeriod(forLayer index: Int) -> Int {
+    /// default when there is nothing to loop yet). Nil when that required positive distance cannot
+    /// be stored as a period, even though both endpoints are valid frames.
+    func suggestedRepeatPeriod(forLayer index: Int) -> Int? {
         guard layers.indices.contains(index) else { return 1 }
         let blockStart = layers[index].cels.map(\.startFrame).min() ?? 0
         let blockLength = layers[index].cels.first { $0.startFrame == blockStart }?.frameCount ?? 1
@@ -911,8 +916,9 @@ extension CanvasManager {
                 }
             }
         }
-        let fromDrawings = end - blockStart
-        return fromDrawings >= 1 ? fromDrawings : max(blockLength, 1)
+        let fromDrawings = Int128(end) - Int128(blockStart)
+        guard fromDrawings >= 1 else { return max(blockLength, 1) }
+        return Int(exactly: fromDrawings)
     }
 
     /// **Sets a Repeat layer's loop length** — §2 ruling 11's (a), typed; one undo step; never below

@@ -1715,19 +1715,6 @@ enum LassoMembership: String, CaseIterable, Identifiable {
         }
     }
 
-    /// One line under the picker saying what the selected segment does — the same job
-    /// `MoveTransformBottomBar`'s caption slot does (`CanvasManager.distortUnavailableReason`, which
-    /// replaced the "Coming soon — acts like Uniform for now" this once named), and needed for the
-    /// same reason: the difference between the three is invisible until the artist has already moved
-    /// something.
-    var explanation: String {
-        switch self {
-        case .enclosed: return "Moves only what lies completely inside the loop."
-        case .cutting:  return "Cuts at the loop and moves what is inside."
-        case .touching: return "Moves anything the loop touches, whole."
-        }
-    }
-
     /// Whether this mode cuts geometry at the boundary. Only `.cutting` does, and that is the whole
     /// difference in the engine: the other two classify and lift, and change no element at all.
     var cutsAtTheBoundary: Bool { self == .cutting }

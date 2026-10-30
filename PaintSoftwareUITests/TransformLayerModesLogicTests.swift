@@ -1051,6 +1051,85 @@ final class TransformLayerModesLogicTests: XCTestCase {
         XCTAssertNil(fx.manager.transformLayerMode(of: .folder(id: folder)), "a folder takes no mode")
     }
 
+    private func repeatPrefillFixture(blockStart: Int, blockLength: Int = 1,
+                                      drawingLength: Int = 1) -> (manager: CanvasManager, drawn: Int, looper: Int) {
+        let manager = CanvasManager()
+        manager.canvasSize = size
+        manager.addLayer(name: "ink")
+        manager.addTransformLayer(name: "looper")
+        let drawn = layerIndex(named: "ink", in: manager)
+        let looper = layerIndex(named: "looper", in: manager)
+        CanvasFixture.setCelLayout(manager, layerIndex: drawn, [(start: 0, length: drawingLength)])
+        CanvasFixture.setBakedContent(manager, layerIndex: drawn,
+                                      CanvasFixture.solidImage(.red, rect: CGRect(x: 8, y: 29, width: 6, height: 6)))
+        CanvasFixture.setCelLayout(manager, layerIndex: looper, [(start: blockStart, length: blockLength)])
+        manager.history.removeAll()
+        return (manager, drawn, looper)
+    }
+
+    func testRepeatPrefillRefusesAnUnrepresentableLengthWithoutChangingTheDrawingOrEarlierHistory() throws {
+        let fx = repeatPrefillFixture(blockStart: Int.min)
+        let target = KeyframeTarget.layer(id: fx.manager.layers[fx.looper].id)
+        XCTAssertEqual(fx.manager.layers[fx.looper].cels[0].endFrame, Int.min + 1,
+                       "PREMISE: the negative transform bar itself has a valid positive duration")
+        XCTAssertEqual(fx.manager.layers[fx.drawn].cels[0].endFrame, 1)
+        fx.manager.setTransformLayerMode(target, to: .parallax)
+        let oldPose = try XCTUnwrap(fx.manager.containerPose(of: target))
+        let labels = fx.manager.history.undoStack.map(\.label)
+        XCTAssertEqual(labels, [.transformLayerMode], "PREMISE: an earlier mode change was accepted")
+        let pixels = try compositeBytes(fx.manager, atFrame: 0)
+        _ = try XCTUnwrap(inkBounds(pixels), "PREMISE: the current scene actually draws the red mark")
+        let layerIDs = fx.manager.layers.map(\.id)
+        let celIDs = fx.manager.layers.map { $0.cels.map(\.id) }
+        let spans = fx.manager.layers.map { $0.cels.map { [$0.startFrame, $0.frameCount] } }
+
+        XCTAssertNil(fx.manager.suggestedRepeatPeriod(forLayer: fx.looper),
+                     "The required distance from Int.min to frame1 cannot be a positive Int period")
+        fx.manager.setTransformLayerMode(target, to: .repeat)
+        XCTAssertEqual(fx.manager.notice?.code, "repeatPeriodRefused")
+        XCTAssertTrue(fx.manager.notice?.message.contains("Repeat") == true)
+        XCTAssertTrue(fx.manager.notice?.message.contains("Nothing was changed") == true)
+        XCTAssertNil(fx.manager.notice?.actionTitle)
+        XCTAssertEqual(fx.manager.layers.map(\.id), layerIDs)
+        XCTAssertEqual(fx.manager.layers.map { $0.cels.map(\.id) }, celIDs)
+        XCTAssertEqual(fx.manager.layers.map { $0.cels.map { [$0.startFrame, $0.frameCount] } }, spans)
+        XCTAssertEqual(fx.manager.containerPose(of: target), oldPose)
+        XCTAssertEqual(fx.manager.history.undoStack.map(\.label), labels)
+        XCTAssertTrue(fx.manager.history.redoStack.isEmpty)
+        XCTAssertEqual(try compositeBytes(fx.manager, atFrame: 0), pixels)
+        guard fx.manager.containerPose(of: target) == oldPose,
+              fx.manager.history.undoStack.map(\.label) == labels else { return }
+
+        fx.manager.undo()
+        XCTAssertEqual(fx.manager.containerPose(of: target)?.mode, .move,
+                       "The next Undo reverses the earlier accepted mode change, with no refused step in between")
+        XCTAssertEqual(try compositeBytes(fx.manager, atFrame: 0), pixels)
+        fx.manager.redo()
+        XCTAssertEqual(fx.manager.containerPose(of: target), oldPose)
+        XCTAssertEqual(try compositeBytes(fx.manager, atFrame: 0), pixels)
+    }
+
+    func testRepeatPrefillKeepsNegativeOriginsHeldDrawingsAndTheLargestExactPeriod() throws {
+        for (start, barLength, drawingLength, expected) in [(-3, 12, 1, 4), (-3, 12, 5, 8), (Int.min + 2, Int.max, 1, Int.max)] {
+            let fx = repeatPrefillFixture(blockStart: start, blockLength: barLength, drawingLength: drawingLength)
+            let target = KeyframeTarget.layer(id: fx.manager.layers[fx.looper].id)
+            _ = try XCTUnwrap(fx.manager.activeCelIndex(inLayer: fx.looper, atFrame: 0),
+                              "PREMISE: every accepted control's bar covers its actual drawn frame")
+            let pixels = try compositeBytes(fx.manager, atFrame: 0)
+            _ = try XCTUnwrap(inkBounds(pixels), "PREMISE: each control starts with actual drawn ink")
+            XCTAssertEqual(fx.manager.suggestedRepeatPeriod(forLayer: fx.looper), expected)
+            fx.manager.setTransformLayerMode(target, to: .repeat)
+            XCTAssertEqual(fx.manager.containerPose(of: target)?.mode, .repeat)
+            XCTAssertEqual(fx.manager.containerPose(of: target)?.repeatPeriod, expected)
+            XCTAssertEqual(fx.manager.history.undoStack.map(\.label), [.transformLayerMode])
+            XCTAssertNotEqual(fx.manager.notice?.code, "repeatPeriodRefused")
+            XCTAssertEqual(fx.manager.layers[fx.looper].cels[0].startFrame, start)
+            XCTAssertEqual(fx.manager.layers[fx.looper].cels[0].frameCount, barLength)
+            XCTAssertEqual(try compositeBytes(fx.manager, atFrame: 0), pixels,
+                           "The exact prefill keeps the ordinary first-cycle drawing")
+        }
+    }
+
     /// **Drawing on a repeated frame lands on the source cel** (ruling 13): at frame 4, which shows
     /// frame 1, the cel every drawing path is handed is frame 1's — through
     /// `displayedCelIndex` and through `ensureCelAtCurrentFrame`, which spawns nothing when the
