@@ -330,9 +330,10 @@ final class DabGradientCache {
     }
 
     /// Integrates the radial profile over device pixels when a dab's support spans only a few cells.
-    /// The fixed 8×8 quadrature visits at most seven by seven cells and retains no buffer. Through
-    /// one device-pixel radius it supplies all coverage; from there to the three-pixel ceiling a
-    /// smoothstep blends into the actual cached gradient, meeting its native pixel profile exactly.
+    /// The fixed 8×8 quadrature visits at most seven by seven cells and retains no buffer. Compact
+    /// support uses all area coverage through a one-pixel minor radius, then a smoothstep meets the native
+    /// gradient at a 1.5-pixel minor radius. Thin ellipses keep area coverage through a two-pixel major
+    /// radius, then meet the same native profile at the three-pixel work bound. Both exits are smooth.
     /// The two weighted sources add inside a bounded transparency layer, then blend into the parent
     /// once. Two ordinary source-over passes would underfill the opaque core; adding into the parent
     /// would alter existing ink. The convex weights instead preserve both coverage and dab alpha.
@@ -344,8 +345,10 @@ final class DabGradientCache {
         let scaleX = abs(transform.a), scaleY = abs(transform.d)
         guard transform.b == 0, transform.c == 0, scaleX > 0, scaleY > 0,
               radius.isFinite, radius > 0 else { return false }
-        let deviceRadius = radius * max(scaleX, scaleY)
-        guard deviceRadius.isFinite, deviceRadius < 3 else { return false }
+        let majorDeviceRadius = radius * max(scaleX, scaleY)
+        let minorDeviceRadius = radius * min(scaleX, scaleY)
+        guard majorDeviceRadius.isFinite, majorDeviceRadius < 3,
+              minorDeviceRadius < 1.5 else { return false }
         let footprint = dabCircleBounds(at: point, radius: radius)
         let deviceX0 = transform.a * footprint.minX + transform.tx
         let deviceX1 = transform.a * footprint.maxX + transform.tx
@@ -379,7 +382,7 @@ final class DabGradientCache {
         guard cellWidth.isFinite, cellHeight.isFinite else { return false }
         let cellBounds = CGRect(x: min(cellX0, cellX1), y: min(cellY0, cellY1),
                                 width: cellWidth, height: cellHeight)
-        let transition = max(0, (deviceRadius - 1) / 2)
+        let transition = max(0, max((minorDeviceRadius - 1) * 2, majorDeviceRadius - 2))
         let nativeWeight = transition * transition * (3 - 2 * transition)
         let nativeGradient = nativeWeight > 0
             ? gradient(red: red, green: green, blue: blue, coreFraction: hardness) : nil

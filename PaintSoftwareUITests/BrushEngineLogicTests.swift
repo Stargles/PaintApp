@@ -448,14 +448,11 @@ final class BrushEngineLogicTests: XCTestCase {
         return difference
     }
 
-    private func renderedRoundDab(radius: CGFloat, center: CGPoint,
-                                  scaleX: CGFloat, scaleY: CGFloat, flipY: Bool = false,
-                                  hardness: CGFloat = 0.8, alpha: CGFloat = 1,
-                                  blendMode: CGBlendMode = .normal, background: UIColor? = nil)
-        -> (pixels: (bytes: [UInt8], width: Int, height: Int), hits: Int, misses: Int)? {
+    private func renderedDabPixels(scaleX: CGFloat, scaleY: CGFloat, flipY: Bool,
+                                   background: UIColor? = nil, draw: (CGContext) -> Void)
+        -> (bytes: [UInt8], width: Int, height: Int)? {
         let width = Int(64 * scaleX), height = Int(64 * scaleY)
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
-        let cache = DabGradientCache()
         let image = bytes.withUnsafeMutableBytes { raw -> CGImage? in
             guard let context = CGContext(data: raw.baseAddress, width: width, height: height,
                                           bitsPerComponent: 8, bytesPerRow: width * 4,
@@ -473,15 +470,41 @@ final class BrushEngineLogicTests: XCTestCase {
             } else {
                 context.scaleBy(x: scaleX, y: scaleY)
             }
-            cache.stamp(into: context, at: center, radius: radius, color: .red, alpha: alpha,
-                        hardness: hardness, blendMode: blendMode)
+            draw(context)
             return context.makeImage()
         }
-        guard let image,
-              let pixels = rgbaPixels(of: UIImage(cgImage: image), width: width, height: height) else {
-            return nil
-        }
+        guard let image else { return nil }
+        return rgbaPixels(of: UIImage(cgImage: image), width: width, height: height)
+    }
+
+    private func renderedRoundDab(radius: CGFloat, center: CGPoint,
+                                  scaleX: CGFloat, scaleY: CGFloat, flipY: Bool = false,
+                                  hardness: CGFloat = 0.8, alpha: CGFloat = 1,
+                                  blendMode: CGBlendMode = .normal, background: UIColor? = nil)
+        -> (pixels: (bytes: [UInt8], width: Int, height: Int), hits: Int, misses: Int)? {
+        let cache = DabGradientCache()
+        guard let pixels = renderedDabPixels(scaleX: scaleX, scaleY: scaleY, flipY: flipY,
+                                             background: background, draw: { context in
+            cache.stamp(into: context, at: center, radius: radius, color: .red, alpha: alpha,
+                        hardness: hardness, blendMode: blendMode)
+        }) else { return nil }
         return (pixels, cache.hits, cache.misses)
+    }
+
+    /// The unchanged native three-stop gradient is the endpoint oracle. Drawing it directly keeps
+    /// the expected profile independent of the production small-dab admission and mixing formula.
+    private func renderedNativeRoundDab(radius: CGFloat, center: CGPoint,
+                                        scaleX: CGFloat, scaleY: CGFloat, flipY: Bool,
+                                        hardness: CGFloat)
+        -> (bytes: [UInt8], width: Int, height: Int)? {
+        let colors = [UIColor.red.cgColor, UIColor.red.cgColor,
+                      UIColor(red: 1, green: 0, blue: 0, alpha: 0).cgColor] as CFArray
+        guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                         colors: colors, locations: [0, hardness, 1]) else { return nil }
+        return renderedDabPixels(scaleX: scaleX, scaleY: scaleY, flipY: flipY) { context in
+            context.drawRadialGradient(gradient, startCenter: center, startRadius: 0,
+                                       endCenter: center, endRadius: radius, options: [])
+        }
     }
 
     /// The saved 1pt Opaque Round stroke is the first case. Other sizes and raster scales pin both
@@ -552,9 +575,11 @@ final class BrushEngineLogicTests: XCTestCase {
                     let rows = Int(ceil(centerDeviceY + radius * scaleY))
                         - Int(floor(centerDeviceY - radius * scaleY))
                     let deviceRadius = radius * max(scaleX, scaleY)
-                    let areaPathExpected = deviceRadius < 3 && columns > 0 && columns <= 7
-                        && rows > 0 && rows <= 7
-                    let pureAreaExpected = areaPathExpected && deviceRadius <= 1
+                    let minorDeviceRadius = radius * min(scaleX, scaleY)
+                    let areaPathExpected = deviceRadius < 3 && minorDeviceRadius < 1.5
+                        && columns > 0 && columns <= 7 && rows > 0 && rows <= 7
+                    let pureAreaExpected = areaPathExpected && minorDeviceRadius <= 1
+                        && deviceRadius <= 2
                     XCTAssertEqual(rendered.misses, pureAreaExpected ? 0 : 1,
                                    "Pure area coverage needs no gradient; the transition and larger dabs share the existing cached native gradient")
                     XCTAssertLessThanOrEqual(rendered.hits, 1)
@@ -564,17 +589,20 @@ final class BrushEngineLogicTests: XCTestCase {
 
         // A narrow device-space ellipse must be integrated over its actual support intersection;
         // sampling only the full pixel can miss every sample even though the dab is representable.
-        for center in phases {
-            guard let rendered = renderedRoundDab(radius: 0.05, center: center,
-                                                  scaleX: 20, scaleY: 1) else {
-                return XCTFail("Could not render the bounded thin anisotropic dab")
+        let thinRadii: [CGFloat] = [0.05, 0.1]
+        for radius in thinRadii {
+            for center in phases {
+                guard let rendered = renderedRoundDab(radius: radius, center: center,
+                                                      scaleX: 20, scaleY: 1) else {
+                    return XCTFail("Could not render the bounded thin anisotropic dab")
+                }
+                let expectedEnergy = .pi * radius * radius * meanCoverage
+                let energy = redEnergy(rendered.pixels, pixelArea: 20)
+                XCTAssertGreaterThan(energy, expectedEnergy * 0.65)
+                XCTAssertLessThan(energy, expectedEnergy * 1.35)
+                XCTAssertEqual(rendered.misses, 0,
+                               "The thin support must use bounded local coverage instead of disappearing between pixel centers")
             }
-            let expectedEnergy = .pi * 0.05 * 0.05 * meanCoverage
-            let energy = redEnergy(rendered.pixels, pixelArea: 20)
-            XCTAssertGreaterThan(energy, expectedEnergy * 0.65)
-            XCTAssertLessThan(energy, expectedEnergy * 1.35)
-            XCTAssertEqual(rendered.misses, 0,
-                           "The thin support must use bounded local coverage instead of disappearing between pixel centers")
         }
 
         // The old half-pixel-diagonal boundary is no longer a switch: both neighbouring radii use
@@ -591,8 +619,8 @@ final class BrushEngineLogicTests: XCTestCase {
                               "A dab must not disappear or jump at the nearest-sample distance for phase \(center)")
         }
 
-        // Both radii remain on the integrated path; verify that a small radius change does not
-        // create a profile jump when no point-sample-error threshold is involved.
+        // The original near-cutoff pair remains smooth on the native path; a small radius change
+        // must not create a profile jump when no point-sample-error threshold is involved.
         guard let smaller = renderedRoundDab(radius: 2.961, center: CGPoint(x: 32, y: 32),
                                              scaleX: 1, scaleY: 1),
               let larger = renderedRoundDab(radius: 2.962, center: CGPoint(x: 32, y: 32),
@@ -600,10 +628,10 @@ final class BrushEngineLogicTests: XCTestCase {
             return XCTFail("Could not render the nearby integrated-coverage profiles")
         }
         XCTAssertLessThan(maximumAlphaDifference(smaller.pixels, larger.pixels), 0.03,
-                          "The integrated profile must vary smoothly with dab radius")
+                          "The radial profile must vary smoothly with dab radius")
 
-        // The actual cached gradient handoff occurs at three device pixels. Compare its complete
-        // per-pixel output against the integrated path on the low side of that boundary.
+        // Preserve the original three-device-pixel boundary oracle even though compact dabs now
+        // meet the native profile sooner. The thin-ellipse work bound is checked separately below.
         for center in [CGPoint(x: 32.5, y: 32.5), CGPoint(x: 32.25, y: 32.75)] {
             guard let below = renderedRoundDab(radius: CGFloat(1).nextDown, center: center,
                                                scaleX: 3, scaleY: 3),
@@ -612,7 +640,67 @@ final class BrushEngineLogicTests: XCTestCase {
                 return XCTFail("Could not render the three-device-pixel cutoff pair")
             }
             XCTAssertLessThan(maximumAlphaDifference(below.pixels, above.pixels), 0.02,
-                              "The last locally corrected dab must meet the existing radial path at three device pixels")
+                              "The radial profile must stay continuous at the original three-device-pixel boundary")
+        }
+    }
+
+    /// The compact-dab exit is a 1.5-pixel minor radius. Thin ellipses instead meet native at the
+    /// three-pixel major-radius work bound, before the seven-cell footprint can reject them. Pin the
+    /// complete native endpoint and both immediate and nearby neighbours at each actual exit.
+    /// CoreGraphics can itself change its sampled profile abruptly; the handoff must add no jump
+    /// beyond the native change measured at those same two radii.
+    func testTinyRoundCoverageMeetsNativeAtBothSamplingAndWorkBounds() {
+        let fixtures: [(CGFloat, CGFloat, CGFloat, Bool)] = [
+            (1.5, 1, 1, false), (0.75, 2, 2, false), (0.5, 3, 3, false),
+            (1.5, 2, 1, false), (1.5, 2, 1, true),
+            (0.15, 20, 1, false), (0.15, 1, 20, true)
+        ]
+        let phases = [CGPoint(x: 32, y: 32), CGPoint(x: 32.5, y: 32.5),
+                      CGPoint(x: 32.25, y: 32.75)]
+        for (radius, scaleX, scaleY, flipY) in fixtures {
+            for hardness in [CGFloat(0), 0.8, 1] {
+                for center in phases {
+                    for sampleRadius in [radius, radius.nextUp,
+                                         radius + 0.001 / max(scaleX, scaleY)] {
+                        guard let actual = renderedRoundDab(radius: sampleRadius, center: center,
+                                                            scaleX: scaleX, scaleY: scaleY,
+                                                            flipY: flipY, hardness: hardness),
+                              let native = renderedNativeRoundDab(radius: sampleRadius, center: center,
+                                                                  scaleX: scaleX, scaleY: scaleY,
+                                                                  flipY: flipY, hardness: hardness) else {
+                            return XCTFail("Could not render a native coverage endpoint")
+                        }
+                        XCTAssertTrue(actual.pixels.bytes == native.bytes,
+                                      "The coverage endpoint and larger dabs must use the unchanged native gradient at \(radius), \(scaleX)×\(scaleY), phase \(center), hardness \(hardness)")
+                    }
+                    for delta in [radius - radius.nextDown,
+                                  0.001 / max(scaleX, scaleY)] {
+                        guard let below = renderedRoundDab(radius: radius - delta, center: center,
+                                                          scaleX: scaleX, scaleY: scaleY,
+                                                          flipY: flipY, hardness: hardness),
+                              let above = renderedRoundDab(radius: radius + delta, center: center,
+                                                          scaleX: scaleX, scaleY: scaleY,
+                                                          flipY: flipY, hardness: hardness),
+                              let nativeBelow = renderedNativeRoundDab(radius: radius - delta, center: center,
+                                                                      scaleX: scaleX, scaleY: scaleY,
+                                                                      flipY: flipY, hardness: hardness),
+                              let nativeAbove = renderedNativeRoundDab(radius: radius + delta, center: center,
+                                                                      scaleX: scaleX, scaleY: scaleY,
+                                                                      flipY: flipY, hardness: hardness) else {
+                            return XCTFail("Could not render the coverage handoff neighbours")
+                        }
+                        var extraProfileChange: CGFloat = 0
+                        for index in stride(from: 3, to: below.pixels.bytes.count, by: 4) {
+                            let actualChange = Int(above.pixels.bytes[index]) - Int(below.pixels.bytes[index])
+                            let nativeChange = Int(nativeAbove.bytes[index]) - Int(nativeBelow.bytes[index])
+                            extraProfileChange = max(extraProfileChange,
+                                                     CGFloat(abs(actualChange - nativeChange)) / 255)
+                        }
+                        XCTAssertLessThan(extraProfileChange, 0.02,
+                                          "The handoff must add no profile jump beyond native at \(radius), \(scaleX)×\(scaleY), phase \(center), hardness \(hardness)")
+                    }
+                }
+            }
         }
     }
 
@@ -621,7 +709,8 @@ final class BrushEngineLogicTests: XCTestCase {
     /// the full-alpha operand also proves that convex mixing retains a completely covered core.
     func testTinyRoundTransitionBlendsOnceAtRequestedAlpha() {
         let fixtures: [(CGFloat, CGFloat, CGFloat, Bool)] = [
-            (1.25, 1, 1, false), (2, 1, 1, false), (2.75, 1, 1, false),
+            (1.125, 1, 1, false), (1.25, 1, 1, false), (1.375, 1, 1, false),
+            (2, 1, 1, false), (2.75, 1, 1, false),
             (1, 2, 2, false), (2 / 3, 3, 3, false), (1, 2, 1, true)
         ]
         let center = CGPoint(x: 32.25, y: 32.75)
