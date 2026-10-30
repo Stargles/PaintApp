@@ -480,6 +480,59 @@ final class BrushLibraryLogicTests: XCTestCase {
                        "a corrupt file reseeds §8.6's whole set, not an empty picker")
     }
 
+    func testAFailedUnreadableLibraryPreservationRetriesBeforeSavingCurrentEdits() throws {
+        let storage = BrushStorage(root: directory)
+        let original = Data("{ original artist library that cannot decode".utf8)
+        try storage.write(original, to: BrushLibraryStore.fileName)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path) }
+        var refused = false
+        XCTAssertThrowsError(try storage.write(Data([1]), to: "preservation-probe.json")) { _ in refused = true }
+        guard refused else { return }
+
+        let store = makeStore()
+        XCTAssertEqual(storage.read(BrushLibraryStore.fileName), original,
+                       "Failed preservation must leave the only original byte-exact")
+        XCTAssertTrue(storage.fileNames().filter { $0.hasPrefix("library-unreadable-") }.isEmpty,
+                      "PREMISE: the actual read-only root could not receive a protected copy")
+        let first = store.addGroup(name: "While read-only")
+        let second = store.addGroup(name: "Still read-only")
+        XCTAssertTrue(store.groups.contains { $0.id == first.id })
+        XCTAssertTrue(store.groups.contains { $0.id == second.id }, "Local edits stay available while saving fails")
+        XCTAssertEqual(storage.read(BrushLibraryStore.fileName), original,
+                       "Repeated edits cannot replace an unprotected original")
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
+        let resumed = store.addGroup(name: "After preservation retry")
+        let kept = storage.fileNames().filter { $0.hasPrefix("library-unreadable-") }
+        XCTAssertEqual(kept.count, 1, "The first writable edit must protect the original before replacing it")
+        guard let protectedName = kept.first else { return }
+        XCTAssertEqual(storage.read(protectedName), original, "The protected copy must recover the exact artist bytes")
+        let written = try XCTUnwrap(storage.read(BrushLibraryStore.fileName))
+        let document = try JSONDecoder().decode(BrushLibraryDocument.self, from: written)
+        XCTAssertEqual(document.groups, store.groups, "Recovery saves the current groups, including earlier local edits")
+        for group in [first, second, resumed] {
+            XCTAssertTrue(document.groups.contains { $0.id == group.id })
+        }
+        XCTAssertEqual(makeStore().groups, store.groups, "The real saved library reopens with all edits")
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+        let later = store.addGroup(name: "Protected but read-only")
+        XCTAssertEqual(storage.read(BrushLibraryStore.fileName), written,
+                       "A later failed save keeps the last complete current library")
+        XCTAssertEqual(storage.read(protectedName), original, "A later save failure cannot damage the protected original")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
+        let final = store.addGroup(name: "After save retry")
+        let reopened = makeStore()
+        XCTAssertEqual(reopened.groups, store.groups, "A later successful edit saves the retained in-memory changes")
+        for group in [later, final] {
+            XCTAssertTrue(reopened.groups.contains { $0.id == group.id })
+        }
+        XCTAssertEqual(Set(storage.fileNames().filter { $0.hasPrefix("library-unreadable-") }), Set(kept),
+                       "Successful protection is not repeated on every later edit")
+        XCTAssertEqual(storage.read(protectedName), original)
+    }
+
     /// **…and the bytes it could not read are still there afterwards.**
     ///
     /// The half above is what the store already did and it is not enough: reseeding leaves the shipped

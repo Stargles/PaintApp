@@ -46,6 +46,9 @@ final class BrushLibraryStore: ObservableObject {
     /// Off while `init` is populating `groups`, so seeding does not write a file the artist never
     /// asked for — a device that has never opened the menu keeps an empty `Brushes/` folder.
     private var isLoaded = false
+    /// A failed copy-aside keeps these exact bytes pending. Every later save retries their
+    /// protection before it can replace the original file with the current in-memory groups.
+    private var unpreservedLibrary: Data?
 
     init(storage: BrushStorage = .shared,
          arguments: [String] = ProcessInfo.processInfo.arguments) {
@@ -60,31 +63,30 @@ final class BrushLibraryStore: ObservableObject {
         }
         #endif
 
-        groups = Self.loadGroups(from: storage)
+        let loaded = Self.load(from: storage)
+        groups = loaded.groups
+        unpreservedLibrary = loaded.unpreservedLibrary
         isLoaded = true
     }
 
-    private static func loadGroups(from storage: BrushStorage) -> [BrushGroup] {
-        guard let data = storage.read(fileName) else { return BrushLibraryDocument.seeded.groups }
+    private static func load(from storage: BrushStorage) -> (groups: [BrushGroup], unpreservedLibrary: Data?) {
+        guard let data = storage.read(fileName) else { return (BrushLibraryDocument.seeded.groups, nil) }
         do {
             let decoded = try JSONDecoder().decode(BrushLibraryDocument.self, from: data)
             // An empty file is a library the artist could not add to and could not pick from, so it
             // is treated as absent rather than honoured.
-            return decoded.groups.isEmpty ? BrushLibraryDocument.seeded.groups : decoded.groupsAtCurrentVersion
+            return (decoded.groups.isEmpty ? BrushLibraryDocument.seeded.groups : decoded.groupsAtCurrentVersion, nil)
         } catch {
             let kept = preserve(data, in: storage)
             log.error("The brush library could not be read and was reseeded; the bytes were kept as \(kept ?? "nothing — the copy failed", privacy: .public): \(String(describing: error), privacy: .public)")
-            return BrushLibraryDocument.seeded.groups
+            return (BrushLibraryDocument.seeded.groups, kept == nil ? data : nil)
         }
     }
 
     /// **A library that cannot be read is moved aside, never destroyed.**
     ///
-    /// The failing path before this was: catch, log, seed — and then the *next* edit persists the
-    /// shipped defaults over the artist's file. The log line was the only trace, and no artist reads
-    /// the log. What is being lost is not a document (§2.14: expendable) but §8.1's library, which is
-    /// the artist's own tuning and exists in exactly one place; `BrushScatterSplit` carries the
-    /// argument for why that distinction is the load-bearing one here.
+    /// The library contains the artist's own tuning. Seeding keeps the menu usable, but no later
+    /// edit may replace an unreadable original until its bytes have been protected beside it.
     ///
     /// **A copy through `BrushStorage`'s existing verbs, not a sixth one.** §2.27 reserves `read`,
     /// `write`, `contains`, `remove` and `fileNames` as the whole of what the app does to a library
@@ -129,6 +131,10 @@ final class BrushLibraryStore: ObservableObject {
 
     private func persist() {
         guard isLoaded else { return }
+        if let unpreservedLibrary {
+            guard Self.preserve(unpreservedLibrary, in: storage) != nil else { return }
+            self.unpreservedLibrary = nil
+        }
         let document = BrushLibraryDocument(groups: groups)
         let encoder = JSONEncoder()
         // Sorted so two saves of the same library are the same bytes — which is what lets a test
