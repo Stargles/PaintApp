@@ -69,7 +69,6 @@ final class FrameBakeStore {
     /// portable to any platform with an LZ4 decoder, which is all of them". `_RAW` is the standard
     /// raw block, whose only extra requirement is knowing the uncompressed size before decoding,
     /// and the header above already carries it. So the portable choice costs nothing here.
-    private static let algorithm = COMPRESSION_LZ4_RAW
 
     // MARK: - Roots
 
@@ -537,8 +536,7 @@ final class FrameBakeStore {
         var out = [UInt8](repeating: 0, count: raw.count)
         let written = raw.withUnsafeBufferPointer { src in
             out.withUnsafeMutableBufferPointer { dst in
-                compression_encode_buffer(dst.baseAddress!, raw.count,
-                                          src.baseAddress!, raw.count, nil, algorithm)
+                LZ4Block.encode(UnsafeRawBufferPointer(src), into: UnsafeMutableRawBufferPointer(dst))
             }
         }
         guard written > 0, written < raw.count else { return nil }
@@ -575,7 +573,8 @@ final class FrameBakeStore {
             guard let destination = dst.bindMemory(to: UInt8.self).baseAddress else { return 0 }
             return payload.withUnsafeBytes { src -> Int in
                 guard let base = src.bindMemory(to: UInt8.self).baseAddress else { return 0 }
-                return compression_decode_buffer(destination, expected, base, payload.count, nil, algorithm)
+                return LZ4Block.decode(UnsafeRawBufferPointer(start: base, count: payload.count),
+                    into: UnsafeMutableRawBufferPointer(start: destination, count: expected)) ? expected : 0
             }
         }
         guard written == expected else { throw ReadFailure.invalid }

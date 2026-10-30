@@ -113,9 +113,9 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// two different `UIImage`s, and comparing them would fold "does this render deterministically"
     /// into a number that is supposed to be about the eraser.
     @discardableResult
-    private func erased(_ scenario: ParityScenario) -> (canvas: VectorCanvas, backdrop: VectorElement?,
+    private func erased(_ scenario: ParityScenario) throws -> (canvas: VectorCanvas, backdrop: VectorElement?,
                                                         changed: Bool) {
-        let backdrop = RasterVectorParity.backdropElement(scenario)
+        let backdrop = try RasterVectorParity.backdropElement(scenario)
         let elements = (backdrop.map { [$0] } ?? []) + [.stroke(RasterVectorParity.paintStroke(scenario))]
         let canvas = VectorCanvas(size: scenario.canvasSize, elements: elements)
         let changed = canvas.erase(alongPath: scenario.eraserSamples, brush: scenario.eraserBrush,
@@ -132,7 +132,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     ///
     /// Both actual commits receive the scenario's field, independently of each element's identity.
     private func parityOfHybrid(_ scenario: ParityScenario) throws -> ParityReport? {
-        let (canvas, backdrop, _) = erased(scenario)
+        let (canvas, backdrop, _) = try erased(scenario)
         let texture = try RasterVectorParity.rasterBase(scenario, backdrop: backdrop)
         RasterVectorParity.stamp(RasterVectorParity.paintStroke(scenario), into: texture, isEraser: false)
         RasterVectorParity.stamp(RasterVectorParity.eraseStroke(scenario), into: texture, isEraser: true)
@@ -191,7 +191,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     func testTheMatrixIsNotVacuous() throws {
         for gesture in Gesture.allCases {
             let scene = scenario(brush: TestBrushes.hardRound, gesture: gesture)
-            let (canvas, _, changed) = erased(scene)
+            let (canvas, _, changed) = try erased(scene)
             XCTAssertTrue(changed, "\(gesture.label) should report a change")
 
             let before = (try XCTUnwrap(VectorCanvas(size: scene.canvasSize,
@@ -224,7 +224,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                              eraserSamples: along,
                              backdrop: .fill(CodableColor(red: 0.1, green: 0.3, blue: 0.9, alpha: 1),
                                              CGRect(x: 8, y: 40, width: 112, height: 48)))
-        let (canvas, _, changed) = erased(scene)
+        let (canvas, _, changed) = try erased(scene)
         XCTAssertTrue(changed)
         XCTAssertEqual(strokes(canvas, .paint).count, 0, "The covered stroke should be gone outright")
         XCTAssertEqual(strokes(canvas, .erase).count, 1,
@@ -271,7 +271,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
 
         for (name, expectedPieces, scene) in cases {
             try XCTContext.runActivity(named: name) { _ in
-                let (canvas, _, _) = erased(scene)
+                let (canvas, _, _) = try erased(scene)
                 let paint = strokes(canvas, .paint)
                 XCTAssertEqual(paint.count, expectedPieces,
                                "\(name) should leave \(expectedPieces) piece(s) — and never zero, which would be deletion")
@@ -304,7 +304,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// `supportsCleanCut` gates deletion on the eraser being capable of removing ink outright. Each row
     /// is a distinct condition, run over the gesture that *would* delete, so a regression that drops one
     /// condition fails on that row alone.
-    func testDeletionIsSkippedWhereverTheAlphaGateFails() {
+    func testDeletionIsSkippedWhereverTheAlphaGateFails() throws {
         var scattering = TestBrushes.hardRound
         scattering.dab.scatterAcross = 0.4
         scattering.dab.scatterAlong = 0.4
@@ -331,8 +331,8 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         ]
 
         for (name, scene) in cases {
-            XCTContext.runActivity(named: name) { _ in
-                let (canvas, _, _) = erased(scene)
+            try XCTContext.runActivity(named: name) { _ in
+                let (canvas, _, _) = try erased(scene)
                 XCTAssertEqual(strokes(canvas, .paint).count, 1,
                                "\(name) must not delete the stroke — the gate rejected this eraser")
                 XCTAssertEqual(strokes(canvas, .paint).first?.id, Self.paintID)
@@ -376,7 +376,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                              eraserSamples: along,
                              backdrop: .fill(CodableColor(red: 0.1, green: 0.3, blue: 0.9, alpha: 1),
                                              CGRect(x: 8, y: 40, width: 112, height: 48)))
-        let (canvas, _, changed) = erased(scene)
+        let (canvas, _, changed) = try erased(scene)
         XCTAssertTrue(changed)
         XCTAssertEqual(strokes(canvas, .paint).count, 0,
                        "A hard, opaque, steady pencil-shaped eraser now deletes what it fully covers")
@@ -389,7 +389,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// The other half of the gate. A *paint* stroke that scatters throws dabs off its own centreline,
     /// so the capsule chain the coverage test measures against does not bound its ink and "covered" is
     /// a claim about the wrong shape. Such a stroke is never deleted, only punched.
-    func testAScatteringPaintStrokeIsNeverDeleted() {
+    func testAScatteringPaintStrokeIsNeverDeleted() throws {
         var scattering = TestBrushes.hardRound
         scattering.dab.scatterAcross = 0.5
         scattering.dab.scatterAlong = 0.5
@@ -397,7 +397,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                               from: 1, to: 1)
         let scene = scenario(brush: scattering, eraserBrush: TestBrushes.hardRound,
                              eraserSize: Self.wideNib, eraserSamples: along)
-        let (canvas, _, _) = erased(scene)
+        let (canvas, _, _) = try erased(scene)
         XCTAssertEqual(strokes(canvas, .paint).count, 1,
                        "A scattering stroke must be erased by the punch alone")
         XCTAssertEqual(strokes(canvas, .paint).first?.id, Self.paintID)
@@ -637,7 +637,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                              eraserSamples: Self.ramp(from: CGPoint(x: 8, y: 64),
                                                       to: CGPoint(x: 120, y: 64),
                                                       count: 15, from: 1, to: 1))
-        let (canvas, _, changed) = erased(scene)
+        let (canvas, _, changed) = try erased(scene)
         XCTAssertTrue(changed)
         XCTAssertEqual(canvas.elements.count, 0,
                        "A fully resolved erase must retain nothing at all, or Mode 1 grows the list forever")
@@ -714,11 +714,11 @@ final class VectorEraserHybridLogicTests: XCTestCase {
 
     /// A gesture that never reaches anything must leave the list exactly as it was — no punch, and no
     /// spurious `changed` that would push an empty undo entry.
-    func testAnEraseOverEmptySpaceChangesNothing() {
+    func testAnEraseOverEmptySpaceChangesNothing() throws {
         let scene = scenario(brush: TestBrushes.hardRound,
                              eraserSamples: Self.ramp(from: CGPoint(x: 8, y: 8), to: CGPoint(x: 120, y: 8),
                                                       count: 9, from: 1, to: 1))
-        let (canvas, _, changed) = erased(scene)
+        let (canvas, _, changed) = try erased(scene)
         XCTAssertFalse(changed, "Nothing was under the gesture, so nothing changed")
         XCTAssertEqual(canvas.elements.count, 1)
         XCTAssertEqual(strokes(canvas, .erase).count, 0, "A punch over nothing must not be retained")
@@ -737,7 +737,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// stretch of backdrop, which is what the trimmed version produced), and stacking stays exact.
     func testReErasingTheSamePlaceCostsOneElementPerGestureAndStaysExact() throws {
         let scene = scenario(brush: TestBrushes.hardRound)
-        let (canvas, _, _) = erased(scene)
+        let (canvas, _, _) = try erased(scene)
         XCTAssertEqual(strokes(canvas, .erase).count, 1)
 
         canvas.erase(alongPath: scene.eraserSamples, brush: scene.eraserBrush, size: scene.eraserSize,
@@ -1495,12 +1495,12 @@ final class VectorEraserHybridLogicTests: XCTestCase {
 
     /// A scattering eraser is a distinct retained element and punches without deleting paint.
     /// Its field ownership is checked through the live consumer and saved display list above.
-    func testAScatteringEraserPunchIsANewStrokeRatherThanTheGesture() {
+    func testAScatteringEraserPunchIsANewStrokeRatherThanTheGesture() throws {
         var scattering = TestBrushes.hardRound
         scattering.dab.scatterAcross = 0.5
         scattering.dab.scatterAlong = 0.5
         let scene = scenario(brush: TestBrushes.hardRound, eraserBrush: scattering)
-        let (canvas, _, _) = erased(scene)
+        let (canvas, _, _) = try erased(scene)
         let punches = strokes(canvas, .erase)
         XCTAssertEqual(punches.count, 1, "A scattering eraser still punches")
         XCTAssertNotEqual(punches.first?.id, Self.eraserID,
@@ -1527,11 +1527,11 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// interleaving that made the question worth asking. The last caller that leaned on the
     /// contiguity, the shape bake's `registerVectorStrokeUndo`, is gone: it swaps the whole element
     /// array through `registerVectorElementsUndo` now, which has nothing to reconstruct.
-    func testAPunchLeavesEachKindContiguousSoTheUndoAccessorsStillRoundTrip() {
+    func testAPunchLeavesEachKindContiguousSoTheUndoAccessorsStillRoundTrip() throws {
         let scene = scenario(brush: TestBrushes.hardRound,
                              backdrop: .fill(CodableColor(red: 0.1, green: 0.3, blue: 0.9, alpha: 1),
                                              CGRect(x: 20, y: 20, width: 88, height: 88)))
-        let (canvas, _, changed) = erased(scene)
+        let (canvas, _, changed) = try erased(scene)
         XCTAssertTrue(changed, "Setup: the gesture should have retained a punch over the fill")
 
         let kinds = canvas.elements.map { element -> Int in
@@ -1563,7 +1563,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
     /// gets: the fill lands on top of the punch and the hole is painted back in.
     func testAFillAddedAfterAnErasePunchLandsOnTopOfIt() throws {
         let scene = scenario(brush: TestBrushes.hardRound)
-        let (canvas, _, _) = erased(scene)
+        let (canvas, _, _) = try erased(scene)
         XCTAssertEqual(canvas.elements.last?.stroke?.composite, .erase, "Setup: a punch is on top")
 
         canvas.addFill(canvasSpacePath: CGPath(rect: CGRect(origin: .zero, size: scene.canvasSize),

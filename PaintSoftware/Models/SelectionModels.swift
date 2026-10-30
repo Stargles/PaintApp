@@ -1509,8 +1509,9 @@ extension CanvasManager {
         currentLayerIndex = insertAt
         self.selection = nil
 
-        let cost = oldRaster.approximateCost + newRaster.approximateCost
-                 + Self.approximateSourceCost(piece) + Self.approximateSourceCost(oldBaked)
+        let cost = RasterUndoCost.bytes(
+            from: RasterUndoCost.sources(rasters: [oldRaster], baked: [oldBaked]),
+            to: RasterUndoCost.sources(rasters: [newRaster, pieceRaster]))
         recordUndo(label: .moveToNewLayer, cost: cost, undo: { [weak self] in
             guard let self else { return }
             if let index = self.layers.firstIndex(where: { $0.id == newLayerID }) {
@@ -2437,9 +2438,12 @@ extension CanvasManager {
                                     label: HistoryActionLabel) {
         applyCelChange(layerID: layerID, celID: celID, raster: newRaster, baked: newBaked,
                        vector: vector.map { ($0.canvas, $0.after, $0.rewriting) }, recipe: recipe?.after)
-        let cost = [oldRaster.approximateCost, newRaster.approximateCost,
-                    Self.approximateSourceCost(oldBaked), Self.approximateSourceCost(newBaked),
-                    vector.map { VectorUndoCost.bytes(from: $0.before, to: $0.after) } ?? 0,
+        let beforeSources = RasterUndoCost.sources(rasters: [oldRaster], baked: [oldBaked],
+                                                   elements: vector.map { [$0.before] } ?? [])
+        let afterSources = RasterUndoCost.sources(rasters: [newRaster], baked: [newBaked],
+                                                  elements: vector.map { [$0.after] } ?? [])
+        let cost = [RasterUndoCost.bytes(from: beforeSources, to: afterSources),
+                    vector.map { VectorUndoCost.geometryBytes(fromLists: [$0.before], toLists: [$0.after]) } ?? 0,
                     recipe?.retainedBytes ?? 0].reduce(0, UndoBudget.addingCost)
         // Whole-cel undo can target an evicted version. Prepare both tiers before history moves,
         // then retain their provider images through the immediate metadata/geometry installation.

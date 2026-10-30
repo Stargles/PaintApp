@@ -72,6 +72,16 @@ final class VideoBakeLogicTests: XCTestCase {
         return (layerIndex, video)
     }
 
+    private func bake(_ manager: CanvasManager, layerIndex: Int, celIndex: Int) throws -> CanvasManager.VideoBakeOutcome {
+        let finished = expectation(description: "prepared video bake completion")
+        var result: CanvasManager.VideoBakeOutcome?
+        manager.bakeVideoToCels(layerIndex: layerIndex, celIndex: celIndex) { outcome in
+            result = outcome; finished.fulfill()
+        }
+        wait(for: [finished], timeout: 30)
+        return try XCTUnwrap(result, "The asynchronous public bake must complete")
+    }
+
     // MARK: - Cold-start reachability
 
     /// **The chain a real artist walks, with no step skipped and no state hand-built.** A fresh
@@ -82,7 +92,7 @@ final class VideoBakeLogicTests: XCTestCase {
     func testAFreshDocumentReachesBakeOnlyAfterAnActualImport() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
 
-        switch manager.bakeVideoToCels(layerIndex: 0, celIndex: 0) {
+        switch try bake(manager, layerIndex: 0, celIndex: 0) {
         case .baked: XCTFail("A fresh document's only cel holds no video and must refuse.")
         case .refused(let reason): XCTAssertEqual(reason, .noVideo)
         }
@@ -91,7 +101,7 @@ final class VideoBakeLogicTests: XCTestCase {
                       "Setup: the real import verb should succeed on a fresh document.")
 
         let (layerIndex, _) = try importedVideo(manager)
-        switch manager.bakeVideoToCels(layerIndex: layerIndex, celIndex: 0) {
+        switch try bake(manager, layerIndex: layerIndex, celIndex: 0) {
         case .baked(let cels): XCTAssertEqual(cels, Self.levelsCount)
         case .refused(let reason): XCTFail("Bake should now be reachable, refused: \(reason)")
         }
@@ -106,7 +116,7 @@ final class VideoBakeLogicTests: XCTestCase {
         XCTAssertTrue(manager.insertVideo(at: try clip()))
         let (layerIndex, originalVideo) = try importedVideo(manager)
 
-        guard case .baked(let cels) = manager.bakeVideoToCels(layerIndex: layerIndex, celIndex: 0) else {
+        guard case .baked(let cels) = try bake(manager, layerIndex: layerIndex, celIndex: 0) else {
             return XCTFail("Setup: bake should succeed on a freshly imported clip.")
         }
         XCTAssertEqual(cels, Self.levelsCount)
@@ -122,7 +132,7 @@ final class VideoBakeLogicTests: XCTestCase {
                 return XCTFail("Cel \(index) still holds a \(elements[0]), not an image.")
             }
             XCTAssertNotEqual(image.id, originalVideo.id, "The image must not reuse the video's id.")
-            let grey = try XCTUnwrap(CanvasFixture.greyAt(image.image, x: 32, y: 32),
+            let grey = try XCTUnwrap(CanvasFixture.greyAt(try image.source.resolveImage().get(), x: 32, y: 32),
                                      "Cel \(index)'s picture should have an opaque pixel to read.")
             XCTAssertEqual(CanvasFixture.nearestLevelIndex(grey, in: Self.levels), index,
                           "Cel \(index) shows level \(grey), the wrong source frame's picture.")
@@ -147,7 +157,7 @@ final class VideoBakeLogicTests: XCTestCase {
         canvas.elements.append(.stroke(plantedStroke))
         canvas.bumpVersion()
 
-        guard case .baked = manager.bakeVideoToCels(layerIndex: layerIndex, celIndex: 0) else {
+        guard case .baked = try bake(manager, layerIndex: layerIndex, celIndex: 0) else {
             return XCTFail("Setup: bake should succeed.")
         }
 
@@ -182,7 +192,7 @@ final class VideoBakeLogicTests: XCTestCase {
         let originalCelID = manager.layers[layerIndex].cels[0].id
         let costBefore = manager.layers[layerIndex].cels.count
 
-        guard case .baked(let cels) = manager.bakeVideoToCels(layerIndex: layerIndex, celIndex: 0),
+        guard case .baked(let cels) = try bake(manager, layerIndex: layerIndex, celIndex: 0),
               cels > 1 else {
             return XCTFail("Setup: bake should split the block into more than one cel.")
         }
@@ -304,7 +314,7 @@ final class VideoBakeLogicTests: XCTestCase {
                 XCTAssertNil(crop)
                 guard crop == nil else { return }
             case "video":
-                let outcome = manager.bakeVideoToCels(layerIndex: layerIndex, celIndex: index)
+                let outcome = try bake(manager, layerIndex: layerIndex, celIndex: index)
                 XCTAssertEqual(outcome, .refused(.videoTiming), "A split refusal must never report twelve baked drawings")
                 guard outcome == .refused(.videoTiming) else { return }
             case "stream":
@@ -422,11 +432,12 @@ final class VideoBakeLogicTests: XCTestCase {
         manager.undo()
         XCTAssertEqual(manager.layers[layerIndex].cels.map(\.frameCount), [12])
 
-        XCTAssertEqual(manager.bakeVideoToCels(layerIndex: layerIndex, celIndex: 0), .baked(cels: 12))
+        XCTAssertEqual(try bake(manager, layerIndex: layerIndex, celIndex: 0), .baked(cels: 12))
         XCTAssertEqual(manager.layers[layerIndex].cels.map(\.frameCount), Array(repeating: 1, count: 12),
                        "A completed bake really has twelve one-frame cells")
         for cel in manager.layers[layerIndex].cels {
-            let image = try XCTUnwrap(cel.vector?.images.first?.image)
+            let source = try XCTUnwrap(cel.vector?.images.first?.source)
+            let image = try source.resolveImage().get()
             XCTAssertEqual(CanvasFixture.nearestLevelIndex(try XCTUnwrap(CanvasFixture.greyAt(image, x: 32, y: 32)), in: Self.levels), 0,
                            "The tiny rounded timing displays its original first source picture on each frame")
             XCTAssertTrue(cel.vector?.videos.isEmpty == true)
@@ -444,7 +455,7 @@ final class VideoBakeLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 1)
         let before = layoutFingerprint(manager)
 
-        switch manager.bakeVideoToCels(layerIndex: 0, celIndex: 0) {
+        switch try bake(manager, layerIndex: 0, celIndex: 0) {
         case .baked: XCTFail("An ordinary raster cel holds no video and must refuse.")
         case .refused(let reason): XCTAssertEqual(reason, .noVideo)
         }
@@ -472,7 +483,7 @@ final class VideoBakeLogicTests: XCTestCase {
         canvas.bumpVersion()
         let before = layoutFingerprint(manager, layerIndex: layerIndex)
 
-        switch manager.bakeVideoToCels(layerIndex: layerIndex, celIndex: 0) {
+        switch try bake(manager, layerIndex: layerIndex, celIndex: 0) {
         case .baked: XCTFail("A video whose file was never written must refuse.")
         case .refused(let reason): XCTAssertEqual(reason, .unreadableAsset)
         }
@@ -514,7 +525,7 @@ final class VideoBakeLogicTests: XCTestCase {
         canvas.elements = elements
         canvas.bumpVersion()
 
-        guard case .baked(let cels) = manager.bakeVideoToCels(layerIndex: layerIndex, celIndex: 0) else {
+        guard case .baked(let cels) = try bake(manager, layerIndex: layerIndex, celIndex: 0) else {
             return XCTFail("MEASURED behavior was a successful bake — see the doc comment above.")
         }
         XCTAssertEqual(cels, Self.levelsCount)
@@ -523,9 +534,51 @@ final class VideoBakeLogicTests: XCTestCase {
             guard case .image(let image) = elements.first else {
                 return XCTFail("Every resulting cel should still hold an image, just the wrong frame.")
             }
-            let grey = try XCTUnwrap(CanvasFixture.greyAt(image.image, x: 32, y: 32))
+            let grey = try XCTUnwrap(CanvasFixture.greyAt(try image.source.resolveImage().get(), x: 32, y: 32))
             XCTAssertEqual(CanvasFixture.nearestLevelIndex(grey, in: Self.levels), Self.levelsCount - 1,
                           "A far-future crop should decode the clip's last frame, repeatedly.")
+        }
+    }
+}
+
+extension VideoBakeLogicTests {
+    func testAPreparationRefusalAfterThreeNativeOutputsPreservesTheOriginalVideoDrawingAndHistory() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        XCTAssertTrue(manager.insertVideo(at: try clip()))
+        let (layerIndex, video) = try importedVideo(manager)
+        weak var observed: RasterResidency?
+        let owner = RasterResidency(budgetBytes: 1024 * 1024, hasHeadroom: { _ in
+            (observed?.usage.allocations ?? 0) < 3
+        })
+        observed = owner
+        manager.layers[layerIndex].cels[0].raster = RasterLayerTexture(size: CanvasFixture.canvasSize, residency: owner)
+        let original = manager.layers[layerIndex].cels[0]
+        let vector = try XCTUnwrap(original.vector)
+        let beforeElements = vector.elements.map(\.id)
+        let beforePixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage)))
+        let undo = manager.history.undoStack.count, redo = manager.history.redoStack.count
+        let completed = expectation(description: "refused native output batch")
+        var result: CanvasManager.VideoBakeOutcome?
+        manager.bakeVideoToCels(layerIndex: layerIndex, celIndex: 0) { result = $0; completed.fulfill() }
+        XCTAssertTrue(manager.isUpdatingCanvas, "The existing canvas owner blocks edits/saves before work begins")
+        XCTAssertEqual(manager.layers[layerIndex].cels.count, 1)
+        XCTAssertTrue(manager.layers[layerIndex].cels[0].vector === vector, "Nothing is published at request time")
+        wait(for: [completed], timeout: 30)
+        XCTAssertEqual(result, .refused(.sourceUnavailable))
+        XCTAssertFalse(manager.isUpdatingCanvas)
+        XCTAssertEqual(owner.usage.allocations, 3, "The fixture reaches three actual copied outputs before checkpoint admission refuses")
+        XCTAssertEqual(owner.usage.chargedBytes, 0)
+        XCTAssertEqual(manager.layers[layerIndex].cels.count, 1)
+        XCTAssertEqual(manager.layers[layerIndex].cels[0].id, original.id)
+        XCTAssertTrue(manager.layers[layerIndex].cels[0].vector === vector)
+        XCTAssertTrue(manager.layers[layerIndex].cels[0].raster === original.raster)
+        XCTAssertEqual(vector.elements.map(\.id), beforeElements)
+        XCTAssertEqual(vector.videos.first.map(VideoCrop.init(of:)), VideoCrop(of: video))
+        XCTAssertEqual(try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage))), beforePixels)
+        XCTAssertEqual(manager.history.undoStack.count, undo); XCTAssertEqual(manager.history.redoStack.count, redo)
+        if FileManager.default.fileExists(atPath: owner.storage.url.path) {
+            XCTAssertTrue(try FileManager.default.contentsOfDirectory(at: owner.storage.url, includingPropertiesForKeys: nil).isEmpty,
+                          "The refused private batch releases its already prepared files")
         }
     }
 }

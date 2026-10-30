@@ -33,7 +33,8 @@ enum LiquifyRasterUITestSeeds {
         let green = UIGraphicsImageRenderer(size: CGSize(width: 18, height: 18), format: PixelOps.transparentFormat()).image { ctx in
             UIColor.green.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 18, height: 18))
         }
-        vector.addImage(VectorImageElement(image: green,
+        guard case .success(let source) = RasterSource.capturePlaced(green) else { return }
+        vector.addImage(VectorImageElement(source: source,
             transform: LayerTransform(position: CGPoint(x: size.width * 0.64, y: size.height * 0.25), scale: 1, rotation: 0)))
         manager.layers[0].cels[0].vector = vector
         manager.addTransformLayer(name: "Pose")

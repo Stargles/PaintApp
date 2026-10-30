@@ -835,6 +835,8 @@ final class RasterLayerTexture: DabTarget, RasterResidencyCandidate {
         count = strokeCount
     }
 
+    deinit { residency.unregister(residencyID) }
+
     static func empty(size: CGSize) -> RasterLayerTexture { RasterLayerTexture(size: size) }
 
     /// Captures foreign rendered pixels before a caller changes its document. Refusal leaves the

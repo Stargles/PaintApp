@@ -117,7 +117,7 @@ enum RasterVectorParity {
                      seed: DabRandom.seed(for: scenario.eraserID))
     }
 
-    static func backdropElement(_ scenario: ParityScenario) -> VectorElement? {
+    static func backdropElement(_ scenario: ParityScenario) throws -> VectorElement? {
         switch scenario.backdrop {
         case .none:
             return nil
@@ -129,7 +129,7 @@ enum RasterVectorParity {
                 ctx.fill(CGRect(origin: .zero, size: size))
             }
             let centre = CGPoint(x: scenario.canvasSize.width / 2, y: scenario.canvasSize.height / 2)
-            return .image(VectorImageElement(image: image,
+            return .image(VectorImageElement(source: try CanvasFixture.placedSource(image),
                                              transform: LayerTransform(position: centre, scale: 1, rotation: 0),
                                              fileName: nil))
         }
@@ -176,8 +176,8 @@ enum RasterVectorParity {
     static func tiers(_ scenario: ParityScenario) throws -> (raster: UIImage, vector: UIImage) {
         let paint = paintStroke(scenario)
         let erase = eraseStroke(scenario)
-        // Built once and shared, so the placed image is literally the same `UIImage` in both tiers.
-        let backdrop = backdropElement(scenario)
+        // Built once and shared, so both tiers read the same immutable placed source.
+        let backdrop = try backdropElement(scenario)
 
         let texture = try rasterBase(scenario, backdrop: backdrop)
         stamp(paint, into: texture, isEraser: false)
@@ -299,7 +299,7 @@ enum RasterVectorParity {
     static func parityOfGeometricSplit(_ scenario: ParityScenario, tolerance: Int = 0) throws -> ParityReport? {
         let paint = paintStroke(scenario)
         let erase = eraseStroke(scenario)
-        let backdrop = backdropElement(scenario)
+        let backdrop = try backdropElement(scenario)
 
         // Ground truth is unchanged: the raster layer really is erased.
         let texture = try rasterBase(scenario, backdrop: backdrop)
@@ -513,7 +513,7 @@ final class RasterVectorParityLogicTests: XCTestCase {
         for (name, backdrop) in backdrops {
             let scene = scenario(brush: TestBrushes.hardRound, eraserOpacity: 1,
                                  gesture: .squareCut, backdrop: backdrop)
-            guard let element = RasterVectorParity.backdropElement(scene),
+            guard let element = try RasterVectorParity.backdropElement(scene),
                   let intact = RasterVectorParity.premultipliedBytes(
                     of: (try XCTUnwrap(VectorCanvas(size: scene.canvasSize, elements: [element]).render())),
                     size: scene.canvasSize),

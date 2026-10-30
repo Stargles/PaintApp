@@ -59,7 +59,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
         let canvas = try XCTUnwrap(manager.layers[1].cels[0].vector)
         let ink = VectorStroke(brush: TestBrushes.hardRound, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1), size: 4, opacity: 1,
             samples: StrokeSamples([VectorSample(x: 20, y: 24), VectorSample(x: 30, y: 24)], channels: .pressureOnly))
-        let editable = VectorImageElement(image: image(.yellow), transform: LayerTransform(position: CGPoint(x: 32, y: 32), scale: 1, rotation: 0))
+        let editable = VectorImageElement(source: try CanvasFixture.placedSource(image(.yellow)), transform: LayerTransform(position: CGPoint(x: 32, y: 32), scale: 1, rotation: 0))
         canvas.restoreElements([.stroke(ink), .image(editable)], changedInk: nil)
         let backing = image()
         let backingSource = try CanvasFixture.rasterSource(backing)
@@ -70,7 +70,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
         guard case .stroke(let moved) = canvas.elements[0], case .image(let kept) = canvas.elements[1] else { return XCTFail("typed objects remain editable") }
         XCTAssertNotEqual(moved.samples, ink.samples)
         XCTAssertEqual(kept.id, editable.id); XCTAssertEqual(kept.transform, editable.transform)
-        XCTAssertTrue(kept.image === editable.image)
+        XCTAssertTrue(kept.source === editable.source)
         let after = try bytes(try XCTUnwrap(manager.layers[1].cels[0].bakedImage?.resolveImage().get()))
         XCTAssertNotEqual(after, try bytes(backing))
         XCTAssertFalse(manager.layers[1].cels[0].raster.hasContent, "mixed vector backing has one pixel tier")
@@ -266,7 +266,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
             manager.layers[0].kind = .vector
             let ink = VectorStroke(brush: TestBrushes.hardRound, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 0.83), size: 3.4, opacity: 0.83,
                 samples: StrokeSamples([VectorSample(x: 8, y: 36), VectorSample(x: 44, y: 36)], channels: .pressureOnly))
-            let editable = VectorImageElement(image: image(.green),
+            let editable = VectorImageElement(source: try CanvasFixture.placedSource(image(.green)),
                 transform: LayerTransform(position: CGPoint(x: 55, y: 15), scale: 0.1, rotation: 0))
             manager.layers[0].cels[0].vector = VectorCanvas(size: size, elements: [.stroke(ink), .image(editable)])
         }
@@ -1006,8 +1006,8 @@ final class LiquifyRasterLogicTests: XCTestCase {
     }
 
     func testRecipeWindowMatchesFullFadeAndLocalEraseAtNonzeroOrigin() throws {
-        let a = VectorImageElement(image: image(), transform: LayerTransform(position: CGPoint(x: 32, y: 32), scale: 1, rotation: 0))
-        let b = VectorImageElement(image: image(.green), transform: LayerTransform(position: CGPoint(x: 34, y: 33), scale: 1, rotation: 0))
+        let a = VectorImageElement(source: try CanvasFixture.placedSource(image()), transform: LayerTransform(position: CGPoint(x: 32, y: 32), scale: 1, rotation: 0))
+        let b = VectorImageElement(source: try CanvasFixture.placedSource(image(.green)), transform: LayerTransform(position: CGPoint(x: 34, y: 33), scale: 1, rotation: 0))
         var erase = VectorStroke(brush: TestBrushes.hardRound, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1), size: 5, opacity: 0.6,
             samples: StrokeSamples([VectorSample(x: 24, y: 22), VectorSample(x: 28, y: 26)], channels: .pressureOnly))
         erase.composite = .erase

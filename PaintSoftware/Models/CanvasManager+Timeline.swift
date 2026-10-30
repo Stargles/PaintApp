@@ -823,12 +823,12 @@ extension CanvasManager {
     private func videoCropEdit(elements: [VectorElement], length: Int, anchoredAt anchor: VideoCropAnchor)
         -> (elements: [VectorElement], rewritten: Set<UUID>)? {
         guard let videos = preparedVideoCrop(elements.compactMap(\.video), length: length, anchoredAt: anchor) else { return nil }
-        return applyingVideoCrops(videos, to: elements)
+        return Self.applyingVideoCrops(videos, to: elements)
     }
 
     /// Only the timing fields land; geometry and fresh treatment identities remain owned by the
     /// current display list. Planning never retains a full ink list or copies a pixel tier.
-    private func applyingVideoCrops(_ videos: [VectorVideoElement], to elements: [VectorElement])
+    private static func applyingVideoCrops(_ videos: [VectorVideoElement], to elements: [VectorElement])
         -> (elements: [VectorElement], rewritten: Set<UUID>) {
         guard !videos.isEmpty else { return (elements, []) }
         let crops = Dictionary(uniqueKeysWithValues: videos.map { ($0.id, VideoCrop(of: $0)) })
@@ -1055,7 +1055,7 @@ extension CanvasManager {
         return CelSplitPlan(layerID: layer.id, sources: sources, cuts: cuts)
     }
 
-    private func sameSplitVideos(_ left: [VectorVideoElement], _ right: [VectorVideoElement]) -> Bool {
+    private static func sameSplitVideos(_ left: [VectorVideoElement], _ right: [VectorVideoElement]) -> Bool {
         left.count == right.count && zip(left, right).allSatisfy { pair in
             let (a, b) = pair
             return a.id == b.id && a.assetURL == b.assetURL && a.assetFileName == b.assetFileName
@@ -1070,51 +1070,58 @@ extension CanvasManager {
         return plan.sources.allSatisfy { source in
             guard let cel = layer.cels.first(where: { $0.id == source.id }),
                   cel.startFrame == source.frames.lowerBound, cel.endFrame == source.frames.upperBound else { return false }
-            return sameSplitVideos(cel.vector?.holdsVideo == true ? cel.vector?.videos ?? [] : [], source.videos)
+            return Self.sameSplitVideos(cel.vector?.holdsVideo == true ? cel.vector?.videos ?? [] : [], source.videos)
         }
     }
 
-    /// Applies an admitted sequence under its caller's existing history/transaction scope. Every
-    /// numeric decision is already in the plan; these are the original split/track/copy owners.
-    @discardableResult
-    func applyCelSplits(_ plan: CelSplitPlan) -> KeyframeCrop {
-        guard let layerIndex = layers.firstIndex(where: { $0.id == plan.layerID }) else {
-            preconditionFailure("Prepared split layer disappeared")
-        }
-        var discarded = KeyframeCrop()
+    /// Materialize the same admitted cuts for a public Split or a private background bake.
+    /// Both halves own private canvases before crop metadata is rewritten; all pixels stay shared.
+    static func materializeCelSplits(_ plan: CelSplitPlan, from input: [Cel])
+        -> (cels: [Cel], crop: KeyframeCrop, changed: Set<UUID>)? {
+        var cels = input, discarded = KeyframeCrop(), changed: Set<UUID> = []
         for cut in plan.cuts {
-            guard let index = layers[layerIndex].cels.firstIndex(where: {
+            guard let index = cels.firstIndex(where: {
                 $0.startFrame == cut.frames.lowerBound && $0.endFrame == cut.frames.upperBound
-            }) else { preconditionFailure("Prepared split span changed") }
-            let cel = layers[layerIndex].cels[index]
-            precondition(sameSplitVideos(cel.vector?.holdsVideo == true ? cel.vector?.videos ?? [] : [], cut.before), "Prepared split timing changed")
+            }) else { return nil }
+            let cel = cels[index]
+            guard sameSplitVideos(cel.vector?.holdsVideo == true ? cel.vector?.videos ?? [] : [], cut.before) else { return nil }
             var leftTracks: [String: TransformTrack] = [:], rightTracks: [String: TransformTrack] = [:]
             for (id, track) in cel.transformTracks {
                 let halves = track.split(atCelLocalFrame: cut.leftFrames.count)
                 leftTracks[id] = halves.left; rightTracks[id] = halves.right
             }
-            layers[layerIndex].cels[index].frameCount = cut.leftFrames.count
-            layers[layerIndex].cels[index].transformTracks = leftTracks
-            var crop = layers[layerIndex].cels[index].cropPoseKeysToSpan()
+            var left = cel
+            left.frameCount = cut.leftFrames.count; left.transformTracks = leftTracks
+            left.vector = cel.vector?.makeCopy()
+            var crop = left.cropPoseKeysToSpan()
             var right = Cel(id: UUID(), startFrame: cut.rightFrames.lowerBound, frameCount: cut.rightFrames.count,
                 raster: cel.raster.makeCopy(), bakedImage: cel.bakedImage, vector: cel.vector?.makeCopy(),
                 interpolation: cel.interpolation, transformTracks: rightTracks, pendingPoseBaselines: cel.pendingPoseBaselines)
             crop.merge(right.cropPoseKeysToSpan())
-            layers[layerIndex].cels.append(right)
-            layers[layerIndex].cels.sort { $0.startFrame < $1.startFrame }
-            noteKeyframeCrop(crop); discarded.merge(crop)
-            if let left = activeCelIndex(inLayer: layerIndex, atFrame: cut.frames.lowerBound),
-               let vector = layers[layerIndex].cels[left].vector {
-                writeVideoCrop(applyingVideoCrops(cut.left, to: vector.elements), layerIndex: layerIndex, celIndex: left)
+            for (vector, videos) in [(left.vector, cut.left), (right.vector, cut.right)] {
+                guard let vector else { continue }
+                let edit = applyingVideoCrops(videos, to: vector.elements)
+                if !edit.rewritten.isEmpty { vector.restoreElements(edit.elements, changedInk: nil, rewriting: edit.rewritten) }
             }
-            if let right = activeCelIndex(inLayer: layerIndex, atFrame: cut.rightFrames.lowerBound) {
-                if let vector = layers[layerIndex].cels[right].vector {
-                    writeVideoCrop(applyingVideoCrops(cut.right, to: vector.elements), layerIndex: layerIndex, celIndex: right)
-                }
-                scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: right)
-            }
+            cels[index] = left; cels.append(right)
+            changed.insert(left.id); changed.insert(right.id); discarded.merge(crop)
         }
-        return discarded
+        cels.sort { $0.startFrame < $1.startFrame }
+        return (cels, discarded, changed)
+    }
+
+    @discardableResult
+    func applyCelSplits(_ plan: CelSplitPlan) -> KeyframeCrop {
+        guard let layerIndex = layers.firstIndex(where: { $0.id == plan.layerID }),
+              let prepared = Self.materializeCelSplits(plan, from: layers[layerIndex].cels) else {
+            preconditionFailure("Prepared split input changed")
+        }
+        layers[layerIndex].cels = prepared.cels
+        noteKeyframeCrop(prepared.crop)
+        for index in prepared.cels.indices where prepared.changed.contains(prepared.cels[index].id) {
+            scheduleThumbnailRegen(layerIndex: layerIndex, celIndex: index)
+        }
+        return prepared.crop
     }
 
     /// Splits a cel into two at `atFrame` (strictly inside the cel); both halves keep the original drawing.

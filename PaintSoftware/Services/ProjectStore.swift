@@ -1192,7 +1192,8 @@ enum ProjectStore {
         var prepared = Set<UUID>()
         var encodedSources = Set<UUID>()
         for job in jobs {
-            for source in [job.cel.rasterImage, job.cel.bakedImage].compactMap({ $0 }) {
+            for source in [job.cel.rasterImage, job.cel.bakedImage].compactMap({ $0 })
+                + (job.cel.vector?.images.map(\.source) ?? []) {
                 guard prepared.insert(source.residencyID).inserted else { continue }
                 switch source.prepareForSave() {
                 case .success(let checkpoint):
@@ -1635,11 +1636,11 @@ enum ProjectStore {
             var imageFileNames: [UUID: String] = [:]
             for element in vector.images {
                 let name = element.fileName ?? "\(cel.id.uuidString)_vec_\(element.id.uuidString).png"
-                _ = try ProjectPackageLayout.writeURL(named: name, role: .placedImage, in: packageURL)
-                if let data = png(element.image) {
-                    files.append(try write(data, name, .placedImage))
-                    imageFileNames[element.id] = name
-                }
+                let destination = try ProjectPackageLayout.writeURL(named: name, role: .placedImage, in: packageURL)
+                try element.source.copyPNG(to: destination).get()
+                files.append(try ProjectPackageLayout.writePath(named: name, role: .placedImage))
+                imageFileNames[element.id] = name
+                if !encodedSources.contains(element.source.residencyID) { cost.reused += 1 }
             }
             // A video's bytes are copied rather than encoded — see `copyAsset`. Its name is the
             // element's own field rather than one minted here, because a video element cannot exist
@@ -2107,7 +2108,7 @@ enum ProjectStore {
                     // Metadata preflight rejects invalid addresses. A missing legal resource keeps
                     // the existing reported-loss policy here.
                     let elements = try payload.canvasSpaceElements(resolvingImages: { ref in
-                        guard let image = UIImage(contentsOfFile: try fileURL(ref.fileName, .placedImage).path) else {
+                        guard case .success(let backing) = RasterBacking.protect(try fileURL(ref.fileName, .placedImage), using: .shared) else {
                             damage.images += 1
                             log.error("""
                                 Placed image \(ref.fileName, privacy: .public) for cel \
@@ -2116,7 +2117,7 @@ enum ProjectStore {
                                 """)
                             return nil
                         }
-                        return image
+                        return RasterSource.backed(by: backing, using: .shared)
                     }, resolvingVideos: { ref in
                         // The placed image's story one door over: a video's payload is a file rather
                         // than a decoded picture, so what "resolves" is a path, and the existence

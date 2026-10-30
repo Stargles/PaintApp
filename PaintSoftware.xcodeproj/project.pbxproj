@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A05511000000000000000004 /* PaintSoftware/Engine/RasterPixels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A05511000000000000000003 /* PaintSoftware/Engine/RasterPixels.swift */; };
+		A05511000000000000000002 /* PaintSoftware/Engine/LZ4Block.swift in Sources */ = {isa = PBXBuildFile; fileRef = A05511000000000000000001 /* PaintSoftware/Engine/LZ4Block.swift */; };
 		F8A6E200A499A50028393691 /* PaintSoftware/Services/ProjectStore+RasterBacking.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6815809A8C5C2CD0814FF3F3 /* PaintSoftware/Services/ProjectStore+RasterBacking.swift */; };
 		6401F14A965B83D66916DF99 /* PaintSoftware/Engine/RasterSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58A4A7FCCDFB61204E0027E6 /* PaintSoftware/Engine/RasterSource.swift */; };
 		36A461ABC706F5D17268285F /* RasterResidencyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4F38094FCC8E64305588F07 /* RasterResidencyLogicTests.swift */; };
@@ -670,6 +672,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		A05511000000000000000003 /* PaintSoftware/Engine/RasterPixels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/RasterPixels.swift; sourceTree = "<group>"; };
+		A05511000000000000000001 /* PaintSoftware/Engine/LZ4Block.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/LZ4Block.swift; sourceTree = "<group>"; };
 		6815809A8C5C2CD0814FF3F3 /* PaintSoftware/Services/ProjectStore+RasterBacking.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Services/ProjectStore+RasterBacking.swift"; sourceTree = "<group>"; };
 		58A4A7FCCDFB61204E0027E6 /* PaintSoftware/Engine/RasterSource.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/RasterSource.swift; sourceTree = "<group>"; };
 		B4F38094FCC8E64305588F07 /* RasterResidencyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RasterResidencyLogicTests.swift; sourceTree = "<group>"; };
@@ -1899,6 +1903,8 @@
 				0571EF8FDE440FCB2D862719 /* PaintSoftware/Engine/FillWindow.swift */,
 				DEC0DE00000000000000000F /* PaintSoftware/Engine/RasterLayerTexture.swift */,
 				6815809A8C5C2CD0814FF3F3 /* PaintSoftware/Services/ProjectStore+RasterBacking.swift */,
+				A05511000000000000000001 /* PaintSoftware/Engine/LZ4Block.swift */,
+				A05511000000000000000003 /* PaintSoftware/Engine/RasterPixels.swift */,
 				58A4A7FCCDFB61204E0027E6 /* PaintSoftware/Engine/RasterSource.swift */,
 				FC13BB925D9D1BFA22318A3B /* PaintSoftware/Engine/RasterResidency.swift */,
 				10E06D42DAEB5E1219F94B87 /* PaintSoftware/Engine/StrokeScratch.swift */,
@@ -2577,6 +2583,8 @@
 				DEC0DE00000000000000000E /* PaintSoftware/Engine/MetalFillEngine.swift in Sources */,
 				DEC0DE000000000000000010 /* PaintSoftware/Engine/RasterLayerTexture.swift in Sources */,
 				F8A6E200A499A50028393691 /* PaintSoftware/Services/ProjectStore+RasterBacking.swift in Sources */,
+				A05511000000000000000002 /* PaintSoftware/Engine/LZ4Block.swift in Sources */,
+				A05511000000000000000004 /* PaintSoftware/Engine/RasterPixels.swift in Sources */,
 				6401F14A965B83D66916DF99 /* PaintSoftware/Engine/RasterSource.swift in Sources */,
 				28B2A653638FFE0447938DD8 /* PaintSoftware/Engine/RasterResidency.swift in Sources */,
 				F0E93626C7BE622D801362A5 /* PaintSoftware/Engine/StrokeScratch.swift in Sources */,

@@ -1159,11 +1159,8 @@ final class CanvasResizeLogicTests: XCTestCase {
     /// placed image and a text box decode nothing on this path and cannot fail; a healthy fill
     /// round-trips its archive; a damaged one does not.
     ///
-    /// The `.image` case is the one worth stating out loud: CANVAS_RESIZE.md §2 lists
-    /// `image.cgImage == nil` among a resize's failure modes, and on the shipped code it is not one —
-    /// the map moves a `LayerTransform` and never touches the pixels, and both raster primitives draw
-    /// through `UIImage.draw(in:)`, which needs no `cgImage`. Refusing for it would decline a
-    /// document nothing else in the app declines.
+    /// Placed capture refuses invalid pixels. Once a valid source exists, mapping reads its
+    /// immutable placement metadata without acquiring even a cold source's pixels.
     func testOnlyADamagedFillIsUnmappable() throws {
         let stroke = Self.stroke(at: [CGPoint(x: 1, y: 2)], size: 4)
         XCTAssertTrue(VectorCanvas.canBeMapped(.stroke(stroke)))
@@ -1175,12 +1172,26 @@ final class CanvasResizeLogicTests: XCTestCase {
         damaged.pathData = Data()
         XCTAssertFalse(VectorCanvas.canBeMapped(.fill(damaged)))
 
-        // A UIImage with no CGImage at all — the case §2 names and this refutes.
         let backingless = UIImage()
         XCTAssertNil(backingless.cgImage, "PREMISE")
+        XCTAssertThrowsError(try CanvasFixture.placedSource(backingless)) { error in
+            XCTAssertEqual(error as? RasterResidency.Failure, .invalidSize,
+                           "Invalid pixels refuse at capture before a placed element exists")
+        }
+
+        let owner = RasterResidency(budgetBytes: 4096)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("map-cold-picture-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let picture = CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 4, height: 4),
+                                               size: CGSize(width: 4, height: 4))
+        try XCTUnwrap(picture.pngData()).write(to: url)
+        let backing = try ProjectStore.RasterBacking.protect(url, using: owner).get()
+        let source = RasterSource.backed(by: backing, using: owner)
+        XCTAssertEqual(owner.usage.pixelBytes, 0, "PREMISE: the valid placed source is cold")
         XCTAssertTrue(VectorCanvas.canBeMapped(
-            .image(VectorImageElement(image: backingless, transform: .identity))),
+            .image(VectorImageElement(source: source, transform: .identity))),
             "a placed image's map is its transform; its pixels are not consulted")
+        XCTAssertEqual(owner.usage.pixelBytes, 0, "Mapping does not resolve the cold picture")
     }
 
     /// **The resample notice fires only when a raster tier actually held pixels, and only when the
@@ -1238,11 +1249,11 @@ final class CanvasResizeLogicTests: XCTestCase {
     /// the block is acceptable makes *more* necessary rather than less: a longer block is a wider
     /// window for `ScenePhaseSaveGate` to write a package that is half old-size and half new.
     func testNoSaveMayStartWhileAResizeIsInFlight() {
-        XCTAssertTrue(ScenePhaseSaveGate.mayStartSave(screenIsEditor: true, hasCanvas: true, isResizing: false))
-        XCTAssertFalse(ScenePhaseSaveGate.mayStartSave(screenIsEditor: true, hasCanvas: true, isResizing: true),
+        XCTAssertTrue(ScenePhaseSaveGate.mayStartSave(screenIsEditor: true, hasCanvas: true, isUpdatingCanvas: false))
+        XCTAssertFalse(ScenePhaseSaveGate.mayStartSave(screenIsEditor: true, hasCanvas: true, isUpdatingCanvas: true),
                        "the one this rule adds")
-        XCTAssertFalse(ScenePhaseSaveGate.mayStartSave(screenIsEditor: false, hasCanvas: true, isResizing: false))
-        XCTAssertFalse(ScenePhaseSaveGate.mayStartSave(screenIsEditor: true, hasCanvas: false, isResizing: false))
+        XCTAssertFalse(ScenePhaseSaveGate.mayStartSave(screenIsEditor: false, hasCanvas: true, isUpdatingCanvas: false))
+        XCTAssertFalse(ScenePhaseSaveGate.mayStartSave(screenIsEditor: true, hasCanvas: false, isUpdatingCanvas: false))
         // The phase rule is untouched by any of this — the two gates answer different questions.
         XCTAssertTrue(ScenePhaseSaveGate.shouldSave(from: .active, to: .background))
         XCTAssertFalse(ScenePhaseSaveGate.shouldSave(from: .inactive, to: .active))
@@ -1303,15 +1314,15 @@ final class CanvasResizeLogicTests: XCTestCase {
         let release = DispatchSemaphore(value: 0)
         queue.async { release.wait() }
         defer { release.signal() }
-        manager.canvasPixelTransforms = LatestWins(queue: queue)
+        manager.canvasPreparations = LatestWins(queue: queue)
 
         manager.resizeCanvasAnnouncingProgress(to: CGSize(width: 96, height: 96))
 
         let id = try XCTUnwrap(manager.canvasUpdatePhase.operationID)
         XCTAssertEqual(manager.canvasUpdatePhase, .preparing(id), "predicted-short work starts without immediate announcement")
-        XCTAssertTrue(manager.isResizing, "preparing already locks edits and saves")
+        XCTAssertTrue(manager.isUpdatingCanvas, "preparing already locks edits and saves")
         XCTAssertFalse(ScenePhaseSaveGate.mayStartSave(screenIsEditor: true, hasCanvas: true,
-                                                       isResizing: manager.isResizing))
+                                                       isUpdatingCanvas: manager.isUpdatingCanvas))
         XCTAssertEqual(manager.canvasSize, CanvasFixture.canvasSize, "no partial landing while the worker waits")
         manager.flipCanvasAnnouncingProgress(horizontal: true)
         XCTAssertEqual(manager.canvasUpdatePhase, .preparing(id), "a second canvas operation cannot replace the locked job")
@@ -1325,7 +1336,7 @@ final class CanvasResizeLogicTests: XCTestCase {
         release.signal()
         await fulfillment(of: [finished], timeout: 30)
 
-        XCTAssertFalse(manager.isResizing, "landing releases the safety lock")
+        XCTAssertFalse(manager.isUpdatingCanvas, "landing releases the safety lock")
         XCTAssertEqual(sizeWhenUnlocked, CGSize(width: 96, height: 96), "the lock releases only after the document lands")
         XCTAssertEqual(manager.canvasSize, CGSize(width: 96, height: 96), "the requested size is committed")
         let image = try XCTUnwrap(manager.layers[0].cels[0].bakedImage?.resolveImage().get().cgImage)
@@ -1341,19 +1352,19 @@ final class CanvasResizeLogicTests: XCTestCase {
         let plan = try XCTUnwrap(manager.planResize(to: newSize, mode: .scaleToFit))
         XCTAssertTrue(plan.audit.needsAnnouncing(scaling: true),
                       "PREMISE: 25 inked cels scaling is 0.22 s — over the line")
-        XCTAssertFalse(manager.isResizing)
+        XCTAssertFalse(manager.isUpdatingCanvas)
         let queue = DispatchQueue(label: "resize.announced.worker")
         let release = DispatchSemaphore(value: 0)
         queue.async { release.wait() }
         defer { release.signal() }
-        manager.canvasPixelTransforms = LatestWins(queue: queue)
+        manager.canvasPreparations = LatestWins(queue: queue)
 
         manager.resizeCanvasAnnouncingProgress(to: newSize, mode: .scaleToFit)
 
-        XCTAssertTrue(manager.isResizing, "set synchronously, so no save can slip in behind it")
+        XCTAssertTrue(manager.isUpdatingCanvas, "set synchronously, so no save can slip in behind it")
         XCTAssertTrue(manager.canvasUpdatePhase.isAnnounced, "the audit announces before the worker starts")
         XCTAssertFalse(ScenePhaseSaveGate.mayStartSave(screenIsEditor: true, hasCanvas: true,
-                                                       isResizing: manager.isResizing),
+                                                       isUpdatingCanvas: manager.isUpdatingCanvas),
                        "and rule 12's gate is closed for the whole of it")
         XCTAssertEqual(manager.canvasSize, CanvasFixture.canvasSize,
                        "the walk has not started: the overlay gets its frame first")
@@ -1363,7 +1374,7 @@ final class CanvasResizeLogicTests: XCTestCase {
         release.signal()
         await fulfillment(of: [finished], timeout: 30)
 
-        XCTAssertFalse(manager.isResizing, "and it is lowered again when the walk returns")
+        XCTAssertFalse(manager.isUpdatingCanvas, "and it is lowered again when the walk returns")
         XCTAssertEqual(manager.canvasSize, newSize)
         XCTAssertEqual(manager.history.undoStack.map(\.label), [.resizeCanvas],
                        "the announced path records the same one step the direct one does")
@@ -1372,7 +1383,7 @@ final class CanvasResizeLogicTests: XCTestCase {
     func testACompletedUpdatesDeadlineCannotAnnounceTheNextUpdate() async throws {
         let manager = Self.documentWithManyInkedCels(count: 1)
         let queue = DispatchQueue(label: "resize.identity.worker")
-        manager.canvasPixelTransforms = LatestWins(queue: queue)
+        manager.canvasPreparations = LatestWins(queue: queue)
         manager.resizeCanvasAnnouncingProgress(to: CGSize(width: 96, height: 96))
         let firstID = try XCTUnwrap(manager.canvasUpdatePhase.operationID)
         let firstFinished = expectation(description: "first update lands")
@@ -1392,7 +1403,7 @@ final class CanvasResizeLogicTests: XCTestCase {
         XCTAssertEqual(manager.canvasUpdatePhase, .preparing(secondID), "an old deadline cannot announce the new job")
         manager.announceCanvasUpdate(secondID)
         XCTAssertEqual(manager.canvasUpdatePhase, .announced(secondID), "the pending job's own deadline announces it")
-        XCTAssertTrue(manager.isResizing, "announcement does not release the safety lock")
+        XCTAssertTrue(manager.isUpdatingCanvas, "announcement does not release the safety lock")
         let secondFinished = expectation(description: "flip lands")
         let secondTerminal = manager.$canvasUpdatePhase.first(where: { $0 == .idle }).sink { _ in secondFinished.fulfill() }
         defer { secondTerminal.cancel() }
@@ -1434,7 +1445,7 @@ final class CanvasResizeLogicTests: XCTestCase {
 
         manager.resizeCanvasAnnouncingProgress(to: CGSize(width: 32, height: 32), mode: .scaleToFit)
 
-        XCTAssertFalse(manager.isResizing, "no modal for work that is not going to happen")
+        XCTAssertFalse(manager.isUpdatingCanvas, "no modal for work that is not going to happen")
         XCTAssertEqual(manager.canvasSize, CanvasFixture.canvasSize)
         XCTAssertEqual(manager.notice?.code, "resizeRefused")
     }

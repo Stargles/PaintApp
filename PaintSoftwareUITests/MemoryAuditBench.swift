@@ -414,8 +414,7 @@ final class MemoryAuditBench: XCTestCase {
             bytes += stroke.samples.channels.channels.count * n * MemoryLayout<CGFloat>.stride
             return bytes
         case .image(let image):
-            guard let cg = image.image.cgImage else { return 0 }
-            return cg.bytesPerRow * cg.height
+            return image.source.logicalPayloadBytes
         case .fill, .text, .video, .stream:
             return 0
         }

@@ -576,8 +576,8 @@ final class UndoRepairLogicTests: XCTestCase {
     }
 
     private static func imageElement(at position: CGPoint, side: CGFloat = 24,
-                                     scale: CGFloat = 1, rotation: CGFloat = 0) -> VectorImageElement {
-        VectorImageElement(image: solidImage(.systemTeal, side: side),
+                                     scale: CGFloat = 1, rotation: CGFloat = 0) throws -> VectorImageElement {
+        VectorImageElement(source: try CanvasFixture.placedSource(solidImage(.systemTeal, side: side)),
                            transform: LayerTransform(position: position, scale: scale,
                                                      rotation: rotation))
     }
@@ -697,7 +697,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// against a bound that ignored `placement` entirely.
     func testUndoingAndRedoingAPlacedImageIsBoundedByItsOwnQuad() throws {
         try assertARoundTripIsBoundedAndDrawsRight(
-            .image(Self.imageElement(at: CGPoint(x: 60, y: 55), side: 28, scale: 1.4,
+            .image(try Self.imageElement(at: CGPoint(x: 60, y: 55), side: 28, scale: 1.4,
                                      rotation: .pi / 7)),
             "rotated placed image")
     }

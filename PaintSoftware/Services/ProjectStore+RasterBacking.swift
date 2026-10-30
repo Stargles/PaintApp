@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import ImageIO
 import UIKit
 
@@ -41,7 +42,8 @@ extension ProjectStore {
             }
         }
 
-        func newResourceURL() -> URL? {
+        enum ResourceKind: String { case png, native = "raster" }
+        func newResourceURL(kind: ResourceKind = .png) -> URL? {
             ProjectStore.serializingPackageMutation {
                 lock.lock(); defer { lock.unlock() }
                 if !created {
@@ -54,7 +56,7 @@ extension ProjectStore {
                     Self.liveLock.unlock()
                     created = true
                 }
-                return url.appendingPathComponent("\(UUID().uuidString).png")
+                return url.appendingPathComponent("\(UUID().uuidString).\(kind.rawValue)")
             }
         }
 
@@ -69,44 +71,52 @@ extension ProjectStore {
     }
 
     final class RasterBacking {
+        enum Payload {
+            case png
+            case native(rawCount: Int, storedCount: Int, compressed: Bool, digest: Data)
+        }
         let url: URL
-        let size: CGSize
+        let descriptor: RasterImageDescriptor
+        let payload: Payload
+        var size: CGSize { descriptor.size }
         private let storage: RasterStorage
 
-        private init(url: URL, size: CGSize, storage: RasterStorage) {
-            self.url = url
-            self.size = size
-            self.storage = storage
+        private init(url: URL, descriptor: RasterImageDescriptor, payload: Payload, storage: RasterStorage) {
+            self.url = url; self.descriptor = descriptor; self.payload = payload; self.storage = storage
         }
+        var isPNG: Bool { if case .png = payload { return true }; return false }
 
-        /// The current document's compressed resource is protected once, before its package can be
-        /// swapped or renamed. No image/context is created and no persistent file descriptor is held.
         static func protect(_ source: URL, using residency: RasterResidency)
             -> Result<RasterBacking, RasterResidency.Failure> {
             ProjectStore.serializingPackageMutation {
-                guard let size = imageSize(at: source), let destination = residency.storage.newResourceURL(),
-                      ProjectStore.cloneRasterResource(from: source, to: destination) else {
-                    return .failure(.unreadableBacking)
-                }
-                return .success(RasterBacking(url: destination, size: size, storage: residency.storage))
+                guard let descriptor = imageDescriptor(at: source), let destination = residency.storage.newResourceURL(),
+                      ProjectStore.cloneRasterResource(from: source, to: destination) else { return .failure(.unreadableBacking) }
+                return .success(RasterBacking(url: destination, descriptor: descriptor, payload: .png, storage: residency.storage))
             }
         }
 
-        private static func imageSize(at url: URL) -> CGSize? {
-            guard let source = CGImageSourceCreateWithURL(url as CFURL,
-                    [kCGImageSourceShouldCache: false] as CFDictionary),
-                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-                  let width = properties[kCGImagePropertyPixelWidth] as? Int,
-                  let height = properties[kCGImagePropertyPixelHeight] as? Int,
-                  RasterSurface.byteCount(width: width, height: height) != nil else { return nil }
-            return CGSize(width: width, height: height)
+        // Cache-disabled ImageIO creates a metadata-bearing image here. No provider bytes or
+        // CGContext are requested, but ImageIO is opaque: owner allocation counters alone cannot
+        // establish that its implementation did no internal decoding.
+        private static func imageDescriptor(at url: URL) -> RasterImageDescriptor? {
+            autoreleasepool {
+                guard let source = CGImageSourceCreateWithURL(url as CFURL,
+                        [kCGImageSourceShouldCache: false] as CFDictionary),
+                      let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                      let image = CGImageSourceCreateImageAtIndex(source, 0,
+                        [kCGImageSourceShouldCache: false, kCGImageSourceShouldAllowFloat: true] as CFDictionary) else { return nil }
+                let orientations: [Int: UIImage.Orientation] = [1: .up, 2: .upMirrored, 3: .down, 4: .downMirrored,
+                    5: .leftMirrored, 6: .right, 7: .rightMirrored, 8: .left]
+                let value = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+                guard let orientation = orientations[value] else { return nil }
+                return RasterImageDescriptor(UIImage(cgImage: image, scale: 1, orientation: orientation))
+            }
         }
 
         struct Decoded {
-            let image: UIImage
-            let isTransparent: Bool
+            let lease: RasterPixelBuffer.ReadLease
+            var isTransparent: Bool { lease.isFullyTransparent }
         }
-
         struct Checkpoint {
             let backing: RasterBacking
             var encodeSeconds = 0.0
@@ -117,45 +127,84 @@ extension ProjectStore {
 
         func decode(using residency: RasterResidency, excluding: Set<UUID>)
             -> Result<Decoded, RasterResidency.Failure> {
-            var decodedInput: RasterResidency.Allocation?
-            let result: Result<Decoded, RasterResidency.Failure> = autoreleasepool {
-                // Creating this uncached CGImage exposes its exact decoded row size before the
-                // decoder is asked to draw it. Input decoding is charged as operation working bytes.
-                guard let source = CGImageSourceCreateWithURL(url as CFURL,
-                        [kCGImageSourceShouldCache: false] as CFDictionary),
-                      let image = CGImageSourceCreateImageAtIndex(source, 0,
-                        [kCGImageSourceShouldCache: false] as CFDictionary),
-                      image.width == Int(size.width), image.height == Int(size.height) else {
-                    return .failure(.unreadableBacking)
+            switch payload {
+            case .png:
+                return autoreleasepool {
+                    guard let source = CGImageSourceCreateWithURL(url as CFURL,
+                            [kCGImageSourceShouldCache: false] as CFDictionary),
+                          let cg = CGImageSourceCreateImageAtIndex(source, 0,
+                            [kCGImageSourceShouldCache: false, kCGImageSourceShouldAllowFloat: true] as CFDictionary),
+                          cg.width == descriptor.width, cg.height == descriptor.height else { return .failure(.unreadableBacking) }
+                    let image = UIImage(cgImage: cg, scale: descriptor.scale, orientation: descriptor.orientation)
+                    return RasterPixelBuffer.capture(image, using: residency, durable: true, excluding: excluding)
+                        .map { Decoded(lease: $0) }
                 }
-                let (inputBytes, overflow) = image.bytesPerRow.multipliedReportingOverflow(by: image.height)
+            case .native(let rawCount, let storedCount, let compressed, let digest):
+                let (workingCount, overflow) = storedCount.addingReportingOverflow(compressed ? LZ4Block.decodingScratchBytes : 0)
                 guard !overflow else { return .failure(.invalidSize) }
-                return residency.admitWorking(inputBytes, excluding: excluding).flatMap { reservation in
-                    decodedInput = reservation
-                    // Force complete decoding while charged. A corrupt resource must fail here,
-                    // rather than a later lazy draw quietly leaving a transparent output behind.
-                    guard let decoded = CGImageSourceCreateImageAtIndex(source, 0,
-                        [kCGImageSourceShouldCacheImmediately: true,
-                         kCGImageSourceShouldAllowFloat: false] as CFDictionary),
-                          decoded.width == image.width, decoded.height == image.height,
-                          decoded.bytesPerRow <= image.bytesPerRow else { return .failure(.unreadableBacking) }
-                    return RasterSurface.allocate(width: decoded.width, height: decoded.height,
-                            using: residency, excluding: excluding).flatMap { surface in
-                        surface.mutate { context in
-                            UIGraphicsPushContext(context)
-                            UIImage(cgImage: decoded).draw(in: CGRect(origin: .zero, size: size))
-                            UIGraphicsPopContext()
-                        }.flatMap {
-                            surface.allocation.markDurable()
-                            let transparent = surface.isFullyTransparent
-                            return surface.image().map { Decoded(image: $0, isTransparent: transparent) }
+                return residency.admitWorking(workingCount, excluding: excluding).flatMap { working in
+                    defer { withExtendedLifetime(working) {} }
+                    return residency.admitPixels(rawCount, durable: true, excluding: excluding).flatMap { allocation in
+                        guard let buffer = RasterPixelBuffer(allocation: allocation) else { return .failure(.allocationRefused) }
+                        let data: Data
+                        do { data = try Data(contentsOf: url, options: .mappedIfSafe) }
+                        catch { return .failure(.unreadableBacking) }
+                        guard data.count == storedCount else { return .failure(.unreadableBacking) }
+                        let scratchSize = compressed ? LZ4Block.decodingScratchBytes : 0
+                        let scratch = scratchSize > 0 ? malloc(scratchSize) : nil
+                        guard scratchSize == 0 || scratch != nil else { return .failure(.allocationRefused) }
+                        defer { free(scratch) }
+                        let decoded = data.withUnsafeBytes { bytes -> Bool in
+                            if compressed {
+                                return LZ4Block.decode(bytes, into: UnsafeMutableRawBufferPointer(start: buffer.address, count: rawCount), scratch: scratch)
+                            }
+                            guard storedCount == rawCount, let input = bytes.baseAddress else { return false }
+                            buffer.address.copyMemory(from: input, byteCount: rawCount)
+                            return true
                         }
+                        let lease = RasterPixelBuffer.ReadLease(buffer: buffer, descriptor: descriptor, residency: residency)
+                        guard decoded, lease.withBytes({ Self.digest($0) }) == digest else { return .failure(.unreadableBacking) }
+                        return .success(Decoded(lease: lease))
                     }
                 }
             }
-            // The decoder's autoreleased/native objects have drained before its charge is released.
-            withExtendedLifetime(decodedInput) {}
-            return result
+        }
+
+        private static func digest(_ bytes: UnsafeRawBufferPointer) -> Data {
+            Data(SHA256.hash(data: Data(bytesNoCopy: UnsafeMutableRawPointer(mutating: bytes.baseAddress!),
+                count: bytes.count, deallocator: .none)))
+        }
+
+        /// Authoritative process-local backing: only bytes are persisted; native layout stays in
+        /// this immutable handle. The existing serializer and storage lifetime own every resource.
+        static func checkpointNative(_ lease: RasterPixelBuffer.ReadLease)
+            -> Result<RasterBacking, RasterResidency.Failure> {
+            precondition(ProjectStore.isPerformingPackageMutation)
+            let residency = lease.residency, count = lease.allocation.byteCount
+            guard let workspace = LZ4Block.checkpointWorkingBytes(count) else { return .failure(.invalidSize) }
+            return residency.admitCheckpointWorking(workspace).flatMap { working in
+                defer { withExtendedLifetime(working) {} }
+                return lease.withBytes { bytes in
+                    let compress = LZ4Block.compressesWithinCheckpoint(count)
+                    let scratch = compress && LZ4Block.encodingScratchBytes > 0 ? malloc(LZ4Block.encodingScratchBytes) : nil
+                    let output = compress ? malloc(count) : nil
+                    guard !compress || (output != nil && (LZ4Block.encodingScratchBytes == 0 || scratch != nil)) else {
+                        free(scratch); free(output); return .failure(.allocationRefused)
+                    }
+                    defer { free(scratch); free(output) }
+                    let written = output.map { LZ4Block.encode(bytes, into: UnsafeMutableRawBufferPointer(start: $0, count: count), scratch: scratch) } ?? 0
+                    let compressed = written > 0 && written < count
+                    let storedCount = compressed ? written : count
+                    let pointer = compressed ? output! : UnsafeMutableRawPointer(mutating: bytes.baseAddress!)
+                    let data = Data(bytesNoCopy: pointer, count: storedCount, deallocator: .none)
+                    guard let destination = residency.storage.newResourceURL(kind: .native) else { return .failure(.checkpointFailed) }
+                    do { try data.write(to: destination, options: .atomic) }
+                    catch { try? FileManager.default.removeItem(at: destination); return .failure(.checkpointFailed) }
+                    return .success(RasterBacking(url: destination, descriptor: lease.descriptor,
+                        payload: .native(rawCount: count, storedCount: storedCount, compressed: compressed, digest: digest(bytes)),
+                        storage: residency.storage))
+                }
+            }
         }
 
         static func admitCheckpoint(_ image: UIImage, using residency: RasterResidency, excluding: Set<UUID>)
@@ -164,31 +213,31 @@ extension ProjectStore {
             let (bytes, overflow) = cg.bytesPerRow.multipliedReportingOverflow(by: cg.height)
             let (working, workingOverflow) = bytes.multipliedReportingOverflow(by: 2)
             guard !overflow, !workingOverflow else { return .failure(.invalidSize) }
-            // One encoded output plus encoder working headroom is reserved before entering the
-            // normal save queue. Failure retains the resident original and refuses eviction/save.
             return residency.admitCheckpointWorking(working, excluding: excluding)
         }
 
+        /// Public PNG is derived once per immutable version. It must never become the native
+        /// checkpoint of a source whose current pixels carry a richer layout or decode table.
         static func checkpoint(_ image: UIImage, using residency: RasterResidency,
                                encoder: RasterResidency.Allocation) -> Result<Checkpoint, RasterResidency.Failure> {
             precondition(ProjectStore.isPerformingPackageMutation)
             defer { withExtendedLifetime(encoder) {} }
             return autoreleasepool {
-                guard let cg = image.cgImage else { return .failure(.unreadableBacking) }
-                guard let destination = residency.storage.newResourceURL() else { return .failure(.checkpointFailed) }
-                let encodeStarted = CFAbsoluteTimeGetCurrent()
+                guard image.cgImage != nil,
+                      let destination = residency.storage.newResourceURL() else { return .failure(.checkpointFailed) }
+                let started = CFAbsoluteTimeGetCurrent()
                 guard let data = ProjectStore.encodeRasterPNG(image) else { return .failure(.checkpointFailed) }
-                let encodeSeconds = CFAbsoluteTimeGetCurrent() - encodeStarted
-                let writeStarted = CFAbsoluteTimeGetCurrent()
+                let encoded = CFAbsoluteTimeGetCurrent() - started, writeStarted = CFAbsoluteTimeGetCurrent()
                 do { try data.write(to: destination, options: .atomic) }
                 catch { try? FileManager.default.removeItem(at: destination); return .failure(.checkpointFailed) }
-                return .success(Checkpoint(backing: RasterBacking(url: destination,
-                    size: CGSize(width: cg.width, height: cg.height), storage: residency.storage),
-                    encodeSeconds: encodeSeconds, writeSeconds: CFAbsoluteTimeGetCurrent() - writeStarted,
-                    bytesWritten: data.count, encoded: true))
+                guard let descriptor = imageDescriptor(at: destination) else {
+                    try? FileManager.default.removeItem(at: destination); return .failure(.checkpointFailed)
+                }
+                return .success(Checkpoint(backing: RasterBacking(url: destination, descriptor: descriptor,
+                    payload: .png, storage: residency.storage), encodeSeconds: encoded,
+                    writeSeconds: CFAbsoluteTimeGetCurrent() - writeStarted, bytesWritten: data.count, encoded: true))
             }
         }
-
         deinit { try? FileManager.default.removeItem(at: url) }
     }
 }

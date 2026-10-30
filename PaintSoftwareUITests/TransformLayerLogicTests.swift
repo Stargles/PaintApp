@@ -444,8 +444,8 @@ final class TransformLayerLogicTests: XCTestCase {
     /// image behind — which is the failure the refusal existed to make visible.
     func testAPlacedImageFollowsAContainerPoseRatherThanBeingRefused() throws {
         let placed = VectorImageElement(
-            image: CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 6, height: 6),
-                                            size: CGSize(width: 6, height: 6)),
+            source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 6, height: 6),
+                                            size: CGSize(width: 6, height: 6))),
             transform: LayerTransform(position: CGPoint(x: 10, y: 10), scale: 1, rotation: 0))
         let posed = CanvasManager.posed([.image(placed)], through: [],
                                         inheriting: PoseMap(CGAffineTransform(translationX: 20, y: 0)))

@@ -71,7 +71,7 @@ struct DrawingView: View {
     /// built, or which state it depends on, moves.
     var body: some View {
         PlaybackTrace.span(.bodyDrawing) { bodyContent }
-            .allowsHitTesting(!canvasManager.isResizing)
+            .allowsHitTesting(!canvasManager.isUpdatingCanvas)
     }
 
     /// The editor's whole body — every toolbar, the timeline and the layer rail are constructed here

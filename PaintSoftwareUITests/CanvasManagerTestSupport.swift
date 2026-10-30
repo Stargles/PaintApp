@@ -20,6 +20,11 @@ import UIKit
 /// membership, not a fork of the logic.
 enum CanvasFixture {
 
+    /// A placed fixture uses the same fallible native-pixel admission as an imported picture.
+    static func placedSource(_ image: UIImage, using residency: RasterResidency = .shared) throws -> RasterSource {
+        try RasterSource.capturePlaced(image, using: residency).get()
+    }
+
     /// Small enough that thumbnail/flatten work in the tree tests is instant, large enough to be a
     /// real bitmap. The perf harness uses the app's real default size instead.
     static let canvasSize = CGSize(width: 64, height: 64)

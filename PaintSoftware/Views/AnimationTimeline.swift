@@ -242,10 +242,12 @@ struct AnimationTimeline: View {
                     // alert) is where every other refusal in this app already surfaces a one-
                     // sentence "the tool didn't do that" — `.noDrawingSurface`'s own doc calls the
                     // modal alert it replaced "three interruptions to deliver one sentence".
-                    switch canvasManager.bakeVideoToCels(layerIndex: request.layerIndex,
-                                                         celIndex: request.celIndex) {
-                    case .baked: break
-                    case .refused(let reason): canvasManager.raise(.videoBakeRefused(reason))
+                    canvasManager.bakeVideoToCels(layerIndex: request.layerIndex,
+                                                   celIndex: request.celIndex) { outcome in
+                        switch outcome {
+                        case .baked: break
+                        case .refused(let reason): canvasManager.raise(.videoBakeRefused(reason))
+                        }
                     }
                 }
                 pendingVideoBake = nil

@@ -37,9 +37,9 @@ final class PlacedImageShapeLogicTests: XCTestCase {
     /// Exact equality, not an accuracy: an `XCTAssertEqual` with a tolerance here would pass for an
     /// implementation that round-tripped every placement through two `sin`/`cos` pairs and left a
     /// similarity that is only nearly one.
-    func testAnUnstretchedPlacementIsTheMatrixTheThreeContextCallsUsedToBuild() {
+    func testAnUnstretchedPlacementIsTheMatrixTheThreeContextCallsUsedToBuild() throws {
         for (scale, rotation) in [(CGFloat(1), CGFloat(0)), (2.5, 0), (1, 0.7), (0.4, -1.9)] {
-            let element = image(at: CGPoint(x: 30, y: 26), scale: scale, rotation: rotation)
+            let element = try image(at: CGPoint(x: 30, y: 26), scale: scale, rotation: rotation)
             let expected = CGAffineTransform(translationX: 30, y: 26)
                 .rotated(by: rotation)
                 .scaledBy(x: scale, y: scale)
@@ -63,7 +63,7 @@ final class PlacedImageShapeLogicTests: XCTestCase {
     /// `transform.scale` and `aspect` holds only the shape — `ObjectTransformFrame.axisScales`'
     /// split, applied to the document.
     func testAStretchIsCarriedAsTheImagesOwnAspectAndTheRenderedPictureFollowsIt() throws {
-        let element = image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: 0)
+        let element = try image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: 0)
         // About the photo's own centre, which is the shape a Move nudge builds about `float.pivot`.
         // A stretch about the *origin* would move the centre to (64, 16) as well as reshaping it, and
         // the render below would then be measuring a photo half off the canvas.
@@ -94,8 +94,8 @@ final class PlacedImageShapeLogicTests: XCTestCase {
     /// It matters because `applyToVectorFloat` picks the arm on `aspect != 1`: if the stretch arm did
     /// not reduce to the similarity arm here, the same visible gesture would write two different
     /// documents on the two tabs of the picker, with the seam at `aspect == 1 ± ε`.
-    func testAStretchAlongTheBoxsOwnDiagonalIsTheUniformScale() {
-        let element = image(at: CGPoint(x: 30, y: 26), scale: 1.5, rotation: 0.4)
+    func testAStretchAlongTheBoxsOwnDiagonalIsTheUniformScale() throws {
+        let element = try image(at: CGPoint(x: 30, y: 26), scale: 1.5, rotation: 0.4)
         let uniform = CGAffineTransform(scaleX: 2, y: 2)
 
         guard case .image(let a) = VectorCanvas.mapping(.image(element), throughStretch: uniform),
@@ -119,8 +119,8 @@ final class PlacedImageShapeLogicTests: XCTestCase {
     /// is precisely the failure `mapping(_:throughSimilarity:)`'s `.image` arm used to assert against
     /// — `theta = atan2(t.b, t.a)` reads a map that turns the plane over as an *angle* — and the
     /// branch that peels the sign into `mirrored` is what replaced the assert.
-    func testMirroringAPlacedImageReflectsItAndMirroringBackIsTheOriginalPlacement() {
-        let element = image(at: CGPoint(x: 30, y: 26), scale: 1.5, rotation: 0.4)
+    func testMirroringAPlacedImageReflectsItAndMirroringBackIsTheOriginalPlacement() throws {
+        let element = try image(at: CGPoint(x: 30, y: 26), scale: 1.5, rotation: 0.4)
         // Mirror about the piece's own vertical centre line, which is the shape
         // `CanvasManager.mirrorFloating` builds about the float's pivot.
         let flip = CGAffineTransform(translationX: 30, y: 26)
@@ -161,17 +161,17 @@ final class PlacedImageShapeLogicTests: XCTestCase {
     /// The bases include an already-stretched and an already-mirrored placement on purpose: the
     /// interesting failure is not the first application but the second, where the old shape has to be
     /// composed rather than overwritten.
-    func testAnyAffineComposesIntoThePlacementAndComesBackOutOfIt() {
+    func testAnyAffineComposesIntoThePlacementAndComesBackOutOfIt() throws {
         let bases: [(String, VectorImageElement)] = [
-            ("at rest", image(at: CGPoint(x: 30, y: 26), scale: 1, rotation: 0)),
-            ("turned", image(at: CGPoint(x: 30, y: 26), scale: 1.3, rotation: 0.4)),
-            ("already stretched on axis", image(at: CGPoint(x: 22, y: 40), scale: 1.1, rotation: 0,
+            ("at rest", try image(at: CGPoint(x: 30, y: 26), scale: 1, rotation: 0)),
+            ("turned", try image(at: CGPoint(x: 30, y: 26), scale: 1.3, rotation: 0.4)),
+            ("already stretched on axis", try image(at: CGPoint(x: 22, y: 40), scale: 1.1, rotation: 0,
                                                 aspect: 2.5)),
-            ("already stretched off axis", image(at: CGPoint(x: 22, y: 40), scale: 1.1, rotation: -0.3,
+            ("already stretched off axis", try image(at: CGPoint(x: 22, y: 40), scale: 1.1, rotation: -0.3,
                                                  aspect: 2.5, stretchAxis: 0.9)),
-            ("already mirrored", image(at: CGPoint(x: 18, y: 18), scale: 0.8, rotation: 1.2,
+            ("already mirrored", try image(at: CGPoint(x: 18, y: 18), scale: 0.8, rotation: 1.2,
                                        mirrored: true)),
-            ("mirrored and stretched", image(at: CGPoint(x: 18, y: 18), scale: 0.8, rotation: 1.2,
+            ("mirrored and stretched", try image(at: CGPoint(x: 18, y: 18), scale: 0.8, rotation: 1.2,
                                              aspect: 0.4, stretchAxis: -0.6, mirrored: true)),
         ]
         let deltas: [(String, CGAffineTransform)] = [
@@ -216,8 +216,8 @@ final class PlacedImageShapeLogicTests: XCTestCase {
     /// already applies to its own `transform` key, which is left out of `encode(to:)` rather than
     /// written as the identity.
     func testAnUnstretchedImageWritesNoNewKeysAndAStretchedOneRoundTrips() throws {
-        let plain = image(at: CGPoint(x: 30, y: 26), scale: 1.5, rotation: 0.4)
-        let shaped = image(at: CGPoint(x: 20, y: 44), scale: 0.9, rotation: -0.2,
+        let plain = try image(at: CGPoint(x: 30, y: 26), scale: 1.5, rotation: 0.4)
+        let shaped = try image(at: CGPoint(x: 20, y: 44), scale: 0.9, rotation: -0.2,
                            aspect: 2.5, stretchAxis: 0.8, mirrored: true)
 
         let plainJSON = try String(decoding: JSONEncoder().encode(payload(for: plain)), as: UTF8.self)
@@ -254,9 +254,9 @@ final class PlacedImageShapeLogicTests: XCTestCase {
     /// enclose it once it is stretched three ways across, and the *Touching* rule still catches it.
     /// A quad built from the old `translate·rotate·scale` expression would answer "enclosed" for a
     /// rectangle sticking a long way out of the loop.
-    func testTheMembershipQuadFollowsTheStretchedRectangle() {
+    func testTheMembershipQuadFollowsTheStretchedRectangle() throws {
         let (_, _, vector) = fixture()
-        let element = image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: 0, aspect: 9)
+        let element = try image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: 0, aspect: 9)
         vector.addImage(element)
         let loop = CGPath(rect: CGRect(x: 24, y: 24, width: 16, height: 16), transform: nil)
 
@@ -279,7 +279,7 @@ final class PlacedImageShapeLogicTests: XCTestCase {
     /// 9:1 is boxed at 18 × 2 and not at the `hypot`-square a circumscribed disc would have given it.
     func testTheMoveBoxOfAStretchedPhotoIsThePhotosOwnRectangle() throws {
         let (manager, layerIndex, vector) = fixture()
-        let element = image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: 0, aspect: 9)
+        let element = try image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: 0, aspect: 9)
         vector.addImage(element)
         let loop = CGRect(x: 4, y: 4, width: 56, height: 56)
         manager.selection = Selection(path: CGPath(rect: loop, transform: nil), bounds: loop)
@@ -298,7 +298,7 @@ final class PlacedImageShapeLogicTests: XCTestCase {
     /// square: the box's *aspect* is the picture's, and its *size* is the picture's placed size.
     func testTheLiftsBoxIsALandscapePhotosOwnRectangleAndNotASquare() throws {
         let (manager, _, vector) = fixture()
-        let element = image(at: CGPoint(x: 32, y: 30), scale: 2, rotation: 0,
+        let element = try image(at: CGPoint(x: 32, y: 30), scale: 2, rotation: 0,
                             size: CGSize(width: 12, height: 4))
         vector.addImage(element)
         XCTAssertTrue(manager.beginVectorMove(ofElementIDs: [element.id]))
@@ -315,7 +315,7 @@ final class PlacedImageShapeLogicTests: XCTestCase {
     /// upright, so it is the quad's bounding box and nothing larger.
     func testTheLiftsBoxOfATurnedPhotoIsTheHullOfItsCorners() throws {
         let (manager, _, vector) = fixture()
-        let element = image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: 0.5,
+        let element = try image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: 0.5,
                             size: CGSize(width: 12, height: 4))
         vector.addImage(element)
         XCTAssertTrue(manager.beginVectorMove(ofElementIDs: [element.id]))
@@ -332,7 +332,7 @@ final class PlacedImageShapeLogicTests: XCTestCase {
     func testTurningTheBoxToThePhotosOwnAngleFitsItsOwnRectangle() throws {
         let (manager, _, vector) = fixture()
         let turn: CGFloat = 0.5
-        let element = image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: turn,
+        let element = try image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: turn,
                             size: CGSize(width: 12, height: 4))
         vector.addImage(element)
         XCTAssertTrue(manager.beginVectorMove(ofElementIDs: [element.id]))
@@ -386,7 +386,7 @@ final class PlacedImageShapeLogicTests: XCTestCase {
     /// element rather than a rasterized approximation of it.
     func testAFreeformStretchOfALassoedPlacedImageIsOneUndoStepAndUndoPutsItBack() throws {
         let (manager, layerIndex, vector) = fixture()
-        vector.addImage(image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: 0))
+        vector.addImage(try image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: 0))
         manager.selection = Selection(path: CGPath(rect: CGRect(x: 18, y: 18, width: 28, height: 28),
                                                    transform: nil),
                                       bounds: CGRect(x: 18, y: 18, width: 28, height: 28))
@@ -416,7 +416,7 @@ final class PlacedImageShapeLogicTests: XCTestCase {
     /// with the two properties that raised them, because no kind can answer no any more.
     func testMirrorIsOfferedOnALassoedPlacedImageAndSurvivesALaterDrag() throws {
         let (manager, layerIndex, vector) = fixture()
-        vector.addImage(image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: 0))
+        vector.addImage(try image(at: CGPoint(x: 32, y: 32), scale: 1, rotation: 0))
         manager.selection = Selection(path: CGPath(rect: CGRect(x: 18, y: 18, width: 28, height: 28),
                                                    transform: nil),
                                       bounds: CGRect(x: 18, y: 18, width: 28, height: 28))
@@ -443,10 +443,10 @@ final class PlacedImageShapeLogicTests: XCTestCase {
     private func image(at position: CGPoint, scale: CGFloat, rotation: CGFloat,
                        aspect: CGFloat = 1, stretchAxis: CGFloat = 0,
                        mirrored: Bool = false,
-                       size: CGSize = CGSize(width: 6, height: 6)) -> VectorImageElement {
-        VectorImageElement(image: CanvasFixture.solidImage(.green,
+                       size: CGSize = CGSize(width: 6, height: 6)) throws -> VectorImageElement {
+        VectorImageElement(source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.green,
                                                            rect: CGRect(origin: .zero, size: size),
-                                                           size: size),
+                                                           size: size)),
                            transform: LayerTransform(position: position, scale: scale,
                                                      rotation: rotation),
                            aspect: aspect, stretchAxis: stretchAxis, mirrored: mirrored)
@@ -493,8 +493,8 @@ final class PlacedImageShapeLogicTests: XCTestCase {
     private func decodedImage(from ref: VectorCanvasData.ImageRef) throws -> VectorImageElement? {
         let data = VectorCanvasData(elements: [.image(ref)], transform: [])
         let rebuilt = try data.canvasSpaceElements(resolvingImages: { _ in
-            CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 6, height: 6),
-                                     size: CGSize(width: 6, height: 6))
+            try CanvasFixture.placedSource(CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 6, height: 6),
+                                     size: CGSize(width: 6, height: 6)))
         }, resolvingVideos: { _ in nil })
         return rebuilt.compactMap(\.image).first
     }

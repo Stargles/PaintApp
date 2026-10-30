@@ -216,7 +216,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
         let data = try payloadJSON(payload, replacingElementAt: 2, with: brokenStrokeElement())
         let decoded = try JSONDecoder().decode(VectorCanvasData.self, from: data)
 
-        let placed = solidImage(.green)
+        let placed = try CanvasFixture.placedSource(solidImage(.green))
         let canvas = VectorCanvas(size: Self.canvasSize,
                                   elements: try decoded.canvasSpaceElements(resolvingImages: { _ in placed },
                                                                         resolvingVideos: { _ in nil }))
@@ -402,7 +402,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
         let decoded = try JSONDecoder().decode(VectorCanvasData.self, from: try jsonData(object))
         XCTAssertEqual(decoded.affineTransform.tx, 12, "fixture precondition: the file says +12")
 
-        let placed = solidImage(.green)
+        let placed = try CanvasFixture.placedSource(solidImage(.green))
         let baked = try decoded.canvasSpaceElements(resolvingImages: { _ in placed },
                                                 resolvingVideos: { _ in nil })
         let canvas = VectorCanvas(size: Self.canvasSize, elements: baked)

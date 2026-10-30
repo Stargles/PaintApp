@@ -196,7 +196,7 @@ struct ContentView: View {
     /// Content that is still changing outside a settled save snapshot. Both automatic saves and
     /// leaving after a background write must wait for it; playback alone does not prevent leaving.
     private var saveContentIsUnsettled: Bool {
-        canvasManager.strokeIsLive || canvasManager.isResizing || canvasManager.hasInteractiveStatePending
+        canvasManager.strokeIsLive || canvasManager.isUpdatingCanvas || canvasManager.hasInteractiveStatePending
     }
 
     /// Whether an autosave may start this instant. Every clause is a reason a snapshot taken now
@@ -236,7 +236,7 @@ struct ContentView: View {
         // `ScenePhaseSaveGate.mayStartSave` for why that document opens rather than failing.
         guard ScenePhaseSaveGate.mayStartSave(screenIsEditor: screen == .editor,
                                               hasCanvas: manager.canvasSize != nil,
-                                              isResizing: manager.isResizing) else {
+                                              isUpdatingCanvas: manager.isUpdatingCanvas) else {
             if screen == .editor, manager.canvasSize != nil, !autosave.clock.hasUnsavedEdits {
                 autosave.saveDeferred(for: manager)
             }

@@ -485,7 +485,7 @@ final class ProjectPackageLayoutLogicTests: XCTestCase {
                 let column = index % 4
                 let row = (index / 4) * 2 + scaleIndex
                 let element = VectorImageElement(
-                    image: image,
+                    source: try CanvasFixture.placedSource(image),
                     transform: LayerTransform(position: CGPoint(x: CGFloat(8 + column * 16),
                                                                   y: CGFloat(8 + row * 16)),
                                               scale: 4, rotation: 0))
@@ -497,7 +497,7 @@ final class ProjectPackageLayoutLogicTests: XCTestCase {
         XCTAssertEqual(originals.count, orientations.count * 2,
                        "PREMISE: each orientation is represented at source scales 1 and 2")
         XCTAssertTrue(originals.allSatisfy {
-            $0.image.cgImage?.width == raw.width && $0.image.cgImage?.height == raw.height
+            $0.source.descriptor.width == raw.width && $0.source.descriptor.height == raw.height
         }, "PREMISE: all orientations and scales retain the same full-resolution source pixels")
         let originalCanvas = try XCTUnwrap(vector.render()?.cgImage)
         let expectedCanvas = try XCTUnwrap(CanvasFixture.rgbaBytes(originalCanvas),
@@ -506,8 +506,8 @@ final class ProjectPackageLayoutLogicTests: XCTestCase {
             let x = Int(image.transform.position.x), y = Int(image.transform.position.y)
             let alpha = expectedCanvas[(y * originalCanvas.width + x) * 4 + 3]
             XCTAssertGreaterThan(alpha, 0,
-                                 "PREMISE: orientation \(image.image.imageOrientation.rawValue), "
-                                 + "scale \(image.image.scale) draws at its placed center")
+                                 "PREMISE: orientation \(image.source.descriptor.orientation.rawValue), "
+                                 + "scale \(image.source.descriptor.scale) draws at its placed center")
         }
 
         func assertSavedImageGeometry(_ loaded: CanvasManager,
@@ -521,14 +521,14 @@ final class ProjectPackageLayoutLogicTests: XCTestCase {
             for index in expectedImages.indices {
                 let source = expectedImages[index]
                 let actual = reopened[index]
-                XCTAssertEqual(actual.image.imageOrientation, source.image.imageOrientation,
+                XCTAssertEqual(actual.source.descriptor.orientation, source.source.descriptor.orientation,
                                "\(pass) preserves orientation at image \(index)")
-                XCTAssertEqual(actual.image.scale, 1,
+                XCTAssertEqual(actual.source.descriptor.scale, 1,
                                "The package PNG's UIImage is decoded at scale 1 for image \(index)")
                 XCTAssertEqual(actual.corners, source.corners,
                                "\(pass) keeps the same physical canvas quad at image \(index)")
-                let sourcePixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(source.image.cgImage)))
-                let actualPixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(actual.image.cgImage)))
+                let sourcePixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(try source.source.resolveImage().get().cgImage)))
+                let actualPixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(try actual.source.resolveImage().get().cgImage)))
                 XCTAssertEqual(actualPixels, sourcePixels,
                                "\(pass) preserves every asymmetric source pixel at image \(index)")
             }
@@ -611,7 +611,7 @@ final class ProjectPackageLayoutLogicTests: XCTestCase {
         let source = root.appendingPathComponent("clip.mov")
         let assetBytes = Data("the existing video model fixture checks presence, not a media decoder".utf8)
         try assetBytes.write(to: source)
-        let image = VectorImageElement(image: picture, transform: LayerTransform(position: CGPoint(x: 16, y: 16), scale: 1, rotation: 0), fileName: "placed.png")
+        let image = VectorImageElement(source: try CanvasFixture.placedSource(picture), transform: LayerTransform(position: CGPoint(x: 16, y: 16), scale: 1, rotation: 0), fileName: "placed.png")
         let video = VectorVideoElement(assetURL: source, assetFileName: "clip.mov", naturalSize: CGSize(width: 8, height: 8),
             sourceStart: .zero, sourceEnd: SourceTime(value: 1, timescale: 1),
             transform: LayerTransform(position: CGPoint(x: 40, y: 40), scale: 1, rotation: 0))
@@ -667,7 +667,7 @@ final class ProjectPackageLayoutLogicTests: XCTestCase {
     func testAnInvalidProvidedImageNameRefusesTheSaveBeforeAnyOutsideWrite() throws {
         let picture = CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 8, height: 8),
                                                size: CGSize(width: 8, height: 8))
-        var image = VectorImageElement(image: picture, transform: LayerTransform(position: CGPoint(x: 16, y: 16), scale: 1, rotation: 0), fileName: "placed.png")
+        var image = VectorImageElement(source: try CanvasFixture.placedSource(picture), transform: LayerTransform(position: CGPoint(x: 16, y: 16), scale: 1, rotation: 0), fileName: "placed.png")
         let manager = CanvasFixture.manager()
         manager.projectName = "WriteA"
         XCTAssertTrue(manager.addVectorLayer())
@@ -752,7 +752,7 @@ final class ProjectPackageLayoutLogicTests: XCTestCase {
     func testAMalformedKnownMediaSlotCannotHideAnInvalidAddress() throws {
         let picture = CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 8, height: 8),
                                                size: CGSize(width: 8, height: 8))
-        let image = VectorImageElement(image: picture,
+        let image = VectorImageElement(source: try CanvasFixture.placedSource(picture),
             transform: LayerTransform(position: CGPoint(x: 16, y: 16), scale: 1, rotation: 0), fileName: "placed.png")
         let package = try addressPackage("MalformedAddress", color: .red, expected: [255, 0, 0, 255], elements: [.image(image)])
         let file = try drawingURL(in: package)

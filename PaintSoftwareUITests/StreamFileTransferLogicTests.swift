@@ -126,7 +126,7 @@ final class StreamFileTransferLogicTests: XCTestCase {
         let layer = try XCTUnwrap(manager.layers.first { $0.id == activeLayerID })
         let vector = try XCTUnwrap(layer.cels.first?.vector)
         let element = try XCTUnwrap(vector.images.first)
-        let cg = try XCTUnwrap(element.image.cgImage)
+        let cg = try XCTUnwrap(try element.source.resolveImage().get().cgImage)
         let rgba = pixel(cg, 0, 0)
         XCTAssertGreaterThan(rgba.r, 200)
         XCTAssertLessThan(rgba.g, 50)
@@ -278,7 +278,8 @@ final class StreamFileTransferLogicTests: XCTestCase {
         let result = try send(image, id: 8, name: "valid.png", kind: "image", through: client)
         XCTAssertTrue(result.ok)
         XCTAssertEqual(manager.layers.count, layers + 1)
-        let cg = try XCTUnwrap(manager.layers.last?.cels.first?.vector?.images.first?.image.cgImage)
+        let placed = try XCTUnwrap(manager.layers.last?.cels.first?.vector?.images.first)
+        let cg = try XCTUnwrap(try placed.source.resolveImage().get().cgImage)
         XCTAssertGreaterThan(pixel(cg, 0, 0).b, 200, "Retry installs the actual blue picture.")
     }
 

@@ -42,7 +42,7 @@ enum ScenePhaseSaveGate {
     /// not only the phase change, because the third condition is about the document rather than
     /// about what asked.
     ///
-    /// **`isResizing` is CANVAS_RESIZE.md §5 rule 12, and the owner's 2026-08-28 ruling makes it more
+    /// **`isUpdatingCanvas` is CANVAS_RESIZE.md §5 rule 12, and the owner's 2026-08-28 ruling makes it more
     /// necessary rather than less.** A canvas resize rewrites every cel's buffers and then
     /// `canvasSize`; a save that lands between those two is a package whose manifest header and whose
     /// PNGs disagree — and `ProjectStore.decodeCel` builds every texture at the manifest's size and
@@ -55,7 +55,7 @@ enum ScenePhaseSaveGate {
     ///
     /// This gate starts no attempt and authorizes no navigation. The current editor's caller keeps
     /// work owed through its existing autosave clock until the resize has settled.
-    static func mayStartSave(screenIsEditor: Bool, hasCanvas: Bool, isResizing: Bool) -> Bool {
-        screenIsEditor && hasCanvas && !isResizing
+    static func mayStartSave(screenIsEditor: Bool, hasCanvas: Bool, isUpdatingCanvas: Bool) -> Bool {
+        screenIsEditor && hasCanvas && !isUpdatingCanvas
     }
 }

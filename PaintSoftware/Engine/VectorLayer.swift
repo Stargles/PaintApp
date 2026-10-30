@@ -1005,7 +1005,7 @@ extension PlacedRectangle {
 }
 
 /// An imported image placed on a vector layer, movable/scalable/rotatable via its own transform.
-/// `image` is runtime-only; persistence stores a file name + the transform (see `ProjectStore`).
+/// `source` is runtime-only; persistence stores a file name + the transform (see `ProjectStore`).
 ///
 /// **Its placement is a general affine as of LASSO_MOVE.md §3 stage 3c**, and the three fields that
 /// make it one sit *beside* `transform` rather than inside it. `LayerTransform` is position, one
@@ -1016,7 +1016,7 @@ extension PlacedRectangle {
 /// `LayerTransform` itself would give the box two homes for one number.
 struct VectorImageElement: Identifiable, PlacedRectangle {
     var id: UUID = UUID()
-    var image: UIImage
+    var source: RasterSource
     var transform: LayerTransform
     var aspect: CGFloat = 1
     var stretchAxis: CGFloat = 0
@@ -1031,12 +1031,10 @@ struct VectorImageElement: Identifiable, PlacedRectangle {
     /// Optional, so the synthesized decoder reads a file written before it existed.
     var animationGroupID: UUID? = nil
 
-    /// The image's own pixels' size — `PlacedRectangle.naturalSize`, which an image gets for free
-    /// because it carries its picture. A video does not, which is why the protocol asks for it rather
-    /// than reading a `UIImage`.
-    var naturalSize: CGSize { image.size }
+    /// Presentation and raw layout are immutable metadata, never a pixel acquisition.
+    var naturalSize: CGSize { source.size }
+    var pixelSize: CGSize { CGSize(width: source.size.width * source.descriptor.scale, height: source.size.height * source.descriptor.scale) }
 
-    var pixelSize: CGSize { CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale) }
 }
 
 /// **An exact instant on a video's own clock** — VIDEO.md §4.1's *"as exact rationals"*, and §6's
@@ -1531,6 +1529,35 @@ enum VectorElement: Identifiable {
 /// snapshot-chain model keeps one max-sized element array per action; common payload buffers need
 /// no additional retention, while distinct old/new geometry must both survive undo and redo.
 /// Adjacent actions may charge a rewritten payload again. No global identity registry is retained.
+/// Logical version retention is independent of decoded residency and compressed/export files.
+/// One action deduplicates source identities across every changed tier and canvas.
+enum RasterUndoCost {
+    typealias Sources = [UUID: Int]
+    static func sources(rasters: [RasterLayerTexture] = [], baked: [RasterSource?] = [],
+                        elements: [[VectorElement]] = []) -> Sources {
+        var result: Sources = [:]
+        func include(_ source: RasterSource?) {
+            guard let source else { return }
+            result[source.residencyID] = source.logicalPayloadBytes
+        }
+        for raster in rasters { include(raster.snapshot()) }
+        for source in baked { include(source) }
+        for list in elements {
+            for element in list { if case .image(let image) = element { include(image.source) } }
+        }
+        return result
+    }
+    static func sources(in layers: [Layer]) -> Sources {
+        let cels = layers.flatMap(\.cels)
+        return sources(rasters: cels.map(\.raster), baked: cels.map(\.bakedImage),
+                       elements: cels.compactMap { $0.vector?.elements })
+    }
+    static func bytes(from: Sources, to: Sources) -> Int {
+        let old = from.reduce(0) { UndoBudget.addingCost($0, to[$1.key] == nil ? $1.value : 0) }
+        return to.reduce(old) { UndoBudget.addingCost($0, from[$1.key] == nil ? $1.value : 0) }
+    }
+}
+
 enum VectorUndoCost {
     static func bytes(from: [VectorElement], to: [VectorElement]) -> Int {
         bytes(fromLists: [from], toLists: [to])
@@ -1539,6 +1566,11 @@ enum VectorUndoCost {
     /// Several canvases changed by one action may share a retained ancestor. Price that payload
     /// once across the action while preserving the measured per-canvas array-slot amortization.
     static func bytes(fromLists from: [[VectorElement]], toLists to: [[VectorElement]]) -> Int {
+        UndoBudget.addingCost(geometryBytes(fromLists: from, toLists: to),
+            RasterUndoCost.bytes(from: RasterUndoCost.sources(elements: from), to: RasterUndoCost.sources(elements: to)))
+    }
+
+    static func geometryBytes(fromLists from: [[VectorElement]], toLists to: [[VectorElement]]) -> Int {
         precondition(from.count == to.count, "one before/after list per changed canvas")
         // The snapshots keep every backing owner alive while operation-local borrow keys are used.
         // These keys never leave this call, enter an undo closure, or dereference a borrowed address.
@@ -1556,7 +1588,6 @@ enum VectorUndoCost {
 
     private enum Identity: Hashable {
         case buffer(address: UInt, bytes: Int)
-        case image(ObjectIdentifier)
     }
 
     /// Payload bytes, not allocator capacity/object headers. There is one visit per stored buffer,
@@ -1584,10 +1615,8 @@ enum VectorUndoCost {
                             unshared = UndoBudget.addingCost(unshared, UndoBudget.payloadBytes(count: thresholds.count, stride: MemoryLayout<(Int, CGFloat)>.stride))
                         }
                     case .fill(let fill): include(fill.pathData)
-                    case .image(let image):
-                        if let cg = image.image.cgImage { owned[.image(ObjectIdentifier(cg))] = UndoBudget.payloadBytes(count: cg.height, stride: cg.bytesPerRow) }
                     case .text(let text): include(text.recipe.string)
-                    case .video, .stream: break // Runtime pictures/files are owned by their source services.
+                    case .image, .video, .stream: break // Immutable sources are priced together across all tiers.
                     }
                 }
             }
@@ -6132,7 +6161,7 @@ final class VectorCanvas {
                 elements: elements.filter { !suppressed.contains($0.id) },
                 quality: quality, clippedTo: cg.boundingBoxOfClipPath, known: known)
             cg.restoreGState()
-            return walked.dabCount
+            return walked?.dabCount
         }
 
         /// Draw the exact ordinary image route or saved-fill direct route, and mint support only
@@ -6991,10 +7020,10 @@ final class VectorCanvas {
         cg.addPath(Self.quad(of: stream))
         cg.clip()
         cg.clear(window)
-        _ = Self.drawLocalContent(into: cg, elements: listed, quality: .full,
+        let walked = Self.drawLocalContent(into: cg, elements: listed, quality: .full,
                                   clippedTo: window, known: known)
         cg.restoreGState()
-        return window
+        return walked == nil ? nil : window
     }
 
     // MARK: - A live element edit's window (TODO (173))
@@ -7007,6 +7036,9 @@ final class VectorCanvas {
     ///
     /// **Integral, and rounded out**, for `repairClip`'s measured reason: a clip that falls between
     /// pixels is antialiased, so the window's outermost row would be part-cleared and part-drawn.
+    ///
+    /// Measurement reads stored geometry only, including each placed source's immutable size.
+    /// Pixel admission belongs to the actual draw and cannot turn measurement into a refusal.
     ///
     /// A hold is told the ids it may rewrite exactly as `restoreElements(_:changedInk:rewriting:)` is,
     /// and for the same reason: an element standing under its own id keeps its measured footprint,
@@ -7039,7 +7071,7 @@ final class VectorCanvas {
     /// surface it drew into is the one the window was read for.
     @discardableResult
     func drawEditWindow(of elements: [VectorElement], in window: CGRect, into cg: CGContext,
-                        rewriting rewritten: Set<UUID>) -> CGRect {
+                        rewriting rewritten: Set<UUID>) -> CGRect? {
         lock.lock()
         var known = paintedBounds
         let transform = _transform
@@ -7052,18 +7084,19 @@ final class VectorCanvas {
         cg.translateBy(x: -window.minX, y: -window.minY)
         cg.clip(to: window)
         cg.clear(window)
+        let walked: Walk?
         if transform.isIdentity {
-            _ = Self.drawLocalContent(into: cg, elements: listed, quality: .full,
+            walked = Self.drawLocalContent(into: cg, elements: listed, quality: .full,
                                       clippedTo: window, known: known)
         } else {
             // Through the canvas's own transform, as `render()` applies it — and unclipped, since the
             // clip is in local space and the window is not.
             cg.concatenate(transform)
-            _ = Self.drawLocalContent(into: cg, elements: listed, quality: .full,
+            walked = Self.drawLocalContent(into: cg, elements: listed, quality: .full,
                                       clippedTo: nil, known: [:])
         }
         cg.restoreGState()
-        return window
+        return walked == nil ? nil : window
     }
 
     /// `element` as `pose` shows it, or as stored when there is no pose to apply. Nil where
@@ -7241,7 +7274,7 @@ final class VectorCanvas {
     /// gives that for free; a raw `CGContext` has to be set up that way first.
     private static func drawLocalContent(into cg: CGContext, elements: [VectorElement],
                                          quality: RenderQuality, clippedTo clip: CGRect?,
-                                         known knownBounds: [UUID: CGRect]) -> Walk {
+                                         known knownBounds: [UUID: CGRect]) -> Walk? {
         // One target — and so one `DabGradientCache` — for the whole walk: a per-run target would
         // throw away the cache's hit rate at every fill or eraser.
         let target = CGContextDabTarget(cg)
@@ -7280,7 +7313,7 @@ final class VectorCanvas {
                 Self.draw(fill: fill, into: cg)
                 index += 1
             case .image(let element):
-                Self.draw(image: element, into: cg)
+                guard Self.draw(image: element, into: cg) else { return nil }
                 index += 1
             case .video(let element):
                 // Ends a paint run exactly as an image does (rule 1 above).
@@ -7481,17 +7514,19 @@ final class VectorCanvas {
         cg.restoreGState()
     }
 
-    private static func draw(image element: VectorImageElement, into cg: CGContext) {
+    private static func draw(image element: VectorImageElement, into cg: CGContext) -> Bool {
+        guard case .success(let image) = element.source.resolveImage() else { return false }
         cg.saveGState()
         // `placement` rather than a translate/rotate/scale sequence spelled again here: a stretched or
         // mirrored placement has two more terms and a sign, and the quad the membership rules test
         // against is built from the same property. At `aspect == 1`, `stretchAxis == 0` and
         // `mirrored == false` it is the identical matrix the three calls used to build.
         cg.concatenate(element.placement)
-        let imgSize = element.image.size
-        element.image.draw(in: CGRect(x: -imgSize.width / 2, y: -imgSize.height / 2,
+        let imgSize = element.naturalSize
+        image.draw(in: CGRect(x: -imgSize.width / 2, y: -imgSize.height / 2,
                                       width: imgSize.width, height: imgSize.height))
         cg.restoreGState()
+        return true
     }
 
     /// **The decoded source frame, or the stage-2 placeholder when there is not one yet.**
@@ -8055,7 +8090,7 @@ struct VectorCanvasData: Codable {
                 // The paired PNG reloads as scale 1; express placement in those point units so its
                 // larger decoded natural size does not enlarge the picture on the next open.
                 return .image(ImageRef(fileName: name, x: el.transform.position.x, y: el.transform.position.y,
-                                       scale: Double(el.transform.scale / el.image.scale),
+                                       scale: Double(el.transform.scale / el.source.descriptor.scale),
                                        rotation: el.transform.rotation,
                                        aspect: el.aspect == 1 ? nil : Double(el.aspect),
                                        stretchAxis: el.stretchAxis == 0 ? nil : Double(el.stretchAxis),
@@ -8175,7 +8210,7 @@ struct VectorCanvasData: Codable {
     /// answers nil leaves the element on its placeholder until the laptop answers, and drops
     /// nothing. So a caller with no package directory loses no element by omitting it, which is not
     /// true of the two above.
-    func canvasSpaceElements(resolvingImages resolveImage: (ImageRef) throws -> UIImage?,
+    func canvasSpaceElements(resolvingImages resolveImage: (ImageRef) throws -> RasterSource?,
                              resolvingVideos resolveVideo: (VideoRef) throws -> URL?,
                              resolvingStreamFrames resolveStreamFrame: (StreamRef) throws -> UIImage? = { _ in nil })
         rethrows -> [VectorElement] {
@@ -8188,7 +8223,7 @@ struct VectorCanvasData: Codable {
 
     /// The display list as the file literally holds it, before `affineTransform` is baked in. Private
     /// to the accessor above — nothing outside this type has any business with layer-local geometry.
-    private func localElements(resolvingImages resolveImage: (ImageRef) throws -> UIImage?,
+    private func localElements(resolvingImages resolveImage: (ImageRef) throws -> RasterSource?,
                                resolvingVideos resolveVideo: (VideoRef) throws -> URL?,
                                resolvingStreamFrames resolveStreamFrame: (StreamRef) throws -> UIImage?) rethrows -> [VectorElement] {
         try elements.compactMap { data in
@@ -8198,7 +8233,7 @@ struct VectorCanvasData: Codable {
             case .text(let text): return .text(text)
             case .image(let ref):
                 guard let image = try resolveImage(ref) else { return nil }
-                return .image(VectorImageElement(image: image,
+                return .image(VectorImageElement(source: image,
                                                  transform: LayerTransform(position: CGPoint(x: ref.x, y: ref.y),
                                                                            scale: ref.scale, rotation: ref.rotation),
                                                  aspect: CGFloat(ref.aspect ?? 1),

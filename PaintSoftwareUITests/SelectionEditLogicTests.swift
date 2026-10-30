@@ -121,7 +121,7 @@ final class SelectionEditLogicTests: XCTestCase {
     /// Mutation caught: returning `order.first` from `SelectionStyle.of`'s `mode` instead of the
     /// most common turns the two-black-one-red loop red when the red stroke is first in the list —
     /// the fixture below puts it first for exactly that reason.
-    func testTheSwatchDefaultsToTheSelectionsColourAndAMixedLoopOpensOnTheMostCommon() {
+    func testTheSwatchDefaultsToTheSelectionsColourAndAMixedLoopOpensOnTheMostCommon() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(y: 10, size: 9, opacity: 0.5, colour: colour(1, 0, 0)))
         vector.addStroke(stroke(y: 20, size: 4, opacity: 1))
@@ -144,9 +144,9 @@ final class SelectionEditLogicTests: XCTestCase {
         XCTAssertFalse(style.sizeIsMixed)
         XCTAssertEqual(style.opacity, 0.5)
 
-        vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+        vector.addImage(VectorImageElement(source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.green,
                                                                           rect: CGRect(x: 0, y: 0, width: 6, height: 6),
-                                                                          size: CGSize(width: 6, height: 6)),
+                                                                          size: CGSize(width: 6, height: 6))),
                                            transform: LayerTransform(position: CGPoint(x: 30, y: 52),
                                                                      scale: 1, rotation: 0)))
         select(manager, layerIndex, loop(CGRect(x: 20, y: 44, width: 24, height: 18)))
@@ -349,7 +349,7 @@ final class SelectionEditLogicTests: XCTestCase {
     /// Mutation caught: adding a `(.size, .fill)` arm to `rewritten` that wrote `fill.opacity` (the
     /// nearest field a fill has) reddens the fill's size row; dropping the `.paint` guard from the
     /// colour arm reddens the eraser row.
-    func testFillsAndTextTakeColourAndOpacityImagesAndVideosTakeNothingAndSizeReachesOnlyStrokes() {
+    func testFillsAndTextTakeColourAndOpacityImagesAndVideosTakeNothingAndSizeReachesOnlyStrokes() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(y: 8, size: 4, opacity: 0.5))
         vector.addStroke(stroke(y: 14, size: 5, opacity: 0.5, composite: .erase))
@@ -361,9 +361,9 @@ final class SelectionEditLogicTests: XCTestCase {
         vector.upsertText(VectorTextElement(id: UUID(), recipe: recipe,
                                             frame: TextFrame(origin: CGPoint(x: 22, y: 30),
                                                              size: CGSize(width: 12, height: 8))))
-        vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+        vector.addImage(VectorImageElement(source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.green,
                                                                           rect: CGRect(x: 0, y: 0, width: 6, height: 6),
-                                                                          size: CGSize(width: 6, height: 6)),
+                                                                          size: CGSize(width: 6, height: 6))),
                                            transform: LayerTransform(position: CGPoint(x: 30, y: 44),
                                                                      scale: 1, rotation: 0)))
         var video = VectorVideoElement(assetURL: URL(fileURLWithPath: "/dev/null"),

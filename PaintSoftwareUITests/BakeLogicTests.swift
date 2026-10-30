@@ -263,13 +263,13 @@ final class BakeLogicTests: XCTestCase {
 
     /// **A placed image is graded into a new picture**, and the new picture carries no file name, so the
     /// next save writes it as an asset of its own and the original file is untouched until then.
-    func testAPlacedImageIsGradedIntoANewPictureWithNoFileName() {
+    func testAPlacedImageIsGradedIntoANewPictureWithNoFileName() throws {
         let manager = document()
         manager.addVectorLayer(name: "Photo")
         let photo = manager.layers[manager.currentLayerIndex].id
         let picture = CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 6, height: 6),
                                                size: CGSize(width: 6, height: 6))
-        var element = VectorImageElement(image: picture,
+        var element = VectorImageElement(source: try CanvasFixture.placedSource(picture),
                                          transform: LayerTransform(position: CGPoint(x: 30, y: 30), scale: 1, rotation: 0))
         element.fileName = "photo.png"
         manager.layers[index(photo, manager)].cels[0].vector!.addImage(element)
@@ -278,12 +278,12 @@ final class BakeLogicTests: XCTestCase {
         XCTAssertNotNil(bakePlan(manager.bakeLayer(id: grade)))
 
         guard let baked = manager.layers[index(photo, manager)].cels[0].vector?.elements.first?.image,
-              let cg = baked.image.cgImage, let bytes = CanvasFixture.rgbaBytes(cg) else {
+              let cg = try baked.source.resolveImage().get().cgImage, let bytes = CanvasFixture.rgbaBytes(cg) else {
             return XCTFail("The image must survive the bake")
         }
         XCTAssertEqual(Array(bytes[0..<4]), [0, 255, 0, 255], "The picture's red is now green")
         XCTAssertNil(baked.fileName, "A new picture, so the next save writes a new asset")
-        XCTAssertEqual(baked.image.size, picture.size, "…at the size it was placed at")
+        XCTAssertEqual(baked.naturalSize, picture.size, "…at the size it was placed at")
     }
 
     /// A pasted UIImage's orientation is part of the picture the vector layer draws. Baking that
@@ -321,7 +321,7 @@ final class BakeLogicTests: XCTestCase {
                 manager.addVectorLayer(name: "Photo")
                 let photo = manager.layers[manager.currentLayerIndex].id
                 manager.layers[index(photo, manager)].cels[0].vector!.addImage(VectorImageElement(
-                    image: picture,
+                    source: try CanvasFixture.placedSource(picture),
                     transform: LayerTransform(position: CGPoint(x: 32, y: 32), scale: 8 * scale, rotation: 0)))
                 let grade = addEffect(manager, Self.hueRotate)
                 XCTAssertNotNil(manager.layers[index(grade, manager)].layerEffect,
@@ -351,9 +351,9 @@ final class BakeLogicTests: XCTestCase {
                 XCTAssertEqual(afterPixels, beforePixels,
                                "Baking preserves the asymmetric \(name) image's drawn pixels at scale \(scale)")
                 let bakedImage = try XCTUnwrap(manager.layers[index(photo, manager)].cels[0].vector?.images.first)
-                XCTAssertEqual(bakedImage.image.imageOrientation, orientation,
+                XCTAssertEqual(bakedImage.source.descriptor.orientation, orientation,
                                "The baked image retains its \(name) orientation metadata")
-                XCTAssertEqual(bakedImage.image.scale, scale,
+                XCTAssertEqual(bakedImage.source.descriptor.scale, scale,
                                "The baked image retains its image scale")
             }
         }
@@ -362,13 +362,13 @@ final class BakeLogicTests: XCTestCase {
     /// **A video and a stream have no colour to take and no asset to write one to**, so the operation
     /// says so rather than guessing — and the colour route is exhaustive over the element kinds, so a
     /// kind added later has to decide.
-    func testAStreamCannotTakeAColourAndSaysSo() {
+    func testAStreamCannotTakeAColourAndSaysSo() throws {
         let stream = VectorStreamElement(naturalSize: CGSize(width: 32, height: 18),
                                          host: "laptop", port: 47301, sourceLabel: "monitor",
                                          transform: LayerTransform(position: .zero, scale: 1, rotation: 0))
         let operation = BakeOperation.grade(Self.hueRotate, opacity: 1)
 
-        guard case .cannotTakeColour = operation.baked(.stream(stream), using: BakedColours(operation)) else {
+        guard case .cannotTakeColour = try operation.baked(.stream(stream), using: BakedColours(operation)) else {
             return XCTFail("A live stream has no colour")
         }
     }

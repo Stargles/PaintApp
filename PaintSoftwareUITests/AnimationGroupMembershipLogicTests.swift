@@ -436,8 +436,8 @@ final class AnimationGroupMembershipLogicTests: XCTestCase {
                       "fixture: Group B's pose is genuinely a keystone")
 
         f.vector.addImage(VectorImageElement(
-            image: CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 6, height: 6),
-                                            size: CGSize(width: 6, height: 6)),
+            source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 6, height: 6),
+                                            size: CGSize(width: 6, height: 6))),
             transform: LayerTransform(position: CGPoint(x: 54, y: 20), scale: 1, rotation: 0)))
 
         let strokeBefore = try XCTUnwrap(stored(f, f.s3), "fixture: S3 is on the cel")

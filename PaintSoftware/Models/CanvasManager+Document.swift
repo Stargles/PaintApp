@@ -617,7 +617,7 @@ extension CanvasManager {
     /// immediately, while DrawingView delays progress for short jobs. The audit announces known
     /// expensive geometry/landing work early, including native-only documents.
     func resizeCanvasAnnouncingProgress(to newArtworkSize: CGSize, mode: CanvasResizeMode = .cropExpand) {
-        guard !isResizing, let plan = planResize(to: newArtworkSize, mode: mode) else { return }
+        guard !isUpdatingCanvas, let plan = planResize(to: newArtworkSize, mode: mode) else { return }
         guard plan.audit.canProceed else {
             raise(.resizeRefused(plan.audit.refusal))
             return
@@ -927,7 +927,7 @@ extension CanvasManager {
     }
 
     func flipCanvasAnnouncingProgress(horizontal: Bool) {
-        guard !isResizing, canvasSize != nil, commitAllInteractiveState() else { return }
+        guard !isUpdatingCanvas, canvasSize != nil, commitAllInteractiveState() else { return }
         prepareCanvasPixels(.flip(horizontal: horizontal)) { [weak self] prepared in
             self?.flipCanvas(horizontal: horizontal, preparedPixels: prepared)
         }
@@ -968,34 +968,52 @@ extension CanvasManager {
 
     /// LatestWins already owns cancellation/generation for document jobs. Freeze on main, prepare
     /// only source handles off-main, and reject stale identities before the atomic landing.
-    private func prepareCanvasPixels(_ operation: CanvasPixelTransformInput.Operation,
-                                     announceImmediately: Bool = false,
-                                     landing: @escaping (CanvasPixelTransformInput.Prepared) -> Void) {
-        guard !isResizing else { return }
+    @discardableResult
+    func prepareCanvasUpdate(announceImmediately: Bool = false,
+                             _ mint: @escaping () -> LatestWins.Work?) -> Bool {
+        guard !isUpdatingCanvas else { return false }
         let id = UUID()
         canvasUpdatePhase = announceImmediately ? .announced(id) : .preparing(id)
         MainActor.assumeIsolated {
-            if canvasPixelTransforms == nil {
-                canvasPixelTransforms = LatestWins(queue: DispatchQueue(label: "com.paintapp.canvasPixels", qos: .userInitiated))
+            if canvasPreparations == nil {
+                canvasPreparations = LatestWins(queue: DispatchQueue(label: "com.paintapp.canvasPixels", qos: .userInitiated))
             }
-            canvasPixelTransforms?.request { [weak self] in
-                guard let self else { return nil }
-                let input = CanvasPixelTransformInput(self)
+            canvasPreparations?.request { [weak self] in
+                guard let self, self.canvasUpdatePhase.operationID == id else { return nil }
+                guard let work = mint() else { self.canvasUpdatePhase = .idle; return nil }
                 return { [weak self] in
-                    let result = input.prepare(operation)
+                    let landing = work()
                     return { [weak self] in
-                        guard let self else { return }
+                        guard let self, self.canvasUpdatePhase.operationID == id else { return }
                         defer { self.canvasUpdatePhase = .idle }
-                        guard input.stillMatches(self) else { self.raise(.drawingSourceUnavailable); return }
-                        switch result {
-                        case .success(let prepared): landing(prepared)
-                        case .failure: self.raise(.drawingSourceUnavailable)
-                        }
+                        landing()
+                    }
+                }
+            }
+        }
+        return true
+    }
+
+    private func prepareCanvasPixels(_ operation: CanvasPixelTransformInput.Operation,
+                                     announceImmediately: Bool = false,
+                                     landing: @escaping (CanvasPixelTransformInput.Prepared) -> Void) {
+        prepareCanvasUpdate(announceImmediately: announceImmediately) { [weak self] in
+            guard let self else { return nil }
+            let input = CanvasPixelTransformInput(self)
+            return { [weak self] in
+                let result = input.prepare(operation)
+                return { [weak self] in
+                    guard let self else { return }
+                    guard input.stillMatches(self) else { self.raise(.drawingSourceUnavailable); return }
+                    switch result {
+                    case .success(let prepared): landing(prepared)
+                    case .failure: self.raise(.drawingSourceUnavailable)
                     }
                 }
             }
         }
     }
+
 
 
 }

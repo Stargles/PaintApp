@@ -1,39 +1,46 @@
 import Foundation
 import UIKit
 
-/// One immutable version of a cel's raster or baked tier. A snapshot retains this small handle;
+/// One immutable version of a cel raster, baked tier or placed picture. A snapshot retains this small handle;
 /// pixels are acquired only when a consumer actually draws or encodes this version.
 final class RasterSource: RasterResidencyCandidate {
     let residencyID = UUID()
     let size: CGSize
+    let descriptor: RasterImageDescriptor
+    let logicalPayloadBytes: Int
     let residency: RasterResidency
     private let lock = NSLock()
     private var image: UIImage?
     private var lease: RasterSurface.ReadLease?
     private var backing: ProjectStore.RasterBacking?
+    private var exportedPNG: ProjectStore.RasterBacking?
     private var loading: DispatchGroup?
     private var isCheckpointing = false
     private var transparencyProven: Bool?
     private weak var originalAllocation: RasterResidency.Allocation?
 
-    private init(size: CGSize, residency: RasterResidency, image: UIImage?, backing: ProjectStore.RasterBacking?,
+    private init(size: CGSize, residency: RasterResidency, backing: ProjectStore.RasterBacking?,
                  lease: RasterSurface.ReadLease? = nil) {
         self.size = size
+        guard let descriptor = lease?.descriptor ?? backing?.descriptor else { preconditionFailure("A source requires immutable native pixels or backing") }
+        self.descriptor = descriptor
+        self.logicalPayloadBytes = lease?.allocation.byteCount ?? descriptor.byteCount ?? Int.max
         self.residency = residency
-        self.image = image
         self.backing = backing
         self.lease = lease
         self.originalAllocation = lease?.allocation
         residency.register(self)
     }
 
+    deinit { residency.unregister(residencyID) }
+
     static func snapshot(of surface: RasterSurface, size: CGSize) -> RasterSource {
-        RasterSource(size: size, residency: surface.residency, image: nil, backing: nil,
+        RasterSource(size: size, residency: surface.residency, backing: nil,
                      lease: surface.readLease())
     }
 
     static func backed(by backing: ProjectStore.RasterBacking, using residency: RasterResidency) -> RasterSource {
-        RasterSource(size: backing.size, residency: residency, image: nil, backing: backing)
+        RasterSource(size: backing.size, residency: residency, backing: backing)
     }
 
     /// Persistent pixel operations share this admitted drawing seam. The drawing must complete in
@@ -90,7 +97,7 @@ final class RasterSource: RasterResidencyCandidate {
         if let transparencyProven { lock.unlock(); return .success(transparencyProven) }
         // Unresolved backing is unknown. Its ordinary admitted decode supplies the same proof;
         // preparation must not accumulate decoded images before the selected draw is admitted.
-        guard let lease else { lock.unlock(); return .success(false) }
+        guard let lease, lease.descriptor.alpha8Layout != nil else { lock.unlock(); return .success(false) }
         let loading = DispatchGroup()
         loading.enter()
         self.loading = loading
@@ -103,8 +110,8 @@ final class RasterSource: RasterResidencyCandidate {
             lock.unlock()
             loading.leave()
         }
-        // This is the existing tightly packed RGBA buffer's exact maximum alpha-cell visits.
-        guard admittingScan(lease.allocation.byteCount / 4) else { return .failure(.budgetExceeded) }
+        // Row padding is ignored; this is the exact maximum number of native alpha-cell visits.
+        guard admittingScan(lease.descriptor.width * lease.descriptor.height) else { return .failure(.budgetExceeded) }
         let transparent = lease.isFullyTransparent
         inspected = transparent
         return .success(transparent)
@@ -129,6 +136,15 @@ final class RasterSource: RasterResidencyCandidate {
                     UIGraphicsPopContext()
                 }.map { snapshot(of: surface, size: CGSize(width: cg.width, height: cg.height)) }
             }
+        }
+    }
+
+    /// Placed pictures retain their native samples, profile, decode table and presentation.
+    /// The foreign wrapper is borrowed only while an independently owned provider is prepared.
+    static func capturePlaced(_ image: UIImage, using residency: RasterResidency = .shared)
+        -> Result<RasterSource, RasterResidency.Failure> {
+        RasterPixelBuffer.capture(image, using: residency).map { lease in
+            RasterSource(size: image.size, residency: residency, backing: nil, lease: lease)
         }
     }
 
@@ -157,16 +173,19 @@ final class RasterSource: RasterResidencyCandidate {
         // No source/owner lock crosses decoding or admission. Another worker shares the result.
         let result: Result<UIImage, RasterResidency.Failure>
         var transparent: Bool?
+        var decodedLease: RasterPixelBuffer.ReadLease?
         if let lease { result = lease.image() }
         else if let backing {
-            result = backing.decode(using: residency, excluding: [residencyID]).map {
+            result = backing.decode(using: residency, excluding: [residencyID]).flatMap {
                 transparent = $0.isTransparent
-                return $0.image
+                decodedLease = $0.lease
+                return $0.lease.image()
             }
         } else { result = .failure(.unreadableBacking) }
         lock.lock()
         if case .success(let image) = result {
             self.image = image
+            if let decodedLease { self.lease = decodedLease; originalAllocation = decodedLease.allocation }
             if let transparent { transparencyProven = transparent }
         }
         self.loading = nil
@@ -176,86 +195,84 @@ final class RasterSource: RasterResidencyCandidate {
         return result
     }
 
-    /// A durable version clones without decoding. A dirty version uses the same PNG serializer and
-    /// serial queue as normal saving; its backing is owned by this resource's lifetime.
+    /// Public files are derived once per immutable version and cloned by every later save.
     func copyPNG(to destination: URL) -> Result<Void, RasterResidency.Failure> {
-        checkpoint().flatMap { checkpoint in
+        prepareForSave().flatMap { checkpoint in
             ProjectStore.cloneRasterResource(from: checkpoint.backing.url, to: destination)
                 ? .success(()) : .failure(.checkpointFailed)
         }
     }
 
-    /// Called serially before the package's parallel file walk. Dirty versions encode one at a
-    /// time; unchanged versions require no decode and contribute no new encode cost.
-    func prepareForSave() -> Result<ProjectStore.RasterBacking.Checkpoint, RasterResidency.Failure> { checkpoint() }
+    func prepareForSave() -> Result<ProjectStore.RasterBacking.Checkpoint, RasterResidency.Failure> {
+        prepareBacking(exportPNG: true)
+    }
 
-    private func checkpoint() -> Result<ProjectStore.RasterBacking.Checkpoint, RasterResidency.Failure> {
+    /// Authoritative eviction never passes through the public PNG encoder.
+    func checkpointForEviction() -> Result<ProjectStore.RasterBacking, RasterResidency.Failure> {
+        prepareBacking(exportPNG: false).map(\.backing)
+    }
+
+    private func prepareBacking(exportPNG: Bool) -> Result<ProjectStore.RasterBacking.Checkpoint, RasterResidency.Failure> {
         lock.lock()
-        if let backing { lock.unlock(); return .success(.init(backing: backing)) }
-        // A package writer can be ahead of this version's already queued checkpoint. Waiting here
-        // would block the only queue capable of finishing it, so save/render admission must retry.
-        guard !isCheckpointing else { lock.unlock(); return .failure(.checkpointPending) }
-        let heldImage = image
-        let lease = self.lease
-        guard heldImage != nil || lease != nil else { lock.unlock(); return .failure(.unreadableBacking) }
+        let ready = exportPNG ? (exportedPNG ?? (backing?.isPNG == true ? backing : nil)) : backing
+        if let ready { lock.unlock(); return .success(.init(backing: ready)) }
+        guard !isCheckpointing, loading == nil else { lock.unlock(); return .failure(.checkpointPending) }
         isCheckpointing = true
         lock.unlock()
-        let resolvedImage = heldImage.map(Result<UIImage, RasterResidency.Failure>.success)
-            ?? lease.map { $0.image() } ?? .failure(.unreadableBacking)
-        let image: UIImage
-        switch resolvedImage {
-        case .success(let resolved): image = resolved
-        case .failure(let failure):
+        let work = { [self] () -> Result<ProjectStore.RasterBacking.Checkpoint, RasterResidency.Failure> in
+            let result = performPreparation(exportPNG: exportPNG)
             lock.lock(); isCheckpointing = false; lock.unlock()
-            return .failure(failure)
-        }
-        let admission = ProjectStore.RasterBacking.admitCheckpoint(image, using: residency, excluding: [residencyID])
-        let encoder: RasterResidency.Allocation
-        switch admission {
-        case .success(let allocation): encoder = allocation
-        case .failure(let failure):
-            lock.lock(); isCheckpointing = false; lock.unlock()
-            return .failure(failure)
-        }
-        if ProjectStore.isPerformingPackageMutation {
-            let result = ProjectStore.RasterBacking.checkpoint(image, using: residency, encoder: encoder)
-            finishCheckpoint(result)
             return result
         }
+        if ProjectStore.isPerformingPackageMutation { return work() }
         ProjectStore.enqueueRasterCheckpoint { [self] in
-            let result = ProjectStore.RasterBacking.checkpoint(image, using: residency, encoder: encoder)
-            finishCheckpoint(result, releasingImage: true)
+            if case .success = work() {
+                lock.lock(); image = nil; lease = nil; lock.unlock()
+            }
         }
         return .failure(.checkpointPending)
     }
 
-    private func finishCheckpoint(_ result: Result<ProjectStore.RasterBacking.Checkpoint, RasterResidency.Failure>,
-                                  releasingImage: Bool = false) {
-        lock.lock(); defer { lock.unlock() }
-        if case .success(let checkpoint) = result {
-            self.backing = checkpoint.backing
-            originalAllocation?.markDurable()
-            if releasingImage { image = nil; lease = nil }
+    private func performPreparation(exportPNG: Bool) -> Result<ProjectStore.RasterBacking.Checkpoint, RasterResidency.Failure> {
+        precondition(ProjectStore.isPerformingPackageMutation)
+        lock.lock(); let native = backing; lock.unlock()
+        if native == nil {
+            // resolveImage only borrows our own charged provider; never a foreign UIImage alias.
+            if case .failure(let failure) = resolveImage() { return .failure(failure) }
+            lock.lock(); let pixels = lease; lock.unlock()
+            guard let pixels else { return .failure(.unreadableBacking) }
+            switch ProjectStore.RasterBacking.checkpointNative(pixels) {
+            case .failure(let failure): return .failure(failure)
+            case .success(let prepared):
+                lock.lock(); backing = prepared; originalAllocation?.markDurable(); lock.unlock()
+            }
         }
-        isCheckpointing = false
+        lock.lock(); let authoritative = backing; lock.unlock()
+        guard let authoritative else { return .failure(.checkpointFailed) }
+        guard exportPNG else { return .success(.init(backing: authoritative)) }
+        if authoritative.isPNG { return .success(.init(backing: authoritative)) }
+        return resolveImage().flatMap { image in
+            ProjectStore.RasterBacking.admitCheckpoint(image, using: residency, excluding: [residencyID]).flatMap { encoder in
+                ProjectStore.RasterBacking.checkpoint(image, using: residency, encoder: encoder).map { checkpoint in
+                    lock.lock(); exportedPNG = checkpoint.backing; lock.unlock()
+                    return checkpoint
+                }
+            }
+        }
     }
 
     func releaseResidentPixels() -> Bool {
-        // An eviction never waits for a source whose worker may itself be requesting admission.
         guard lock.try() else { return false }
         guard image != nil || lease != nil, loading == nil, !isCheckpointing else { lock.unlock(); return false }
         let needsCheckpoint = backing == nil
         lock.unlock()
         if needsCheckpoint {
-            guard case .success = checkpoint() else { return false }
+            guard case .success = checkpointForEviction() else { return false }
         }
         lock.lock()
         guard backing != nil, loading == nil, !isCheckpointing else { lock.unlock(); return false }
-        image = nil
-        lease = nil
+        image = nil; lease = nil
         lock.unlock()
-        // An escaping CGImage can still hold these pixels. Its provider retains the allocation;
-        // admission reads the remaining charge rather than assuming this dropped the last reader.
         return true
     }
 }

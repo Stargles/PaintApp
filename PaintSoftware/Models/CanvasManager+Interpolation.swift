@@ -29,6 +29,8 @@ extension CanvasManager {
         let guidesBefore = guideStrokes
         let layersBefore = layers
         let elementsBefore = canvases.map { $0.elements }
+        let sourcesBefore = RasterUndoCost.sources(in: layers).merging(
+            RasterUndoCost.sources(elements: elementsBefore), uniquingKeysWith: { first, _ in first })
 
         // `defer` guards against `body` exiting early and leaving undo disabled.
         do {
@@ -42,7 +44,10 @@ extension CanvasManager {
         let layersAfter = layers
         let elementsAfter = canvases.map { $0.elements }
 
-        let cost = UndoBudget.addingCost(4096, VectorUndoCost.bytes(fromLists: elementsBefore, toLists: elementsAfter))
+        let cost = [4096, VectorUndoCost.geometryBytes(fromLists: elementsBefore, toLists: elementsAfter),
+                    RasterUndoCost.bytes(from: sourcesBefore, to: RasterUndoCost.sources(in: layers).merging(
+                        RasterUndoCost.sources(elements: elementsAfter), uniquingKeysWith: { first, _ in first }))]
+            .reduce(0, UndoBudget.addingCost)
         recordUndo(label: label, cost: cost, undo: { [weak self] in
             self?.applyInterpolationState(groups: groupsBefore, guides: guidesBefore,
                                           layers: layersBefore, canvases: canvases,

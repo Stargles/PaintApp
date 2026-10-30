@@ -100,8 +100,8 @@ final class InkDistortLogicTests: XCTestCase {
         XCTAssertTrue(manager.vectorFloatIsDistort, "so a corner grip means Distort")
 
         manager.cancelVectorFloat()
-        vector.addImage(VectorImageElement(id: UUID(), image: CanvasFixture.solidImage(.red,
-                                                                                         rect: CGRect(x: 0, y: 0, width: 8, height: 8)),
+        vector.addImage(VectorImageElement(id: UUID(), source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.red,
+                                                                                         rect: CGRect(x: 0, y: 0, width: 8, height: 8))),
                                               transform: LayerTransform(position: CGPoint(x: 32, y: 32),
                                                                         scale: 1, rotation: 0)))
         XCTAssertTrue(manager.beginVectorWholeCelMove(), "setup: the same float, now carrying a photo")
@@ -236,7 +236,7 @@ final class InkDistortLogicTests: XCTestCase {
     /// mirror bit is six numbers and a sign; a homography is eight.
     func testAPlacedImageAndAVideoDeclineAProjectiveMap() throws {
         let image = VectorImageElement(id: UUID(),
-                                       image: CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 8, height: 8)),
+                                       source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 8, height: 8))),
                                        transform: LayerTransform(position: CGPoint(x: 40, y: 40),
                                                                  scale: 1, rotation: 0))
         let video = VectorVideoElement(assetURL: URL(fileURLWithPath: "/dev/null"),

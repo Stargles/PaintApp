@@ -1270,16 +1270,16 @@ final class LassoMoveLogicTests: XCTestCase {
     ///
     /// Watched failing with `mapping`'s `.image` arm left at position-only: *("1.0") is not equal to
     /// ("2.0")* — the photo stayed its original size while everything around it doubled.
-    func testAScaledFloatCarriesItsPlacedImageAndItsText() {
+    func testAScaledFloatCarriesItsPlacedImageAndItsText() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 28, y: 24), to: CGPoint(x: 36, y: 24), size: 3))
         vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 28, y: 28, width: 8, height: 4),
                                                       transform: nil),
                                          color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
                                          opacity: 1))
-        vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+        vector.addImage(VectorImageElement(source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.green,
                                                                           rect: CGRect(x: 0, y: 0, width: 6, height: 6),
-                                                                          size: CGSize(width: 6, height: 6)),
+                                                                          size: CGSize(width: 6, height: 6))),
                                            transform: LayerTransform(position: CGPoint(x: 30, y: 36),
                                                                      scale: 1, rotation: 0)))
         var recipe = TextRecipe(string: "hi")
@@ -1326,11 +1326,11 @@ final class LassoMoveLogicTests: XCTestCase {
 
     /// A rotation turns a placed image as well as moving it — the other half of the `.image` arm, and
     /// the one a translation-only `mapping` could never have exposed.
-    func testARotatedFloatTurnsItsPlacedImage() {
+    func testARotatedFloatTurnsItsPlacedImage() throws {
         let (manager, layerIndex, vector) = fixture()
-        vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+        vector.addImage(VectorImageElement(source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.green,
                                                                           rect: CGRect(x: 0, y: 0, width: 8, height: 8),
-                                                                          size: CGSize(width: 8, height: 8)),
+                                                                          size: CGSize(width: 8, height: 8))),
                                            transform: LayerTransform(position: CGPoint(x: 32, y: 32),
                                                                      scale: 1, rotation: 0.2)))
         select(manager, layerIndex, loop(CGRect(x: 16, y: 16, width: 32, height: 32)))
@@ -1748,9 +1748,9 @@ final class LassoMoveLogicTests: XCTestCase {
     func testMirroringAPieceCarryingAStrokeAndAPhotoFlipsBothTogether() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
-        vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+        vector.addImage(VectorImageElement(source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.green,
                                                                            rect: CGRect(x: 0, y: 0, width: 6, height: 6),
-                                                                           size: CGSize(width: 6, height: 6)),
+                                                                           size: CGSize(width: 6, height: 6))),
                                            transform: LayerTransform(position: CGPoint(x: 30, y: 34),
                                                                      scale: 1, rotation: 0)))
         let pixelsBefore = try cgImage(vector)
@@ -2070,12 +2070,12 @@ final class LassoMoveLogicTests: XCTestCase {
     /// file, the text box in `testAStretchedTextBoxDistortsItsLetterformsAndDoesNotReflowTheWords`, the
     /// photo in `PlacedImageShapeLogicTests`. What this one keeps is that a *mixed* piece takes the
     /// mode at all, which is the thing the two deleted properties used to decide.
-    func testFreeformIsOfferedOnEveryKindThePieceCanCarry() {
+    func testFreeformIsOfferedOnEveryKindThePieceCanCarry() throws {
         let (imageManager, imageLayer, imageVector) = fixture()
         imageVector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
-        imageVector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+        imageVector.addImage(VectorImageElement(source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.green,
                                                                                 rect: CGRect(x: 0, y: 0, width: 6, height: 6),
-                                                                                size: CGSize(width: 6, height: 6)),
+                                                                                size: CGSize(width: 6, height: 6))),
                                                 transform: LayerTransform(position: CGPoint(x: 30, y: 34),
                                                                           scale: 1, rotation: 0)))
         select(imageManager, imageLayer, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
@@ -2900,7 +2900,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// Uniform, Rotate 45° and Mirror keep working at any box angle, as they did in phase 1: a
     /// uniform drag scales the ratio of two radii about the anchor and a rotate knob measures a swept
     /// angle about the same one, so neither reads a rotation at all.
-    func testFreeformIsOfferedAtEveryBoxAngleAndOnEveryKind() {
+    func testFreeformIsOfferedAtEveryBoxAngleAndOnEveryKind() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
         select(manager, layerIndex, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
@@ -2929,9 +2929,9 @@ final class LassoMoveLogicTests: XCTestCase {
         // stretch made about the visible edge cannot be confused with one made about the ink's own.
         let (imageManager, imageLayer, imageVector) = fixture()
         imageVector.addStroke(stroke(from: CGPoint(x: 26, y: 24), to: CGPoint(x: 38, y: 24), size: 3))
-        imageVector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+        imageVector.addImage(VectorImageElement(source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.green,
                                                                                 rect: CGRect(x: 0, y: 0, width: 6, height: 6),
-                                                                                size: CGSize(width: 6, height: 6)),
+                                                                                size: CGSize(width: 6, height: 6))),
                                                 transform: LayerTransform(position: CGPoint(x: 30, y: 34),
                                                                           scale: 1, rotation: 0)))
         select(imageManager, imageLayer, loop(CGRect(x: 18, y: 16, width: 32, height: 30)))
@@ -3638,7 +3638,7 @@ final class LassoMoveLogicTests: XCTestCase {
     ///
     /// Drives the engine seam directly rather than through `recolorSelection`, because the whole
     /// point is that the two disagree about eligibility while agreeing about geometry.
-    func testContainmentAnswersForEveryKindIncludingTheOnesARecolourSkips() {
+    func testContainmentAnswersForEveryKindIncludingTheOnesARecolourSkips() throws {
         let (_, _, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 20, y: 18), to: CGPoint(x: 40, y: 18), size: 5))
         vector.addStroke(stroke(from: CGPoint(x: 22, y: 22), to: CGPoint(x: 38, y: 22),
@@ -3647,9 +3647,9 @@ final class LassoMoveLogicTests: XCTestCase {
                                                       transform: nil),
                                          color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1),
                                          opacity: 1))
-        vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+        vector.addImage(VectorImageElement(source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.green,
                                                                           rect: CGRect(x: 0, y: 0, width: 6, height: 6),
-                                                                          size: CGSize(width: 6, height: 6)),
+                                                                          size: CGSize(width: 6, height: 6))),
                                            transform: LayerTransform(position: CGPoint(x: 30, y: 36),
                                                                      scale: 1, rotation: 0)))
         var recipe = TextRecipe(string: "hi")
@@ -3851,13 +3851,13 @@ final class LassoMoveLogicTests: XCTestCase {
     /// has a colour a recolour could change, so neither is counted — and a step that undoes to an
     /// identical document is worse than no step, because the artist presses undo expecting their own
     /// last real edit back.
-    func testALoopCatchingOnlyAnEraserAndAPhotoRecordsNoHistoryStep() {
+    func testALoopCatchingOnlyAnEraserAndAPhotoRecordsNoHistoryStep() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 44, y: 20),
                                 size: 6, composite: .erase))
-        vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+        vector.addImage(VectorImageElement(source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.green,
                                                                           rect: CGRect(x: 0, y: 0, width: 12, height: 12),
-                                                                          size: CGSize(width: 12, height: 12)),
+                                                                          size: CGSize(width: 12, height: 12))),
                                            transform: LayerTransform(position: CGPoint(x: 30, y: 26),
                                                                      scale: 1, rotation: 0)))
         let before = vector.elements
@@ -4374,16 +4374,16 @@ final class LassoMoveLogicTests: XCTestCase {
 
     /// **A placed image follows the same centre rule, in both directions** — the second kind that
     /// cannot be parted, answered the same way for the same reason.
-    func testAPlacedImageIsClearedWholeByItsCentreAndOneMerelyClippedIsUntouched() {
+    func testAPlacedImageIsClearedWholeByItsCentreAndOneMerelyClippedIsUntouched() throws {
         let (manager, layerIndex, vector) = fixture()
-        let caught = VectorImageElement(image: CanvasFixture.solidImage(.green,
+        let caught = VectorImageElement(source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.green,
                                                                        rect: CGRect(x: 0, y: 0, width: 12, height: 12),
-                                                                       size: CGSize(width: 12, height: 12)),
+                                                                       size: CGSize(width: 12, height: 12))),
                                         transform: LayerTransform(position: CGPoint(x: 24, y: 24),
                                                                   scale: 1, rotation: 0))
-        let clipped = VectorImageElement(image: CanvasFixture.solidImage(.red,
+        let clipped = VectorImageElement(source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.red,
                                                                         rect: CGRect(x: 0, y: 0, width: 20, height: 12),
-                                                                        size: CGSize(width: 20, height: 12)),
+                                                                        size: CGSize(width: 20, height: 12))),
                                          transform: LayerTransform(position: CGPoint(x: 46, y: 20),
                                                                    scale: 1, rotation: 0))
         vector.addImage(caught)
@@ -4680,11 +4680,11 @@ final class LassoMoveLogicTests: XCTestCase {
     /// A corners-only containment test would be wrong here and is not what this asks: `subtracting`
     /// is a region operation, so a loop that leaves any part of the rectangle uncovered fails
     /// Enclosed however its four corners happen to fall.
-    func testAPlacedImageFollowsItsOwnQuadInTouchingAndEnclosedAndItsCentreInCut() {
+    func testAPlacedImageFollowsItsOwnQuadInTouchingAndEnclosedAndItsCentreInCut() throws {
         let (_, _, vector) = fixture()
-        vector.addImage(VectorImageElement(image: CanvasFixture.solidImage(.green,
+        vector.addImage(VectorImageElement(source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.green,
                                                                           rect: CGRect(x: 0, y: 0, width: 6, height: 6),
-                                                                          size: CGSize(width: 6, height: 6)),
+                                                                          size: CGSize(width: 6, height: 6))),
                                            transform: LayerTransform(position: CGPoint(x: 30, y: 36),
                                                                      scale: 1, rotation: 0)))
         let id = vector.elements[0].id

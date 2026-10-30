@@ -208,7 +208,8 @@ extension CanvasManager {
             switch treatment {
             case .operation(let operation):
                 let colours = memo.colours(for: operation)
-                elements = vector.elements.map { operation.baked($0, using: colours).element ?? $0 }
+                do { elements = try vector.elements.map { try operation.baked($0, using: colours).element ?? $0 } }
+                catch { raise(.drawingSourceUnavailable); return false }
             case .pose(let run):
                 elements = Self.baked(vector.elements, through: run.mappings, inheriting: run.inherited)
                 layers[at.layer].cels[at.cel].transformTracks = [:]

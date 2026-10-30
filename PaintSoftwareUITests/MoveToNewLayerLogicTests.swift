@@ -345,8 +345,8 @@ final class MoveToNewLayerLogicTests: XCTestCase {
                     celID: manager.layers[sourceIndex].cels[0].id, atFrame: 0).isEmpty,
                     "PREMISE: the target's map filter omits this composition rather than refusing the target")
             } else {
-                let image = VectorImageElement(image: CanvasFixture.solidImage(.red,
-                    rect: CGRect(x: 0, y: 0, width: 8, height: 8)),
+                let image = VectorImageElement(source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.red,
+                    rect: CGRect(x: 0, y: 0, width: 8, height: 8))),
                     transform: LayerTransform(position: CGPoint(x: 32, y: 32), scale: 1, rotation: 0))
                 vector.addImage(image)
                 let pose = PoseQuad(box: box, corners: Quad(CGPoint(x: 8, y: 0), CGPoint(x: 56, y: 0),

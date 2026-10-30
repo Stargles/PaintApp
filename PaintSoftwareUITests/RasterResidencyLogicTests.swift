@@ -25,6 +25,102 @@ final class RasterResidencyLogicTests: XCTestCase {
         return Array(bytes.prefix(4))
     }
 
+    func testTransientSourcesRetireTheirEvictionRegistrationsWithoutWaitingForPressure() throws {
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+        weak var retired: RasterSource?
+        for _ in 0..<256 {
+            try autoreleasepool {
+                let surface = try surface(owner)
+                let source = RasterSource.snapshot(of: surface, size: CGSize(width: width, height: height))
+                retired = source
+                XCTAssertEqual(owner.usage.registeredCandidateCount, 1)
+                XCTAssertEqual(try pixel(XCTUnwrap(source.resolveImage().get().cgImage)), [255, 0, 0, 255])
+            }
+            XCTAssertNil(retired)
+            XCTAssertEqual(owner.usage.registeredCandidateCount, 0,
+                           "Dead source registrations must leave without an admission failure")
+            XCTAssertEqual(owner.usage.chargedBytes, 0)
+            XCTAssertEqual(owner.usage.reservedCheckpointBytes, 0)
+        }
+        XCTAssertEqual(owner.usage.allocations, 256)
+        XCTAssertEqual(owner.usage.evictions, 0, "Retirement must not depend on a pressure pass")
+    }
+
+    func testTransientTexturesRetireTheirEvictionRegistrationsWithoutWaitingForPressure() throws {
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+        weak var retired: RasterLayerTexture?
+        for _ in 0..<256 {
+            try autoreleasepool {
+                let texture = try RasterLayerTexture.rendered(size: CGSize(width: width, height: height), using: owner) { context in
+                    context.setFillColor(UIColor.blue.cgColor)
+                    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+                    return true
+                }.get()
+                retired = texture
+                XCTAssertTrue(texture.hasContent)
+                XCTAssertEqual(owner.usage.registeredCandidateCount, 1)
+                XCTAssertEqual(owner.usage.pixelBytes, pictureBytes)
+            }
+            XCTAssertNil(retired)
+            XCTAssertEqual(owner.usage.registeredCandidateCount, 0,
+                           "Dead texture registrations must leave without an admission failure")
+            XCTAssertEqual(owner.usage.chargedBytes, 0)
+            XCTAssertEqual(owner.usage.reservedCheckpointBytes, 0)
+        }
+        XCTAssertEqual(owner.usage.allocations, 256)
+        XCTAssertEqual(owner.usage.evictions, 0, "Retirement must not depend on a pressure pass")
+    }
+
+    func testRetiringASourceRegistrationKeepsAnEscapedProviderCharged() throws {
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+        weak var retired: RasterSource?
+        var escaped: CGImage?
+        try autoreleasepool {
+            let surface = try surface(owner)
+            let source = RasterSource.snapshot(of: surface, size: CGSize(width: width, height: height))
+            retired = source
+            escaped = try XCTUnwrap(source.resolveImage().get().cgImage)
+            XCTAssertEqual(owner.usage.registeredCandidateCount, 1)
+        }
+        XCTAssertNil(retired)
+        XCTAssertEqual(owner.usage.registeredCandidateCount, 0,
+                       "The source registration ends before its escaped pixel provider")
+        XCTAssertEqual(owner.usage.pixelBufferCount, 1)
+        XCTAssertEqual(owner.usage.pixelBytes, pictureBytes)
+        XCTAssertEqual(try pixel(XCTUnwrap(escaped)), [255, 0, 0, 255])
+        escaped = nil
+        XCTAssertEqual(owner.usage.chargedBytes, 0)
+        XCTAssertEqual(owner.usage.reservedCheckpointBytes, 0)
+    }
+
+    func testALiveColdSourceKeepsItsRegistrationForTheNextEviction() throws {
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+        var live: RasterSource?
+        try autoreleasepool {
+            let surface = try surface(owner)
+            let source = RasterSource.snapshot(of: surface, size: CGSize(width: width, height: height))
+            _ = try ProjectStore.serializingPackageMutation { try source.checkpointForEviction().get() }
+            XCTAssertTrue(source.releaseResidentPixels())
+            live = source
+        }
+        XCTAssertEqual(owner.usage.chargedBytes, 0)
+        XCTAssertEqual(owner.usage.registeredCandidateCount, 1, "A live cold version stays eligible")
+        for expectedEvictions in 1...2 {
+            try autoreleasepool {
+                XCTAssertEqual(try pixel(XCTUnwrap(live?.resolveImage().get().cgImage)), [255, 0, 0, 255])
+            }
+            XCTAssertEqual(owner.usage.pixelBytes, pictureBytes)
+            let held = try owner.admitWorking(owner.budgetBytes).get()
+            XCTAssertEqual(owner.usage.pixelBytes, 0, "The rehydrated live version must still be evictable")
+            XCTAssertEqual(owner.usage.registeredCandidateCount, 1)
+            XCTAssertEqual(owner.usage.evictions, expectedEvictions)
+            withExtendedLifetime(held) {}
+        }
+        live = nil
+        XCTAssertEqual(owner.usage.registeredCandidateCount, 0)
+        XCTAssertEqual(owner.usage.chargedBytes, 0)
+    }
+
     func testExtractedCGImageKeepsItsPixelsChargedAfterSurfaceAndUIImageAreReleased() throws {
         let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
         var escaped: CGImage?
@@ -445,7 +541,10 @@ final class RasterResidencyLogicTests: XCTestCase {
         XCTAssertEqual(owner.usage.allocations, 0)
         XCTAssertFalse(blank.isCertainlyTransparent, "Unvisited content is never assumed empty")
         try autoreleasepool {
-            _ = try blank.resolveImage().get()
+            let blankImage = try XCTUnwrap(blank.resolveImage().get().cgImage)
+            let blankBytes = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(blankImage, width: width, height: height))
+            XCTAssertTrue(stride(from: 3, to: blankBytes.count, by: 4).allSatisfy { blankBytes[$0] == 0 },
+                          "PREMISE: the actual native decoded blank draws fully transparent")
             let image = try XCTUnwrap(painted.resolveImage().get().cgImage)
             let bytes = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(image, width: width, height: height))
             XCTAssertEqual(stride(from: 3, to: bytes.count, by: 4).filter { bytes[$0] > 0 }.count, 1)
@@ -527,7 +626,10 @@ final class RasterResidencyLogicTests: XCTestCase {
         }.get())
         XCTAssertEqual(owner.usage, cold)
         XCTAssertFalse(deferred.isCertainlyTransparent, "Uninspected backing remains unknown")
-        _ = try deferred.resolveImage().get()
+        let deferredImage = try XCTUnwrap(deferred.resolveImage().get().cgImage)
+        let deferredBytes = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(deferredImage, width: width, height: height))
+        XCTAssertTrue(stride(from: 3, to: deferredBytes.count, by: 4).allSatisfy { deferredBytes[$0] == 0 },
+                      "PREMISE: the ordinary native backed image draws fully transparent")
         XCTAssertTrue(deferred.isCertainlyTransparent, "Ordinary backed decode keeps its existing exact proof")
         let unreadable = RasterSource.backed(by: backing, using: owner)
         try FileManager.default.removeItem(at: backing.url)
@@ -1586,4 +1688,566 @@ final class RasterResidencyLogicTests: XCTestCase {
         XCTAssertEqual(owner.usage.pixelBufferCount, 0)
     }
 
+}
+
+extension RasterResidencyLogicTests {
+    private final class NativeReleaseCount { var value = 0 }
+    private final class NativeFixtureBytes {
+        let pointer: UnsafeMutableRawPointer
+        let count: Int
+        let releases: NativeReleaseCount
+        init(_ bytes: Data, releases: NativeReleaseCount) {
+            count = bytes.count; self.releases = releases
+            pointer = .allocate(byteCount: bytes.count, alignment: 16)
+            bytes.withUnsafeBytes { pointer.copyMemory(from: $0.baseAddress!, byteCount: bytes.count) }
+        }
+        func provider() throws -> CGDataProvider {
+            let retained = Unmanaged.passRetained(self)
+            guard let provider = CGDataProvider(dataInfo: retained.toOpaque(), data: pointer, size: count,
+                releaseData: { info, _, _ in if let info { Unmanaged<NativeFixtureBytes>.fromOpaque(info).release() } })
+            else { retained.release(); throw NSError(domain: "NativeFixture", code: 1) }
+            return provider
+        }
+        deinit { pointer.deallocate(); releases.value += 1 }
+    }
+
+    private struct NativeImageFields: Equatable {
+        let width: Int, height: Int, row: Int, bpc: Int, bpp: Int
+        let bitmap: UInt32, alpha: UInt32
+        let intent: Int32
+        let interpolates: Bool
+        let model: Int32
+        let profile: Data?
+        let decode: [CGFloat]?
+        init(_ image: CGImage) throws {
+            let space = try XCTUnwrap(image.colorSpace)
+            width = image.width; height = image.height; row = image.bytesPerRow
+            bpc = image.bitsPerComponent; bpp = image.bitsPerPixel
+            bitmap = image.bitmapInfo.rawValue; alpha = image.alphaInfo.rawValue
+            intent = image.renderingIntent.rawValue; interpolates = image.shouldInterpolate
+            model = space.model.rawValue; profile = space.copyICCData().map { $0 as Data }
+            decode = image.decode.map { Array(UnsafeBufferPointer(start: $0, count: space.numberOfComponents * 2)) }
+        }
+    }
+
+    /// Eight actual native layouts; every raw row includes deliberately nonzero padding.
+    private func nativeFixture(_ family: Int, releases: NativeReleaseCount) throws -> (image: CGImage, bytes: Data) {
+        let components = family == 4 || family == 7 ? 1 : (family == 5 ? 2 : 4)
+        let depth = family == 2 || family == 3 || family == 5 ? 16 : 8
+        let row = components * 3 * (depth / 8) + 4
+        let space: CGColorSpace
+        switch family {
+        case 0: space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        case 1, 2: space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.displayP3))
+        case 3: space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3))
+        case 4, 5: space = CGColorSpaceCreateDeviceGray()
+        case 6: space = CGColorSpaceCreateDeviceCMYK()
+        default:
+            let palette: [UInt8] = [255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0]
+            space = try XCTUnwrap(palette.withUnsafeBufferPointer {
+                CGColorSpace(indexedBaseSpace: CGColorSpaceCreateDeviceRGB(), last: 3, colorTable: $0.baseAddress!)
+            })
+        }
+        let alpha: CGImageAlphaInfo = family == 4 || family == 6 || family == 7 ? .none : (family == 2 ? .last : .premultipliedLast)
+        let order: UInt32 = depth == 16 ? CGBitmapInfo.byteOrder16Little.rawValue
+            : (components == 4 && family != 6 ? CGBitmapInfo.byteOrder32Big.rawValue : 0)
+        let bitmap = CGBitmapInfo(rawValue: alpha.rawValue | order | (family == 3 ? CGBitmapInfo.floatComponents.rawValue : 0))
+        var bytes = Data(repeating: 0xA7, count: row * 2)
+        let coverage: [Double] = [1, 0, 1.0 / 255, 0.25, 0.5, 1]
+        let colours: [[Double]] = [[1, 0, 0.125], [0.37, 0.79, 0.19], [0.01, 0.29, 0.93],
+                                   [0.83, 0.02, 0.41], [0.14, 0.91, 0.07], [0.61, 0.23, 0.87]]
+        for pixel in 0..<6 {
+            let a = coverage[pixel]
+            var channels: [Double]
+            switch family {
+            case 4: channels = [colours[pixel][0]]
+            case 5: channels = [colours[pixel][0] * a, a]
+            case 6: channels = [colours[pixel][0], colours[pixel][1], colours[pixel][2], 0] // K=0 is opaque.
+            case 7: channels = [Double(pixel % 4) / 255]
+            default:
+                channels = family == 3 && pixel == 0 ? [1.375, -0.125, 0.625] : colours[pixel]
+                if family != 2 { channels = channels.map { $0 * a } }
+                channels.append(a)
+            }
+            let offset = (pixel / 3) * row + (pixel % 3) * components * (depth / 8)
+            for component in 0..<components {
+                if depth == 8 { bytes[offset + component] = UInt8((channels[component] * 255).rounded()) }
+                else {
+                    let value = family == 3 ? Float16(channels[component]).bitPattern : UInt16((channels[component] * 65535).rounded())
+                    bytes[offset + component * 2] = UInt8(truncatingIfNeeded: value)
+                    bytes[offset + component * 2 + 1] = UInt8(truncatingIfNeeded: value >> 8)
+                }
+            }
+        }
+        let storage = NativeFixtureBytes(bytes, releases: releases), provider = try storage.provider()
+        let decode: [CGFloat]? = family == 0 ? [0.125, 0.875, 0, 1, 0, 1] : nil
+        func make(_ ranges: UnsafePointer<CGFloat>?) -> CGImage? {
+            CGImage(width: 3, height: 2, bitsPerComponent: depth, bitsPerPixel: depth * components,
+                bytesPerRow: row, space: space, bitmapInfo: bitmap, provider: provider, decode: ranges,
+                shouldInterpolate: false, intent: .relativeColorimetric)
+        }
+        let made: CGImage?
+        if let decode { made = decode.withUnsafeBufferPointer { make($0.baseAddress) } }
+        else { made = make(nil) }
+        let image = try XCTUnwrap(made, "PREMISE: family\(family) has its explicit native representation")
+        XCTAssertEqual(image.bitsPerComponent, depth); XCTAssertEqual(image.bitsPerPixel, depth * components)
+        XCTAssertEqual(image.bitmapInfo, bitmap); XCTAssertEqual(image.alphaInfo, alpha)
+        XCTAssertEqual(image.bytesPerRow, row)
+        XCTAssertEqual(try NativeImageFields(image).decode, decode)
+        return (image, bytes)
+    }
+
+    private func nativeSamples(_ image: CGImage) throws -> Data {
+        let data = try XCTUnwrap(image.dataProvider?.data)
+        return Data(bytes: try XCTUnwrap(CFDataGetBytePtr(data)), count: CFDataGetLength(data))
+    }
+
+    /// Explicit high-depth P3 destination, always drawn into the SAME original-presentation rect.
+    /// A PNG reader resetting UIImage.scale to1 must not change the codec comparison's geometry.
+    private func nativeDrawing(_ image: UIImage, rect: CGRect) throws -> Data {
+        let side = 16, row = 16 * 4 * MemoryLayout<Float>.size
+        var bytes = Data(count: row * side)
+        try bytes.withUnsafeMutableBytes { data in
+            let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3))
+            let info = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.floatComponents.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+            let cg = try XCTUnwrap(CGContext(data: data.baseAddress, width: side, height: side, bitsPerComponent: 32,
+                bytesPerRow: row, space: space, bitmapInfo: info), "PREMISE: explicit Float32 P3 destination")
+            cg.interpolationQuality = .none
+            cg.translateBy(x: 0, y: CGFloat(side)); cg.scaleBy(x: 1, y: -1)
+            UIGraphicsPushContext(cg); defer { UIGraphicsPopContext() }
+            image.draw(in: rect)
+        }
+        let samples = bytes.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+        XCTAssertTrue(samples.allSatisfy(\.isFinite))
+        XCTAssertTrue(stride(from: 3, to: samples.count, by: 4).contains { samples[$0] > 0 }, "PREMISE: the picture really draws")
+        return bytes
+    }
+
+    func testNativePlacedSourcesKeepOneHundredTwentyEightPresentationsExactThroughPrivateEvictionAndPublicPNG() throws {
+        let orientations: [UIImage.Orientation] = [.up, .down, .left, .right, .upMirrored, .downMirrored, .leftMirrored, .rightMirrored]
+        let referenceDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("native-png-reference-\(UUID())")
+        try FileManager.default.createDirectory(at: referenceDirectory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: referenceDirectory) }
+        var checked = 0, normalizedPNGEqual = 0
+        for family in 0..<8 {
+            for orientation in orientations {
+                for scale in [CGFloat(1), 2] {
+                    let owner = RasterResidency(budgetBytes: 4096, hasHeadroom: { _ in true })
+                    let original = NativeReleaseCount()
+                    var source: RasterSource?, escaped: CGImage?
+                    var fields: NativeImageFields?, samples = Data(), drawing = Data()
+                    var rect = CGRect.zero, pointSize = CGSize.zero
+                    try autoreleasepool {
+                        let fixture = try nativeFixture(family, releases: original)
+                        let input = UIImage(cgImage: fixture.image, scale: scale, orientation: orientation)
+                        fields = try NativeImageFields(fixture.image)
+                        samples = fixture.bytes; pointSize = input.size
+                        rect = CGRect(x: 2, y: 2, width: input.size.width * 4, height: input.size.height * 4)
+                        drawing = try nativeDrawing(input, rect: rect)
+                        source = try RasterSource.capturePlaced(input, using: owner).get()
+                        let captured = try XCTUnwrap(source)
+                        XCTAssertEqual(captured.size, input.size)
+                        XCTAssertEqual(captured.descriptor.scale, scale); XCTAssertEqual(captured.descriptor.orientation, orientation)
+                        XCTAssertEqual(captured.logicalPayloadBytes, samples.count)
+                        let owned = try captured.resolveImage().get()
+                        XCTAssertEqual(try NativeImageFields(try XCTUnwrap(owned.cgImage)), fields)
+                        XCTAssertEqual(try nativeSamples(XCTUnwrap(owned.cgImage)), samples)
+                        XCTAssertEqual(try nativeDrawing(owned, rect: rect), drawing)
+                        if family >= 4 {
+                            var scans = 0
+                            XCTAssertFalse(try captured.prepareTransparencyProof { _ in scans += 1; return false }.get())
+                            XCTAssertEqual(scans, 0, "Unknown alpha layouts never charge or refuse a nonexistent RGBA scan")
+                            XCTAssertFalse(captured.isCertainlyTransparent, "CMYK K=0 and opaque gray/indexed pictures remain ink")
+                        }
+                        let native = try ProjectStore.serializingPackageMutation { try captured.checkpointForEviction().get() }
+                        XCTAssertFalse(native.isPNG); XCTAssertEqual(native.url.pathExtension, "raster")
+                        if family < 4 {
+                            let first = try ProjectStore.serializingPackageMutation { try captured.prepareForSave().get() }
+                            let second = try ProjectStore.serializingPackageMutation { try captured.prepareForSave().get() }
+                            XCTAssertTrue(first.encoded); XCTAssertFalse(second.encoded)
+                            XCTAssertEqual(first.backing.url, second.backing.url, "One PNG export per immutable version")
+                            let oldURL = referenceDirectory.appendingPathComponent("\(family)-\(orientation.rawValue)-\(scale).png")
+                            try XCTUnwrap(ProjectStore.encodeRasterPNG(input)).write(to: oldURL)
+                            let oldRead = try XCTUnwrap(UIImage(contentsOfFile: oldURL.path))
+                            let newRead = try XCTUnwrap(UIImage(contentsOfFile: first.backing.url.path))
+                            XCTAssertEqual(oldRead.imageOrientation, newRead.imageOrientation)
+                            XCTAssertEqual(oldRead.size, newRead.size)
+                            XCTAssertEqual(try nativeDrawing(oldRead, rect: rect), try nativeDrawing(newRead, rect: rect),
+                                           "Public output keeps the actual old PNG codec's picture")
+                            if try nativeDrawing(oldRead, rect: rect) == drawing { normalizedPNGEqual += 1 }
+                            XCTAssertEqual(try nativeDrawing(try captured.resolveImage().get(), rect: rect), drawing,
+                                           "Public PNG export cannot replace the live native picture")
+                        }
+                        XCTAssertTrue(captured.releaseResidentPixels())
+                    }
+                    XCTAssertEqual(original.value, 1, "The source must not keep its original UIImage/CGImage/provider alive")
+                    XCTAssertEqual(owner.usage.pixelBufferCount, 0)
+                    let beforeMetadata = owner.usage.allocations
+                    try autoreleasepool {
+                        let value = try XCTUnwrap(source)
+                        let element = VectorImageElement(source: value, transform: .identity)
+                        XCTAssertEqual(element.naturalSize, pointSize)
+                        XCTAssertEqual(element.pixelSize, CGSize(width: pointSize.width * scale, height: pointSize.height * scale))
+                        _ = element.corners
+                        XCTAssertEqual(VectorUndoCost.bytes(from: [.image(element)], to: [.image(element)]), MemoryLayout<VectorElement>.stride)
+                        XCTAssertEqual(owner.usage.allocations, beforeMetadata, "Bounds/geometry/history metadata never decode")
+                        let reloaded = try value.resolveImage().get()
+                        escaped = try XCTUnwrap(reloaded.cgImage)
+                        XCTAssertEqual(try NativeImageFields(XCTUnwrap(escaped)), fields)
+                        XCTAssertEqual(try nativeSamples(XCTUnwrap(escaped)), samples)
+                        XCTAssertEqual(reloaded.size, pointSize); XCTAssertEqual(reloaded.scale, scale)
+                        XCTAssertEqual(reloaded.imageOrientation, orientation)
+                        XCTAssertEqual(try nativeDrawing(reloaded, rect: rect), drawing)
+                        XCTAssertTrue(value.releaseResidentPixels())
+                    }
+                    source = nil
+                    XCTAssertEqual(owner.usage.pixelBufferCount, 1, "Escaping provider keeps its real charge after source retirement")
+                    XCTAssertEqual(try FileManager.default.contentsOfDirectory(at: owner.storage.url, includingPropertiesForKeys: nil).count, 0,
+                                   "Last source/backing ref removes both native and derived PNG resources")
+                    try autoreleasepool {
+                        XCTAssertEqual(try nativeDrawing(UIImage(cgImage: XCTUnwrap(escaped), scale: scale, orientation: orientation), rect: rect), drawing)
+                    }
+                    escaped = nil
+                    XCTAssertEqual(owner.usage.chargedBytes, 0)
+                    XCTAssertEqual(owner.usage.reservedCheckpointBytes, 0)
+                    XCTAssertLessThanOrEqual(owner.usage.highWaterBytes, owner.budgetBytes)
+                    checked += 1
+                }
+            }
+        }
+        XCTAssertEqual(checked, 128)
+        print("NATIVE_SOURCE matrix=\(checked) normalizedPNGEqual=\(normalizedPNGEqual)/64 exactNativeBytes=true")
+    }
+}
+
+extension RasterResidencyLogicTests {
+    func testPlacedSourceWindowAndLogicalHistoryStayBoundedAfterEviction() throws {
+        let extent = width * height * 4
+        let owner = RasterResidency(budgetBytes: extent * 5, hasHeadroom: { _ in true })
+        let ring = DecodedFrameRing(byteBudget: extent)
+        var versions: [RasterSource] = []
+        for index in 0..<4 {
+            try autoreleasepool {
+                let colour: [UInt8] = [UInt8(30 + index * 40), 20, 10, 255]
+                var data = Data()
+                for _ in 0..<(width * height) { data.append(contentsOf: colour) }
+                let frame = DecodedFrame(width: width, height: height, pixels: data)
+                XCTAssertTrue(ring.insert(frame, for: "source-\(index)"))
+                let source = try RasterSource.capturePlaced(UIImage(cgImage: XCTUnwrap(frame.makeImage())), using: owner).get()
+                _ = try ProjectStore.serializingPackageMutation { try source.checkpointForEviction().get() }
+                XCTAssertTrue(source.releaseResidentPixels())
+                versions.append(source)
+            }
+            XCTAssertEqual(owner.usage.pixelBytes, 0)
+            XCTAssertEqual(ring.byteCount, extent)
+        }
+        ring.removeAll()
+        for source in versions {
+            try autoreleasepool {
+                let resolved = try source.resolveImage().get()
+                XCTAssertEqual(resolved.size, CGSize(width: width, height: height))
+                XCTAssertEqual(owner.usage.pixelBufferCount, 1)
+                XCTAssertTrue(source.releaseResidentPixels())
+            }
+            XCTAssertEqual(owner.usage.pixelBytes, 0)
+        }
+        let a = VectorImageElement(source: versions[0], transform: .identity)
+        var translated = a; translated.transform.position.x = 4
+        XCTAssertEqual(VectorUndoCost.bytes(from: [.image(a)], to: [.image(translated)]), MemoryLayout<VectorElement>.stride)
+        let shared = RasterUndoCost.sources(baked: [versions[0]], elements: [[.image(a)], [.image(a)]])
+        XCTAssertEqual(shared.count, 1)
+        XCTAssertEqual(RasterUndoCost.bytes(from: [:], to: shared), extent,
+                       "One source shared by placed/baked tiers is one action-local retention price")
+        versions.removeAll()
+        XCTAssertLessThanOrEqual(owner.usage.highWaterBytes, owner.budgetBytes)
+    }
+
+    func testPlacedSourceHistoryTrimsLogicalVersionsAndDeletesOnlyTheirLastBackingReferences() throws {
+        let owner = RasterResidency(budgetBytes: pictureBytes * 5, hasHeadroom: { _ in true })
+        var urls: [URL] = []
+        func version(_ colour: UIColor) throws -> RasterSource {
+            let pixels = try surface(owner, color: colour)
+            let source = RasterSource.snapshot(of: pixels, size: CGSize(width: width, height: height))
+            let backing = try ProjectStore.serializingPackageMutation { try source.checkpointForEviction().get() }
+            urls.append(backing.url)
+            XCTAssertTrue(source.releaseResidentPixels())
+            return source
+        }
+        var current: RasterSource? = try autoreleasepool { try version(.red) }
+        let bytes = try XCTUnwrap(current).logicalPayloadBytes
+        let stepCost = UndoBudget.addingCost(MemoryLayout<VectorElement>.stride, bytes * 2)
+        let history = UndoHistory(maxCost: stepCost * 2)
+        for colour in [UIColor.green, .blue, .yellow] {
+            try autoreleasepool {
+                let before = try XCTUnwrap(current), after = try version(colour)
+                let old = VectorImageElement(source: before, transform: .identity)
+                let new = VectorImageElement(source: after, transform: .identity)
+                let cost = VectorUndoCost.bytes(from: [.image(old)], to: [.image(new)])
+                XCTAssertEqual(cost, stepCost)
+                history.record(.init(label: .insertImage, cost: cost,
+                    undo: { current = before }, redo: { current = after }))
+                current = after
+            }
+        }
+        XCTAssertEqual(history.undoStack.count, 2)
+        XCTAssertEqual(history.currentCost, stepCost * 2)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: urls[0].path), "Trimming releases the oldest history-only source")
+        let finalID = current?.residencyID
+        XCTAssertEqual(history.undo(), .insertImage)
+        XCTAssertNotEqual(current?.residencyID, finalID)
+        XCTAssertEqual(history.currentCost, stepCost * 2, "Redo retains the same logical source versions")
+        XCTAssertEqual(history.redo(), .insertImage)
+        XCTAssertEqual(current?.residencyID, finalID, "Redo shares the immutable source handle")
+        XCTAssertEqual(history.trimUnderMemoryPressure(), 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: urls[1].path))
+        history.removeAll()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: urls[2].path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: urls[3].path), "The live source still owns its backing")
+        current = nil
+        XCTAssertFalse(FileManager.default.fileExists(atPath: urls[3].path))
+        XCTAssertEqual(owner.usage.chargedBytes, 0)
+    }
+
+    func testNativeCheckpointWriteFailureAndCorruptionNeverReplacePixelsWithBlank() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("native-failure-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let blocked = directory.appendingPathComponent("blocked")
+        try Data([9]).write(to: blocked)
+        let owner = RasterResidency(budgetBytes: 4096, storage: ProjectStore.RasterStorage(url: blocked), hasHeadroom: { _ in true })
+        let released = NativeReleaseCount()
+        let fixture = try nativeFixture(2, releases: released)
+        let source = try RasterSource.capturePlaced(UIImage(cgImage: fixture.image), using: owner).get()
+        try autoreleasepool {
+            let failure = ProjectStore.serializingPackageMutation { source.checkpointForEviction() }
+            guard case .failure = failure else { return XCTFail("A file occupying the source directory must refuse checkpointing") }
+            XCTAssertEqual(try nativeSamples(XCTUnwrap(source.resolveImage().get().cgImage)), fixture.bytes,
+                           "Failed checkpoint keeps the original native samples")
+            XCTAssertEqual(owner.usage.pixelBufferCount, 1)
+        }
+        try FileManager.default.removeItem(at: blocked)
+        let backing = try autoreleasepool {
+            let backing = try ProjectStore.serializingPackageMutation { try source.checkpointForEviction().get() }
+            XCTAssertTrue(source.releaseResidentPixels())
+            return backing
+        }
+        let valid = try Data(contentsOf: backing.url)
+        XCTAssertEqual(owner.usage.pixelBytes, 0)
+        for damaged in [Data(valid.dropLast()), Data(valid.enumerated().map { $0.offset == 0 ? $0.element ^ 1 : $0.element })] {
+            try damaged.write(to: backing.url, options: .atomic)
+            XCTAssertThrowsError(try source.resolveImage().get(), "Length and native-byte digest must reject damaged private payload")
+            XCTAssertEqual(owner.usage.chargedBytes, 0, "Failed reads drop every private decode allocation")
+        }
+        try valid.write(to: backing.url, options: .atomic)
+        try autoreleasepool {
+            XCTAssertEqual(try nativeSamples(XCTUnwrap(source.resolveImage().get().cgImage)), fixture.bytes)
+            XCTAssertTrue(source.releaseResidentPixels())
+        }
+        XCTAssertEqual(owner.usage.chargedBytes, 0)
+    }
+
+    private final class NativeReadProbe {
+        weak var owner: RasterResidency?
+        let bytes: NativeFixtureBytes
+        var capturing = false
+        var observedWorking: [Int] = []
+        init(owner: RasterResidency, count: Int) {
+            self.owner = owner
+            bytes = NativeFixtureBytes(Data(repeating: 255, count: count), releases: NativeReleaseCount())
+        }
+    }
+    private func readProbe(_ owner: RasterResidency, providerBytes: Int) throws -> (UIImage, NativeReadProbe) {
+        let probe = NativeReadProbe(owner: owner, count: providerBytes)
+        let retained = Unmanaged.passRetained(probe)
+        var callbacks = CGDataProviderDirectCallbacks(version: 0, getBytePointer: { info in
+            guard let info else { return nil }
+            let value = Unmanaged<NativeReadProbe>.fromOpaque(info).takeUnretainedValue()
+            if value.capturing { value.observedWorking.append(value.owner?.usage.workingBytes ?? 0) }
+            return UnsafeRawPointer(value.bytes.pointer)
+        }, releaseBytePointer: nil, getBytesAtPosition: nil, releaseInfo: { info in
+            if let info { Unmanaged<NativeReadProbe>.fromOpaque(info).release() }
+        })
+        guard let provider = CGDataProvider(directInfo: retained.toOpaque(), size: Int64(providerBytes), callbacks: &callbacks) else {
+            retained.release(); throw NSError(domain: "NativeReadProbe", code: 1)
+        }
+        let cg = try XCTUnwrap(CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+            bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue), provider: provider,
+            decode: nil, shouldInterpolate: false, intent: .defaultIntent))
+        probe.observedWorking.removeAll(); probe.capturing = true
+        return (UIImage(cgImage: cg), probe)
+    }
+
+    func testNativeProviderExtractionIsPreAdmittedAndOversizedProvidersAreHonestlyChargedOrRefused() throws {
+        let owner = RasterResidency(budgetBytes: pictureBytes * 10, hasHeadroom: { _ in true })
+        let (image, probe) = try readProbe(owner, providerBytes: pictureBytes * 2)
+        try autoreleasepool {
+            let source = try RasterSource.capturePlaced(image, using: owner).get()
+            XCTAssertFalse(probe.observedWorking.isEmpty, "PREMISE: the actual opaque provider was read")
+            XCTAssertTrue(probe.observedWorking.allSatisfy { $0 >= pictureBytes * 2 }, "Header-based input/extraction reservation precedes CopyData")
+            XCTAssertEqual(source.logicalPayloadBytes, pictureBytes * 2)
+            XCTAssertEqual(owner.usage.pixelBytes, pictureBytes * 2, "Returned provider bytes, including excess ownership, are actually priced")
+        }
+        XCTAssertEqual(owner.usage.chargedBytes, 0)
+        let refused = RasterResidency(budgetBytes: pictureBytes * 2 - 1, hasHeadroom: { _ in true })
+        let (unread, refusedProbe) = try readProbe(refused, providerBytes: pictureBytes)
+        XCTAssertThrowsError(try RasterSource.capturePlaced(unread, using: refused).get())
+        XCTAssertTrue(refusedProbe.observedWorking.isEmpty, "Insufficient header workspace refuses before forcing opaque data")
+        XCTAssertEqual(refused.usage.allocations, 0)
+    }
+
+    func testCommonPNGAlphaProofAndCroppedNativePictureUseTheirActualLayouts() throws {
+        let owner = RasterResidency(budgetBytes: 4096, hasHeadroom: { _ in true })
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("native-layout-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let png = directory.appendingPathComponent("clear.png")
+        try autoreleasepool {
+            let clear = try RasterSurface.allocate(width: width, height: height, using: owner).get()
+            try XCTUnwrap(ProjectStore.encodeRasterPNG(try clear.image().get())).write(to: png)
+        }
+        let backing = try ProjectStore.RasterBacking.protect(png, using: owner).get()
+        let cold = RasterSource.backed(by: backing, using: owner)
+        XCTAssertEqual(owner.usage.pixelBytes, 0, "Protection retains metadata/files, not an owner pixel buffer")
+        try autoreleasepool {
+            let decoded = try cold.resolveImage().get()
+            let fields = try NativeImageFields(XCTUnwrap(decoded.cgImage))
+            XCTAssertEqual(fields.bpc, 8); XCTAssertEqual(fields.bpp, 32)
+            XCTAssertTrue(cold.isCertainlyTransparent, "Common PNG8 straight/first/row layout keeps its exact transparent-cel proof")
+            XCTAssertTrue(cold.releaseResidentPixels())
+        }
+        let fixture = try nativeFixture(1, releases: NativeReleaseCount())
+        let cropped = try XCTUnwrap(fixture.image.cropping(to: CGRect(x: 1, y: 1, width: 2, height: 1)))
+        let input = UIImage(cgImage: cropped, scale: 2, orientation: .rightMirrored)
+        let actualProviderCount = CFDataGetLength(try XCTUnwrap(cropped.dataProvider?.data))
+        let extent = cropped.bytesPerRow * cropped.height
+        let result = RasterSource.capturePlaced(input, using: owner)
+        if actualProviderCount < extent {
+            XCTAssertThrowsError(try result.get(), "Missing declared final-row bytes are explicitly unsupported, never guessed")
+        } else {
+            let source = try result.get()
+            let rect = CGRect(x: 2, y: 2, width: input.size.width * 4, height: input.size.height * 4)
+            let expected = try nativeDrawing(input, rect: rect)
+            _ = try ProjectStore.serializingPackageMutation { try source.checkpointForEviction().get() }
+            XCTAssertTrue(source.releaseResidentPixels())
+            XCTAssertEqual(try nativeDrawing(source.resolveImage().get(), rect: rect), expected,
+                           "An admitted cropped view preserves its actual drawn pixels, not merely its header")
+        }
+    }
+}
+
+
+extension RasterResidencyLogicTests {
+    func testPlacedImageEditMeasurementUsesColdMetadataWhileActualDrawRefusesTheWholePicture() throws {
+        var allowPixels = true
+        let owner = RasterResidency(budgetBytes: 4096, hasHeadroom: { _ in allowPixels })
+        let fixture = try nativeFixture(1, releases: NativeReleaseCount())
+        let source = try RasterSource.capturePlaced(UIImage(cgImage: fixture.image), using: owner).get()
+        try autoreleasepool {
+            _ = try ProjectStore.serializingPackageMutation { try source.checkpointForEviction().get() }
+            XCTAssertTrue(source.releaseResidentPixels())
+        }
+        XCTAssertEqual(owner.usage.pixelBytes, 0)
+        allowPixels = false
+        let original = VectorImageElement(source: source,
+            transform: LayerTransform(position: CGPoint(x: 20, y: 20), scale: 1, rotation: 0))
+        var replacement = original
+        replacement.transform.position.x += 4
+        let size = CGSize(width: 64, height: 64)
+        let canvas = VectorCanvas(size: size, elements: [.image(original)])
+        let allocations = owner.usage.allocations
+        let window = canvas.editWindow(replacingWith: [.image(replacement)], rewriting: [original.id])
+        XCTAssertEqual(window, CGRect(x: 16, y: 17, width: 12, height: 6),
+                       "The old/new placed rectangles determine the bounded edit window with no pixel reads")
+        XCTAssertEqual(owner.usage.allocations, allocations)
+        XCTAssertEqual(owner.usage.pixelBytes, 0, "Cold source metadata never resolves a picture")
+        var drawnWindow: CGRect?
+        _ = UIGraphicsImageRenderer(size: window.size, format: PixelOps.transparentFormat()).image { context in
+            drawnWindow = canvas.drawEditWindow(of: [.image(replacement)], in: window,
+                into: context.cgContext, rewriting: [original.id])
+        }
+        XCTAssertNil(drawnWindow, "An unavailable picture refuses the entire prepared window")
+        let frozen = canvas.freeze(quality: .full)
+        var drawn: Int?
+        _ = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
+            drawn = frozen.draw(into: context.cgContext, frameRect: CGRect(origin: .zero, size: size), quality: .full)
+        }
+        XCTAssertNil(drawn, "A frozen draw cannot publish a picture with the placed source omitted")
+        XCTAssertNil(canvas.render(), "The canvas render also discards its whole unavailable picture")
+        XCTAssertEqual(owner.usage.allocations, allocations, "Refused drawing leaves no admitted pixel allocation")
+        XCTAssertEqual(canvas.elements.map(\.id), [original.id])
+    }
+}
+
+
+extension RasterResidencyLogicTests {
+    private func grayAlpha8Fixture(painted: Bool) throws -> (image: UIImage, bytes: Data) {
+        // Three two-byte pixels and two padding bytes per row. Nonzero luminance and padding
+        // cannot be mistaken for alpha; the only painted sample is the middle of the last row.
+        let bytes = Data([255, 0, 96, 0, 32, 0, 255, 255,
+                          192, 0, 128, painted ? 255 : 0, 64, 0, 255, 255])
+        let provider = try NativeFixtureBytes(bytes, releases: NativeReleaseCount()).provider()
+        let cg = try XCTUnwrap(CGImage(width: 3, height: 2, bitsPerComponent: 8, bitsPerPixel: 16,
+            bytesPerRow: 8, space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue), provider: provider,
+            decode: nil, shouldInterpolate: false, intent: .defaultIntent))
+        XCTAssertEqual(cg.bitsPerComponent, 8); XCTAssertEqual(cg.bitsPerPixel, 16)
+        XCTAssertEqual(cg.bytesPerRow, 8); XCTAssertEqual(cg.alphaInfo, .last)
+        XCTAssertEqual(cg.bitmapInfo.rawValue, CGImageAlphaInfo.last.rawValue)
+        XCTAssertEqual(cg.colorSpace?.model, .monochrome)
+        XCTAssertFalse(cg.isMask); XCTAssertNil(cg.decode)
+        return (UIImage(cgImage: cg), bytes)
+    }
+
+    func testNativeGrayAlpha8BlankProofIgnoresLuminanceAndPaddingAndKeepsNativeBytes() throws {
+        let fixture = try grayAlpha8Fixture(painted: false)
+        let drawn = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(
+            XCTUnwrap(fixture.image.cgImage), width: 3, height: 2))
+        XCTAssertTrue(stride(from: 3, to: drawn.count, by: 4).allSatisfy { drawn[$0] == 0 },
+                      "PREMISE: the actual explicit monochrome-alpha fixture draws fully transparent")
+        let owner = RasterResidency(budgetBytes: 4096, hasHeadroom: { _ in true })
+        let source = try RasterSource.capturePlaced(fixture.image, using: owner).get()
+        let before = owner.usage
+        var scans = 0
+        XCTAssertTrue(try source.prepareTransparencyProof { count in
+            scans += 1; XCTAssertEqual(count, 6); return true
+        }.get(), "Exact two-byte alpha scan must ignore nonzero color samples and row padding")
+        XCTAssertTrue(source.isCertainlyTransparent)
+        XCTAssertEqual(scans, 1); XCTAssertEqual(owner.usage, before)
+        _ = try source.prepareTransparencyProof { _ in XCTFail("Proof is cached per immutable version"); return false }.get()
+        try autoreleasepool {
+            XCTAssertEqual(try nativeSamples(XCTUnwrap(source.resolveImage().get().cgImage)), fixture.bytes)
+            _ = try ProjectStore.serializingPackageMutation { try source.checkpointForEviction().get() }
+            XCTAssertTrue(source.releaseResidentPixels())
+        }
+        try autoreleasepool {
+            let reloaded = try XCTUnwrap(source.resolveImage().get().cgImage)
+            XCTAssertEqual(reloaded.bitsPerPixel, 16); XCTAssertEqual(reloaded.colorSpace?.model, .monochrome)
+            XCTAssertEqual(try nativeSamples(reloaded), fixture.bytes, "Blank proof cannot normalize native gray-alpha samples")
+            XCTAssertTrue(source.isCertainlyTransparent)
+        }
+    }
+
+    func testNativeGrayAlpha8ProofPreservesOnePaintedSampleAtItsActualPixelStride() throws {
+        let fixture = try grayAlpha8Fixture(painted: true)
+        let drawn = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(
+            XCTUnwrap(fixture.image.cgImage), width: 3, height: 2))
+        let painted = stride(from: 3, to: drawn.count, by: 4).filter { drawn[$0] != 0 }
+        XCTAssertEqual(painted.count, 1, "PREMISE: the actual native fixture draws exactly one painted sample")
+        XCTAssertEqual(drawn[(1 * 3 + 1) * 4 + 3], 255)
+        let owner = RasterResidency(budgetBytes: 4096, hasHeadroom: { _ in true })
+        let source = try RasterSource.capturePlaced(fixture.image, using: owner).get()
+        var scans = 0
+        XCTAssertFalse(try source.prepareTransparencyProof { count in
+            scans += 1; XCTAssertEqual(count, 6); return true
+        }.get(), "A single alpha sample in the second two-byte pixel must retain the whole picture")
+        XCTAssertEqual(scans, 1, "A supported known layout must actually inspect alpha")
+        XCTAssertFalse(source.isCertainlyTransparent)
+        _ = try source.prepareTransparencyProof { _ in XCTFail("Nonblank proof is cached too"); return false }.get()
+        try autoreleasepool {
+            let owned = try XCTUnwrap(source.resolveImage().get().cgImage)
+            XCTAssertEqual(try nativeSamples(owned), fixture.bytes)
+            XCTAssertEqual(try CoreGraphicsCompositor.premultipliedBytes(owned, width: 3, height: 2), drawn)
+        }
+    }
 }

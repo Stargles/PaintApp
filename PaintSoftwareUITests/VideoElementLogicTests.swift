@@ -499,7 +499,7 @@ final class VideoElementLogicTests: XCTestCase {
         video.transform = LayerTransform(position: CGPoint(x: 12, y: 20), scale: 1.5, rotation: 0.2)
         video.aspect = 1.3
         video.stretchAxis = 0.4
-        let image = VectorImageElement(image: solidImage(),
+        let image = VectorImageElement(source: try CanvasFixture.placedSource(solidImage()),
                                        transform: video.transform, aspect: video.aspect,
                                        stretchAxis: video.stretchAxis, mirrored: video.mirrored)
         let map = CGAffineTransform(translationX: 5, y: -3).rotated(by: 0.35).scaledBy(x: 2, y: 2)
@@ -525,7 +525,7 @@ final class VideoElementLogicTests: XCTestCase {
         let asset = try writeAsset(named: "clip.mov")
         var video = defaultElement(assetURL: asset)
         video.transform = LayerTransform(position: CGPoint(x: 9, y: 4), scale: 1.2, rotation: 0.1)
-        let image = VectorImageElement(image: solidImage(), transform: video.transform)
+        let image = VectorImageElement(source: try CanvasFixture.placedSource(solidImage()), transform: video.transform)
         let map = CGAffineTransform(scaleX: -1, y: 1)
 
         let movedVideo = try XCTUnwrap(VectorCanvas.mapping(.video(video), throughSimilarity: map).video)

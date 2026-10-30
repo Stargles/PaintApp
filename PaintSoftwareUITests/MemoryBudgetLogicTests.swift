@@ -982,13 +982,13 @@ final class MemoryBudgetLogicTests: XCTestCase {
         XCTAssertEqual(Array(a[old..<(old + 4)]), [0, 0, 255, 255])
         XCTAssertEqual(b[old + 3], 0)
         XCTAssertEqual(Array(b[new..<(new + 4)]), [0, 0, 255, 255])
-        let image = VectorImageElement(image: UIImage(cgImage: before), transform: .identity)
+        let image = VectorImageElement(source: try CanvasFixture.placedSource(UIImage(cgImage: before)), transform: .identity)
         var alias = image
         alias.id = UUID()
         let bytes = before.bytesPerRow * before.height
         XCTAssertEqual(VectorUndoCost.bytes(from: [], to: [.image(image), .image(alias)]), 2 * slots + bytes)
         XCTAssertEqual(VectorUndoCost.bytes(from: [.image(image)], to: [.image(alias)]), slots,
-                       "Element IDs differ, but both snapshots retain the same immutable CGImage.")
+                       "Element IDs differ, but both snapshots retain the same immutable source handle.")
     }
 
     func testInterpolationHistoryTrimsByRewrittenGeometryAndUndoRedoStillDrawTheChargedSnapshots() throws {

@@ -28,6 +28,7 @@ final class RasterResidency {
         let allocations: Int
         let evictions: Int
         let reservedCheckpointBytes: Int
+        let registeredCandidateCount: Int
 
         var chargedBytes: Int { pixelBytes + workingBytes }
         var admittedBytes: Int { chargedBytes + reservedCheckpointBytes }
@@ -85,7 +86,8 @@ final class RasterResidency {
         return Usage(pixelBytes: pixelBytes, workingBytes: workingBytes,
                      pixelBufferCount: pixelBufferCount, highWaterBytes: highWaterBytes,
                      allocations: allocations, evictions: evictions,
-                     reservedCheckpointBytes: reservedCheckpointBytes)
+                     reservedCheckpointBytes: reservedCheckpointBytes,
+                     registeredCandidateCount: candidates.count)
     }
 
     private var reservedCheckpointBytes: Int {
@@ -98,6 +100,12 @@ final class RasterResidency {
         candidates[candidate.residencyID] = Candidate(value: candidate, touched: clock)
     }
 
+    /// A live cold owner stays eligible; only its death retires its weak registration.
+    func unregister(_ id: UUID) {
+        lock.lock(); defer { lock.unlock() }
+        candidates[id] = nil
+    }
+
     func touch(_ id: UUID) {
         lock.lock(); defer { lock.unlock() }
         clock &+= 1
@@ -106,8 +114,8 @@ final class RasterResidency {
 
     /// Admission precedes I/O/allocation and precedes a texture's mutation lock. Eviction callbacks
     /// run without this owner's lock and must decline rather than wait for a busy texture.
-    func admitPixels(_ bytes: Int, excluding: Set<UUID> = []) -> Result<Allocation, Failure> {
-        admit(bytes, kind: .pixels, excluding: excluding)
+    func admitPixels(_ bytes: Int, durable: Bool = false, excluding: Set<UUID> = []) -> Result<Allocation, Failure> {
+        admit(bytes, kind: .pixels, excluding: excluding, durable: durable)
     }
 
     func admitWorking(_ bytes: Int, excluding: Set<UUID> = []) -> Result<Allocation, Failure> {
@@ -118,11 +126,12 @@ final class RasterResidency {
         admit(bytes, kind: .checkpoint, excluding: excluding)
     }
 
-    private func admit(_ bytes: Int, kind: Allocation.Kind, excluding: Set<UUID>) -> Result<Allocation, Failure> {
+    private func admit(_ bytes: Int, kind: Allocation.Kind, excluding: Set<UUID>, durable: Bool = false) -> Result<Allocation, Failure> {
         guard bytes >= 0 else { return .failure(.invalidSize) }
         guard bytes <= budgetBytes else { return .failure(.budgetExceeded) }
-        let (checkpointBytes, checkpointOverflow) = bytes.multipliedReportingOverflow(by: 2)
-        guard kind != .pixels || !checkpointOverflow else { return .failure(.invalidSize) }
+        let required = LZ4Block.checkpointWorkingBytes(bytes)
+        guard kind != .pixels || required != nil else { return .failure(.invalidSize) }
+        let checkpointBytes = durable ? 0 : required ?? 0
         guard hasHeadroom(bytes) else { return .failure(.allocationRefused) }
         return withEvictionPass(excluding: excluding) {
             let dirtyNeed = max(dirtyAllocations.values.max() ?? 0, kind == .pixels ? checkpointBytes : 0)
@@ -134,7 +143,7 @@ final class RasterResidency {
                 switch kind {
                 case .pixels:
                     pixelBytes += bytes; pixelBufferCount += 1; allocations += 1
-                    dirtyAllocations[allocation.id] = checkpointBytes
+                    if checkpointBytes > 0 { dirtyAllocations[allocation.id] = checkpointBytes }
                 case .working: workingBytes += bytes
                 case .checkpoint: workingBytes += bytes; checkpointWorkingBytes += bytes
                 }
@@ -156,13 +165,12 @@ final class RasterResidency {
     }
 
     func prepareMutation(of allocation: Allocation, excluding: Set<UUID> = []) -> Result<Void, Failure> {
-        let (checkpointBytes, overflow) = allocation.byteCount.multipliedReportingOverflow(by: 2)
-        guard !overflow else { return .failure(.invalidSize) }
+        guard let checkpointBytes = LZ4Block.checkpointWorkingBytes(allocation.byteCount) else { return .failure(.invalidSize) }
         return withEvictionPass(excluding: excluding) {
             if dirtyAllocations[allocation.id] != nil { return () }
             let need = max(dirtyAllocations.values.max() ?? 0, checkpointBytes)
             if max(0, need - checkpointWorkingBytes) <= budgetBytes - pixelBytes - workingBytes {
-                dirtyAllocations[allocation.id] = checkpointBytes
+                if checkpointBytes > 0 { dirtyAllocations[allocation.id] = checkpointBytes }
                 return ()
             }
             return nil
@@ -222,86 +230,13 @@ protocol RasterResidencyCandidate: AnyObject {
 /// A native RGBA8 buffer whose charge lasts as long as any CGContext or CGImage can read its bytes.
 /// A provider reads this allocation directly; retained source images never use makeImage's hidden COW.
 final class RasterSurface {
-    private final class Buffer {
-        let allocation: RasterResidency.Allocation
-        let address: UnsafeMutableRawPointer
-        private let lock = NSLock()
-        private var readers = 0
-
-        init?(allocation: RasterResidency.Allocation) {
-            guard allocation.byteCount > 0, let address = calloc(1, allocation.byteCount) else { return nil }
-            self.allocation = allocation
-            self.address = address
-        }
-
-        var readLeaseCount: Int {
-            lock.lock(); defer { lock.unlock() }
-            return readers
-        }
-
-        var isFullyTransparent: Bool {
-            let bytes = address.assumingMemoryBound(to: UInt8.self)
-            for index in stride(from: 3, to: allocation.byteCount, by: 4) where bytes[index] != 0 { return false }
-            return true
-        }
-
-        func beginReading() { lock.lock(); readers += 1; lock.unlock() }
-        func endReading() { lock.lock(); readers -= 1; precondition(readers >= 0); lock.unlock() }
-        deinit { free(address) }
-    }
-
-    /// Immutable snapshot pin, created before an image is requested. Its eventual data provider
-    /// retains the same pin, so a CGImage escape outlives the source handle without losing its charge.
-    final class ReadLease {
-        private let buffer: Buffer
-        let width: Int
-        let height: Int
-        let bytesPerRow: Int
-        let residency: RasterResidency
-        var allocation: RasterResidency.Allocation { buffer.allocation }
-
-        /// The lease pins this exact buffer against mutation; proof needs no image or pixel copy.
-        var isFullyTransparent: Bool { buffer.isFullyTransparent }
-
-        fileprivate init(_ surface: RasterSurface) {
-            buffer = surface.buffer
-            width = surface.width
-            height = surface.height
-            bytesPerRow = surface.bytesPerRow
-            residency = surface.residency
-            buffer.beginReading()
-        }
-
-        func image() -> Result<UIImage, RasterResidency.Failure> {
-            // The returned Result owns its wrapper across this boundary. UIKit's temporary native
-            // ownership must not postpone a checkpoint eviction until the caller's event loop drains.
-            autoreleasepool {
-                let reader = Unmanaged.passRetained(self)
-                guard let provider = CGDataProvider(dataInfo: reader.toOpaque(), data: buffer.address,
-                        size: allocation.byteCount, releaseData: { info, _, _ in
-                            if let info { Unmanaged<ReadLease>.fromOpaque(info).release() }
-                        }) else {
-                    reader.release()
-                    return .failure(.allocationRefused)
-                }
-                guard let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
-                        bytesPerRow: bytesPerRow, space: PixelOps.deviceRGBColorSpace,
-                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                        provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else {
-                    return .failure(.allocationRefused)
-                }
-                return .success(UIImage(cgImage: image, scale: 1, orientation: .up))
-            }
-        }
-
-        deinit { buffer.endReading() }
-    }
+    typealias ReadLease = RasterPixelBuffer.ReadLease
 
     let width: Int
     let height: Int
     let bytesPerRow: Int
     let residency: RasterResidency
-    private let buffer: Buffer
+    private let buffer: RasterPixelBuffer
     /// Mutate only after preparedForWrite succeeds, with the texture's own lock held. A read provider
     /// can escape the texture, so directly writing this context without that admission is forbidden.
     private let context: CGContext
@@ -312,10 +247,10 @@ final class RasterSurface {
 
     /// Exact blank proof for private storage or an immutable lease. No downsampling can discard
     /// a single painted pixel; normal nonblank pictures return at their first nonzero alpha.
-    var isFullyTransparent: Bool { buffer.isFullyTransparent }
+    var isFullyTransparent: Bool { buffer.isFullyTransparent(.rgba8(width: width, height: height)) }
 
     private init(width: Int, height: Int, bytesPerRow: Int, residency: RasterResidency,
-                 buffer: Buffer, context: CGContext) {
+                 buffer: RasterPixelBuffer, context: CGContext) {
         self.width = width
         self.height = height
         self.bytesPerRow = bytesPerRow
@@ -335,13 +270,13 @@ final class RasterSurface {
                          excluding: Set<UUID> = []) -> Result<RasterSurface, RasterResidency.Failure> {
         guard let bytes = byteCount(width: width, height: height) else { return .failure(.invalidSize) }
         return residency.admitPixels(bytes, excluding: excluding).flatMap { allocation in
-            guard let buffer = Buffer(allocation: allocation) else { return .failure(.allocationRefused) }
+            guard let buffer = RasterPixelBuffer(allocation: allocation) else { return .failure(.allocationRefused) }
             let retained = Unmanaged.passRetained(buffer)
             guard let context = CGContext(data: buffer.address, width: width, height: height,
                     bitsPerComponent: 8, bytesPerRow: width * 4, space: PixelOps.deviceRGBColorSpace,
                     bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue,
                     releaseCallback: { info, _ in
-                        if let info { Unmanaged<Buffer>.fromOpaque(info).release() }
+                        if let info { Unmanaged<RasterPixelBuffer>.fromOpaque(info).release() }
                     }, releaseInfo: retained.toOpaque()) else {
                 retained.release()
                 return .failure(.allocationRefused)
@@ -387,7 +322,7 @@ final class RasterSurface {
         return .success(body(context))
     }
 
-    func readLease() -> ReadLease { ReadLease(self) }
+    func readLease() -> ReadLease { ReadLease(buffer: buffer, descriptor: .rgba8(width: width, height: height), residency: residency) }
     func image() -> Result<UIImage, RasterResidency.Failure> { readLease().image() }
 
     /// Warpers already produce normalized RGBA8 bytes. Install them directly into admitted native

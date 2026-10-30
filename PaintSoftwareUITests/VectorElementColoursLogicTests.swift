@@ -39,7 +39,7 @@ final class VectorElementColoursLogicTests: XCTestCase {
             ("gradient fill", .fill(VectorFillElement(path: box, paint: .linearGradient(gradient)))),
             ("text", .text(VectorTextElement(id: UUID(), recipe: recipe,
                                               frame: TextFrame(origin: .zero, size: CGSize(width: 8, height: 8))))),
-            ("image", .image(VectorImageElement(image: picture, transform: place))),
+            ("image", .image(VectorImageElement(source: try CanvasFixture.placedSource(picture), transform: place))),
             ("video", .video(VectorVideoElement(assetURL: URL(fileURLWithPath: "/dev/null"), assetFileName: "null",
                                                 naturalSize: CGSize(width: 8, height: 4), sourceStart: .zero,
                                                 sourceEnd: SourceTime(value: 1, timescale: 1), speed: 1,

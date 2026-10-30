@@ -747,7 +747,11 @@ final class CelSpanCropLogicTests: XCTestCase {
         XCTAssertEqual(manager.layers[1].cels[0].frameCount, 2, "Premise")
         manager.layers[1].cels[0].transformTracks = [TransformChannelID.cel.id: track([(0, 0), (2, 20)])]
 
-        guard case .baked = manager.bakeVideoToCels(layerIndex: 1, celIndex: 0) else {
+        let prepared = expectation(description: "video bake lands its own crop")
+        var outcome: CanvasManager.VideoBakeOutcome?
+        manager.bakeVideoToCels(layerIndex: 1, celIndex: 0) { outcome = $0; prepared.fulfill() }
+        wait(for: [prepared], timeout: 30)
+        guard case .baked = try XCTUnwrap(outcome) else {
             return XCTFail("Premise: the bake ran")
         }
         XCTAssertNil(manager.pendingKeyframeCrop, "nothing stays parked once the bake's step is recorded")

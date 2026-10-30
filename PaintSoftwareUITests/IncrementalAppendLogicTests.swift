@@ -151,7 +151,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
     /// **The fixture is mutated cumulatively rather than rebuilt per row**, which CLAUDE.md's
     /// "green assertion" section is specifically about: a table that constructs a fresh canvas per
     /// row would be comparing something other than the effect of the row.
-    func testWhatEveryMutationSiteDeclares() {
+    func testWhatEveryMutationSiteDeclares() throws {
         let canvas = Self.canvas(3)
         XCTAssertEqual(canvas.lastDamage, .everything, "a canvas nobody has edited assumes nothing")
 
@@ -186,7 +186,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
         // An image goes *below* the first stroke, so on this cel it is a middle insert.
         let photo = CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 8, height: 8),
                                              size: CGSize(width: 8, height: 8))
-        canvas.addImage(VectorImageElement(image: photo,
+        canvas.addImage(VectorImageElement(source: try CanvasFixture.placedSource(photo),
                                            transform: LayerTransform(position: CGPoint(x: 40, y: 40),
                                                                      scale: 1, rotation: 0)))
         XCTAssertEqual(canvas.lastDamage, .everything,
@@ -211,23 +211,23 @@ final class IncrementalAppendLogicTests: XCTestCase {
     /// **An image imported onto a cel with no line art on it *is* an append**, and the declaration
     /// is derived from where the element landed rather than argued from the kind order — so this row
     /// and the `.everything` row above are the same call site answering two different lists.
-    func testAnImageOntoAnEmptyCelIsAnAppendAndOntoLineArtIsNot() {
+    func testAnImageOntoAnEmptyCelIsAnAppendAndOntoLineArtIsNot() throws {
         let photo = CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 8, height: 8),
                                              size: CGSize(width: 8, height: 8))
-        func element() -> VectorImageElement {
-            VectorImageElement(image: photo,
+        func element() throws -> VectorImageElement {
+            VectorImageElement(source: try CanvasFixture.placedSource(photo),
                                transform: LayerTransform(position: CGPoint(x: 40, y: 40),
                                                          scale: 1, rotation: 0))
         }
 
         let blank = VectorCanvas(size: Self.canvasSize, elements: [])
-        blank.addImage(element())
+        blank.addImage(try element())
         XCTAssertEqual(blank.lastDamage, .appended(count: 1))
-        blank.addImage(element())
+        blank.addImage(try element())
         XCTAssertEqual(blank.lastDamage, .appended(count: 1), "a second image goes above the first")
 
         let inked = Self.canvas(2)
-        inked.addImage(element())
+        inked.addImage(try element())
         XCTAssertEqual(inked.lastDamage, .everything)
     }
 
@@ -482,7 +482,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
 
         let photo = CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 12, height: 12),
                                              size: CGSize(width: 12, height: 12))
-        canvas.addImage(VectorImageElement(image: photo,
+        canvas.addImage(VectorImageElement(source: try CanvasFixture.placedSource(photo),
                                            transform: LayerTransform(position: CGPoint(x: 50, y: 40),
                                                                      scale: 1, rotation: 0)))
         let incremental = (try XCTUnwrap(canvas.render()))

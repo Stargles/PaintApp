@@ -53,6 +53,7 @@ extension CanvasManager {
         ///
         /// Keyed by element id, so it survives a cel being reordered or the array being rebuilt.
         var videoCrops: [UUID: VideoCrop]
+        let sourceCosts: RasterUndoCost.Sources
     }
 
     private func captureStructure() -> StructureSnapshot {
@@ -60,7 +61,8 @@ extension CanvasManager {
                           activeViewPresetIndex: activeViewPresetIndex,
                           currentLayerIndex: currentLayerIndex,
                           motionGroups: motionGroups, guideStrokes: guideStrokes,
-                          animationGroups: animationGroups, videoCrops: captureVideoCrops())
+                          animationGroups: animationGroups, videoCrops: captureVideoCrops(),
+                          sourceCosts: RasterUndoCost.sources(in: layers))
     }
 
     /// Every video element's crop, by id — see `StructureSnapshot.videoCrops`.
@@ -144,7 +146,8 @@ extension CanvasManager {
     /// Registers one undo step for a discrete (non-gesture) structural edit — call after the
     /// mutation has already happened, passing a `before` snapshot taken right before it.
     private func recordStructureChange(label: HistoryActionLabel, from: StructureSnapshot, to: StructureSnapshot) {
-        recordUndo(label: label, cost: 4096, undo: { [weak self] in
+        let cost = UndoBudget.addingCost(4096, RasterUndoCost.bytes(from: from.sourceCosts, to: to.sourceCosts))
+        recordUndo(label: label, cost: cost, undo: { [weak self] in
             self?.restoreStructure(from)
         }, redo: { [weak self] in
             self?.restoreStructure(to)

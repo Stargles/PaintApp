@@ -305,6 +305,7 @@ extension CanvasManager {
         guard pending.commit(), commitAllInteractiveState(), celSplitPlanIsCurrent(splits),
               let settledVector = layers[layerIndex].cels.first(where: { $0.id == cel.id })?.vector else { return .refused(.pendingEdit) }
         let snapshot = Self.streamSnapshot(picture, fitting: stream.naturalSize)
+        guard case .success(let source) = RasterSource.capturePlaced(snapshot, using: cel.raster.residency) else { return .refused(.pendingEdit) }
 
         // `touching: [settledVector]`: the block's own canvas is the one `splitCel` never copies (it keeps
         // the left half), and it is the one the swap mutates whenever `frame` is the block's first
@@ -323,7 +324,7 @@ extension CanvasManager {
                 guard case .stream(let posedStream) = element, posedStream.id == streamID else {
                     return element.reidentified()
                 }
-                var image = VectorImageElement(image: snapshot,
+                var image = VectorImageElement(source: source,
                                                transform: posedStream.transform,
                                                aspect: posedStream.aspect,
                                                stretchAxis: posedStream.stretchAxis,

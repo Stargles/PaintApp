@@ -388,8 +388,8 @@ final class AnimatedDistortLogicTests: XCTestCase {
         let vector = try XCTUnwrap(withPhoto.layers[withPhoto.currentLayerIndex].cels[0].vector)
         vector.addStroke(stroke([CGPoint(x: 8, y: 8), CGPoint(x: 40, y: 8)]))
         vector.addImage(VectorImageElement(
-            image: CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 6, height: 6),
-                                            size: CGSize(width: 6, height: 6)),
+            source: try CanvasFixture.placedSource(CanvasFixture.solidImage(.green, rect: CGRect(x: 0, y: 0, width: 6, height: 6),
+                                            size: CGSize(width: 6, height: 6))),
             transform: LayerTransform(position: CGPoint(x: 20, y: 30), scale: 1, rotation: 0)))
         withPhoto.setTransformMode(.distort)
         XCTAssertTrue(withPhoto.beginVectorWholeCelMove())

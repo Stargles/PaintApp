@@ -433,7 +433,7 @@ final class CanvasManager: ObservableObject {
     }
 
     @Published var canvasUpdatePhase: CanvasUpdatePhase = .idle
-    var isResizing: Bool { canvasUpdatePhase.operationID != nil }
+    var isUpdatingCanvas: Bool { canvasUpdatePhase.operationID != nil }
 
     /// The presenter may announce only the operation whose deadline it actually waited for.
     func announceCanvasUpdate(_ id: UUID) {
@@ -441,7 +441,7 @@ final class CanvasManager: ObservableObject {
         canvasUpdatePhase = .announced(id)
     }
 
-    var canvasPixelTransforms: LatestWins?
+    var canvasPreparations: LatestWins?
 
     /// The motion group a canvas tap assigns to, or nil when tapping does nothing — the retagging
     /// gesture, armed from its chip on `InterpolateBar`.
@@ -609,7 +609,8 @@ final class CanvasManager: ObservableObject {
         guard let vector = layers[surface.layerIndex].cels[surface.celIndex].vector else { return nil }
         let elementsBefore = vector.elements
         let cascade = cascading ? CGFloat(vector.images.count) * Self.importCascadeStep : 0
-        let drawn = VectorImageElement(image: image,
+        guard case .success(let source) = RasterSource.capturePlaced(image, using: layers[surface.layerIndex].cels[surface.celIndex].raster.residency) else { raise(.drawingSourceUnavailable); return nil }
+        let drawn = VectorImageElement(source: source,
                                        transform: LayerTransform(position: CGPoint(x: centre.x + cascade,
                                                                                    y: centre.y + cascade),
                                                                  scale: fit, rotation: 0))
@@ -1776,7 +1777,7 @@ final class CanvasManager: ObservableObject {
 
     static func approximateSourceCost(_ source: RasterSource?) -> Int {
         guard let source else { return 0 }
-        return RasterSurface.byteCount(width: Int(source.size.width), height: Int(source.size.height)) ?? Int.max
+        return source.logicalPayloadBytes
     }
 
     /// Fires whenever a real drawing/fill interaction begins on the canvas — `DrawingView` uses this
@@ -3504,7 +3505,7 @@ final class CanvasManager: ObservableObject {
     /// and showing that view is what makes `syncFrameBake` — and so `frameBaker` — run at least once.
     @MainActor
     func closeFrameBaker() {
-        canvasPixelTransforms?.cancel()
+        canvasPreparations?.cancel()
         canvasUpdatePhase = .idle
         thumbnailBackfillTask?.cancel()
         thumbnailBackfillTask = nil

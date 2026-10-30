@@ -706,7 +706,8 @@ enum InterpolationEvaluator {
             backward.draw(in: local, blendMode: .normal, alpha: evaluation.backwardWeight)
         }
         guard !evaluation.localEdits.isEmpty else { return blended }
-        let backdrop = VectorImageElement(image: blended,
+        guard case .success(let source) = RasterSource.capturePlaced(blended) else { return nil }
+        let backdrop = VectorImageElement(source: source,
             transform: LayerTransform(position: CGPoint(x: window.midX, y: window.midY), scale: 1, rotation: 0))
         return render([.image(backdrop)] + evaluation.localEdits)
     }

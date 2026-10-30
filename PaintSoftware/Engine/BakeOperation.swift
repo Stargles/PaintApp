@@ -165,11 +165,12 @@ enum BakeOperation: Equatable {
     ///   save writes it as a new asset beside the old one and the original is untouched until then.
     ///   A colour-class operation acts on pixel colour alone, so grading the picture in its own
     ///   coordinates is the same as grading it on the canvas.
-    func baked(_ element: VectorElement, using colours: BakedColours) -> ElementResult {
+    func baked(_ element: VectorElement, using colours: BakedColours) throws -> ElementResult {
         if let recoloured = element.mappingColours({ colours($0) }) { return .baked(recoloured) }
         switch element {
         case .image(var image):
-            image.image = baked(image.image)
+            let input = try image.source.resolveImage().get()
+            image.source = try RasterSource.capturePlaced(baked(input), using: image.source.residency).get()
             image.fileName = nil
             return .baked(.image(image))
         case .video, .stream:

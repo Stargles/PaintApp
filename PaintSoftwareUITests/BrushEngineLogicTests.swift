@@ -856,8 +856,8 @@ final class BrushEngineLogicTests: XCTestCase {
         }
     }
 
-    private func placedImage(_ color: UIColor) -> VectorImageElement {
-        VectorImageElement(image: solidImage(color),
+    private func placedImage(_ color: UIColor) throws -> VectorImageElement {
+        VectorImageElement(source: try CanvasFixture.placedSource(solidImage(color)),
                            transform: LayerTransform(position: CGPoint(x: 32, y: 32), scale: 1, rotation: 0),
                            fileName: "placed.png")
     }
@@ -887,9 +887,9 @@ final class BrushEngineLogicTests: XCTestCase {
 
     /// Reassigning the writable kind-filtered accessors preserves every existing z-position,
     /// including pictures interleaved with the edited kinds.
-    func testKindAccessorGetSetRoundTripPreservesElementOrder() {
+    func testKindAccessorGetSetRoundTripPreservesElementOrder() throws {
         let fill = opaqueFill(CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
-        let image = placedImage(.green)
+        let image = try placedImage(.green)
         let first = centreStroke(CodableColor(red: 0, green: 0, blue: 1, alpha: 1))
         let second = centreStroke(CodableColor(red: 1, green: 1, blue: 0, alpha: 1))
         let original: [VectorElement] = [.fill(fill), .image(image), .stroke(first), .stroke(second)]
@@ -925,11 +925,11 @@ final class BrushEngineLogicTests: XCTestCase {
     /// of what is already on the layer (LASSO_FILL.md §2a, the owner's *"Cover everything"* of
     /// 2026-08-21); this used to assert `["fill", "image", "stroke", "stroke"]` on the same four calls,
     /// from when a fill drawn after a line was required to go *under* it.
-    func testAddingElementsKeepsTheKindOrderExceptForAFillWhichGoesOnTop() {
+    func testAddingElementsKeepsTheKindOrderExceptForAFillWhichGoesOnTop() throws {
         let canvas = VectorCanvas(size: Self.canvasSize)
         canvas.addStroke(centreStroke(CodableColor(red: 0, green: 0, blue: 1, alpha: 1)))
         canvas.addFill(opaqueFill(CodableColor(red: 1, green: 0, blue: 0, alpha: 1)))
-        canvas.addImage(placedImage(.green))
+        canvas.addImage(try placedImage(.green))
         canvas.addStroke(centreStroke(CodableColor(red: 1, green: 1, blue: 0, alpha: 1)))
 
         XCTAssertEqual(kinds(canvas.elements), ["image", "stroke", "fill", "stroke"],
@@ -980,14 +980,14 @@ final class BrushEngineLogicTests: XCTestCase {
     /// too. This pins the correct mapping directly: an image's local position, carried back through the
     /// very `transform` it was added under, must land exactly on the canvas point it was given, and its
     /// local `scale` must render back out at the `fit` it was given.
-    func testAddImageCanvasSpaceElementMapsPositionAndScaleThroughTheLayersTransform() {
+    func testAddImageCanvasSpaceElementMapsPositionAndScaleThroughTheLayersTransform() throws {
         let transform = CGAffineTransform(translationX: 100, y: 50).scaledBy(x: 2, y: 2)
         let canvas = VectorCanvas(size: Self.canvasSize, elements: [], transform: transform)
         let canvasCentre = CGPoint(x: Self.canvasSize.width / 2, y: Self.canvasSize.height / 2)
         let fit: CGFloat = 0.8
 
         let element = canvas.addImage(canvasSpaceElement: VectorImageElement(
-            image: solidImage(.blue), transform: LayerTransform(position: canvasCentre, scale: fit, rotation: 0)))
+            source: try CanvasFixture.placedSource(solidImage(.blue)), transform: LayerTransform(position: canvasCentre, scale: fit, rotation: 0)))
 
         let mappedBackToCanvas = element.transform.position.applying(transform)
         XCTAssertEqual(mappedBackToCanvas.x, canvasCentre.x, accuracy: 0.001,
@@ -1063,7 +1063,7 @@ final class BrushEngineLogicTests: XCTestCase {
     /// Kind-only snapshots cannot recover B's position once Undo removes its slot.
     func testImagePlacementRedoPreservesInterleavedFillOcclusionAndSourceIdentity() throws {
         let fx = try XCTUnwrap(importFixture(), "Setup: expected a vector cel")
-        let first = placedImage(.red)
+        let first = try placedImage(.red)
         fx.vector.addImage(first)
         let fill = opaqueFill(CodableColor(red: 0, green: 1, blue: 0, alpha: 1))
         fx.vector.addFill(fill)
@@ -1073,6 +1073,7 @@ final class BrushEngineLogicTests: XCTestCase {
         let source = solidImage(.blue)
         XCTAssertTrue(fx.manager.placeImage(source, centre: CGPoint(x: 32, y: 32), width: 16))
         let second = try XCTUnwrap(fx.vector.images.last)
+        let secondSource = second.source
         let afterIDs = beforeIDs + [second.id]
         XCTAssertEqual(fx.vector.elements.map(\.id), afterIDs, "image B lands above the fill")
         let forward = try XCTUnwrap(fx.vector.render())
@@ -1086,7 +1087,7 @@ final class BrushEngineLogicTests: XCTestCase {
         let undoPixels = try XCTUnwrap(rgbaPixels(of: undone, width: 64, height: 64))
         XCTAssertEqual(rgb(undoPixels, x: 32, y: 32).1, 1, accuracy: 0.01,
                        "Undo reveals the green fill, not image A")
-        XCTAssertTrue(try XCTUnwrap(fx.vector.images.first).image === first.image,
+        XCTAssertTrue(try XCTUnwrap(fx.vector.images.first).source === first.source,
                       "Undo keeps image A's original source handle")
 
         fx.manager.redo()
@@ -1098,8 +1099,8 @@ final class BrushEngineLogicTests: XCTestCase {
                        "Redo restores the exact ordered identities [image A, fill, image B]")
         let restored = try XCTUnwrap(fx.vector.images.last)
         XCTAssertEqual(restored.transform, second.transform, "Redo keeps image B's placement")
-        XCTAssertTrue(restored.image === source, "Redo keeps image B's original source handle")
-        XCTAssertTrue(try XCTUnwrap(fx.vector.images.first).image === first.image,
+        XCTAssertTrue(restored.source === secondSource, "Redo keeps image B's original source handle")
+        XCTAssertTrue(try XCTUnwrap(fx.vector.images.first).source === first.source,
                       "Redo also keeps image A's original source handle")
     }
 
