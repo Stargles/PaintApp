@@ -1161,7 +1161,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         manager.fillGestureLayerID = layerID
         manager.fillGestureCelID = celID
         manager.fillGestureFillColor = CodableColor(.green)
-        let fill = CanvasManager.FillRenderResult(generation: manager.fillGeneration,
+        let fill = CanvasManager.FillRenderResult(generation: manager.fillGeneration, documentFrame: manager.currentFrame,
             bytes: Array(repeating: [UInt8(0), 255, 0, 255], count: 64 * 32).flatMap { $0 },
             window: FillWindow.fitting(CGRect(origin: .zero, size: size), in: size, pixelBudget: 64 * 32))
         manager.fillRenderedRegion = fill
@@ -1465,7 +1465,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         manager.fillGestureLayerID = manager.layers[0].id
         manager.fillGestureCelID = manager.layers[0].cels[0].id
         manager.fillGestureFillColor = CodableColor(.green)
-        let fill = CanvasManager.FillRenderResult(generation: manager.fillGeneration,
+        let fill = CanvasManager.FillRenderResult(generation: manager.fillGeneration, documentFrame: manager.currentFrame,
             bytes: Array(repeating: [UInt8(0), 255, 0, 255], count: 64 * 64).flatMap { $0 },
             window: FillWindow.fitting(CGRect(origin: .zero, size: size), in: size, pixelBudget: 64 * 64))
         manager.fillRenderedRegion = fill

@@ -307,9 +307,15 @@ extension CanvasManager {
     /// whatever poses it, and nil wherever the composition is the identity, which is every layer of
     /// every document that has never been posed.
     func inkPose(forLayerID id: UUID) -> PoseMap? {
+        inkPose(forLayerID: id, atFrame: currentFrame)
+    }
+
+    /// The same pose at an existing request's document time. The walk still redirects the cel's
+    /// source time independently; an outer parent above Repeat remains at this document frame.
+    func inkPose(forLayerID id: UUID, atFrame frame: Int) -> PoseMap? {
         guard let index = layers.firstIndex(where: { $0.id == id }) else { return nil }
-        let walk = renderTreeAndPoses(atFrame: currentFrame)
-        return inkPose(ofLayerAt: index, showing: walk.frames[index] ?? currentFrame,
+        let walk = renderTreeAndPoses(atFrame: frame)
+        return inkPose(ofLayerAt: index, showing: walk.frames[index] ?? frame,
                        inheriting: walk.poses[index])
     }
 
@@ -319,7 +325,14 @@ extension CanvasManager {
     /// path itself where nothing poses the layer, and where the pose cannot be inverted (a layer
     /// collapsed to a line, which shows nothing to draw round).
     static func layerSpacePath(_ canvasPath: CGPath, shownThrough pose: PoseMap?) -> CGPath {
-        pose?.inverse?.mapped(canvasPath) ?? canvasPath
+        layerSpacePathIfInvertible(canvasPath, shownThrough: pose) ?? canvasPath
+    }
+
+    /// The same pull-back, refusing a singular pose or a path its inverse cannot carry. A required
+    /// paint clip must distinguish that refusal from the absence of a clip.
+    static func layerSpacePathIfInvertible(_ canvasPath: CGPath, shownThrough pose: PoseMap?) -> CGPath? {
+        guard let pose else { return canvasPath }
+        return pose.inverse?.mapped(canvasPath)
     }
 
     /// **A point the artist put on the canvas, in the layer's own space** — `layerSpacePath`'s answer

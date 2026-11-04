@@ -99,6 +99,25 @@ final class InkPoseLogicTests: XCTestCase {
                    "a pose that cannot be inverted leaves the point where it is")
     }
 
+    func testStrictPathPullBackRefusesSingularAndUnmappablePosesWithoutChangingTheFallback() throws {
+        let path = CGPath(rect: CGRect(x: 32, y: 8, width: 8, height: 8), transform: nil)
+        XCTAssertEqual(CanvasManager.layerSpacePathIfInvertible(path, shownThrough: nil)?.boundingBoxOfPath, path.boundingBoxOfPath)
+        let slide = PoseMap.affine(CGAffineTransform(translationX: 12, y: 8))
+        XCTAssertEqual(CanvasManager.layerSpacePathIfInvertible(path, shownThrough: slide)?.boundingBoxOfPath,
+                       CGRect(x: 20, y: 0, width: 8, height: 8))
+        let singular = PoseMap.affine(CGAffineTransform(scaleX: 0, y: 0))
+        let horizon = PoseMap.projective(Homography(a: 1, b: 0, c: 0, d: 0, e: 1, f: 0, g: 1 / 32, h: 0, i: 1))
+        for pose in [singular, horizon] {
+            XCTAssertNil(CanvasManager.layerSpacePathIfInvertible(path, shownThrough: pose))
+            XCTAssertEqual(CanvasManager.layerSpacePath(path, shownThrough: pose).boundingBoxOfPath, path.boundingBoxOfPath,
+                           "existing selection consumers keep their documented fallback")
+        }
+        let crossed = CGPath(rect: CGRect(x: 24, y: 8, width: 16, height: 8), transform: nil)
+        XCTAssertNil(CanvasManager.layerSpacePathIfInvertible(crossed, shownThrough: horizon))
+        XCTAssertEqual(CanvasManager.layerSpacePath(crossed, shownThrough: horizon).boundingBoxOfPath, crossed.boundingBoxOfPath,
+                       "the nonoptional API retains its original-path fallback for a refused crossing")
+    }
+
     /// **Two transformation layers stacked**: the lower one moves the ink and the upper one carries
     /// the result — inner first. A turn and a slide do not commute, so the reversed order maps the
     /// test point somewhere else entirely.

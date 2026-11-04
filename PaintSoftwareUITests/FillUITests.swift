@@ -11,6 +11,60 @@ import XCTest
 
 final class FillContainmentUITests: PaintUITestCase {
 
+    /// Cold public workflow on the default vector layer. The Select panel's solid Fill action is
+    /// deliberately not used: the bucket must preview and commit through its own native-contour arm.
+    func testBucketKeepsASelectionClippedThroughCommitUndoAndRedo() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        setBrushColor(app, hex: "FF0000")
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangle = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
+        rectangle.tap()
+        let paper = visiblePaperRect(app, in: canvas)
+        func at(_ x: Double, _ y: Double) -> CGVector { onHost(paper, x, y) }
+        let inside = at(0.27, 0.24), outside = at(0.65, 0.24)
+        dragOnCanvas(app, from: at(0.12, 0.10), to: at(0.42, 0.38))
+        let allowOutside = app.buttons["selectPanel.allowOutsideToggle"]
+        XCTAssertTrue(allowOutside.waitForExistence(timeout: 5))
+        XCTAssertFalse(allowOutside.isSelected, "PREMISE: painting is restricted to the selection")
+        app.buttons["toolbar.fillButton"].tap()
+        canvas.coordinate(withNormalizedOffset: inside).tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: inside, matches: { isRed($0) }), "the bucket preview paints inside the ants")
+        XCTAssertNotNil(waitForPixel(canvas, at: outside, matches: { !isRed($0) }), "preview does not paint the exterior")
+        attachScreenshot(app, "selected-bucket-preview-landscape")
+
+        // A real tool switch sets down the adjustable fill. Expose the exterior without its hatch
+        // so the drawn result, rather than the selection decoration, proves it stayed paper.
+        app.buttons["toolbar.brushButton"].tap()
+        app.buttons["toolbar.selectButton"].tap()
+        XCTAssertTrue(allowOutside.waitForExistence(timeout: 5))
+        allowOutside.tap()
+        XCTAssertTrue(allowOutside.isSelected)
+        XCTAssertNotNil(waitForPixel(canvas, at: inside, matches: { isRed($0) }))
+        XCTAssertNotNil(waitForPixel(canvas, at: outside, matches: { isWhitish($0) }), "commit keeps the exterior paper")
+        attachScreenshot(app, "selected-bucket-committed-exterior-exposed")
+        app.buttons["sideToolbar.undoButton"].tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: inside, matches: { isWhitish($0) }), "Undo removes the bucket fill")
+        XCTAssertNotNil(waitForPixel(canvas, at: outside, matches: { isWhitish($0) }))
+        app.buttons["sideToolbar.redoButton"].tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: inside, matches: { isRed($0) }))
+        XCTAssertNotNil(waitForPixel(canvas, at: outside, matches: { isWhitish($0) }), "Redo restores only the selected fill")
+        attachScreenshot(app, "selected-bucket-redo-landscape")
+
+        // Ordinary public control: with Paint Outside Selection enabled, the paper beside the red
+        // region can still take a bucket fill and the first region remains its own colour.
+        app.buttons["toolbar.fillButton"].tap()
+        canvas.coordinate(withNormalizedOffset: outside).tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: outside, matches: { isRed($0) }))
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: outside, matches: { isRed($0) }))
+        XCTAssertNotNil(waitForPixel(canvas, at: inside, matches: { isRed($0) }))
+        attachScreenshot(app, "selected-bucket-outside-permission-control")
+    }
+
     /// The owner reports that a completed first fill flashes off the canvas as a second fill starts.
     /// Keep reading the first region while the second tap commits the first gesture and starts its own;
     /// every sample after the first fill lands must still show the first fill, not the stale base.

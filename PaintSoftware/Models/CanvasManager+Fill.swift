@@ -64,6 +64,7 @@ extension CanvasManager {
     /// `generation` is the gesture's identity: see `CanvasManager.fillGeneration`.
     struct FillGestureContext {
         var generation: UInt64
+        var documentFrame: Int
         var seedX: Int, seedY: Int
         var color: SIMD4<Float>       // premultiplied
         var layerID: UUID, celID: UUID
@@ -87,27 +88,30 @@ extension CanvasManager {
     /// `window.rect` of the canvas — TODO (86): a fill's pixels are the window's, never the canvas's.
     final class FillRenderResult {
         let generation: UInt64
+        /// The request's document time, including any parent above Repeat. A timeline scrub settles
+        /// this result after currentFrame has changed, so the cel id cannot recover this context.
+        let documentFrame: Int
         let bytes: [UInt8]
         let window: FillWindow
 
-        init(generation: UInt64, bytes: [UInt8], window: FillWindow) {
+        init(generation: UInt64, documentFrame: Int, bytes: [UInt8], window: FillWindow) {
             self.generation = generation
+            self.documentFrame = documentFrame
             self.bytes = bytes
             self.window = window
         }
 
         /// **The bytes as the preview tier**: the window's picture over the window's rect, clipped to
-        /// `clip` (canvas coordinates) when there is one — `fillSelectionClip`. What the layer's host
+        /// `clip` (layer coordinates) when there is one — `fillSelectionClip`. What the layer's host
         /// draws and what the commit flattens, built by this one function so the picture cannot change
         /// when the pencil lifts. Any thread: it reads only its own bytes.
         func preview(clippedTo clip: CGPath?) -> FillPreview? {
             guard let image = CanvasManager.imageFromRGBA(bytes, width: window.workingWidth,
                                                           height: window.workingHeight) else { return nil }
-            // The clip is in canvas coordinates and the picture's pixels are its window's.
+            // The clip is in the layer's coordinates and the picture's pixels are its window's.
             var toWindow = window.transform
-            guard let clip, let path = clip.copy(using: &toWindow) else {
-                return FillPreview(image: image, rect: window.rect)
-            }
+            guard let clip else { return FillPreview(image: image, rect: window.rect) }
+            guard let path = clip.copy(using: &toWindow) else { return nil }
             return FillPreview(image: PixelOps.maskedComposite(overlay: image, insidePath: path),
                                rect: window.rect)
         }
@@ -131,7 +135,7 @@ extension CanvasManager {
         let celID: UUID
         /// The latest render to land. Nil until the first does, and for a lasso that enclosed nothing.
         var render: FillRenderResult?
-        /// The selection the fill is clipped to, in canvas coordinates, when it is
+        /// The selection the fill is clipped to, in the layer's coordinates, when it is
         /// (`fillSelectionClip`) — resolved with each landing, on the main thread, where the selection is.
         var clip: CGPath?
 
@@ -182,7 +186,8 @@ extension CanvasManager {
     /// The live gesture's render inputs, as a render is minted (`mintFillRender`). Main thread only.
     private func fillGestureContext(generation: UInt64) -> FillGestureContext? {
         guard let layerID = fillGestureLayerID, let celID = fillGestureCelID else { return nil }
-        return FillGestureContext(generation: generation, seedX: fillGestureSeed.x, seedY: fillGestureSeed.y,
+        return FillGestureContext(generation: generation, documentFrame: currentFrame,
+                                  seedX: fillGestureSeed.x, seedY: fillGestureSeed.y,
                                   color: fillGestureColor, layerID: layerID, celID: celID)
     }
 
@@ -317,7 +322,8 @@ extension CanvasManager {
         beginLiveFill(layerID: layerID, celID: celID)
         refreshUndoRedoState() // the fill is undoable from the moment it starts, even on a blank canvas
 
-        let context = FillGestureContext(generation: beginFillGeneration(), seedX: seedX, seedY: seedY,
+        let context = FillGestureContext(generation: beginFillGeneration(), documentFrame: currentFrame,
+                                         seedX: seedX, seedY: seedY,
                                          color: fillGestureColor, layerID: layerID, celID: celID)
 
         fillQueue.async { [weak self] in
@@ -541,17 +547,18 @@ extension CanvasManager {
     }
 
     /// The layers whose content bounds the fill, bottom-to-top: every layer marked `isFillReference`, at
-    /// its active cel for the current frame. Empty when nothing is a reference (the fill then floods the
+    /// its displayed cel for the current frame. Empty when nothing is a reference (the fill then floods the
     /// whole canvas).
     func fillReferenceSources() -> [(layer: Layer, cel: Cel)] {
         fillReferenceSources(atFrame: currentFrame)
     }
 
     func fillReferenceSources(atFrame frame: Int) -> [(layer: Layer, cel: Cel)] {
-        layers.indices.compactMap { i in
+        let shown = displayedFrames(atFrame: frame)
+        return layers.indices.compactMap { i in
             let layer = layers[i]
             guard layer.isFillReference,
-                  let celIdx = activeCelIndex(inLayer: i, atFrame: frame) else { return nil }
+                  let celIdx = activeCelIndex(inLayer: i, atFrame: shown[i] ?? frame) else { return nil }
             return (layer, layer.cels[celIdx])
         }
     }
@@ -704,7 +711,9 @@ extension CanvasManager {
         guard let render, !render.bytes.isEmpty else {
             return { [weak self] in self?.finishInteractiveFill() }
         }
-        guard let preview = render.preview(clippedTo: fillSelectionClip(layerIndex: layerIndex, celIndex: celIndex)) else {
+        guard case .resolved(let clip) = fillSelectionClip(layerIndex: layerIndex, celIndex: celIndex,
+                                                          atFrame: render.documentFrame),
+              let preview = render.preview(clippedTo: clip) else {
             raise(.drawingSourceUnavailable); return nil
         }
         let label: HistoryActionLabel = fillGestureIsLasso ? .lassoFill : .fill
@@ -716,7 +725,15 @@ extension CanvasManager {
                 return { [weak self] in self?.finishInteractiveFill() }
             }
             var toCanvas = render.window.transform.inverted()
-            guard let path = traced.copy(using: &toCanvas) else { raise(.drawingSourceUnavailable); return nil }
+            guard let tracedPath = traced.copy(using: &toCanvas) else { raise(.drawingSourceUnavailable); return nil }
+            let path: CGPath
+            if let clip {
+                // A first lasso may still cross itself. Boolean operands must be normalized;
+                // winding is also the live preview's clip rule, including composed holes.
+                let rule = VectorCanvas.lassoFillRule
+                path = tracedPath.normalized(using: rule).intersection(clip.normalized(using: rule), using: rule)
+            } else { path = tracedPath }
+            guard !path.isEmpty else { return { [weak self] in self?.finishInteractiveFill() } }
             let before = cel.vector?.elements ?? []
             let prepared = cel.vector?.makeCopy() ?? .empty(size: cel.raster.size)
             let added = prepared.addFill(canvasSpacePath: path, paint: .solid(fillGestureFillColor))
@@ -962,7 +979,8 @@ extension CanvasManager {
 
         // A lasso session seeds from its mask, so the seed coordinate is unused — but the generation
         // is not, and this begin is exposed to a second gesture exactly as the bucket fill's is.
-        let context = FillGestureContext(generation: beginFillGeneration(), seedX: 0, seedY: 0,
+        let context = FillGestureContext(generation: beginFillGeneration(), documentFrame: currentFrame,
+                                         seedX: 0, seedY: 0,
                                          color: fillGestureColor, layerID: layerID, celID: celID)
         // A new loop supersedes the last one's §7 picture, even mid-fade: whatever the artist is
         // about to be told is about *this* gesture. The presenter clears it on its own timer too;
@@ -1089,7 +1107,8 @@ extension CanvasManager {
         // Empty means empty here too, so §7.1's no-undo-entry rule still holds by the same
         // mechanism (nothing to bake, so nothing recorded).
         let rendered = (enclosedNothing ? nil : bytes).map {
-            FillRenderResult(generation: context.generation, bytes: $0, window: window)
+            FillRenderResult(generation: context.generation, documentFrame: context.documentFrame,
+                             bytes: $0, window: window)
         }
         fillLock.lock()
         let stillCurrent = context.generation == fillGeneration
@@ -1123,7 +1142,11 @@ extension CanvasManager {
         guard fillGestureActive,
               let layerIndex = layers.firstIndex(where: { $0.id == context.layerID }),
               let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == context.celID }) else { return }
-        showLiveFill(outcome.rendered, clip: fillSelectionClip(layerIndex: layerIndex, celIndex: celIndex))
+        guard case .resolved(let clip) = fillSelectionClip(layerIndex: layerIndex, celIndex: celIndex,
+                                                          atFrame: context.documentFrame) else {
+            raise(.drawingSourceUnavailable); return
+        }
+        showLiveFill(outcome.rendered, clip: clip)
         // The two halves of §7, raised together: the sentence naming both causes, and the
         // picture that lets the artist tell which one it was. `diagnostic` is non-nil exactly
         // when this is the first empty result of a streak, so the latch that keeps the banner
@@ -1181,18 +1204,26 @@ extension CanvasManager {
                             artworkRect: paper, mendReach: Float(key.mendReach) * scale, fillColor: context.color)
     }
 
-    /// **The selection a fill on `celIndex` of `layerIndex` is clipped to**, in canvas coordinates —
+    private enum FillSelectionClip {
+        /// Nil means the fill may paint freely; a failed required mapping has its own case.
+        case resolved(CGPath?)
+        case unavailable
+    }
+
+    /// **The selection a fill on `celIndex` of `layerIndex` is clipped to**, in the layer's coordinates —
     /// when the selection acts on that cel and outside interaction is denied; nil when the fill paints
     /// freely. The flood-fill tool analogue of `StrokeCanvasView.selectionClipPath`, so a bucket fill
     /// can't paint outside the marching ants any more than a brush stroke can. Main thread, where the
     /// selection is: read by each render's landing for the host, and by `commitInteractiveFill` for the
     /// flatten, so a fill baked by a second tap obeys the selection the same fill previewed inside.
-    private func fillSelectionClip(layerIndex: Int, celIndex: Int) -> CGPath? {
+    private func fillSelectionClip(layerIndex: Int, celIndex: Int, atFrame frame: Int) -> FillSelectionClip {
         guard let selection, !allowsPaintingOutsideSelection,
               layers.indices.contains(layerIndex), layers[layerIndex].cels.indices.contains(celIndex),
               selection.acts(onLayer: layers[layerIndex].id, cel: layers[layerIndex].cels[celIndex].id)
-        else { return nil }
-        return selection.path
+        else { return .resolved(nil) }
+        guard let path = Self.layerSpacePathIfInvertible(selection.path,
+            shownThrough: inkPose(forLayerID: layers[layerIndex].id, atFrame: frame)) else { return .unavailable }
+        return .resolved(path)
     }
 
     // MARK: - Fill helpers

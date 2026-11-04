@@ -17,6 +17,65 @@ import QuartzCore
 /// about the fixture and an identity is a claim about the code.
 final class HomographyLogicTests: XCTestCase {
 
+    func testProjectivePathMappingRejectsHorizonCrossingsBetweenFiniteVertices() {
+        let map = Homography(a: 1, b: 0, c: 0, d: 0, e: 1, f: 0, g: -1 / 32, h: 0, i: 1)
+        let start = CGPoint(x: 24, y: 8), end = CGPoint(x: 40, y: 8)
+        XCTAssertNotNil(map.map(start), "PREMISE: neither endpoint is itself on the horizon")
+        XCTAssertNotNil(map.map(end))
+        let line = CGMutablePath()
+        line.move(to: start); line.addLine(to: end)
+        let closed = CGPath(rect: CGRect(x: 24, y: 8, width: 16, height: 8), transform: nil)
+        for path in [line, closed] {
+            XCTAssertNil(map.mapped(path), "A connected edge cannot jump through the horizon between finite vertices")
+        }
+        let overflow = Homography(a: 1, b: 0, c: 0, d: 0, e: 1, f: 0,
+                                  g: .greatestFiniteMagnitude, h: 0, i: 1)
+        XCTAssertNil(overflow.mapped(CGPath(rect: CGRect(x: 2, y: 1, width: 1, height: 1), transform: nil)),
+                     "An overflowing homogeneous weight cannot prove a finite path domain")
+    }
+
+    func testProjectivePathMappingRejectsBezierHullsThatMeetBothSidesOfTheHorizon() {
+        let map = Homography(a: 1, b: 0, c: 0, d: 0, e: 1, f: 0, g: -1 / 32, h: 0, i: 1)
+        let quadratic = CGMutablePath()
+        quadratic.move(to: CGPoint(x: 24, y: 8))
+        quadratic.addQuadCurve(to: CGPoint(x: 24, y: 16), control: CGPoint(x: 40, y: 12))
+        let cubic = CGMutablePath()
+        cubic.move(to: CGPoint(x: 24, y: 8))
+        cubic.addCurve(to: CGPoint(x: 24, y: 16), control1: CGPoint(x: 40, y: 8),
+                       control2: CGPoint(x: 40, y: 16))
+        // This curve stays finite, but its control hull spans the horizon. The shared path mapper
+        // conservatively refuses that uncertainty instead of approximating an unproved domain.
+        let uncertain = CGMutablePath()
+        uncertain.move(to: CGPoint(x: 8, y: 8))
+        uncertain.addQuadCurve(to: CGPoint(x: 8, y: 16), control: CGPoint(x: 40, y: 12))
+        for path in [quadratic, cubic, uncertain] {
+            XCTAssertNil(map.mapped(path), "Each Bezier control hull must prove one finite side of the horizon")
+        }
+    }
+
+    func testProjectivePathMappingKeepsSameSideCurvesClosedEdgesAndIndependentSubpaths() {
+        let map = Homography(a: 1, b: 0, c: 0, d: 0, e: 1, f: 0, g: -1 / 32, h: 0, i: 1)
+        let curves = CGMutablePath()
+        curves.move(to: CGPoint(x: 8, y: 8))
+        curves.addQuadCurve(to: CGPoint(x: 24, y: 16), control: CGPoint(x: 16, y: 12))
+        curves.addCurve(to: CGPoint(x: 8, y: 24), control1: CGPoint(x: 24, y: 20),
+                        control2: CGPoint(x: 16, y: 24))
+        curves.closeSubpath()
+        let separate = CGMutablePath()
+        separate.addRect(CGRect(x: 8, y: 8, width: 8, height: 8))
+        separate.addRect(CGRect(x: 40, y: 8, width: 8, height: 8))
+        for path in [curves, separate] {
+            let mapped = map.mapped(path)
+            XCTAssertNotNil(mapped, "Independent components may occupy opposite finite sides")
+            guard let mapped else { continue }
+            XCTAssertFalse(mapped.isEmpty)
+            let equivalent = (-1 * map).mapped(path)
+            XCTAssertNotNil(equivalent, "A homogeneous sign change must preserve the path domain")
+            guard let equivalent else { continue }
+            XCTAssertEqual(mapped.boundingBoxOfPath, equivalent.boundingBoxOfPath)
+        }
+    }
+
     // MARK: - Fixtures
 
     /// A box wide enough that a perspective divide has somewhere to act, and asymmetric so a

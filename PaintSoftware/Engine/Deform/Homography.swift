@@ -325,8 +325,8 @@ struct Homography: Equatable, Codable {
     // MARK: - Paths
 
     #if canImport(CoreGraphics)
-    /// `path` with every one of its points carried through this map, or nil when any of them lands
-    /// on the vanishing line where it has no image.
+    /// `path` with every one of its points carried through this map, or nil when a connected
+    /// subpath cannot be proved to stay on one finite side of the vanishing line.
     ///
     /// **Point-wise, because a `CALayer` transform cannot do this one.** A projective
     /// `CATransform3D` is how the piece itself and the text box carry their warp, for free, on the
@@ -339,15 +339,28 @@ struct Homography: Equatable, Codable {
     /// none.** A projective image of a cubic is not a cubic, so mapping the controls is only exact
     /// for straight segments — which is every segment a lasso, a rectangle or a wand trace produces.
     /// A future caller with real curves wants a flatten first, not this.
+    /// Every endpoint and control in a subpath must have the same nonzero homogeneous-weight sign.
+    /// A Bezier stays inside its control hull, so this proves the curves and closing edge too;
+    /// separate subpaths may occupy different sides without connecting across the horizon.
     func mapped(_ path: CGPath) -> CGPath? {
         let out = CGMutablePath()
         var escaped = false
+        var subpathWeightSign: FloatingPointSign?
         path.applyWithBlock { raw in
             guard !escaped else { return }
             let element = raw.pointee
-            func at(_ index: Int) -> CGPoint? { map(element.points[index]) }
+            func at(_ index: Int) -> CGPoint? {
+                let point = element.points[index]
+                let weight = self.weight(at: point)
+                guard weight.isFinite, abs(weight) > Quad.epsilon else { return nil }
+                guard subpathWeightSign == nil || subpathWeightSign == weight.sign else { return nil }
+                guard let mapped = map(point), mapped.x.isFinite, mapped.y.isFinite else { return nil }
+                subpathWeightSign = weight.sign
+                return mapped
+            }
             switch element.type {
             case .moveToPoint:
+                subpathWeightSign = nil
                 guard let p = at(0) else { escaped = true; return }
                 out.move(to: p)
             case .addLineToPoint:

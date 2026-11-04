@@ -536,11 +536,11 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
                                        in: canvas, pixelBudget: 288)
             let green: [UInt8] = [0, 255, 0, 255], red: [UInt8] = [255, 0, 0, 255]
             let blue: [UInt8] = [0, 0, 255, 255]
-            let first = CanvasManager.FillRenderResult(generation: 1,
+            let first = CanvasManager.FillRenderResult(generation: 1, documentFrame: 0,
                 bytes: Array(repeating: green, count: a.workingWidth * a.workingHeight).flatMap { $0 }, window: a)
-            let active = CanvasManager.FillRenderResult(generation: 2,
+            let active = CanvasManager.FillRenderResult(generation: 2, documentFrame: 0,
                 bytes: Array(repeating: red, count: b.workingWidth * b.workingHeight).flatMap { $0 }, window: b)
-            let newest = CanvasManager.FillRenderResult(generation: 3,
+            let newest = CanvasManager.FillRenderResult(generation: 3, documentFrame: 0,
                 bytes: Array(repeating: blue, count: c.workingWidth * c.workingHeight).flatMap { $0 }, window: c)
             XCTAssertTrue(owner!.showFill(first, clip: nil))
             let surface = try XCTUnwrap(owner!.subviews.compactMap { $0 as? WindowSurfaceView }.first)
@@ -620,7 +620,7 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
         let window = FillWindow.fitting(CGRect(x: 4, y: 6, width: 8, height: 4),
                                        in: canvas, pixelBudget: 4096)
         let green: [UInt8] = [0, 255, 0, 255]
-        let render = CanvasManager.FillRenderResult(generation: 1,
+        let render = CanvasManager.FillRenderResult(generation: 1, documentFrame: 0,
             bytes: Array(repeating: green, count: window.workingWidth * window.workingHeight).flatMap { $0 },
             window: window)
 
@@ -671,7 +671,7 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
             let window = FillWindow.fitting(CGRect(x: 4, y: 6, width: 8, height: 4),
                                            in: canvas, pixelBudget: 4096)
             let green: [UInt8] = [0, 255, 0, 255]
-            let render = CanvasManager.FillRenderResult(generation: 1,
+            let render = CanvasManager.FillRenderResult(generation: 1, documentFrame: 0,
                 bytes: Array(repeating: green, count: window.workingWidth * window.workingHeight).flatMap { $0 },
                 window: window)
 
@@ -701,10 +701,10 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
                                        in: canvas, pixelBudget: 4096)
         let green: [UInt8] = [0, 255, 0, 255]
         let red: [UInt8] = [255, 0, 0, 255]
-        let renderA = CanvasManager.FillRenderResult(generation: 1,
+        let renderA = CanvasManager.FillRenderResult(generation: 1, documentFrame: 0,
             bytes: Array(repeating: green, count: window.workingWidth * window.workingHeight).flatMap { $0 },
             window: window)
-        let renderB = CanvasManager.FillRenderResult(generation: 2,
+        let renderB = CanvasManager.FillRenderResult(generation: 2, documentFrame: 0,
             bytes: Array(repeating: red, count: window.workingWidth * window.workingHeight).flatMap { $0 },
             window: window)
         weak var ownerReference: LayerFillView? = nil
