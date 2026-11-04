@@ -53,6 +53,11 @@ final class LassoMoveLogicTests: XCTestCase {
 
     private func cgImage(_ vector: VectorCanvas) throws -> CGImage? { (try XCTUnwrap(vector.render())).cgImage }
 
+    private func picture(_ elements: [VectorElement], size: CGSize) throws -> [UInt8] {
+        let image = try XCTUnwrap(VectorCanvas(size: size, elements: elements).render())
+        return try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(image.cgImage)))
+    }
+
     /// `a·d − b·c`. Its **sign** is the whole question a mirror asks: negative is a plane turned over,
     /// positive is a plane merely turned. `CGAffineTransform` has no such accessor of its own.
     private func determinant(_ t: CGAffineTransform) -> CGFloat { t.a * t.d - t.b * t.c }
@@ -777,11 +782,7 @@ final class LassoMoveLogicTests: XCTestCase {
         for nudgeCount in [0, 2] {
             let (manager, layerIndex, vector) = fixture()
             vector.addStroke(stroke(from: CGPoint(x: 4, y: 30), to: CGPoint(x: 60, y: 30), size: 4))
-            func picture(_ elements: [VectorElement]) throws -> [UInt8] {
-                let image = try XCTUnwrap(VectorCanvas(size: vector.size, elements: elements).render())
-                return try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(image.cgImage)))
-            }
-            let original = try picture(vector.elements)
+            let original = try picture(vector.elements, size: vector.size)
             let originalIDs = vector.elements.map(\.id)
             select(manager, layerIndex, loop(CGRect(x: 34, y: 10, width: 26, height: 40)))
             manager.history.removeAll()
@@ -790,7 +791,7 @@ final class LassoMoveLogicTests: XCTestCase {
             var authored = [original]
             for step in 0..<nudgeCount {
                 manager.nudgeVectorFloat(to: movedBy(manager, dx: CGFloat((step + 1) * 5), dy: 0))
-                authored.append(try picture(vector.elements))
+                authored.append(try picture(vector.elements, size: vector.size))
             }
             XCTAssertEqual(manager.vectorFloat?.nudges, nudgeCount)
             XCTAssertEqual(manager.history.undoStack.count, nudgeCount)
@@ -811,9 +812,9 @@ final class LassoMoveLogicTests: XCTestCase {
                 XCTAssertNotNil(manager.selection, "the original lasso remains available")
             } else {
                 manager.undo()
-                XCTAssertEqual(try picture(vector.elements), authored[1], "one Undo still removes exactly the last nudge")
+                XCTAssertEqual(try picture(vector.elements, size: vector.size), authored[1], "one Undo still removes exactly the last nudge")
                 manager.undo()
-                XCTAssertEqual(try picture(vector.elements), original, "the earlier nudge remains independently undoable")
+                XCTAssertEqual(try picture(vector.elements, size: vector.size), original, "the earlier nudge remains independently undoable")
             }
         }
     }
@@ -822,17 +823,21 @@ final class LassoMoveLogicTests: XCTestCase {
 
     /// A loop over blank paper plus Move does **nothing** — it does not fall back to moving the whole
     /// cel, and the loop stays on screen ready to be redrawn (owner, 2026-08-22).
-    func testAnEmptyLassoDoesNothingAndLeavesTheLoopOnScreen() {
+    func testAnEmptyLassoDoesNothingAndLeavesTheLoopOnScreen() throws {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 4, y: 8), to: CGPoint(x: 20, y: 8)))
         let before = vector.elements
+        let beforeIDs = before.map(\.id)
+        let beforePixels = try picture(before, size: vector.size)
         let emptyRegion = loop(CGRect(x: 30, y: 40, width: 20, height: 20))
         select(manager, layerIndex, emptyRegion)
 
         XCTAssertFalse(manager.beginVectorLassoMove())
         XCTAssertNil(manager.vectorFloat, "nothing lifted")
         XCTAssertEqual(vector.elements.count, before.count, "and nothing moved")
-        XCTAssertEqual(vector.elements, before, "and the whole cel emphatically did not move")
+        let afterPixels = try picture(vector.elements, size: vector.size)
+        XCTAssertTrue(vector.elements.map(\.id) == beforeIDs && afterPixels == beforePixels,
+                      "and the whole cel emphatically did not move")
         XCTAssertNotNil(manager.selection, "the loop stays, ready to be redrawn")
     }
 
