@@ -546,6 +546,183 @@ final class InkPoseLogicTests: XCTestCase {
         XCTAssertEqual(vector.elements.compactMap(\.text), [original])
     }
 
+    private func repeatedTextFixture(sourceOnly: Bool) throws -> (manager: CanvasManager, vector: VectorCanvas,
+                                                                 original: VectorTextElement, shownCorners: [CGPoint]) {
+        let manager = CanvasManager()
+        manager.brushLibraryOverride = CanvasFixture.isolatedBrushLibrary()
+        manager.canvasSize = Self.size
+        manager.addVectorLayer(name: "Repeated text")
+        manager.addTransformLayer(name: "Repeat")
+        manager.addTransformLayer(name: "Outer Move")
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: sourceOnly ? 3 : 24)])
+        CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 0, length: 24)])
+        CanvasFixture.setCelLayout(manager, layerIndex: 2, [(start: 0, length: 24)])
+        manager.layers[1].transform = LayerPose(pose: PoseQuad(restingIn: Self.box), mode: .repeat, repeatPeriod: 12)
+        func groupMap(_ frame: Int) -> CGAffineTransform {
+            CGAffineTransform(scaleX: 1.5, y: 0.8).concatenating(CGAffineTransform(translationX: CGFloat(frame * 6), y: 0))
+        }
+        func celMap(_ frame: Int) -> CGAffineTransform {
+            CGAffineTransform(rotationAngle: 0.12).concatenating(CGAffineTransform(translationX: 0, y: CGFloat(frame * 2)))
+        }
+        func outerMap(_ frame: Int) -> CGAffineTransform {
+            CGAffineTransform(rotationAngle: -0.08)
+                .concatenating(CGAffineTransform(translationX: CGFloat(frame * 2), y: CGFloat(frame)))
+        }
+        manager.layers[2].transform = LayerPose(pose: PoseQuad(box: Self.box, mappedBy: outerMap(0)),
+            track: CanvasFixture.poseTrack([(0, PoseQuad(box: Self.box, mappedBy: outerMap(0))),
+                                            (23, PoseQuad(box: Self.box, mappedBy: outerMap(23)))], interpolation: .linear))
+        let group = AnimationGroup(displayName: "Looped label", tagColor: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        manager.animationGroups = [group]
+        var recipe = TextRecipe(string: "Hi")
+        recipe.typography = Typography(pointSize: 24, tracking: 3, lineSpacing: 4, paragraphSpacing: 6)
+        let original = VectorTextElement(recipe: recipe,
+            frame: TextFrame(origin: CGPoint(x: 20, y: 30), size: CGSize(width: 58, height: 44), autoSize: false),
+            motionGroupID: UUID(), animationGroupID: group.id)
+        let carried = CGAffineTransform(rotationAngle: 0.1).concatenating(CGAffineTransform(translationX: 5, y: 8))
+        let vector = VectorCanvas(size: Self.size, elements: [.text(original)], transform: carried)
+        manager.layers[0].cels[0].vector = vector
+        let last = sourceOnly ? 2 : 23
+        manager.layers[0].cels[0].transformTracks = [
+            TransformChannelID.group(group.id).id: CanvasFixture.poseTrack(
+                [(0, PoseQuad(box: Self.box, mappedBy: groupMap(0))),
+                 (last, PoseQuad(box: Self.box, mappedBy: groupMap(last)))], interpolation: .linear),
+            TransformChannelID.cel.id: CanvasFixture.poseTrack(
+                [(0, PoseQuad(box: Self.box, mappedBy: celMap(0))),
+                 (last, PoseQuad(box: Self.box, mappedBy: celMap(last)))], interpolation: .linear)
+        ]
+        manager.currentLayerIndex = 0
+        manager.currentFrame = 14
+        manager.history.removeAll()
+        // Repeat resolves the cel/group at 2; the poser above Repeat still resolves at 14.
+        let corners = original.frame.corners.map {
+            $0.applying(groupMap(2)).applying(celMap(2)).applying(outerMap(14)).applying(carried)
+        }
+        return (manager, vector, original, corners)
+    }
+
+    private func repeatedTextFrame(_ manager: CanvasManager) throws -> CGImage {
+        let request = try XCTUnwrap(manager.makeRenderRequest(atFrame: manager.currentFrame, includeBackground: false))
+        return try XCTUnwrap(Compositor.composite(request), "the actual repeated document must draw")
+    }
+
+    func testARepeatedHeldTextTapUsesSourceChannelsAndDocumentTimeContainerForAnExactNoOp() throws {
+        let fx = try repeatedTextFixture(sourceOnly: false)
+        let manager = fx.manager
+        XCTAssertEqual(manager.displayedFrame(forLayer: 0, atFrame: 14), 2, "PREMISE: the shown source differs from the playhead")
+        XCTAssertEqual(manager.activeCelIndex(inLayer: 0, atFrame: 14), 0, "PREMISE: one held cel covers both frames")
+        let beforeImage = try repeatedTextFrame(manager)
+        let before = try XCTUnwrap(CanvasFixture.rgbaBytes(beforeImage))
+        let ink = try XCTUnwrap(PixelOps.opaqueContentBounds(UIImage(cgImage: beforeImage)), "PREMISE: actual repeated letters are drawn")
+        let expectedBox = try XCTUnwrap(Quad(fx.shownCorners)).boundingBox
+        XCTAssertTrue(expectedBox.insetBy(dx: -2, dy: -2).contains(ink), "PREMISE: actual pixels follow source channels and the document-time outer pose")
+        let tap = CGPoint(x: fx.shownCorners.map(\.x).reduce(0, +) / 4,
+                          y: fx.shownCorners.map(\.y).reduce(0, +) / 4)
+
+        manager.beginTextSession(at: tap)
+        XCTAssertEqual(manager.textEditingElementID, fx.original.id, "Text reopens the label where Repeat actually draws it")
+        XCTAssertEqual(manager.textGestureCelID, manager.layers[0].cels[0].id)
+        let overlayError = zip(manager.textFrame.corners, fx.shownCorners)
+            .map { hypot($0.x - $1.x, $0.y - $1.y) }.max() ?? .infinity
+        XCTAssertLessThan(overlayError, 1e-6, "the actual overlay uses source channels and keeps outer container time")
+        XCTAssertTrue(manager.commitInteractiveText())
+        XCTAssertEqual(fx.vector.elements.first?.text, fx.original, "the repeated label's no-op keeps exact identity, frame, groups and typography")
+        XCTAssertNil(fx.vector.editingElementID)
+        XCTAssertFalse(manager.history.canUndo)
+        XCTAssertEqual(CanvasFixture.rgbaBytes(try repeatedTextFrame(manager)), before,
+                       "closing the unchanged repeated label preserves its actual document picture")
+    }
+
+    func testEditingRepeatedTextByIDUsesShownCelsAndRetainsTheirAnimationThroughHistory() throws {
+        for sourceOnly in [false, true] {
+            let fx = try repeatedTextFixture(sourceOnly: sourceOnly)
+            let manager = fx.manager
+            if sourceOnly {
+                XCTAssertNil(manager.activeCelIndex(inLayer: 0, atFrame: 14), "PREMISE: no drawing exists at the raw playhead")
+            } else {
+                XCTAssertEqual(manager.activeCelIndex(inLayer: 0, atFrame: 14), 0, "PREMISE: one held cel covers source and playhead")
+            }
+            XCTAssertEqual(manager.displayedCelIndex(inLayer: 0, atFrame: 14), 0, "PREMISE: Repeat shows the earlier drawing")
+            let before = try XCTUnwrap(CanvasFixture.rgbaBytes(try repeatedTextFrame(manager)))
+            XCTAssertTrue(before.enumerated().contains { $0.offset % 4 == 3 && $0.element > 200 }, "PREMISE: real repeated text is visible")
+            let opened = manager.beginEditingText(elementID: fx.original.id)
+            XCTAssertTrue(opened, "Edit Text must open the shown source cel even when the playhead holds none")
+            guard opened else { return }
+            XCTAssertEqual(manager.textGestureCelID, manager.layers[0].cels[0].id)
+            let overlayError = zip(manager.textFrame.corners, fx.shownCorners)
+                .map { hypot($0.x - $1.x, $0.y - $1.y) }.max() ?? .infinity
+            XCTAssertLessThan(overlayError, 1e-6, "ID Edit's actual overlay follows source channels and document-time outer pose")
+            manager.updateTextString("Ho")
+            XCTAssertTrue(manager.commitInteractiveText())
+            var expected = fx.original
+            expected.recipe.string = "Ho"
+            let edited = try XCTUnwrap(fx.vector.elements.first?.text)
+            XCTAssertEqual(edited.id, expected.id)
+            XCTAssertEqual(edited.motionGroupID, expected.motionGroupID)
+            XCTAssertEqual(edited.animationGroupID, expected.animationGroupID)
+            XCTAssertEqual(edited.recipe.string, expected.recipe.string)
+            XCTAssertEqual(edited.recipe.font, expected.recipe.font)
+            XCTAssertEqual(edited.recipe.color, expected.recipe.color)
+            XCTAssertEqual(edited.recipe.opacity, expected.recipe.opacity)
+            XCTAssertEqual(edited.recipe.typography.pointSize, expected.recipe.typography.pointSize, accuracy: 1e-6)
+            XCTAssertEqual(edited.recipe.typography.tracking, expected.recipe.typography.tracking, accuracy: 1e-6)
+            XCTAssertEqual(edited.recipe.typography.lineSpacing, expected.recipe.typography.lineSpacing, accuracy: 1e-6)
+            XCTAssertEqual(edited.recipe.typography.paragraphSpacing, expected.recipe.typography.paragraphSpacing, accuracy: 1e-6)
+            XCTAssertEqual(edited.recipe.typography.lineHeightMultiple, expected.recipe.typography.lineHeightMultiple)
+            XCTAssertEqual(edited.recipe.typography.alignment, expected.recipe.typography.alignment)
+            for (actual, original) in zip(edited.frame.corners, expected.frame.corners) {
+                assertSame(actual, original, "the real edit pulls back into the source cel's original full quad")
+            }
+            XCTAssertEqual(manager.layers[0].cels.count, 1, "editing a repeated source does not create a playhead drawing")
+            let after = try XCTUnwrap(CanvasFixture.rgbaBytes(try repeatedTextFrame(manager)))
+            XCTAssertNotEqual(after, before, "the actual repeated picture contains the changed letters")
+            XCTAssertTrue(manager.history.canUndo)
+            manager.undo()
+            XCTAssertEqual(fx.vector.elements.first?.text, fx.original)
+            XCTAssertFalse(manager.history.canUndo, "one text edit is one history step")
+            XCTAssertEqual(CanvasFixture.rgbaBytes(try repeatedTextFrame(manager)), before)
+            manager.redo()
+            XCTAssertEqual(fx.vector.elements.first?.text, edited)
+            XCTAssertEqual(CanvasFixture.rgbaBytes(try repeatedTextFrame(manager)), after)
+        }
+    }
+
+    func testNewTextOnARepeatedSourceOnlyCelLandsWhereItWasDrawnAndUndoesAsOneEdit() throws {
+        let fx = try repeatedTextFixture(sourceOnly: true)
+        let manager = fx.manager
+        fx.vector.elements = []
+        let sourceCelID = manager.layers[0].cels[0].id
+        let point = CGPoint(x: 100, y: 90)
+        manager.beginTextSession(at: point)
+        XCTAssertTrue(manager.textGestureActive, "a new text box can open on the drawing Repeat shows")
+        guard manager.textGestureActive else { return }
+        XCTAssertEqual(manager.textGestureCelID, sourceCelID)
+        manager.textRecipe.typography.pointSize = 24
+        manager.updateTextString("Hi")
+        let expectedBox = manager.textFrame.boundingBox
+        XCTAssertEqual(manager.textFrame.corners[0], point)
+        XCTAssertTrue(manager.commitInteractiveText())
+        let text = try XCTUnwrap(fx.vector.elements.first?.text)
+        XCTAssertNil(text.animationGroupID, "new text joins the shown cel, not an existing element's group")
+        XCTAssertNil(text.motionGroupID)
+        XCTAssertEqual(manager.layers[0].cels.count, 1)
+        XCTAssertEqual(manager.layers[0].cels[0].id, sourceCelID)
+        XCTAssertNil(manager.activeCelIndex(inLayer: 0, atFrame: 14))
+        let afterImage = try repeatedTextFrame(manager)
+        let ink = try XCTUnwrap(PixelOps.opaqueContentBounds(UIImage(cgImage: afterImage)), "the new repeated label is actually drawn")
+        XCTAssertTrue(expectedBox.insetBy(dx: -2, dy: -2).contains(ink),
+                      "new text removes the source cel pose and document-time outer pose before landing")
+        let after = try XCTUnwrap(CanvasFixture.rgbaBytes(afterImage))
+        XCTAssertTrue(manager.history.canUndo)
+        manager.undo()
+        XCTAssertTrue(fx.vector.elements.isEmpty)
+        XCTAssertFalse(manager.history.canUndo)
+        let empty = try XCTUnwrap(CanvasFixture.rgbaBytes(try repeatedTextFrame(manager)))
+        XCTAssertFalse(empty.enumerated().contains { $0.offset % 4 == 3 && $0.element > 0 }, "Undo removes the actual shown new label")
+        manager.redo()
+        XCTAssertEqual(fx.vector.elements.first?.text, text)
+        XCTAssertEqual(CanvasFixture.rgbaBytes(try repeatedTextFrame(manager)), after)
+    }
+
     /// **A loop drawn round the ink where it is shown** catches it: the container pose reaches the
     /// per-element pull-back the lasso, the Move box and every nudge all read.
     func testALassoRoundTheShownInkPullsBackOntoTheStoredInk() throws {

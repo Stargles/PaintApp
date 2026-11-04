@@ -351,9 +351,11 @@ extension CanvasManager {
     func beginGradientEdit(elementID: UUID) -> Bool {
         commitGradientEdit()
         guard layers.indices.contains(currentLayerIndex),
-              layers[currentLayerIndex].kind == .vector,
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              let vector = layers[currentLayerIndex].cels[celIndex].vector else { return false }
+              layers[currentLayerIndex].kind == .vector else { return false }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        guard let shown = displayedCel(inLayer: currentLayerIndex, atFrame: currentFrame, in: walk),
+              let vector = layers[currentLayerIndex].cels[shown.index].vector else { return false }
+        let celIndex = shown.index
         let elements = vector.elements
         guard elements.contains(where: { $0.id == elementID && $0.fill?.gradient != nil }) else { return false }
         // A paint changes no footprint, so the list found sizes the window.

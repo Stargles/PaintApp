@@ -259,9 +259,8 @@ extension CanvasManager {
     /// geometry to cut or to hit.
     ///
     /// - Parameter frames: the frame each layer is read at when it is not the playhead's — the walk's
-    ///   Repeat source frames. The eraser passes them, since a stroke lands on the drawing a Repeat
-    ///   layer shows; the Tap selection reads every layer at the playhead, since a selection belongs to
-    ///   the cel under it.
+    ///   Repeat source frames. Both erasing and Tap selection ask for the stored drawing the viewer
+    ///   sees, so they pass the render walk's frames along with its visible tree.
     func visibleStoredVectorCels(in tree: [RenderNode], shownAt frames: [Int: Int] = [:]) -> [VisibleVectorCel] {
         tree.visibleLeavesTopmostFirst.compactMap { node in
             guard case .leaf(let index) = node.content, layers[index].kind == .vector else { return nil }

@@ -15,6 +15,69 @@ import XCTest
 /// read their current values off the loop, and dragging one is the whole gesture.
 final class SelectionEditUITests: PaintUITestCase {
 
+    /// A fixed loop must describe the mark now drawn inside it after a same-frame Move-layer edit.
+    /// Both marks and the transform are made through public controls from a cold document.
+    func testSelectionColourReadoutFollowsASameFrameContainerMoveUndoAndRedo() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        openLayerPanel(app)
+        addTransformLayerFromAddMenu(app)
+        let ink = app.staticTexts["layerPanel.row.0"]
+        XCTAssertTrue(ink.waitForExistence(timeout: 5))
+        ink.tap()
+        closeLayerRail(app)
+        let paper = paperRect(in: canvas)
+        func at(_ x: Double, _ y: Double) -> CGVector { onHost(paper, x, y) }
+        setBrushSize(app, normalized: 0.05)
+        setBrushColor(app, hex: "FF0000")
+        drawLine(on: canvas, from: at(0.28, 0.22), to: at(0.36, 0.22))
+        setBrushColor(app, hex: "0000FF")
+        drawLine(on: canvas, from: at(0.60, 0.22), to: at(0.68, 0.22))
+        let inside = at(0.32, 0.22)
+        XCTAssertNotNil(waitForPixel(canvas, at: inside, matches: { isRed($0) }))
+        XCTAssertNotNil(waitForPixel(canvas, at: at(0.64, 0.22), matches: { isBlue($0) }))
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangle = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
+        rectangle.tap()
+        dragOnCanvas(app, from: at(0.24, 0.15), to: at(0.40, 0.29))
+        openSelectionEditBand(app)
+        let swatch = app.buttons["selectPanel.colourSwatch"]
+        XCTAssertTrue((swatch.value as? String ?? "").uppercased().hasPrefix("FF0000"), "warm the red readout before the pose changes")
+        attachScreenshot(app, "selection-memo-before-container-move-landscape")
+
+        openLayerPanel(app)
+        let poser = app.staticTexts["layerPanel.row.1"]
+        XCTAssertTrue(poser.waitForExistence(timeout: 5))
+        poser.tap()
+        let move = app.buttons["layerOptions.transformMove"]
+        XCTAssertTrue(move.waitForExistence(timeout: 5))
+        move.tap()
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5))
+        dragOnCanvas(app, from: at(0.50, 0.34), to: at(0.18, 0.34))
+        app.buttons["moveBar.doneButton"].tap()
+        let closeOptions = app.buttons["layerOptions.close"]
+        if closeOptions.waitForExistence(timeout: 2) { closeOptions.tap() }
+        if !app.tables["layerPanel.list"].exists { openLayerPanel(app) }
+        XCTAssertTrue(ink.waitForExistence(timeout: 5))
+        ink.tap()
+        closeLayerRail(app)
+        if !app.buttons["selectPanel.editDisclosure"].exists { app.buttons["toolbar.selectButton"].tap() }
+        openSelectionEditBand(app)
+        XCTAssertNotNil(waitForPixel(canvas, at: inside, matches: { isBlue($0) }), "the blue mark is actually drawn in the same loop")
+        XCTAssertTrue((swatch.value as? String ?? "").uppercased().hasPrefix("0000FF"), "the readout follows the drawn blue mark")
+        attachScreenshot(app, "selection-memo-after-container-move-landscape")
+        app.buttons["sideToolbar.undoButton"].tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: inside, matches: { isRed($0) }))
+        XCTAssertTrue((swatch.value as? String ?? "").uppercased().hasPrefix("FF0000"))
+        app.buttons["sideToolbar.redoButton"].tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: inside, matches: { isBlue($0) }))
+        XCTAssertTrue((swatch.value as? String ?? "").uppercased().hasPrefix("0000FF"))
+        attachScreenshot(app, "selection-memo-redo-container-move-landscape")
+    }
+
     // MARK: - Size, live
 
     func testDraggingTheSizeSliderOverALassoedLineChangesWhatIsDrawnLiveAndUndoPutsItBack() throws {

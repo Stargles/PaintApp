@@ -332,12 +332,16 @@ struct SelectionStyleMemo: Equatable {
     var celID: UUID
     var frame: Int
     var vectorVersion: Int
+    /// The resolved channels and inherited pose used by the loop's pull-back, not stored ink.
+    var poseChannels: [String: [CGFloat]]
+    var inheritedPose: [CGFloat]?
     var membership: LassoMembership
     var answer: SelectionStyle
 
     func matches(_ key: SelectionStyleMemo) -> Bool {
         pathObject == key.pathObject && bounds == key.bounds && layerID == key.layerID
             && celID == key.celID && frame == key.frame && vectorVersion == key.vectorVersion
+            && poseChannels == key.poseChannels && inheritedPose == key.inheritedPose
             && membership == key.membership
     }
 }
@@ -381,12 +385,20 @@ extension CanvasManager {
     /// same thing.
     var selectionEditUnavailableReason: String? {
         guard layers.indices.contains(currentLayerIndex) else { return nil }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        return selectionEditUnavailableReason(at: displayedCel(inLayer: currentLayerIndex,
+                                                               atFrame: currentFrame, in: walk)?.index)
+    }
+
+    private func selectionEditUnavailableReason(at celIndex: Int?) -> String? {
         guard layers[currentLayerIndex].kind == .vector,
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
+              let celIndex,
               layers[currentLayerIndex].cels[celIndex].vector != nil else {
             return "Colour, Size and Opacity work on vector layers only."
         }
-        if activeCelIsInBetween { return "Colour, Size and Opacity can't edit an in-between frame." }
+        if layers[currentLayerIndex].cels[celIndex].interpolation != nil {
+            return "Colour, Size and Opacity can't edit an in-between frame."
+        }
         return nil
     }
 
@@ -407,24 +419,30 @@ extension CanvasManager {
         if let session = selectionEdit {
             return SelectionStyle.of(session.working, caught: session.caught, overriding: session.value)
         }
-        guard selectionEditUnavailableReason == nil,
-              let selection,
-              let celIndex = activeCelIndex(actedOnBy: selection),
-              let vector = layers[currentLayerIndex].cels[celIndex].vector
+        guard layers.indices.contains(currentLayerIndex), let selection else { return .unavailable }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        guard let shown = displayedCel(actedOnBy: selection, in: walk),
+              selectionEditUnavailableReason(at: shown.index) == nil,
+              let vector = layers[currentLayerIndex].cels[shown.index].vector
         else { return .unavailable }
         let layerID = layers[currentLayerIndex].id
-        let celID = layers[currentLayerIndex].cels[celIndex].id
+        let cel = layers[currentLayerIndex].cels[shown.index]
+        let celID = cel.id
+        let mappings = Self.poseMappings(cel.transformTracks, atCelLocalFrame: shown.frame - cel.startFrame)
+        let inherited = shown.inheritedPose
 
         let key = SelectionStyleMemo(
             pathObject: ObjectIdentifier(selection.path), bounds: selection.bounds,
             layerID: layerID, celID: celID, frame: currentFrame,
-            vectorVersion: vector.version, membership: selectionMembership, answer: .unavailable)
+            vectorVersion: vector.version,
+            poseChannels: Dictionary(uniqueKeysWithValues: mappings.map { ($0.0.id, $0.1.encoded) }),
+            inheritedPose: inherited?.encoded, membership: selectionMembership, answer: .unavailable)
         if let memo = selectionStyleMemo, memo.matches(key) { return memo.answer }
 
         let elements = vector.elements
         let loops = CanvasManager.lassoLoops(
             of: selection, in: vector,
-            posedBy: celPoseMaps(elements, layerID: layerID, celID: celID, atFrame: currentFrame))
+            posedBy: Self.poseMaps(elements, through: mappings, inheriting: inherited))
         let caught = vector.elementIDs(insideLoops: loops, membership: selectionMembership)
         let answer = SelectionStyle.of(elements, caught: caught)
         var stored = key
@@ -461,10 +479,12 @@ extension CanvasManager {
         // selection outlives a Move lift, and a float still up would bake its own old values over
         // the top of every tick.
         guard commitAllInteractiveState() else { return false }
-        guard selectionEditUnavailableReason == nil,
-              let selection = requested,
-              let celIndex = activeCelIndex(actedOnBy: selection),
-              let vectorCanvas = layers[currentLayerIndex].cels[celIndex].vector else { return false }
+        guard layers.indices.contains(currentLayerIndex), let selection = requested else { return false }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        guard let shown = displayedCel(actedOnBy: selection, in: walk),
+              selectionEditUnavailableReason(at: shown.index) == nil,
+              let vectorCanvas = layers[currentLayerIndex].cels[shown.index].vector else { return false }
+        let celIndex = shown.index
         let layerID = layers[currentLayerIndex].id
         let celID = layers[currentLayerIndex].cels[celIndex].id
 
@@ -475,7 +495,8 @@ extension CanvasManager {
         let elementsBefore = vectorCanvas.elements
         let loops = CanvasManager.lassoLoops(
             of: selection, in: vectorCanvas,
-            posedBy: celPoseMaps(elementsBefore, layerID: layerID, celID: celID, atFrame: currentFrame))
+            posedBy: Self.poseMaps(elementsBefore, of: layers[currentLayerIndex].cels[celIndex],
+                                   showing: shown.frame, inheriting: shown.inheritedPose))
         let membership = selectionMembership
         let working: [VectorElement]
         let caught: Set<UUID>

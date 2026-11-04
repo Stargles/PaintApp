@@ -105,6 +105,56 @@ final class FolderMoveLogicTests: XCTestCase {
 
     /// **One nudge moves every layer in the folder by the same delta and the layer outside by none**,
     /// as one undo step; undo puts every layer back in one press.
+    @MainActor
+    func testAFolderGripReleaseKeepsItsBoxWithAnOutsideActiveLayerAndOneUndoRestoresItsPicture() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for scope in [FolderMoveScope.thisCel, .allFrames] {
+            let fx = try fixture()
+            let manager = fx.manager
+            XCTAssertEqual(manager.currentLayerIndex, fx.outside, "PRE: the existing folder fixture leaves an outside layer active")
+            let before = try XCTUnwrap(manager.makeRenderRequest(atFrame: 0, includeBackground: false).flatMap(Compositor.composite))
+            let beforePixels = try XCTUnwrap(CanvasFixture.rgbaBytes(before))
+            let outside = xs(manager, fx.outside)
+            manager.setFolderMoveScope(scope)
+            XCTAssertTrue(manager.beginVectorFolderMove(fx.folder))
+            XCTAssertEqual(manager.currentLayerIndex, fx.outside, "raising the folder box does not pick its first child")
+            manager.moveBoxTouched()
+            XCTAssertTrue(manager.moveBoxIsTouched)
+            try nudge(manager, byX: 7)
+            manager.moveBoxLifted()
+
+            XCTAssertNotNil(manager.vectorFloat, "a folder grip release keeps the lifted folder and its Move box")
+            let held = try XCTUnwrap(manager.vectorFloat)
+            XCTAssertEqual(held.folder, FolderLift(folderID: fx.folder, scope: scope))
+            XCTAssertNotNil(manager.fittedMoveBoxFrame, "the existing box geometry remains available after release")
+            XCTAssertFalse(manager.moveBoxIsTouched)
+            XCTAssertNil(manager.liveTransformEdit)
+            XCTAssertEqual(manager.currentLayerIndex, fx.outside)
+            for layer in fx.inner {
+                XCTAssertEqual(xs(manager, layer), [19, 39, 59])
+                XCTAssertFalse(canvas(manager, layer).suppressedElementIDs.isEmpty, "the part remains owned by the live folder float")
+            }
+            XCTAssertEqual(xs(manager, fx.outside), outside)
+            XCTAssertEqual(manager.history.undoStack.count, 1, "pointer release does not add a terminal step")
+
+            XCTAssertTrue(manager.commitVectorFloatIfNeeded())
+            let after = try XCTUnwrap(manager.makeRenderRequest(atFrame: 0, includeBackground: false).flatMap(Compositor.composite))
+            let afterPixels = try XCTUnwrap(CanvasFixture.rgbaBytes(after))
+            XCTAssertEqual(afterPixels[(12 * after.width + 12) * 4 + 3], 0, "the inside stroke left its old edge")
+            XCTAssertGreaterThan(afterPixels[(12 * after.width + 57) * 4 + 3], 200, "the accepted folder drag is drawn")
+            XCTAssertEqual(afterPixels[(52 * after.width + 32) * 4 + 3], beforePixels[(52 * before.width + 32) * 4 + 3], "outside ink is unchanged")
+            XCTAssertEqual(manager.history.undoStack.count, 1)
+            manager.undo()
+            let undone = try XCTUnwrap(manager.makeRenderRequest(atFrame: 0, includeBackground: false).flatMap(Compositor.composite))
+            XCTAssertEqual(CanvasFixture.rgbaBytes(undone), beforePixels, "one Undo restores the complete original picture")
+            manager.redo()
+            let redone = try XCTUnwrap(manager.makeRenderRequest(atFrame: 0, includeBackground: false).flatMap(Compositor.composite))
+            XCTAssertEqual(CanvasFixture.rgbaBytes(redone), afterPixels, "Redo restores the accepted folder picture")
+        }
+    }
+
     func testANudgeMovesEveryLayerInTheFolderTogetherAndUndoPutsThemAllBack() throws {
         let fx = try fixture()
         let before = (fx.inner + [fx.outside]).map { xs(fx.manager, $0) }
@@ -268,6 +318,63 @@ final class FolderMoveLogicTests: XCTestCase {
         var moved = try XCTUnwrap(manager.vectorFloat?.frame.transform)
         moved.position.x += dx
         manager.nudgeVectorFloat(to: moved)
+    }
+
+    @MainActor
+    func testRepeatedFolderAllFramesShowsSourcePartsButKeepsNonshownNearestFrameAndNoKeyContract() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        let f = try frames()
+        let manager = f.manager
+        let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+        manager.layers[f.a].cels[2].transformTracks = [TransformChannelID.cel.id:
+            CanvasFixture.poseTrack([
+                (0, PoseQuad(box: box, mappedBy: CGAffineTransform(scaleX: 2, y: 2))),
+                (1, PoseQuad(box: box, mappedBy: CGAffineTransform(scaleX: 4, y: 4)))], interpolation: .linear)]
+        XCTAssertTrue(manager.addKeys(.layer(id: manager.layers[f.a].id), atFrame: 0))
+        manager.addTransformLayer(name: "Repeat folder")
+        let repeatLayer = manager.currentLayerIndex
+        CanvasFixture.setCelLayout(manager, layerIndex: repeatLayer, [(start: 0, length: 12)])
+        manager.layers[repeatLayer].transform = LayerPose(pose: PoseQuad(restingIn: box), mode: .repeat, repeatPeriod: 3)
+        manager.currentFrame = 7
+        let original = Dictionary(uniqueKeysWithValues: f.all.map { ($0, xs(f, $0)) })
+        let originalTracks = manager.layers[f.a].cels.map(\.transformTracks)
+        manager.history.removeAll()
+        manager.setFolderMoveScope(.allFrames)
+        XCTAssertTrue(manager.beginVectorFolderMove(f.fx.folder))
+        let float = try XCTUnwrap(manager.vectorFloat)
+        XCTAssertEqual(float.parts.count, 5)
+        let shownIDs = Set([manager.layers[f.a].cels[0].id, manager.layers[f.b].cels[0].id])
+        XCTAssertEqual(Set(float.parts.filter(\.isShown).map(\.celID)), shownIDs,
+                       "document7 repeats source1 despite the raw playhead gaps")
+        for part in float.parts {
+            XCTAssertEqual(part.displayed?.frame, shownIDs.contains(part.celID) ? 1 : nil)
+        }
+        let offscreen = try XCTUnwrap(float.parts.first { $0.celID == manager.layers[f.a].cels[2].id })
+        XCTAssertNil(offscreen.displayed)
+        XCTAssertEqual(offscreen.poses.values.first?.affine?.a ?? .nan, 4, accuracy: 1e-7,
+                       "nonshown a2 uses its nearest frame5/local1, not Repeat source1")
+        try nudge(manager, byX: 6)
+        manager.commitVectorFloatIfNeeded()
+        for name in f.all {
+            let delta: CGFloat = name == "a2" ? 1.5 : 6
+            XCTAssertEqual(xs(f, name), original[name]!.map { $0 + delta }, "\(name) takes its existing nearest-frame map once")
+        }
+        XCTAssertEqual(manager.layers[f.a].cels.map(\.transformTracks), originalTracks)
+        for layer in f.fx.inner {
+            XCTAssertTrue(manager.layers[layer].cels.allSatisfy { $0.pendingPoseBaselines.isEmpty })
+        }
+        XCTAssertEqual(xs(fx: f.fx, layer: f.fx.outside), [12, 32, 52])
+        let picture = try XCTUnwrap(manager.makeRenderRequest(atFrame: 7, includeBackground: false).flatMap(Compositor.composite))
+        let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(picture))
+        XCTAssertEqual(bytes[(8 * picture.width + 12) * 4 + 3], 0, "shown source ink left its old edge")
+        XCTAssertGreaterThan(bytes[(8 * picture.width + 56) * 4 + 3], 200, "shown source ink moved six points")
+        XCTAssertEqual(manager.history.undoStack.count, 1, "All Frames remains one geometry-only gesture")
+        manager.undo()
+        for name in f.all { XCTAssertEqual(xs(f, name), original[name]) }
+        manager.redo()
+        XCTAssertEqual(xs(f, "a2"), original["a2"]!.map { $0 + 1.5 })
     }
 
     /// **Under All Frames every cel of every layer in the folder is a part, and only the ones on the

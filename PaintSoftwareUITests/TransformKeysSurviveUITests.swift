@@ -55,6 +55,91 @@ final class TransformKeysSurviveUITests: PaintUITestCase {
         try inkTopLeft(try settledProbe(canvas, window: inkWindow), in: inkWindow)
     }
 
+    func testHeldDrawingKeepsItsSelectedMoveBoxFromKeyAThroughScrubAndKeyBToTheNextDrag() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        XCTAssertEqual(app.windows.firstMatch.frame.size, CGSize(width: 1080, height: 810))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        dragOnCanvas(app, from: CGVector(dx: 0.28, dy: 0.32), to: CGVector(dx: 0.55, dy: 0.32))
+        let original = try inkCorner(canvas)
+        addKeysAtThePlayhead(app, layer: 0, frame: 0)
+        app.buttons["toolbar.moveButton"].tap()
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5))
+        goTo(app, frame: 10)
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].exists, "scrubbing a held drawing leaves its Move box ready")
+        addKeysAtThePlayhead(app, layer: 0, frame: 10)
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].exists, "Key B leaves the same usable box")
+        let box = try XCTUnwrap(settledMoveBox(app), "the held drawing's box is exposed after both keys")
+        attachScreenshot(XCUIScreen.main, "repeat-move-held-key-b-box-still-up")
+        dragOnCanvas(app, from: CGVector(dx: box.midX, dy: box.midY),
+                     to: CGVector(dx: box.midX, dy: box.midY + 0.12))
+        app.buttons["moveBar.doneButton"].tap()
+        XCTAssertEqual(markers(app, layer: 0), "0|10")
+        let b = try inkCorner(canvas)
+        goTo(app, frame: 0)
+        let a = try inkCorner(canvas)
+        XCTAssertEqual(a.x, original.x, accuracy: 0.006)
+        XCTAssertEqual(a.y, original.y, accuracy: 0.006, "A keeps the original picture")
+        XCTAssertEqual(b.x, a.x, accuracy: 0.006)
+        XCTAssertEqual(b.y - a.y, 0.12, accuracy: 0.02, "B receives the drag without another Move press or selection")
+        attachScreenshot(XCUIScreen.main, "repeat-move-held-key-a-original-picture")
+        goTo(app, frame: 10)
+        XCTAssertEqual(try inkCorner(canvas).y, b.y, accuracy: 0.006)
+        attachScreenshot(XCUIScreen.main, "repeat-move-held-key-b-drawn-picture")
+
+        // A fresh box over the now-keyed drawing must follow its picture when it is scrubbed,
+        // without a nudge to force a new isolated bitmap. A stored box value alone cannot prove it.
+        goTo(app, frame: 0)
+        app.buttons["toolbar.moveButton"].tap()
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5))
+        goTo(app, frame: 10)
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].exists)
+        let movedBox = try XCTUnwrap(settledMoveBox(app), "the incoming keyed picture still has a box")
+        XCTAssertGreaterThan(movedBox.midY, box.midY + 0.08)
+        XCTAssertEqual(try inkCorner(canvas).y, b.y, accuracy: 0.006,
+                       "an unmoved replacement shows B's actual ink while its box is still up")
+        attachScreenshot(XCUIScreen.main, "repeat-move-zero-nudge-key-b-picture-under-box")
+        app.buttons["moveBar.doneButton"].tap()
+        XCTAssertEqual(markers(app, layer: 0), "0|10", "the unmoved replacement writes no extra key")
+    }
+
+    func testHeldDrawingLandsItsEarlierDragAndShowsTheNewDragWithItsBoxStillUp() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        XCTAssertEqual(app.windows.firstMatch.frame.size, CGSize(width: 1080, height: 810))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        dragOnCanvas(app, from: CGVector(dx: 0.28, dy: 0.32), to: CGVector(dx: 0.55, dy: 0.32))
+        let original = try inkCorner(canvas)
+        addKeysAtThePlayhead(app, layer: 0, frame: 0)
+        app.buttons["toolbar.moveButton"].tap()
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5))
+        let firstBox = try XCTUnwrap(settledMoveBox(app))
+        dragOnCanvas(app, from: CGVector(dx: firstBox.midX, dy: firstBox.midY),
+                     to: CGVector(dx: firstBox.midX, dy: firstBox.midY + 0.06))
+        goTo(app, frame: 10)
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].exists, "landing the old edit preserves the box")
+        addKeysAtThePlayhead(app, layer: 0, frame: 10)
+        let secondBox = try XCTUnwrap(settledMoveBox(app))
+        XCTAssertEqual(try inkCorner(canvas).y - original.y, 0.06, accuracy: 0.02,
+                       "the replacement's actual bitmap includes the earlier drag")
+        attachScreenshot(XCUIScreen.main, "repeat-move-earlier-drag-retained-under-new-box")
+        dragOnCanvas(app, from: CGVector(dx: secondBox.midX, dy: secondBox.midY),
+                     to: CGVector(dx: secondBox.midX, dy: secondBox.midY + 0.12))
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].exists)
+        XCTAssertEqual(try inkCorner(canvas).y - original.y, 0.18, accuracy: 0.02,
+                       "both authored drags are drawn while the box stays up")
+        attachScreenshot(XCUIScreen.main, "repeat-move-second-drag-drawn-with-box-up")
+        app.buttons["moveBar.doneButton"].tap()
+        XCTAssertEqual(markers(app, layer: 0), "0|10")
+        goTo(app, frame: 0)
+        XCTAssertEqual(try inkCorner(canvas).y, original.y, accuracy: 0.006, "A retains its pre-drag picture")
+        goTo(app, frame: 10)
+        XCTAssertEqual(try inkCorner(canvas).y - original.y, 0.18, accuracy: 0.02, "B retains both authored drags")
+        attachScreenshot(XCUIScreen.main, "repeat-move-authored-drag-key-b-committed")
+    }
+
     func testAKeyedMoveKeepsItsKeysThroughItsBoxABakeBeneathItAndARelaunch() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-resetGallery", "-uiTestNoticeSeconds", "120"]

@@ -359,6 +359,7 @@ struct CanvasView: UIViewRepresentable {
                           let vector = coordinator.canvasManager.vectorCanvas(of: part),
                           host.strokeView.isShowingVectorFloat(for: vector, celID: part.celID) else { continue }
                     host.strokeView.holdVectorFloatUntilBaseLands(for: vector, celID: part.celID)
+                    host.strokeView.endVectorFloat()
                 }
             }
         }

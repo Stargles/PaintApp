@@ -255,6 +255,15 @@ extension CanvasManager {
         return maps
     }
 
+    /// Per-element maps for a known cel at its shown source frame, with the container pose already
+    /// resolved by the render walk. Repeat can redirect the cel's time while an outer poser keeps
+    /// document time; recomputing that poser at the source frame would move the drawing again.
+    static func poseMaps(_ elements: [VectorElement], of cel: Cel, showing frame: Int,
+                         inheriting inherited: PoseMap? = nil) -> [UUID: PoseMap] {
+        poseMaps(elements, through: poseMappings(cel.transformTracks, atCelLocalFrame: frame - cel.startFrame),
+                 inheriting: inherited)
+    }
+
     /// The same, for one cel of the document at an **absolute** frame — the conversion in one place,
     /// `resolvedPose`'s rule.
     ///
@@ -268,9 +277,7 @@ extension CanvasManager {
                      atFrame frame: Int) -> [UUID: PoseMap] {
         guard let at = celIndices(forCel: celID, inLayer: layerID) else { return [:] }
         let cel = layers[at.layer].cels[at.cel]
-        return Self.poseMaps(elements,
-                             through: Self.poseMappings(cel.transformTracks,
-                                                        atCelLocalFrame: frame - cel.startFrame),
+        return Self.poseMaps(elements, of: cel, showing: frame,
                              inheriting: containerPose(ofLayerAt: at.layer, atFrame: frame))
     }
 
@@ -465,14 +472,14 @@ extension CanvasManager {
     /// which is *after* `C`, so keying it onto a channel means conjugating: the cel channel takes
     /// `C·D` and a group takes `G·C·D·C⁻¹`, and both are `M·O·D·O⁻¹` for this function's `O`.
     ///
-    /// The container pose (`containerPose(ofLayerAt:atFrame:)`) is outside both and is composed last,
+    /// The accepted inherited container pose is outside both and is composed last,
     /// as `posed` composes it. So it is the identity for `.cel` on a layer no transformation layer
     /// reaches, and the cel channel for a group there — on a document nobody has keyframed or posed
     /// the whole expression reduces to `D` and the commit is byte-for-byte what it was.
     func outerPoseMap(layerID: UUID, celID: UUID, channel: TransformChannelID,
-                      atFrame frame: Int) -> PoseMap {
+                      atFrame frame: Int, inheriting inherited: PoseMap?) -> PoseMap {
         guard let at = celIndices(forCel: celID, inLayer: layerID) else { return .identity }
-        let container = containerPose(ofLayerAt: at.layer, atFrame: frame) ?? .identity
+        let container = inherited ?? .identity
         switch channel {
         case .cel: return container
         case .group:

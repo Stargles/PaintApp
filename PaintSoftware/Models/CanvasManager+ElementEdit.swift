@@ -220,9 +220,16 @@ extension CanvasManager {
     /// **Whether the cel's picture on this frame is the one pose's** — the cel at rest, or every
     /// element of it shown through the same map the layer is (`inkPose(forLayerID:)`).
     private func shownThroughOnePose(celID: UUID, in layerID: UUID, elements: [VectorElement]) -> Bool {
-        let maps = celPoseMaps(elements, layerID: layerID, celID: celID, atFrame: currentFrame)
+        guard let layerIndex = layers.firstIndex(where: { $0.id == layerID }) else { return false }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        guard let shown = displayedCel(inLayer: layerIndex, atFrame: currentFrame, in: walk),
+              layers[layerIndex].cels[shown.index].id == celID else { return false }
+        let maps = Self.poseMaps(elements, of: layers[layerIndex].cels[shown.index],
+                                showing: shown.frame, inheriting: shown.inheritedPose)
         if maps.isEmpty { return true }
-        guard maps.count == elements.count, let layerPose = inkPose(forLayerID: layerID) else { return false }
+        guard maps.count == elements.count,
+              let layerPose = inkPose(ofLayerAt: layerIndex, showing: shown.frame,
+                                     inheriting: shown.inheritedPose) else { return false }
         return maps.values.allSatisfy { $0 == layerPose }
     }
 }

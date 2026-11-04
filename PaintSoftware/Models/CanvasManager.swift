@@ -1115,6 +1115,9 @@ final class CanvasManager: ObservableObject {
         guard !recordingOwnsMoveBox else { return }
         settleBoxNudge()
         endLiveTransformEdit()
+        // The vector overlay has delivered its nudge before this lift. A same-cel scrub that
+        // arrived under the pointer can now land its accepted edit and prepare the incoming box.
+        if let float = vectorFloat, float.folder == nil { _ = handleActiveContextChanged() }
     }
 
     /// **A take that owned the Move box ended** — what `moveBoxLifted` left up for it, released unless a

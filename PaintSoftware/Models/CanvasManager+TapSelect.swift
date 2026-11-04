@@ -80,9 +80,9 @@ extension CanvasManager {
                 raise(.nothingTappedToSubtractFrom)
                 return nil
             }
-            let shown = shownElements(layerIndex: cel.layerIndex, celIndex: cel.celIndex)
+            let shown = shownElements(layerIndex: cel.layerIndex, displayed: cel.displayed)
             if let hit = VectorHitTest.topmost(in: shown.filter { held.contains($0.id) }, at: point) {
-                selectTapped(.subtract, (cel.layerIndex, cel.celIndex, hit))
+                selectTapped(.subtract, (cel.layerIndex, cel.displayed.index, hit))
             }
             return nil
         }
@@ -133,22 +133,25 @@ extension CanvasManager {
     }
 
     /// Where the tapped selection's cel is now, or nil when the selection is not one or its cel is gone.
-    private var tappedSelectionCel: (layerIndex: Int, celIndex: Int)? {
+    private var tappedSelectionCel: (layerIndex: Int, displayed: DisplayedCel)? {
         guard let objects = selection?.objects,
-              let layerIndex = layers.firstIndex(where: { $0.id == objects.layerID }),
-              let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == objects.celID })
+              let layerIndex = layers.firstIndex(where: { $0.id == objects.layerID })
         else { return nil }
-        return (layerIndex, celIndex)
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        guard let shown = displayedCel(inLayer: layerIndex, atFrame: currentFrame, in: walk),
+              layers[layerIndex].cels[shown.index].id == objects.celID,
+              layers[layerIndex].cels[shown.index].interpolation == nil else { return nil }
+        return (layerIndex, shown)
     }
 
     /// Everything the cel's drawing shows, as it is shown: its elements carried by the channels of the
     /// cel and the transformation layers above it.
-    private func shownElements(layerIndex: Int, celIndex: Int) -> [VectorElement] {
-        guard let vector = layers[layerIndex].cels[celIndex].vector else { return [] }
+    private func shownElements(layerIndex: Int, displayed shown: DisplayedCel) -> [VectorElement] {
+        let cel = layers[layerIndex].cels[shown.index]
+        guard let vector = cel.vector else { return [] }
         let elements = vector.elements
-        return Self.posed(elements, by: celPoseMaps(elements, layerID: layers[layerIndex].id,
-                                                    celID: layers[layerIndex].cels[celIndex].id,
-                                                    atFrame: currentFrame))
+        return Self.posed(elements, by: Self.poseMaps(elements, of: cel, showing: shown.frame,
+                                                     inheriting: shown.inheritedPose))
     }
 
     /// The topmost object under `point` across the document, as it is shown, and where it lives.
@@ -158,8 +161,10 @@ extension CanvasManager {
     /// whose drawing is derived rather than stored.
     private func topmostObject(at point: CGPoint)
         -> (layerIndex: Int, celIndex: Int, shown: VectorElement)? {
-        for cel in visibleStoredVectorCels(in: renderTree(atFrame: currentFrame)) {
-            if let hit = VectorHitTest.topmost(in: shownElements(layerIndex: cel.layerIndex, celIndex: cel.celIndex),
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        for cel in visibleStoredVectorCels(in: walk.tree, shownAt: walk.frames) {
+            guard let shown = displayedCel(inLayer: cel.layerIndex, atFrame: currentFrame, in: walk) else { continue }
+            if let hit = VectorHitTest.topmost(in: shownElements(layerIndex: cel.layerIndex, displayed: shown),
                                                at: point) {
                 return (cel.layerIndex, cel.celIndex, hit)
             }

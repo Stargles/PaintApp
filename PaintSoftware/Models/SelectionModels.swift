@@ -837,8 +837,8 @@ extension CanvasManager {
     /// never silently discarded — if the active cel actually changed. A selection is put down by the
     /// rule on `Selection`: **a drawn region follows the artist to another layer and to another frame**
     /// (TODO (185), (187)) and is never put down here; a tapped set is put down by any move off the cel
-    /// its objects live on. Same-cel frame ticks (scrubbing within one cel's frame range)
-    /// intentionally leave all of it alone.
+    /// its objects live on. A held drawing keeps its Move box through a scrub: accepted movement
+    /// lands at its old shown time, then the same IDs are prepared for the incoming time.
     @discardableResult
     func handleActiveContextChanged() -> Bool {
         // A still-adjustable fill or shape can't follow the user to another cel — bake both here so
@@ -847,26 +847,48 @@ extension CanvasManager {
         guard beginCanvasEdit() else { return false }
         let activeLayerID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
         let activeCelID = self.activeCelID(inLayer: currentLayerIndex, atFrame: currentFrame)
+        // One transient walk for every displayed-context consumer in this transition. Container and
+        // effect boxes retain their document-time target contract.
+        let walk = (vectorFloat != nil || floatingPiece?.kind == .move || selection?.objects != nil || selectionEdit != nil)
+            ? renderTreeAndPoses(atFrame: currentFrame) : nil
+        let incoming = walk.flatMap { displayedCel(inLayer: currentLayerIndex, atFrame: currentFrame, in: $0) }
+        let shownCelID = incoming.map { layers[currentLayerIndex].cels[$0.index].id }
         if let piece = floatingPiece {
-            let stillTargeted = piece.targetLayerID == activeLayerID && piece.targetCelID == activeCelID
+            let celID = piece.kind == .move ? shownCelID : activeCelID
+            let stillTargeted = piece.targetLayerID == activeLayerID && piece.targetCelID == celID
             if !stillTargeted, !recordingOwnsMoveBox, !commitFloatingPieceIfNeeded() { return false }
         }
         // The lasso move's float, on the same rule and for the same reason. Explicit rather than
         // inherited: `beginCanvasEdit()` above deliberately does not settle floats, so a float left
         // here would keep its ids suppressed on a cel the artist has walked away from — artwork in
         // the document that renders nowhere.
-        if let float = vectorFloat,
-           !(float.parts[0].layerID == activeLayerID && float.parts[0].celID == activeCelID) {
-            commitVectorFloatIfNeeded()
+        if let float = vectorFloat {
+            let part = float.parts[0]
+            let targetCelID = float.folder == nil ? shownCelID : activeCelID
+            if !(part.layerID == activeLayerID && part.celID == targetCelID) {
+                commitVectorFloatIfNeeded()
+            } else if float.folder == nil, let accepted = part.displayed, let incoming,
+                      (accepted.frame != incoming.frame
+                        || (accepted.inheritedPose ?? .identity) != (incoming.inheritedPose ?? .identity)) {
+                // A pointer still owes its old-context nudge. The overlay delivers that before
+                // moveBoxLifted asks this same transition owner again.
+                if !moveBoxIsTouched { retargetVectorFloat(to: incoming) }
+            }
         }
-        if let selection, !selection.acts(onLayer: activeLayerID, cel: activeCelID) {
+        let selectionCelID: UUID?
+        if selection?.objects != nil || selectionEdit != nil {
+            selectionCelID = shownCelID
+        } else {
+            selectionCelID = activeCelID
+        }
+        if let selection, !selection.acts(onLayer: activeLayerID, cel: selectionCelID) {
             self.selection = nil
         }
         // A drag on the selection is about one cel's drawing, and a region outlives the layer and the
         // frame it was made on: the session ends with the cel it was opened on, as it did when the move
         // put the selection down.
         if let session = selectionEdit,
-           !(session.edit.layerID == activeLayerID && session.edit.celID == activeCelID) {
+           !(session.edit.layerID == activeLayerID && session.edit.celID == selectionCelID) {
             cancelSelectionEdit()
         }
         // **Render-cache eviction used to happen here and deliberately does not any more.**
@@ -883,17 +905,14 @@ extension CanvasManager {
         activeCelIndex(inLayer: layerIndex, atFrame: frame).map { layers[layerIndex].cels[$0].id }
     }
 
-    /// The index of the active cel when `selection` can be acted on there — a region on any cel, a
-    /// tapped set only on its own — or nil. **The one door every consumer of a selection asks**, so
-    /// "can this selection act here" has one answer and the consumers go on reading `currentLayerIndex`
-    /// and the returned index for the layer and cel they act on.
-    func activeCelIndex(actedOnBy selection: Selection) -> Int? {
+    /// The selection's target in an already-resolved display walk. A region acts on the shown cel;
+    /// a tapped set still acts only on its exact layer/cel identity.
+    func displayedCel(actedOnBy selection: Selection, in walk: RenderWalk) -> DisplayedCel? {
         guard layers.indices.contains(currentLayerIndex),
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
+              let shown = displayedCel(inLayer: currentLayerIndex, atFrame: currentFrame, in: walk),
               selection.acts(onLayer: layers[currentLayerIndex].id,
-                             cel: layers[currentLayerIndex].cels[celIndex].id)
-        else { return nil }
-        return celIndex
+                             cel: layers[currentLayerIndex].cels[shown.index].id) else { return nil }
+        return shown
     }
 
     /// **Whether a live take is recording the Move box that is up** — KEYFRAMES.md §5's second surface,
@@ -1014,8 +1033,11 @@ extension CanvasManager {
     /// give back. A region is always returned: it acts on whatever drawing is there.
     private func selectionStillActing(_ candidate: Selection?) -> Selection? {
         guard let candidate else { return nil }
+        guard candidate.objects != nil else { return candidate }
         let layerID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
-        let celID = activeCelID(inLayer: currentLayerIndex, atFrame: currentFrame)
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        let celID = displayedCel(inLayer: currentLayerIndex, atFrame: currentFrame, in: walk)
+            .map { layers[currentLayerIndex].cels[$0.index].id }
         return candidate.acts(onLayer: layerID, cel: celID) ? candidate : nil
     }
 
@@ -1101,9 +1123,11 @@ extension CanvasManager {
         // the fill is carried into the floating piece AND re-bakes into the source cel later, which
         // is exactly the "the filled section gets duplicated" report.
         guard commitAllInteractiveState() else { return }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
         guard let canvasSize, layers.indices.contains(currentLayerIndex),
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame) else { return }
+              let displayed = displayedCel(inLayer: currentLayerIndex, atFrame: currentFrame, in: walk) else { return }
 
+        let celIndex = displayed.index
         let cel = layers[currentLayerIndex].cels[celIndex]
         let sourceLayerID = layers[currentLayerIndex].id
         // **The piece is lifted from what the canvas shows, and the cel keeps what is left of what it
@@ -1112,7 +1136,7 @@ extension CanvasManager {
         // cut from that picture (`shown`) and the hole it leaves is cut from the cel's own pixels
         // through the loop pulled back to where those are (`remainder`). Both are the one image and
         // the one loop wherever nothing poses the layer.
-        let pose = inkPose(forLayerID: sourceLayerID)
+        let pose = displayed.inheritedPose
         guard let stored = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else { return }
         let shown: UIImage
         if let pose {
@@ -1140,7 +1164,7 @@ extension CanvasManager {
             let split = try PixelOps.maskedPiece(image: shown, path: path, using: cel.raster.residency).get()
             croppedPiece = try split.piece.cropped(to: bounds).get().resolveImage().get()
             remainder = try pose == nil ? split.remainder
-                : PixelOps.clear(base: stored, path: layerSpacePath(path, forLayerID: sourceLayerID),
+                : PixelOps.clear(base: stored, path: Self.layerSpacePath(path, shownThrough: pose),
                                  using: cel.raster.residency).get()
         } catch { raise(.drawingSourceUnavailable); return }
 
@@ -1466,8 +1490,10 @@ extension CanvasManager {
         // `clearSelectionPixels`' reason: settle a lifted piece before reading the cel it left a
         // hole in.
         guard commitAllInteractiveState() else { return }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
         guard let selection = requested, let canvasSize,
-              let celIndex = activeCelIndex(actedOnBy: selection) else { return }
+              let shown = displayedCel(actedOnBy: selection, in: walk) else { return }
+        let celIndex = shown.index
         let sourceIndex = currentLayerIndex
         guard admitChildChange(inContainer: layers[sourceIndex].parentFolderID) else { return }
         let cel = layers[sourceIndex].cels[celIndex]
@@ -1480,7 +1506,9 @@ extension CanvasManager {
         let remainder: RasterSource
         do {
             (piece, remainder) = try PixelOps.maskedPiece(image: fullImage,
-                path: layerSpacePath(selection.path, forLayerID: sourceLayerID), using: cel.raster.residency).get()
+                path: Self.layerSpacePath(selection.path, shownThrough:
+                    inkPose(ofLayerAt: sourceIndex, showing: shown.frame, inheriting: shown.inheritedPose)),
+                using: cel.raster.residency).get()
         } catch { raise(.drawingSourceUnavailable); return }
 
         // TODO (108): span exactly the source cel, not the whole scene — see the same note on
@@ -2084,6 +2112,52 @@ extension CanvasManager {
         commitContainerPose(target, restingAt: rest, movedTo: posed, atFrame: nudge.frame)
     }
 
+    // MARK: Clipboard selection actions
+
+    @MainActor
+    @discardableResult
+    func copySelectionToPasteboard() -> Bool {
+        let requested = selection
+        guard commitAllInteractiveState(), let selection = requested else { return false }
+        return copiedSelectionToPasteboard(selection) != nil
+    }
+
+    @MainActor
+    @discardableResult
+    func cutSelectionToPasteboard() -> Bool {
+        let requested = selection
+        guard commitAllInteractiveState(), let selection = requested,
+              let copied = copiedSelectionToPasteboard(selection) else { return false }
+        // Clipboard preparation and Clear share one shown target. Validate its captured identities
+        // before the artwork write, without resolving the target at a second time.
+        guard layers.indices.contains(currentLayerIndex),
+              layers[currentLayerIndex].id == copied.layerID,
+              layers[currentLayerIndex].cels.indices.contains(copied.shown.index),
+              layers[currentLayerIndex].cels[copied.shown.index].id == copied.celID else { return false }
+        clearSelectionPixels(selection, at: copied.shown)
+        return true
+    }
+
+    /// Copy the pixels this selection is shown over, at the source time supplied by the render walk.
+    /// Native ink derives through cel/group and container poses; raster backing follows only its
+    /// container, exactly as the normal frozen leaf does. A failed picture/crop never admits a Cut.
+    @MainActor
+    private func copiedSelectionToPasteboard(_ selection: Selection)
+        -> (shown: DisplayedCel, layerID: UUID, celID: UUID)? {
+        guard let canvasSize else { return nil }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        guard let shown = displayedCel(actedOnBy: selection, in: walk) else { return nil }
+        let layerID = layers[currentLayerIndex].id
+        let cel = layers[currentLayerIndex].cels[shown.index]
+        let derived = celContentProvider(atFrame: shown.frame).content(for: cel, inheriting: shown.inheritedPose)
+        guard let flattened = PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
+                                                derived: derived, pose: shown.inheritedPose),
+              let cropped = PixelOps.copiedSubimage(of: flattened, in: selection.path.boundingBoxOfPath)
+        else { return nil }
+        UIPasteboard.general.image = cropped
+        return (shown, layerID, cel.id)
+    }
+
     // MARK: Fill / Clear (one-shot pixel edits on the current selection)
 
     func fillSelection() {
@@ -2092,13 +2166,16 @@ extension CanvasManager {
         // (see `beginMove`), so without settling the piece first this would paint into the cel that
         // is currently showing a hole, and the piece would then bake over the top of it.
         guard commitAllInteractiveState() else { return }
-        guard let selection = requested, let celIndex = activeCelIndex(actedOnBy: selection) else { return }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        guard let selection = requested,
+              let shown = displayedCel(actedOnBy: selection, in: walk) else { return }
         // The same add path the fill tool and Add → Rectangle take, so "Fill" means one thing
         // whichever door it arrives from: a vector layer gets an element on top of everything
         // (LASSO_FILL.md §2a's *"cover everything"*), a raster layer gets pixels.
-        layDownSolidFill(layerSpacePath(selection.path, forLayerID: layers[currentLayerIndex].id),
+        layDownSolidFill(Self.layerSpacePath(selection.path, shownThrough:
+                            inkPose(ofLayerAt: currentLayerIndex, showing: shown.frame, inheriting: shown.inheritedPose)),
                          color: brushColor.resolvedUIColor(opacity: toolProfiles.brush.opacity),
-                         layerIndex: currentLayerIndex, celIndex: celIndex, label: .fill)
+                         layerIndex: currentLayerIndex, celIndex: shown.index, label: .fill)
     }
 
     /// **Everything the loop catches goes, under the rule the artist picked in the Select panel**
@@ -2174,8 +2251,16 @@ extension CanvasManager {
         // (see `beginMove`), so without settling the piece first this would paint into the cel that
         // is currently showing a hole, and the piece would then bake over the top of it.
         guard commitAllInteractiveState() else { return }
-        guard let selection = requested, let canvasSize,
-              let celIndex = activeCelIndex(actedOnBy: selection) else { return }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        guard let selection = requested,
+              let shown = displayedCel(actedOnBy: selection, in: walk) else { return }
+        clearSelectionPixels(selection, at: shown)
+    }
+
+    /// The settled Clear body, shared with a Cut whose clipboard result already admitted this target.
+    private func clearSelectionPixels(_ selection: Selection, at shown: DisplayedCel) {
+        guard let canvasSize else { return }
+        let celIndex = shown.index
         let cel = layers[currentLayerIndex].cels[celIndex]
         let isVector = layers[currentLayerIndex].kind == .vector
         if isVector, let vectorCanvas = cel.vector {
@@ -2186,8 +2271,8 @@ extension CanvasManager {
             // the same space Move does. Empty overrides on an ordinary cel.
             let loops = CanvasManager.lassoLoops(
                 of: selection, in: vectorCanvas,
-                posedBy: celPoseMaps(vectorCanvas.elements, layerID: layers[currentLayerIndex].id,
-                                     celID: cel.id, atFrame: currentFrame))
+                posedBy: Self.poseMaps(vectorCanvas.elements, of: cel, showing: shown.frame,
+                                       inheriting: shown.inheritedPose))
             let elementsBefore = vectorCanvas.elements
             // **The rule the artist picked, with no exception** (LASSO_MOVE.md §5.26). Under Cut this
             // is the same call it has always been and cuts at the loop; under Enclosed and Touching
@@ -2233,7 +2318,8 @@ extension CanvasManager {
         } else {
             guard let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else { return }
             guard case .success(let source) = PixelOps.clear(base: base,
-                path: layerSpacePath(selection.path, forLayerID: layers[currentLayerIndex].id),
+                path: Self.layerSpacePath(selection.path, shownThrough:
+                    inkPose(ofLayerAt: currentLayerIndex, showing: shown.frame, inheriting: shown.inheritedPose)),
                 using: cel.raster.residency) else { raise(.drawingSourceUnavailable); return }
             let raster = preparedRasterTexture(source: source, likeExisting: cel.raster)
             registerUndoableCelChange(layerID: layers[currentLayerIndex].id, celID: cel.id,
@@ -2260,12 +2346,19 @@ extension CanvasManager {
     /// refusal that names the wrong button is a refusal the artist has to translate.
     var applyBrushUnavailableReason: String? {
         guard layers.indices.contains(currentLayerIndex) else { return nil }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        return applyBrushUnavailableReason(at: displayedCel(inLayer: currentLayerIndex,
+                                                            atFrame: currentFrame, in: walk)?.index)
+    }
+
+    private func applyBrushUnavailableReason(at celIndex: Int?) -> String? {
         guard layers[currentLayerIndex].kind == .vector,
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              layers[currentLayerIndex].cels[celIndex].vector != nil else {
+              let celIndex, layers[currentLayerIndex].cels[celIndex].vector != nil else {
             return "Apply Brush works on vector layers only."
         }
-        if activeCelIsInBetween { return "Apply Brush can't edit an in-between frame." }
+        if layers[currentLayerIndex].cels[celIndex].interpolation != nil {
+            return "Apply Brush can't edit an in-between frame."
+        }
         return nil
     }
 
@@ -2301,15 +2394,17 @@ extension CanvasManager {
         // `commitAllInteractiveState`, not `beginCanvasEdit`: a selection outlives a Move lift, and a
         // float still up would bake its own strokes over the top carrying the brush this is replacing.
         guard commitAllInteractiveState() else { return }
-        guard applyBrushUnavailableReason == nil,
-              let selection = requested,
-              let celIndex = activeCelIndex(actedOnBy: selection),
-              let vectorCanvas = layers[currentLayerIndex].cels[celIndex].vector else { return }
-
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        guard let selection = requested,
+              let shown = displayedCel(actedOnBy: selection, in: walk),
+              applyBrushUnavailableReason(at: shown.index) == nil,
+              let vectorCanvas = layers[currentLayerIndex].cels[shown.index].vector else { return }
+        let celIndex = shown.index
+        let cel = layers[currentLayerIndex].cels[celIndex]
         let loops = CanvasManager.lassoLoops(
             of: selection, in: vectorCanvas,
-            posedBy: celPoseMaps(vectorCanvas.elements, layerID: layers[currentLayerIndex].id,
-                                 celID: layers[currentLayerIndex].cels[celIndex].id, atFrame: currentFrame))
+            posedBy: Self.poseMaps(vectorCanvas.elements, of: cel, showing: shown.frame,
+                                  inheriting: shown.inheritedPose))
 
         let membership = selectionMembership
         let elementsBefore = vectorCanvas.elements

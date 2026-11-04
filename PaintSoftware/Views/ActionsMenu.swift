@@ -64,24 +64,14 @@ struct ActionsMenu: View {
 
     // MARK: - Cut / Copy / Paste (TODO (104))
     //
-    // These three did not exist before — every row here used to raise "Cut isn't available yet" and
-    // its two siblings. The orchestrating brief's instruction was to find what the app already has
-    // for a selection's copy/paste and wire it rather than invent a second clipboard; a repo-wide
-    // search turned up nothing shaped like "copy the pixels under a selection" (the timeline's own
-    // Copy/Paste, `CanvasManager.copyCel`/`pasteCel`, is a single-slot clipboard for a whole *cel*
-    // block and requires an empty target slot — the wrong shape for "copy this drawing, paste it
-    // somewhere with something already on it"). So this wires the one clipboard that already exists
-    // system-wide, `UIPasteboard`, onto the primitives the Select panel's own Fill/Clear rows already
-    // use to answer "what are this cel's pixels" and "remove what is inside the loop":
-    // `PixelOps.rasterize` (the exact flatten `fillSelection`/`clearSelectionPixels` call "the cel's
-    // pixels", vector or raster alike) and `clearSelectionPixels()` itself for Cut's second half.
+    // Selection writers own Copy and Cut together: the clipboard picture and the removed artwork
+    // must name the same displayed source drawing, including under Repeat.
 
     /// Requires an active selection, the same gate `SelectPanel`'s Fill/Clear rows already dim behind
     /// with no built-in disabled look of its own (`row(enabled:)` mirrors it here).
     private var cutRow: some View {
         Button {
-            guard copySelectionToPasteboard() else { return }
-            canvasManager.clearSelectionPixels()
+            canvasManager.cutSelectionToPasteboard()
         } label: {
             row(icon: "scissors", title: "Cut", enabled: canvasManager.selection != nil)
         }
@@ -91,7 +81,7 @@ struct ActionsMenu: View {
 
     private var copyRow: some View {
         Button {
-            if !copySelectionToPasteboard() {
+            if !canvasManager.copySelectionToPasteboard() {
                 notice = "Nothing selected to copy."
             }
         } label: {
@@ -113,23 +103,6 @@ struct ActionsMenu: View {
         }
         .disabled(canvasManager.canvasSize == nil)
         .accessibilityIdentifier("actions.pasteRow")
-    }
-
-    /// Renders the current selection's bounding box out of the active cel's flattened pixels and sets
-    /// it on the system pasteboard. False when there is no selection, no active cel to read, or the
-    /// crop is degenerate — the three guards `fillSelection`/`clearSelectionPixels` already state for
-    /// "a cel this selection acts on".
-    @discardableResult
-    private func copySelectionToPasteboard() -> Bool {
-        guard let selection = canvasManager.selection, let canvasSize = canvasManager.canvasSize,
-              let celIndex = canvasManager.activeCelIndex(actedOnBy: selection)
-        else { return false }
-        let cel = canvasManager.layers[canvasManager.currentLayerIndex].cels[celIndex]
-        guard let flattened = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else { return false }
-        guard let cropped = PixelOps.copiedSubimage(of: flattened, in: selection.path.boundingBoxOfPath)
-        else { return false }
-        UIPasteboard.general.image = cropped
-        return true
     }
 
     /// TODO item (29) — RENDER.md §3.9. The animation as video, or one frame as an image.

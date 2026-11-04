@@ -81,24 +81,28 @@ extension CanvasManager {
         guard layers.indices.contains(currentLayerIndex) else { return }
         guard Tool.textUnavailableReason(onLayerOfKind: activeLayerKind) == nil else { return }
         let layerIndex = currentLayerIndex
-        guard let celIndex = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame) else { return }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        guard let shown = displayedCel(inLayer: layerIndex, atFrame: currentFrame, in: walk) else { return }
+        let celIndex = shown.index
 
         let layerID = layers[layerIndex].id
-        let celID = layers[layerIndex].cels[celIndex].id
+        let cel = layers[layerIndex].cels[celIndex]
+        let celID = cel.id
         // **The whole point of stage 3**: on a vector layer the object is still there, so a tap on it
         // reopens the same object rather than dropping a second one on top. `topmostText` hits the
         // *box*, not the glyphs — tapping the hole in an "O" is tapping the text. The same per-element
         // maps the render uses carry grouped text to its drawn position before the hit test.
         if layers[layerIndex].kind == .vector,
-           let vectorCanvas = layers[layerIndex].cels[celIndex].vector {
-            let poses = celPoseMaps(vectorCanvas.elements, layerID: layerID, celID: celID, atFrame: currentFrame)
+           let vectorCanvas = cel.vector {
+            let poses = Self.poseMaps(vectorCanvas.elements, of: cel, showing: shown.frame, inheriting: shown.inheritedPose)
             if let existing = vectorCanvas.topmostText(atCanvasPoint: canvasPoint, posedBy: poses) {
                 _ = reopenText(existing, in: vectorCanvas, layerID: layerID, celID: celID,
                                shownThrough: poses[existing.id])
                 return
             }
         }
-        bindTextSession(toLayer: layerID, cel: celID, shownThrough: inkPose(forLayerID: layerID))
+        bindTextSession(toLayer: layerID, cel: celID,
+                        shownThrough: inkPose(ofLayerAt: layerIndex, showing: shown.frame, inheriting: shown.inheritedPose))
 
         // The recipe carries over from the previous session — font, size, tracking, colour. An
         // artist labelling six things in a row sets the type once, which is what every other tool in
@@ -124,21 +128,25 @@ extension CanvasManager {
     /// session, the same overlay with its box and grips, the same panel, so typing, restyling and
     /// dragging the box all behave exactly as they do after tapping the text with the text tool.
     ///
-    /// - Returns: false when the object is not on the cel under the playhead, or text cannot go on
+    /// - Returns: false when the object is not on the cel shown at the playhead, or text cannot go on
     ///   this layer — the caller then has nothing to open a panel for.
     @discardableResult
     func beginEditingText(elementID: UUID) -> Bool {
         guard beginCanvasEdit() else { return false }
         guard layers.indices.contains(currentLayerIndex),
               Tool.textUnavailableReason(onLayerOfKind: activeLayerKind) == nil,
-              layers[currentLayerIndex].kind == .vector,
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              let vectorCanvas = layers[currentLayerIndex].cels[celIndex].vector,
+              layers[currentLayerIndex].kind == .vector else { return false }
+        let layerIndex = currentLayerIndex
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        guard let shown = displayedCel(inLayer: layerIndex, atFrame: currentFrame, in: walk),
+              let vectorCanvas = layers[layerIndex].cels[shown.index].vector,
               let existing = vectorCanvas.elements.lazy.compactMap(\.text).first(where: { $0.id == elementID })
         else { return false }
-        let layerID = layers[currentLayerIndex].id
-        let celID = layers[currentLayerIndex].cels[celIndex].id
-        let pose = celPoseMaps([.text(existing)], layerID: layerID, celID: celID, atFrame: currentFrame)[existing.id]
+        let celIndex = shown.index
+        let layerID = layers[layerIndex].id
+        let cel = layers[layerIndex].cels[celIndex]
+        let pose = Self.poseMaps([.text(existing)], of: cel, showing: shown.frame, inheriting: shown.inheritedPose)[existing.id]
+        let celID = cel.id
         return reopenText(existing, in: vectorCanvas, layerID: layerID, celID: celID, shownThrough: pose)
     }
 

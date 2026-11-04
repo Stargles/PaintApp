@@ -464,12 +464,22 @@ can see it is one. `CanvasManager.displayedFrame(forLayer:atFrame:)` / `displaye
 render walk's per-leaf source frame (behind a one-scan exit for documents with no Repeat), and **the
 drawing path goes through them**: `ensureCelAtCurrentFrame` (which also *spawns* at the source frame
 when it is empty), the live host's tiers, the stroke's lift, the spawned block, the selection clip, the
-live derived preview, the thumbnail install, `activeLayerIsVector` and an imported image. **What still
-reads the playhead's own frame, and is the remainder**: the Move box and the lasso (`SelectionModels`,
-`CanvasManager+LassoMove`), text and shape placement, animation-group membership, the panel row's
-thumbnail and the onion skin. On a repeated frame those see the cel the playhead sits on — a held block,
-or none — exactly as they would on an empty frame today, which is the silent half of case 3 and is
-listed here rather than left to be found. The ghost blocks are `TimelineRepeatGhostBand`: one dashed
+live derived preview, the thumbnail install, `activeLayerIsVector` and an imported image. The shared
+`DisplayedCel` edit context also serves selection reads/edits, Fill, Clear, Apply Brush, To New Layer,
+Copy/Cut and ordinary vector Move, including whole-cel, lasso, channel and explicit-ID lifts and lasso
+Duplicate. A Move part accepts the source frame and already-resolved inherited parent beside its stable
+layer/cel IDs: fresh Cut pieces, transfer preparation and delayed key settlement use that same context.
+The parent keeps document time while the cel and groups keep source time; delayed writes never identify
+a cel by its captured array index. A held drawing keeps the box and selected IDs through a scrub: the
+accepted edit lands, then the existing preparer measures those IDs at the incoming shown time. A pointer
+still owing its nudge completes before that replacement. The old drawn picture survives until the new
+hole and isolated ink are ready. Folder All Frames remains its separate geometry-only contract, with
+nonshown cels read at their nearest frame and no keys written.
+
+This does not complete the Repeat caller audit. Raster Duplicate, the remaining raw placement and channel-list navigation,
+panel-thumbnail and onion routes are mandatory follow-ups rather than approved time exceptions; the
+folder transition's existing active-layer guard and Fill/Clear's deferred derived-write hole remain
+separate recorded issues. The ghost blocks are `TimelineRepeatGhostBand`: one dashed
 outline over a dark wash per run of one source drawing, computed structurally
 (`repeatGhostSegments`, the layout key cannot afford a walk per frame) and pinned against the walk on
 a nested fixture.

@@ -6,8 +6,8 @@ import SwiftUI
 /// holds the caught elements' rewritten list on every tick, `commitSelectionEdit` writes it once and
 /// records the one step, `cancelSelectionEdit` lets the held list go.
 ///
-/// Every assertion here is on a stored field, and the file says so: what is *drawn* is
-/// `SelectionEditUITests`' business, from a fresh document, off the screen — and, for the held
+/// Stored-field tests pin the edit arithmetic; the pose regressions also inspect actual compositor
+/// pixels. `SelectionEditUITests` drives a fresh document off the screen — and, for the held
 /// window's own picture, `LiveElementEditLogicTests`'. What these pin is the arithmetic a drag has to
 /// get right whatever the picture looks like — which ids a tick may touch, what "one step" means
 /// across ten ticks, what a cancel leaves, and which kinds each control reaches. **Mid-drag the
@@ -110,6 +110,1309 @@ final class SelectionEditLogicTests: XCTestCase {
         XCTAssertEqual(opacities(vector), [0.25, 0.25, 0.8], "opacity reaches the two and not the third")
 
         XCTAssertEqual(stepsSince(baseline, manager), 3, "three one-shots, three steps")
+    }
+
+    /// The loop and frame stay fixed while graph/pose writers carry another mark into it. Pose
+    /// tracks do not rewrite stored ink, so both memo readouts must include their resolved inputs.
+    @MainActor
+    func testSelectionReadoutsFollowSameFrameCelGroupAndContainerPoseEdits() throws {
+        let previousBackend = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previousBackend }
+        for owner in ["cel", "group", "container"] {
+            let (manager, layer, vector) = fixture()
+            let red = colour(1, 0, 0), blue = colour(0, 0, 1), green = colour(0, 1, 0)
+            let a = UUID(), b = UUID()
+            manager.animationGroups = [AnimationGroup(id: a, displayName: "Red group", tagColor: red),
+                                       AnimationGroup(id: b, displayName: "Blue group", tagColor: blue)]
+            var left = stroke(y: 20, size: 4, colour: red, from: 10, to: 20)
+            var right = stroke(y: 20, size: 8, opacity: 0.5, colour: blue, from: 42, to: 52)
+            left.animationGroupID = a
+            right.animationGroupID = b
+            vector.addStroke(left)
+            vector.addStroke(right)
+            let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+            let channels: [TransformChannelID] = owner == "group" ? [.group(a), .group(b)] : [.cel]
+            if owner == "container" {
+                manager.addTransformLayer()
+                manager.currentLayerIndex = layer
+            } else {
+                for channel in channels {
+                    manager.layers[layer].cels[0].transformTracks[channel.id] = TransformTrack(box: box,
+                        curves: [.x: AnimationCurve(keys: [.init(frame: 0, value: 32)])])
+                }
+            }
+            let path = loop(CGRect(x: 6, y: 10, width: 22, height: 24))
+            select(manager, layer, path)
+            manager.selectionMembership = .touching
+            for _ in 0..<3 {
+                XCTAssertEqual(manager.selectionStyle.color, red, "warm the ordinary pose's style memo")
+                XCTAssertEqual(manager.selectionAnimationGroupName, "Red group", "warm the group memo too")
+            }
+            let oldPixel = try memoPixel(manager, at: CGPoint(x: 15, y: 20))
+            XCTAssertGreaterThan(oldPixel[0], 200)
+            XCTAssertLessThan(oldPixel[2], 30)
+            let version = vector.version
+            let frame = manager.currentFrame
+            let steps = manager.history.undoStack.count
+            if owner == "container" {
+                let target = KeyframeTarget.layer(id: manager.layers[layer + 1].id)
+                let before = manager.layers[layer + 1].transform
+                manager.writeContainerPose(LayerPose(pose: PoseQuad(box: box,
+                    mappedBy: CGAffineTransform(translationX: -32, y: 0)), mode: .move), from: before, target: target)
+            } else {
+                let changes = Dictionary(uniqueKeysWithValues: channels.map {
+                    (PoseChannelID.cel($0).parameterID(.x), Optional(AnimationCurve(keys: [.init(frame: 0, value: 0)])))
+                })
+                XCTAssertTrue(manager.setPoseChannelTracks(.layer(id: manager.layers[layer].id), curves: changes))
+            }
+            XCTAssertEqual(manager.currentFrame, frame)
+            XCTAssertTrue(manager.selection?.path === path)
+            XCTAssertEqual(vector.version, version, "PREMISE: only resolved pose changed, not stored ink")
+            let newPixel = try memoPixel(manager, at: CGPoint(x: 15, y: 20))
+            XCTAssertGreaterThan(newPixel[2], 100, "blue is now drawn inside the fixed loop")
+            XCTAssertLessThan(newPixel[0], 30)
+            for _ in 0..<3 {
+                let style = manager.selectionStyle
+                XCTAssertEqual(style.color, blue)
+                XCTAssertEqual(style.size, 8)
+                XCTAssertEqual(style.opacity, 0.5)
+                XCTAssertFalse(style.colorIsMixed)
+                XCTAssertEqual(manager.selectionAnimationGroupName, "Blue group")
+            }
+            XCTAssertEqual(manager.history.undoStack.count, steps + 1)
+            XCTAssertTrue(manager.applySelectionEdit(.color(green)), "the action reaches the mark the readout now names")
+            XCTAssertEqual(vector.elements.first(where: { $0.id == left.id })?.stroke?.color, red)
+            XCTAssertEqual(vector.elements.first(where: { $0.id == right.id })?.stroke?.color, green)
+            let editedPixel = try memoPixel(manager, at: CGPoint(x: 15, y: 20))
+            XCTAssertGreaterThan(editedPixel[1], 100)
+            XCTAssertLessThan(editedPixel[0], 30)
+            manager.undo()
+            XCTAssertEqual(manager.selectionStyle.color, blue)
+            manager.undo()
+            XCTAssertEqual(manager.selectionStyle.color, red)
+            XCTAssertEqual(manager.selectionAnimationGroupName, "Red group")
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 15, y: 20)), oldPixel)
+            manager.redo()
+            XCTAssertEqual(manager.selectionStyle.color, blue)
+            XCTAssertEqual(manager.selectionAnimationGroupName, "Blue group")
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 15, y: 20)), newPixel)
+        }
+    }
+
+    @MainActor
+    func testSelectionTextEditorFollowsTheNewObjectAfterASameFramePoseEdit() throws {
+        let (manager, layer, vector) = fixture()
+        var red = TextRecipe(string: "LEFT")
+        red.color = colour(1, 0, 0)
+        var blue = TextRecipe(string: "RIGHT")
+        blue.color = colour(0, 0, 1)
+        let left = VectorTextElement(recipe: red, frame: TextFrame(origin: CGPoint(x: 10, y: 16), size: CGSize(width: 16, height: 18)))
+        let right = VectorTextElement(recipe: blue, frame: TextFrame(origin: CGPoint(x: 42, y: 16), size: CGSize(width: 16, height: 18)))
+        vector.upsertText(left)
+        vector.upsertText(right)
+        let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+        manager.layers[layer].cels[0].transformTracks[TransformChannelID.cel.id] = TransformTrack(box: box,
+            curves: [.x: AnimationCurve(keys: [.init(frame: 0, value: 32)])])
+        select(manager, layer, loop(CGRect(x: 6, y: 10, width: 24, height: 30)))
+        manager.selectionMembership = .touching
+        XCTAssertEqual(manager.selectionStyle.editableObjects[.text], left.id, "warm the text editor target")
+        let version = vector.version
+        XCTAssertTrue(manager.setPoseChannelTrack(.layer(id: manager.layers[layer].id),
+            parameterID: PoseChannelID.cel(.cel).parameterID(.x), to: AnimationCurve(keys: [.init(frame: 0, value: 0)])))
+        XCTAssertEqual(vector.version, version)
+        XCTAssertEqual(manager.selectionStyle.editableObjects[.text], right.id)
+        XCTAssertTrue(manager.editSelectedObject(.text))
+        XCTAssertEqual(manager.textEditingElementID, right.id, "Edit opens the object now inside the loop")
+        XCTAssertEqual(manager.textRecipe.string, "RIGHT")
+        manager.cancelInteractiveText()
+    }
+
+    @MainActor
+    private func memoPixel(_ manager: CanvasManager, at point: CGPoint) throws -> [UInt8] {
+        let image = try memoPicture(manager)
+        let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(image))
+        let offset = (Int(point.y) * image.width + Int(point.x)) * 4
+        return Array(bytes[offset..<(offset + 4)])
+    }
+
+    @MainActor
+    private func memoPicture(_ manager: CanvasManager) throws -> CGImage {
+        try XCTUnwrap(manager.makeRenderRequest(atFrame: manager.currentFrame, includeBackground: false)
+            .flatMap(Compositor.composite))
+    }
+
+    /// The source drawing is read at 2 while its parent above Repeat is read at 14. The blue mark
+    /// moves 32 pt left through its cel and 8 pt down through its group, then another 8 through the
+    /// document-time parent. Reading either time incorrectly therefore catches another mark or paper.
+    private func repeatedSelectionFixture(sourceOnly: Bool) throws
+        -> (manager: CanvasManager, vector: VectorCanvas, red: UUID, blue: UUID, redGroup: UUID, blueGroup: UUID) {
+        let manager = CanvasManager()
+        manager.brushLibraryOverride = CanvasFixture.isolatedBrushLibrary()
+        manager.canvasSize = CanvasFixture.canvasSize
+        manager.addVectorLayer(name: "Source ink")
+        manager.addTransformLayer(name: "Repeat")
+        manager.addTransformLayer(name: "Outer Move")
+        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: sourceOnly ? 3 : 24)])
+        CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 0, length: 24)])
+        CanvasFixture.setCelLayout(manager, layerIndex: 2, [(start: 0, length: 24)])
+        let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+        manager.layers[1].transform = LayerPose(pose: PoseQuad(restingIn: box), mode: .repeat, repeatPeriod: 12)
+        manager.layers[2].transform = LayerPose(pose: PoseQuad(restingIn: box),
+            track: CanvasFixture.poseTrack([
+                (2, PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 0, y: -8))),
+                (14, PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 0, y: 8)))
+            ], interpolation: .linear))
+        let a = AnimationGroup(displayName: "Red group", tagColor: colour(1, 0, 0))
+        let b = AnimationGroup(displayName: "Blue group", tagColor: colour(0, 0, 1))
+        manager.animationGroups = [a, b]
+        let vector = try XCTUnwrap(manager.layers[0].cels[0].vector)
+        var red = stroke(y: 20, size: 4, colour: colour(1, 0, 0), from: 10, to: 20)
+        var blue = stroke(y: 20, size: 8, opacity: 0.5, colour: colour(0, 0, 1), from: 42, to: 52)
+        red.animationGroupID = a.id
+        blue.animationGroupID = b.id
+        vector.addStroke(red)
+        vector.addStroke(blue)
+        let last = sourceOnly ? 2 : 14
+        let xKeys: [AnimationCurve.Key] = sourceOnly ? [.init(frame: 2, value: 0)]
+            : [.init(frame: 2, value: 0), .init(frame: last, value: 32)]
+        let yKeys: [AnimationCurve.Key] = sourceOnly ? [.init(frame: 2, value: 40)]
+            : [.init(frame: 2, value: 40), .init(frame: last, value: 32)]
+        manager.layers[0].cels[0].transformTracks = [
+            TransformChannelID.cel.id: TransformTrack(box: box, curves: [.x: AnimationCurve(keys: xKeys)]),
+            TransformChannelID.group(b.id).id: TransformTrack(box: box, curves: [.y: AnimationCurve(keys: yKeys)])
+        ]
+        manager.currentLayerIndex = 0
+        manager.currentFrame = 14
+        select(manager, 0, loop(CGRect(x: 6, y: 26, width: 22, height: 20)))
+        manager.selectionMembership = .touching
+        manager.history.removeAll()
+        return (manager, vector, red.id, blue.id, a.id, b.id)
+    }
+
+    private func selectionInk(_ vector: VectorCanvas) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return try encoder.encode(VectorCanvasData(from: vector, imageFileNames: [:]))
+    }
+
+    @MainActor
+    func testRepeatedCutMoveRetakesFreshPiecePosesAtSourceTimeAndDocumentParent() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for sourceOnly in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
+            let manager = f.manager
+            f.vector.elements = []
+            f.vector.addFill(canvasSpacePath: loop(CGRect(x: 42, y: 20, width: 10, height: 8)), color: colour(0, 0, 1))
+            let originalID = try XCTUnwrap(f.vector.elements.first?.id)
+            manager.layers[0].cels[0].transformTracks.removeValue(forKey: TransformChannelID.group(f.blueGroup).id)
+            if !sourceOnly {
+                manager.layers[0].cels[0].transformTracks[TransformChannelID.cel.id] = TransformTrack(
+                    box: CGRect(origin: .zero, size: CanvasFixture.canvasSize), curves: [.x: AnimationCurve(keys: [
+                        .init(frame: 2, value: 0), .init(frame: 3, value: 32)])])
+            }
+            select(manager, 0, loop(CGRect(x: 15, y: 24, width: 10, height: 20)))
+            manager.selectionMembership = .cutting
+            let before = try selectionInk(f.vector)
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 18, y: 32)), [0, 0, 255, 255])
+            manager.history.removeAll()
+
+            XCTAssertTrue(manager.beginVectorLassoMove())
+            let part = try XCTUnwrap(manager.vectorFloat?.parts.first)
+            XCTAssertEqual(part.displayed?.frame, 2)
+            XCTAssertFalse(part.insideIDs.contains(originalID), "Cut made fresh piece IDs")
+            XCTAssertEqual(part.poses.count, part.insideIDs.count, "fresh pieces retain the source cel and document parent")
+            XCTAssertEqual(part.poses.values.first?.affine?.tx ?? .nan, -32, accuracy: 1e-7)
+            XCTAssertEqual(part.poses.values.first?.affine?.ty ?? .nan, 8, accuracy: 1e-7)
+            XCTAssertEqual(manager.vectorFloat?.pivot.x ?? .nan, 17.5, accuracy: 1e-7, "fresh Cut box surrounds shown right half")
+            XCTAssertEqual(manager.vectorFloat?.pivot.y ?? .nan, 32, accuracy: 1e-7)
+            var moved = try XCTUnwrap(manager.vectorFloat?.frame.transform)
+            moved.position.x += 8
+            manager.nudgeVectorFloat(to: moved)
+            XCTAssertTrue(manager.commitVectorFloatIfNeeded())
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 12, y: 32)), [0, 0, 255, 255], "outside half stays")
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 18, y: 32))[3], 0, "inside half leaves its shown place")
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 24, y: 32)), [0, 0, 255, 255], "piece follows the eight-point drag")
+            XCTAssertEqual(manager.history.undoStack.count, sourceOnly ? 1 : 2,
+                           "one drag, plus the existing seed write when both source keys are present")
+            manager.undo()
+            if !sourceOnly { manager.undo() }
+            XCTAssertEqual(try selectionInk(f.vector), before)
+        }
+    }
+
+    @MainActor
+    func testRepeatedDuplicateBakesSourceChannelsAndKeepsSourceInkThroughItsTwoUndoSteps() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for sourceOnly in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
+            let manager = f.manager
+            select(manager, 0, loop(CGRect(x: 6, y: 33, width: 22, height: 6)))
+            let original = try selectionInk(f.vector)
+            let sourceID = manager.layers[0].cels[0].id
+            let sourcePixel = try memoPixel(manager, at: CGPoint(x: 15, y: 36))
+            XCTAssertGreaterThan(sourcePixel[2], 100)
+            manager.history.removeAll()
+
+            XCTAssertTrue(manager.beginVectorLassoDuplicate())
+            XCTAssertEqual(manager.layers.count, 4)
+            let copied = try XCTUnwrap(manager.vectorFloat?.parts.first)
+            XCTAssertNotEqual(copied.celID, sourceID)
+            XCTAssertEqual(copied.displayed?.frame, 2)
+            XCTAssertEqual(copied.displayed?.inheritedPose?.affine?.ty ?? .nan, 8, accuracy: 1e-7)
+            XCTAssertEqual(manager.vectorFloat?.pivot.x ?? .nan, 15, accuracy: 1e-7)
+            XCTAssertEqual(manager.vectorFloat?.pivot.y ?? .nan, 36, accuracy: 1e-7, "copy's box includes the document parent once")
+            XCTAssertEqual(manager.layers[1].cels[0].startFrame, 0)
+            XCTAssertEqual(manager.layers[1].cels[0].frameCount, sourceOnly ? 3 : 24)
+            XCTAssertEqual(try selectionInk(f.vector), original)
+            var moved = try XCTUnwrap(manager.vectorFloat?.frame.transform)
+            moved.position.x += 12
+            manager.nudgeVectorFloat(to: moved)
+            XCTAssertTrue(manager.commitVectorFloatIfNeeded())
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 15, y: 36)), sourcePixel, "source is unchanged")
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 27, y: 36)), sourcePixel, "copy has source-time group pose and parent once")
+            XCTAssertEqual(manager.history.undoStack.count, 2, "layer insertion and one nudge")
+            manager.undo()
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 27, y: 36))[3], 0)
+            manager.undo()
+            XCTAssertEqual(manager.layers.count, 3)
+            XCTAssertEqual(try selectionInk(f.vector), original)
+            manager.redo()
+            manager.redo()
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 27, y: 36)), sourcePixel)
+            XCTAssertEqual(try selectionInk(f.vector), original)
+        }
+    }
+
+    /// Half-scale cel × double-scale parent and identity × identity have the same latched map.
+    /// Only accepted source time and the separate parent can price the old six-point drag correctly.
+    @MainActor
+    func testRepeatedMoveKeysAcceptedSourceAndParentAcrossDoneNavigationLayerSaveAndIndexChanges() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for terminal in ["done", "navigate", "layer", "save", "index", "pointer"] {
+            let f = try repeatedSelectionFixture(sourceOnly: false)
+            let manager = f.manager
+            let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+            f.vector.elements = []
+            f.vector.addFill(canvasSpacePath: loop(CGRect(x: 20, y: 20, width: 8, height: 8)), color: colour(0, 0, 1))
+            manager.layers[0].cels[0].startFrame = 2
+            manager.layers[0].cels[0].frameCount = 22
+            let sourceID = manager.layers[0].cels[0].id
+            let layerID = manager.layers[0].id
+            manager.layers[0].cels[0].transformTracks = [TransformChannelID.cel.id:
+                CanvasFixture.poseTrack([
+                    (0, PoseQuad(box: box, mappedBy: CGAffineTransform(scaleX: 0.5, y: 0.5))),
+                    (1, PoseQuad(restingIn: box))], interpolation: .linear)]
+            manager.layers[2].transform = LayerPose(pose: PoseQuad(restingIn: box),
+                track: CanvasFixture.poseTrack([
+                    (2, PoseQuad(restingIn: box)),
+                    (14, PoseQuad(box: box, mappedBy: CGAffineTransform(scaleX: 2, y: 2))),
+                    (15, PoseQuad(restingIn: box))], interpolation: .linear))
+            manager.selection = nil
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 23, y: 23)), [0, 0, 255, 255], "PRE: cancelling scale maps show the original square")
+            let before = try selectionInk(f.vector)
+            manager.history.removeAll()
+            XCTAssertTrue(manager.beginVectorWholeCelMove())
+            XCTAssertTrue(try XCTUnwrap(manager.vectorFloat?.parts.first).poses.isEmpty, "the composed map cannot identify the accepted time or parent")
+            if terminal == "pointer" {
+                manager.moveBoxTouched()
+                manager.currentFrame = 15
+                XCTAssertTrue(manager.moveBoxIsTouched)
+                XCTAssertEqual(manager.vectorFloat?.parts.first?.displayed?.frame, 2,
+                               "a held pointer still owes its old source2 drag before any incoming reprepare")
+            }
+            var moved = try XCTUnwrap(manager.vectorFloat?.frame.transform)
+            moved.position.x += 6
+            manager.nudgeVectorFloat(to: moved)
+            var loaded: CanvasManager?
+            if terminal == "pointer" {
+                manager.moveBoxLifted()
+                XCTAssertFalse(manager.moveBoxIsTouched)
+                XCTAssertNotNil(manager.vectorFloat, "pointer lift leaves the incoming held-cel box ready")
+                XCTAssertEqual(manager.vectorFloat?.parts.first?.displayed?.frame, 3)
+            } else if terminal == "navigate" {
+                manager.currentFrame = 15
+                XCTAssertNotNil(manager.vectorFloat, "same held cel keeps a usable box for the incoming frame")
+                XCTAssertEqual(manager.vectorFloat?.parts.first?.displayed?.frame, 3)
+            } else if terminal == "layer" {
+                manager.currentLayerIndex = 1
+                XCTAssertNil(manager.vectorFloat, "a different layer keeps its existing terminal contract")
+            } else if terminal == "index" {
+                XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: 0, frameCount: 1))
+                XCTAssertEqual(manager.layers[0].cels.firstIndex { $0.id == sourceID }, 1)
+                XCTAssertTrue(manager.commitVectorFloatIfNeeded())
+            } else if terminal == "save" {
+                let root = FileManager.default.temporaryDirectory.appendingPathComponent("repeat-move-\(UUID().uuidString)", isDirectory: true)
+                try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+                let backupRoot = ProjectBackupManager.rootDirectoryOverride
+                ProjectBackupManager.rootDirectoryOverride = root
+                defer {
+                    ProjectBackupManager.rootDirectoryOverride = backupRoot
+                    try? FileManager.default.removeItem(at: root)
+                }
+                let url = root.appendingPathComponent("accepted.paintproj", isDirectory: true)
+                let finished = expectation(description: "accepted Move save")
+                ProjectStore.save(manager, to: url) { _ in finished.fulfill() }
+                wait(for: [finished], timeout: 30)
+                loaded = try XCTUnwrap(ProjectStore.load(from: url))
+            } else {
+                XCTAssertTrue(manager.commitVectorFloatIfNeeded())
+            }
+            // Navigation may have left a fresh, unmoved box; land it before compositor assertions.
+            _ = manager.commitVectorFloatIfNeeded()
+            let at = try XCTUnwrap(manager.celIndices(forCel: sourceID, inLayer: layerID))
+            let track = try XCTUnwrap(manager.layers[at.layer].cels[at.cel].transformTracks[TransformChannelID.cel.id])
+            XCTAssertEqual(track.curve(.x)?.key(atFrame: 0)?.value ?? -1, 19, accuracy: 1e-7,
+                           "source2: centre16 plus local3, priced through accepted parent2")
+            XCTAssertEqual(track.curve(.x)?.key(atFrame: 1)?.value ?? -1, 32, accuracy: 1e-7, "incoming source3 remains identity")
+            XCTAssertNil(track.curve(.x)?.key(atFrame: 12), "no document14 key in a cel beginning at2")
+            XCTAssertNil(track.curve(.x)?.key(atFrame: 13), "no late document15 key")
+            manager.currentLayerIndex = at.layer
+            manager.currentFrame = 14
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 29, y: 23)), [0, 0, 255, 255])
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 23, y: 23))[3], 0)
+            manager.currentFrame = 15
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 23, y: 23)), [0, 0, 255, 255])
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 29, y: 23))[3], 0)
+            if let loaded {
+                let saved = try XCTUnwrap(loaded.celIndices(forCel: sourceID, inLayer: layerID))
+                XCTAssertEqual(loaded.layers[saved.layer].cels[saved.cel].transformTracks[TransformChannelID.cel.id], track)
+                loaded.currentFrame = 14
+                XCTAssertEqual(try memoPixel(loaded, at: CGPoint(x: 29, y: 23)), [0, 0, 255, 255])
+            }
+            XCTAssertEqual(manager.history.undoStack.count, terminal == "index" ? 3 : 2, "existing key-then-drag history, plus the explicit insertion")
+            manager.undo()
+            if terminal == "index" { manager.undo() }
+            manager.undo()
+            XCTAssertEqual(try selectionInk(f.vector), before, "Undo reaches exact original source geometry")
+            manager.redo()
+            if terminal == "index" { manager.redo() }
+            manager.redo()
+            manager.currentFrame = 14
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 29, y: 23)), [0, 0, 255, 255])
+        }
+    }
+
+    @MainActor
+    func testRepeatedGroupMoveKeysItsSourceChannelThroughTheSourceCelAndDocumentParent() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        let f = try repeatedSelectionFixture(sourceOnly: false)
+        let manager = f.manager
+        let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+        f.vector.elements = []
+        f.vector.addFill(canvasSpacePath: loop(CGRect(x: 2, y: 44, width: 8, height: 8)), color: colour(1, 0, 0))
+        f.vector.addFill(canvasSpacePath: loop(CGRect(x: 20, y: 20, width: 8, height: 8)), color: colour(0, 0, 1))
+        let blue = try XCTUnwrap(f.vector.elements.last?.id)
+        f.vector.elements = f.vector.elements.map { $0.id == blue ? $0.taggedForAnimation(f.blueGroup) : $0 }
+        f.vector.bumpVersion()
+        manager.layers[0].cels[0].startFrame = 2
+        manager.layers[0].cels[0].frameCount = 22
+        manager.layers[0].cels[0].transformTracks = [
+            TransformChannelID.cel.id: CanvasFixture.poseTrack([
+                (0, PoseQuad(box: box, mappedBy: CGAffineTransform(scaleX: 0.5, y: 0.5))),
+                (1, PoseQuad(restingIn: box))], interpolation: .linear),
+            TransformChannelID.group(f.blueGroup).id: TransformTrack(box: box, curves: [
+                .x: AnimationCurve(keys: [.init(frame: 0, value: 36), .init(frame: 1, value: 40)])])]
+        manager.layers[2].transform = LayerPose(pose: PoseQuad(restingIn: box),
+            track: CanvasFixture.poseTrack([
+                (2, PoseQuad(restingIn: box)),
+                (14, PoseQuad(box: box, mappedBy: CGAffineTransform(scaleX: 2, y: 2))),
+                (15, PoseQuad(restingIn: box))], interpolation: .linear))
+        manager.selection = nil
+        manager.tapComposition = .add
+        manager.selectObject(at: CGPoint(x: 27, y: 23))
+        XCTAssertEqual(manager.selection?.objects?.elements, Set([blue]))
+        XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 27, y: 23)), [0, 0, 255, 255], "PRE: group4, celhalf and parent2 compose to a four-point slide")
+        let original = try selectionInk(f.vector)
+        manager.history.removeAll()
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        XCTAssertEqual(manager.vectorFloat?.parts.first?.insideIDs, Set([blue]))
+        var moved = try XCTUnwrap(manager.vectorFloat?.frame.transform)
+        moved.position.x += 6
+        manager.nudgeVectorFloat(to: moved)
+        manager.commitVectorFloatIfNeeded()
+        let tracks = manager.layers[0].cels[0].transformTracks
+        let group = try XCTUnwrap(tracks[TransformChannelID.group(f.blueGroup).id])
+        XCTAssertEqual(group.curve(.x)?.key(atFrame: 0)?.value ?? -1, 42, accuracy: 1e-7,
+                       "group translation4 plus screen6 through sourcecelhalf and docparent2")
+        XCTAssertEqual(group.curve(.x)?.key(atFrame: 1)?.value ?? -1, 40, accuracy: 1e-7, "other source frame stays")
+        XCTAssertEqual(tracks[TransformChannelID.cel.id]?.curve(.x)?.key(atFrame: 0)?.value ?? -1, 16, accuracy: 1e-7,
+                       "the group edit leaves the source cel channel alone")
+        XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 25, y: 23))[3], 0)
+        XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 35, y: 23)), [0, 0, 255, 255])
+        XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 6, y: 47)), [255, 0, 0, 255], "unselected red is unchanged")
+        XCTAssertEqual(manager.history.undoStack.count, 2)
+        manager.undo()
+        manager.undo()
+        XCTAssertEqual(try selectionInk(f.vector), original)
+        XCTAssertEqual(manager.layers[0].cels[0].transformTracks[TransformChannelID.group(f.blueGroup).id]?
+            .curve(.x)?.key(atFrame: 0)?.value ?? -1, 36, accuracy: 1e-7)
+        manager.redo()
+        manager.redo()
+        XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 35, y: 23)), [0, 0, 255, 255])
+        manager.currentFrame = 15
+        XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 31, y: 23)), [0, 0, 255, 255])
+        XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 37, y: 23))[3], 0, "source3 keeps its eight-point slide")
+    }
+
+    @MainActor
+    func testHeldCelKeyAThenScrubThenKeyBLeavesTheSelectedMoveBoxReadyForTheNextDrag() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for tapped in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: false)
+            let manager = f.manager
+            f.vector.elements = []
+            f.vector.addFill(canvasSpacePath: loop(CGRect(x: 20, y: 20, width: 8, height: 8)), color: colour(0, 0, 1))
+            manager.layers[0].cels[0].transformTracks = [:]
+            manager.layers[1].transform = nil
+            manager.layers[2].transform = nil
+            manager.currentFrame = 0
+            manager.selection = nil
+            if tapped {
+                manager.tapComposition = .add
+                manager.selectObject(at: CGPoint(x: 24, y: 24))
+            }
+            let ids = Set(f.vector.elements.map(\.id))
+            let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 0))
+            XCTAssertTrue(manager.addKeys(target, atFrame: 0))
+            XCTAssertTrue(tapped ? manager.beginVectorLassoMove() : manager.beginVectorWholeCelMove())
+            manager.turnVectorFloatBox(to: 0.25)
+            manager.currentFrame = 8
+            let continued = try XCTUnwrap(manager.vectorFloat, "scrubbing a held cel must not require another Move press")
+            XCTAssertEqual(continued.parts[0].insideIDs, ids)
+            XCTAssertEqual(continued.parts[0].displayed?.frame, 8)
+            XCTAssertEqual(continued.frame.boxAngle, 0.25, accuracy: 1e-9)
+            if tapped { XCTAssertEqual(manager.selection?.objects?.elements, ids, "selected objects survive") }
+            XCTAssertTrue(manager.addKeys(target, atFrame: 8))
+            manager.history.removeAll()
+            var moved = try XCTUnwrap(manager.vectorFloat?.frame.transform)
+            moved.position.x += 6
+            manager.nudgeVectorFloat(to: moved)
+            XCTAssertTrue(manager.commitVectorFloatIfNeeded())
+            let track = try XCTUnwrap(manager.layers[0].cels[0].transformTracks[TransformChannelID.cel.id])
+            XCTAssertEqual(track.curve(.x)?.key(atFrame: 0)?.value ?? -1, 24, accuracy: 1e-7)
+            XCTAssertEqual(track.curve(.x)?.key(atFrame: 8)?.value ?? -1, 30, accuracy: 1e-7)
+            XCTAssertEqual(manager.history.undoStack.count, 2, "seed/key and drag retain their existing steps")
+            manager.currentFrame = 0
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 23, y: 23)), [0, 0, 255, 255], "A stays")
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 31, y: 23))[3], 0)
+            manager.currentFrame = 8
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 23, y: 23))[3], 0)
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 31, y: 23)), [0, 0, 255, 255], "B receives the drag")
+        }
+    }
+
+    @MainActor
+    func testAuthoredMoveBeforeHeldCelScrubKeepsItsPendingBaselineAndNextDragKeysOnlyTheNewFrame() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        let f = try repeatedSelectionFixture(sourceOnly: false)
+        let manager = f.manager
+        f.vector.elements = []
+        f.vector.addFill(canvasSpacePath: loop(CGRect(x: 20, y: 20, width: 8, height: 8)), color: colour(0, 0, 1))
+        manager.layers[0].cels[0].transformTracks = [:]
+        manager.layers[1].transform = nil
+        manager.layers[2].transform = nil
+        manager.selection = nil
+        manager.currentFrame = 0
+        manager.tapComposition = .add
+        manager.selectObject(at: CGPoint(x: 24, y: 24))
+        let selected = Set(f.vector.elements.map(\.id))
+        let target = try XCTUnwrap(manager.keyframeTarget(layerIndex: 0))
+        manager.addKeys(target, atFrame: 0)
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        var first = try XCTUnwrap(manager.vectorFloat?.frame.transform)
+        first.position.x += 4
+        manager.nudgeVectorFloat(to: first)
+        manager.currentFrame = 8
+        XCTAssertNotNil(manager.vectorFloat, "the next drag keeps its box")
+        XCTAssertEqual(manager.selection?.objects?.elements, selected, "authored old movement keeps the selected objects for the new drag")
+        XCTAssertEqual(manager.layers[0].cels[0].pendingPoseBaselines.count, 1, "old drag holds its existing baseline until B")
+        XCTAssertTrue(manager.layers[0].cels[0].transformTracks.isEmpty)
+        XCTAssertTrue(manager.addKeys(target, atFrame: 8))
+        let seeded = try XCTUnwrap(manager.layers[0].cels[0].transformTracks[TransformChannelID.cel.id])
+        XCTAssertEqual(seeded.curve(.x)?.key(atFrame: 0)?.value ?? -1, 24, accuracy: 1e-7)
+        XCTAssertEqual(seeded.curve(.x)?.key(atFrame: 8)?.value ?? -1, 28, accuracy: 1e-7)
+        XCTAssertTrue(manager.layers[0].cels[0].pendingPoseBaselines.isEmpty)
+        let history = manager.history.undoStack.count
+        var second = try XCTUnwrap(manager.vectorFloat?.frame.transform)
+        second.position.x += 6
+        manager.nudgeVectorFloat(to: second)
+        manager.commitVectorFloatIfNeeded()
+        let keyed = try XCTUnwrap(manager.layers[0].cels[0].transformTracks[TransformChannelID.cel.id])
+        XCTAssertEqual(keyed.curve(.x)?.key(atFrame: 0)?.value ?? -1, 24, accuracy: 1e-7)
+        XCTAssertEqual(keyed.curve(.x)?.key(atFrame: 8)?.value ?? -1, 34, accuracy: 1e-7)
+        XCTAssertEqual(manager.history.undoStack.count - history, 2, "existing .key restoration then nudge Undo")
+        manager.currentFrame = 0
+        XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 23, y: 23)), [0, 0, 255, 255])
+        manager.currentFrame = 8
+        XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 35, y: 23)), [0, 0, 255, 255])
+        manager.undo()
+        manager.undo()
+        XCTAssertEqual(manager.layers[0].cels[0].transformTracks[TransformChannelID.cel.id], seeded)
+        XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 29, y: 23)), [0, 0, 255, 255], "undoing second drag retains first")
+        XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 35, y: 23))[3], 0)
+    }
+
+    @MainActor
+    func testAnUnnudgedCutSurvivesAHeldCelScrubAndFirstUndoStillRejoinsTheOriginalInk() throws {
+        let f = try repeatedSelectionFixture(sourceOnly: false)
+        let manager = f.manager
+        f.vector.elements = []
+        f.vector.addFill(canvasSpacePath: loop(CGRect(x: 20, y: 20, width: 8, height: 8)), color: colour(0, 0, 1))
+        manager.layers[0].cels[0].transformTracks = [:]
+        manager.layers[1].transform = nil
+        manager.layers[2].transform = nil
+        manager.currentFrame = 0
+        select(manager, 0, loop(CGRect(x: 24, y: 18, width: 8, height: 12)))
+        manager.selectionMembership = .cutting
+        let original = try selectionInk(f.vector)
+        let originalID = try XCTUnwrap(f.vector.elements.first?.id)
+        manager.history.removeAll()
+        XCTAssertTrue(manager.beginVectorLassoMove())
+        let cutIDs = try XCTUnwrap(manager.vectorFloat?.parts.first?.insideIDs)
+        XCTAssertFalse(cutIDs.contains(originalID))
+        var landings = 0
+        manager.onLivePictureWillLand = { landing in
+            guard case .vectorFloat(let old) = landing else { return XCTFail("a vector context replacement lands its vector picture") }
+            landings += 1
+            XCTAssertEqual(old.parts[0].displayed?.frame, 0)
+            XCTAssertEqual(old.parts[0].insideIDs, cutIDs)
+            XCTAssertEqual(manager.vectorFloat?.parts.first?.displayed?.frame, 0,
+                           "the old context is live until its exact shown picture has been retained")
+            XCTAssertEqual(old.nudges, 0)
+            XCTAssertTrue(manager.history.undoStack.isEmpty, "replacing an unmoved context authors no history")
+        }
+        defer { manager.onLivePictureWillLand = nil }
+        manager.currentFrame = 8
+        XCTAssertEqual(landings, 1, "one admitted replacement releases one old picture latch")
+        manager.onLivePictureWillLand = nil
+        XCTAssertEqual(manager.vectorFloat?.parts.first?.insideIDs, cutIDs)
+        XCTAssertEqual(manager.vectorFloat?.parts.first?.displayed?.frame, 8)
+        XCTAssertNotNil(manager.selection)
+        XCTAssertTrue(manager.history.undoStack.isEmpty, "a scrub authors no movement or history")
+        var moved = try XCTUnwrap(manager.vectorFloat?.frame.transform)
+        moved.position.x += 6
+        manager.nudgeVectorFloat(to: moved)
+        manager.commitVectorFloatIfNeeded()
+        XCTAssertEqual(manager.history.undoStack.count, 1)
+        manager.undo()
+        XCTAssertEqual(try selectionInk(f.vector), original, "first Undo restores the whole original, not a pre-split approximation")
+        XCTAssertNil(manager.vectorFloat)
+    }
+
+    func testRepeatedMoveAndDuplicateRefuseTheShownDerivedCelAndKeepStandaloneAdmissionAtomic() throws {
+        for duplicate in [false, true] {
+            for shownLinked in [false, true] {
+                let f = try repeatedSelectionFixture(sourceOnly: true)
+                let manager = f.manager
+                manager.addCel(layerIndex: 0, startFrame: 14, frameCount: 1)
+                manager.layers[0].cels[shownLinked ? 0 : 1].interpolation = InterpolationRecipe(mode: .reproject)
+                let before = try selectionInk(f.vector)
+                let layers = manager.layers.map(\.id)
+                manager.history.removeAll()
+                let accepted = duplicate ? manager.beginVectorLassoDuplicate() : manager.beginVectorLassoMove()
+                XCTAssertEqual(accepted, !shownLinked)
+                if shownLinked {
+                    XCTAssertNil(manager.vectorFloat)
+                    XCTAssertEqual(manager.notice?.kind, .cannotMoveDerivedFrame)
+                    XCTAssertEqual(manager.layers.map(\.id), layers)
+                    XCTAssertEqual(try selectionInk(f.vector), before)
+                    XCTAssertTrue(manager.history.undoStack.isEmpty)
+                } else {
+                    XCTAssertNotNil(manager.vectorFloat)
+                    if duplicate { XCTAssertEqual(try selectionInk(f.vector), before) }
+                    manager.cancelVectorFloat()
+                }
+            }
+        }
+        let f = try repeatedSelectionFixture(sourceOnly: true)
+        let manager = f.manager
+        let before = try selectionInk(f.vector)
+        XCTAssertTrue(manager.beginStructureGesture())
+        XCTAssertFalse(manager.beginVectorLassoDuplicate(), "a standalone transfer refuses the enclosing gesture before settlement")
+        XCTAssertEqual(try selectionInk(f.vector), before)
+        XCTAssertEqual(manager.layers.count, 3)
+        XCTAssertNotNil(manager.selection)
+        manager.cancelStructureGesture()
+    }
+
+    @MainActor
+    func testRepeatedSelectionsReadAndRecolourTheShownSourceCelThroughHistory() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for sourceOnly in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
+            let manager = f.manager, vector = f.vector
+            let original = try selectionInk(vector)
+            let sourceID = manager.layers[0].cels[0].id
+            XCTAssertEqual(manager.displayedFrame(forLayer: 0, atFrame: 14), 2)
+            XCTAssertEqual(manager.activeCelIndex(inLayer: 0, atFrame: 14) == nil, sourceOnly)
+            XCTAssertGreaterThan(try memoPixel(manager, at: CGPoint(x: 15, y: 36))[2], 100)
+            XCTAssertNil(manager.selectionEditUnavailableReason)
+            XCTAssertNil(manager.animationGroupEditUnavailableReason)
+            for _ in 0..<3 {
+                XCTAssertEqual(manager.selectionStyle.color, colour(0, 0, 1), "the fixed loop reads the shown source's blue")
+                XCTAssertEqual(manager.selectionStyle.size, 8)
+                XCTAssertEqual(manager.selectionStyle.opacity, 0.5)
+                XCTAssertEqual(manager.selectionAnimationGroupName, "Blue group", "the fixed loop names the shown source group")
+            }
+            XCTAssertTrue(manager.beginSelectionEdit(.color))
+            manager.previewSelectionEdit(.color(colour(0, 0, 1)))
+            XCTAssertFalse(manager.commitSelectionEdit(), "an untouched source readout records nothing")
+            XCTAssertTrue(try selectionInk(vector) == original)
+            XCTAssertEqual(manager.history.undoStack.count, 0)
+            XCTAssertTrue(manager.applySelectionEdit(.color(colour(0, 1, 0))))
+            XCTAssertEqual(manager.layers[0].cels.map(\.id), [sourceID], "no cel is created at the playhead")
+            XCTAssertEqual(vector.elements.first { $0.id == f.red }?.stroke?.color, colour(1, 0, 0))
+            XCTAssertEqual(vector.elements.first { $0.id == f.blue }?.stroke?.color, colour(0, 1, 0))
+            XCTAssertGreaterThan(try memoPixel(manager, at: CGPoint(x: 15, y: 36))[1], 100)
+            XCTAssertEqual(manager.history.undoStack.count, 1)
+            manager.undo()
+            XCTAssertTrue(try selectionInk(vector) == original, "Undo restores all source geometry and style")
+            XCTAssertEqual(manager.selectionStyle.color, colour(0, 0, 1))
+            XCTAssertGreaterThan(try memoPixel(manager, at: CGPoint(x: 15, y: 36))[2], 100)
+            manager.redo()
+            XCTAssertEqual(manager.selectionStyle.color, colour(0, 1, 0))
+            XCTAssertGreaterThan(try memoPixel(manager, at: CGPoint(x: 15, y: 36))[1], 100)
+            if !sourceOnly {
+                manager.undo()
+                XCTAssertEqual(manager.selectionStyle.color, colour(0, 0, 1), "warm both source-time keys")
+                XCTAssertEqual(manager.selectionAnimationGroupName, "Blue group")
+                let version = vector.version
+                // Only the source key changes; the exact key at document14 stays at32. A memo
+                // keyed at document time would remain warm while the actual shown mark changes.
+                manager.layers[0].cels[0].transformTracks[TransformChannelID.cel.id] = TransformTrack(
+                    box: CGRect(origin: .zero, size: CanvasFixture.canvasSize),
+                    curves: [.x: AnimationCurve(keys: [.init(frame: 2, value: 32), .init(frame: 14, value: 32)])])
+                XCTAssertEqual(manager.currentFrame, 14)
+                XCTAssertEqual(vector.version, version)
+                XCTAssertGreaterThan(try memoPixel(manager, at: CGPoint(x: 15, y: 28))[0], 200)
+                XCTAssertEqual(manager.selectionStyle.color, colour(1, 0, 0), "a source-key edit invalidates the style memo")
+                XCTAssertEqual(manager.selectionAnimationGroupName, "Red group", "a source-key edit invalidates the group memo")
+            }
+        }
+    }
+
+    @MainActor
+    func testRepeatedSelectionGroupCompensationUsesSourceTimeAndKeepsThePictureThroughHistory() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for sourceOnly in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
+            let manager = f.manager, vector = f.vector
+            let original = try selectionInk(vector)
+            let before = try memoPixel(manager, at: CGPoint(x: 15, y: 36))
+            XCTAssertGreaterThan(before[2], 100)
+            XCTAssertEqual(manager.selectionAnimationGroupName, "Blue group", "the group readout starts on the shown source")
+            XCTAssertTrue(manager.setAnimationGroupOfSelection(.existing(f.redGroup)))
+            XCTAssertEqual(vector.elements.first { $0.id == f.blue }?.animationGroupID, f.redGroup)
+            XCTAssertEqual(vector.elements.first { $0.id == f.red }?.animationGroupID, f.redGroup)
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 15, y: 36)), before,
+                           "source-time compensation preserves the shown blue mark")
+            XCTAssertEqual(manager.selectionAnimationGroupName, "Red group")
+            XCTAssertFalse(manager.setAnimationGroupOfSelection(.existing(f.redGroup)), "same group is an exact no-op")
+            XCTAssertEqual(manager.history.undoStack.count, 1)
+            manager.undo()
+            XCTAssertTrue(try selectionInk(vector) == original)
+            XCTAssertEqual(manager.selectionAnimationGroupName, "Blue group")
+            manager.redo()
+            XCTAssertEqual(manager.selectionAnimationGroupName, "Red group")
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 15, y: 36)), before)
+        }
+    }
+
+    @MainActor
+    func testRepeatedTapAndSelectEditOpenTheShownSourceTextAndKeepItsNoOpExact() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for sourceOnly in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
+            let manager = f.manager, vector = f.vector
+            var redRecipe = TextRecipe(string: "A"), blueRecipe = TextRecipe(string: "B")
+            redRecipe.color = colour(1, 0, 0)
+            blueRecipe.color = colour(0, 0, 1)
+            redRecipe.typography = Typography(pointSize: 12)
+            blueRecipe.typography = Typography(pointSize: 12)
+            let left = VectorTextElement(recipe: redRecipe,
+                frame: TextFrame(origin: CGPoint(x: 10, y: 20), size: CGSize(width: 16, height: 18), autoSize: false),
+                animationGroupID: f.redGroup)
+            let right = VectorTextElement(recipe: blueRecipe,
+                frame: TextFrame(origin: CGPoint(x: 42, y: 20), size: CGSize(width: 16, height: 18), autoSize: false),
+                animationGroupID: f.blueGroup)
+            vector.elements = [.text(left), .text(right)]
+            let original = try selectionInk(vector)
+            let beforePixels = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+            XCTAssertTrue(stride(from: 3, to: beforePixels.count, by: 4).contains { beforePixels[$0] > 0 },
+                          "the repeated source text actually draws")
+            let sourceID = manager.layers[0].cels[0].id
+            XCTAssertEqual(manager.selectionStyle.editableObjects[.text], right.id, "Select offers the displayed source label")
+            XCTAssertTrue(manager.editSelectedObject(.text))
+            XCTAssertEqual(manager.textEditingElementID, right.id)
+            XCTAssertEqual(manager.textGestureCelID, sourceID)
+            XCTAssertEqual(manager.textRecipe.string, "B")
+            XCTAssertEqual(manager.textFrame.corners, right.frame.corners.map { CGPoint(x: $0.x - 32, y: $0.y + 16) })
+            manager.commitInteractiveText()
+            XCTAssertTrue(try selectionInk(vector) == original)
+            XCTAssertTrue(try CanvasFixture.rgbaBytes(memoPicture(manager)) == beforePixels)
+            XCTAssertEqual(manager.history.undoStack.count, 0)
+            manager.tapComposition = .add
+            _ = manager.selectObject(at: CGPoint(x: 15, y: 40))
+            XCTAssertEqual(manager.selection?.objects?.celID, sourceID, "Tap selects the displayed source cel")
+            XCTAssertEqual(manager.selection?.objects?.elements, Set([right.id]), "Tap names the shown blue label")
+            manager.currentFrame = 2
+            manager.currentFrame = 14
+            XCTAssertEqual(manager.selection?.objects?.elements, Set([right.id]),
+                           "the same source cel keeps its tapped selection across Repeat ticks")
+            manager.undo()
+            XCTAssertNil(manager.selection?.objects)
+            manager.redo()
+            XCTAssertEqual(manager.selection?.objects?.elements, Set([right.id]), "Redo restores a tapped source selection")
+            manager.tapComposition = .subtract
+            _ = manager.selectObject(at: CGPoint(x: 15, y: 40))
+            XCTAssertNil(manager.selection, "Subtract hits the shown source object")
+            manager.undo()
+            XCTAssertEqual(manager.selection?.objects?.elements, Set([right.id]), "Undo restores the subtracted source object")
+            XCTAssertEqual(manager.selectionStyle.editableObjects[.text], right.id)
+            XCTAssertTrue(manager.editSelectedObject(.text))
+            manager.textRecipe.string = "BC"
+            manager.textRecipeDidChange()
+            manager.commitInteractiveText()
+            XCTAssertEqual(vector.elements.compactMap(\.text).map(\.id), [left.id, right.id])
+            XCTAssertEqual(vector.elements.compactMap(\.text).first { $0.id == left.id }, left)
+            XCTAssertEqual(vector.elements.compactMap(\.text).first { $0.id == right.id }?.recipe.string, "BC")
+            XCTAssertEqual(manager.history.undoStack.count, 2, "one tap selection and one text edit")
+            let editedPixels = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+            XCTAssertFalse(editedPixels == beforePixels, "typing changes the actual repeated source letters")
+            manager.undo()
+            XCTAssertTrue(try selectionInk(vector) == original)
+            XCTAssertTrue(try CanvasFixture.rgbaBytes(memoPicture(manager)) == beforePixels)
+            manager.redo()
+            XCTAssertEqual(vector.elements.compactMap(\.text).first { $0.id == right.id }?.recipe.string, "BC")
+            XCTAssertTrue(try CanvasFixture.rgbaBytes(memoPicture(manager)) == editedPixels)
+        }
+    }
+
+    @MainActor
+    func testRepeatedGradientEditUsesTheShownSourceAndItsLiveWindowThroughHistory() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for sourceOnly in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
+            let manager = f.manager, vector = f.vector
+            // The untagged fill follows only cel + parent; removing the strokes makes every
+            // remaining element share the one pose required by the editor's existing live window.
+            vector.elements = []
+            let rect = CGRect(x: 42, y: 20, width: 12, height: 8)
+            let id = vector.addFill(canvasSpacePath: loop(rect),
+                paint: .linearGradient(.spanning(rect, angle: 0))).id
+            let original = try selectionInk(vector)
+            let before = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+            let sourceID = manager.layers[0].cels[0].id
+            XCTAssertEqual(manager.selectionStyle.editableObjects[.gradient], id, "Select offers the gradient on the shown source")
+            XCTAssertTrue(manager.editSelectedObject(.gradient), "Edit opens the shown source gradient")
+            XCTAssertEqual(manager.gradientEdit?.edit.celID, sourceID)
+            XCTAssertEqual(manager.gradientEdit?.elementID, id)
+            XCTAssertEqual(manager.liveCelContentEdit?.celID, sourceID,
+                           "the source-time single-pose check admits a live edit window")
+            guard manager.liveCelContentEdit != nil else { continue }
+            XCTAssertFalse(manager.commitGradientEdit(), "opening and closing records nothing")
+            XCTAssertTrue(try selectionInk(vector) == original)
+            XCTAssertEqual(manager.history.undoStack.count, 0)
+            XCTAssertTrue(manager.editSelectedObject(.gradient))
+            manager.setGradientColour(.start, to: .green)
+            let held = try XCTUnwrap(manager.liveCelContentEdit)
+            let placement = manager.celContentPlacement(forLayerID: manager.layers[0].id)
+            let preview = try XCTUnwrap(held.presentation(placement: placement))
+            let sample = CGPoint(x: 15, y: 32)
+            let coversSample = preview.window.contains(sample)
+            XCTAssertTrue(coversSample, "the live window covers the shown source gradient")
+            guard coversSample else { continue }
+            let cg = try XCTUnwrap(preview.image.cgImage)
+            let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(cg))
+            let x = Int((sample.x - preview.window.minX) * CGFloat(cg.width) / preview.window.width)
+            let y = Int((sample.y - preview.window.minY) * CGFloat(cg.height) / preview.window.height)
+            let offset = (y * cg.width + x) * 4
+            XCTAssertGreaterThan(pixels[offset + 1], pixels[offset],
+                                 "the rewritten green gradient is drawn inside its shown live window")
+            XCTAssertTrue(manager.commitGradientEdit())
+            let edited = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+            XCTAssertFalse(edited == before, "the gradient's new colour is drawn on the repeated source")
+            XCTAssertEqual(vector.elements.map(\.id), [id])
+            XCTAssertEqual(manager.history.undoStack.count, 1)
+            manager.undo()
+            XCTAssertTrue(try selectionInk(vector) == original)
+            XCTAssertTrue(try CanvasFixture.rgbaBytes(memoPicture(manager)) == before)
+            manager.redo()
+            XCTAssertTrue(try CanvasFixture.rgbaBytes(memoPicture(manager)) == edited)
+        }
+    }
+
+    func testRepeatedSelectionAdmissionUsesTheShownCelsLinkedStatus() throws {
+        for shownLinked in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: true)
+            let manager = f.manager
+            manager.addCel(layerIndex: 0, startFrame: 14, frameCount: 1)
+            manager.layers[0].cels[shownLinked ? 0 : 1].interpolation = InterpolationRecipe(mode: .reproject)
+            let before = try selectionInk(f.vector)
+            let history = manager.history.undoStack.count
+            if shownLinked {
+                XCTAssertTrue(manager.selectionEditUnavailableReason?.contains("in-between") == true,
+                              "the shown linked cel refuses the selection band")
+                XCTAssertTrue(manager.animationGroupEditUnavailableReason?.contains("in-between") == true,
+                              "the shown linked cel refuses group assignment")
+                XCTAssertEqual(manager.selectionStyle, .unavailable)
+                XCTAssertEqual(manager.selectionAnimationGroup, .unavailable)
+                XCTAssertFalse(manager.applySelectionEdit(.color(colour(0, 1, 0))))
+                XCTAssertFalse(manager.setAnimationGroupOfSelection(.none))
+                XCTAssertTrue(try selectionInk(f.vector) == before)
+                XCTAssertEqual(manager.history.undoStack.count, history)
+            } else {
+                XCTAssertNil(manager.selectionEditUnavailableReason, "an ordinary shown cel keeps its selection band")
+                XCTAssertNil(manager.animationGroupEditUnavailableReason, "an ordinary shown cel keeps group assignment")
+                XCTAssertEqual(manager.selectionStyle.color, colour(0, 0, 1))
+                XCTAssertEqual(manager.selectionAnimationGroupName, "Blue group")
+            }
+        }
+    }
+
+    @MainActor
+    func testRepeatedClearDeletesOnlyTheShownSourceMarksThroughHistory() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for sourceOnly in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
+            let manager = f.manager
+            let tightLoop = CGRect(x: 6, y: 33, width: 22, height: 6)
+            manager.selection = Selection(path: loop(tightLoop), bounds: tightLoop)
+            let original = try selectionInk(f.vector)
+            let before = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+            XCTAssertGreaterThan(try memoPixel(manager, at: CGPoint(x: 15, y: 36))[2], 100)
+            manager.clearSelectionPixels()
+            XCTAssertEqual(f.vector.elements.map(\.id), [f.red], "Clear removes the shown source blue, not the raw-time red")
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 15, y: 36))[3], 0, "the loop is visibly clear")
+            XCTAssertEqual(manager.currentFrame, 14)
+            XCTAssertEqual(manager.layers[0].cels.count, 1)
+            XCTAssertEqual(manager.history.undoStack.count, 1)
+            manager.undo()
+            XCTAssertEqual(try selectionInk(f.vector), original)
+            XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), before)
+            manager.redo()
+            XCTAssertEqual(f.vector.elements.map(\.id), [f.red])
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 15, y: 36))[3], 0)
+        }
+    }
+
+    @MainActor
+    func testRepeatedFillLandsOnTheShownSourceInsideTheCanvasLoopThroughHistory() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for sourceOnly in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
+            let manager = f.manager
+            let original = try selectionInk(f.vector)
+            let before = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+            manager.brushColor = Color(.sRGB, red: 0, green: 1, blue: 0, opacity: 1)
+            manager.toolProfiles.brush.opacity = 1
+            manager.fillSelection()
+            XCTAssertEqual(f.vector.elements.count, 3, "Fill appends to the displayed source cel")
+            XCTAssertEqual(Array(f.vector.elements.prefix(2).map(\.id)), [f.red, f.blue])
+            let fill = try XCTUnwrap(f.vector.elements.last?.fill?.cgPath)
+            XCTAssertEqual(fill.boundingBoxOfPath, CGRect(x: 38, y: 18, width: 22, height: 20),
+                           "the canvas loop is pulled back through source cel and document parent once")
+            XCTAssertGreaterThan(try memoPixel(manager, at: CGPoint(x: 15, y: 36))[1], 200, "the repeated canvas loop is green")
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 35, y: 36))[3], 0, "Fill leaves the loop exterior clear")
+            XCTAssertEqual(manager.currentFrame, 14)
+            XCTAssertEqual(manager.layers[0].cels.count, 1)
+            XCTAssertEqual(manager.history.undoStack.count, 1)
+            let after = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+            manager.undo()
+            XCTAssertEqual(try selectionInk(f.vector), original)
+            XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), before)
+            manager.redo()
+            XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), after)
+        }
+    }
+
+    @MainActor
+    func testRepeatedApplyBrushUsesShownSourceGroupTimingAndUndoesOneVisibleEdit() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for sourceOnly in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
+            let manager = f.manager
+            let tightLoop = CGRect(x: 6, y: 33, width: 22, height: 6)
+            manager.selection = Selection(path: loop(tightLoop), bounds: tightLoop)
+            let original = try selectionInk(f.vector)
+            let before = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+            let picked = Brush(id: UUID(), name: "Soft sparse", tip: .round, size: 8,
+                               dab: BrushDabSettings(spacing: 0.7, hardness: 0.05))
+            manager.selectPreset(picked, for: .brush)
+            XCTAssertNil(manager.applyBrushUnavailableReason, "the shown source permits Apply Brush")
+            manager.applyBrushToSelection()
+            XCTAssertEqual(f.vector.elements.first { $0.id == f.red }?.stroke?.brush, TestBrushes.hardRound)
+            XCTAssertEqual(f.vector.elements.first { $0.id == f.blue }?.stroke?.brush, picked,
+                           "Apply Brush rewrites the mark shown inside the loop")
+            let after = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+            XCTAssertNotEqual(after, before, "the new brush visibly changes the repeated source")
+            XCTAssertEqual(manager.currentFrame, 14)
+            XCTAssertEqual(manager.history.undoStack.count, 1)
+            manager.applyBrushToSelection()
+            XCTAssertEqual(manager.history.undoStack.count, 1, "applying the same brush is a no-op")
+            manager.undo()
+            XCTAssertEqual(try selectionInk(f.vector), original)
+            XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), before)
+            manager.redo()
+            XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), after)
+        }
+    }
+
+    @MainActor
+    func testRepeatedToNewLayerPreparesSourceCelAndGroupPoseAndPreservesThePicture() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for sourceOnly in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
+            let manager = f.manager
+            let tightLoop = CGRect(x: 6, y: 33, width: 22, height: 6)
+            manager.selection = Selection(path: loop(tightLoop), bounds: tightLoop)
+            let original = try selectionInk(f.vector)
+            let source = manager.layers[0].cels[0]
+            let before = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+            manager.moveSelectionToNewLayer()
+            XCTAssertEqual(manager.layers.count, 4, "To New Layer transfers from the shown source")
+            guard manager.layers.count == 4 else { continue }
+            XCTAssertTrue(manager.commitAllInteractiveState())
+            XCTAssertEqual(f.vector.elements.map(\.id), [f.red], "only the shown blue mark leaves the source")
+            XCTAssertEqual(manager.layers[1].cels[0].vector?.elements.map(\.id), [f.blue])
+            XCTAssertEqual(manager.layers[1].cels[0].startFrame, source.startFrame)
+            XCTAssertEqual(manager.layers[1].cels[0].frameCount, source.frameCount)
+            XCTAssertTrue(manager.layers[1].cels[0].transformTracks.isEmpty)
+            XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), before,
+                           "source-time cel/group pose is consumed once and document-time parent stays once")
+            XCTAssertEqual(manager.currentFrame, 14)
+            XCTAssertEqual(manager.history.undoStack.count, 1)
+            manager.undo()
+            XCTAssertEqual(manager.layers.count, 3)
+            XCTAssertEqual(try selectionInk(f.vector), original)
+            XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), before)
+            manager.redo()
+            XCTAssertEqual(manager.layers.count, 4)
+            XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), before)
+        }
+    }
+
+    func testRepeatedApplyBrushAndToNewLayerAdmitOrRefuseTheShownLinkedCel() throws {
+        for shownLinked in [false, true] {
+            for transfer in [false, true] {
+                let f = try repeatedSelectionFixture(sourceOnly: true)
+                let manager = f.manager
+                manager.addCel(layerIndex: 0, startFrame: 14, frameCount: 1)
+                manager.layers[0].cels[shownLinked ? 0 : 1].interpolation = InterpolationRecipe(mode: .reproject)
+                let original = try selectionInk(f.vector)
+                let raw = try selectionInk(XCTUnwrap(manager.layers[0].cels[1].vector))
+                manager.history.removeAll()
+                manager.selectPreset(Brush(id: UUID(), name: "Other", tip: .round, size: 8,
+                    dab: BrushDabSettings(spacing: 0.7, hardness: 0.05)), for: .brush)
+                if transfer {
+                    XCTAssertEqual(manager.moveVectorSelectionToNewLayer(), !shownLinked,
+                                   "To New Layer refuses exactly when the shown cel is linked")
+                } else {
+                    XCTAssertEqual(manager.applyBrushUnavailableReason?.contains("in-between") == true, shownLinked)
+                    manager.applyBrushToSelection()
+                }
+                XCTAssertEqual(try selectionInk(XCTUnwrap(manager.layers[0].cels[1].vector)), raw,
+                               "the raw-time cel is never rewritten")
+                XCTAssertEqual(manager.currentFrame, 14)
+                if shownLinked {
+                    XCTAssertEqual(try selectionInk(f.vector), original)
+                    XCTAssertEqual(manager.history.undoStack.count, 0, "refusal records no transfer or brush edit")
+                    XCTAssertEqual(manager.layers.count, 3)
+                } else {
+                    XCTAssertNotEqual(try selectionInk(f.vector), original, "the ordinary shown source is edited")
+                    XCTAssertEqual(manager.history.undoStack.count, 1)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func testRepeatedRasterMoveLandsOnTheShownSourceThroughItsAcceptedParentAndOneUndo() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for sourceOnly in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
+            let manager = f.manager
+            manager.layers[0].kind = .raster
+            manager.layers[0].cels[0].vector = nil
+            manager.layers[0].cels[0].transformTracks = [:]
+            CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 0,
+                CanvasFixture.solidImage(.blue, rect: CGRect(x: 10, y: 20, width: 10, height: 8)))
+            let sourceID = manager.layers[0].cels[0].id
+            if sourceOnly {
+                XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: 14, frameCount: 1))
+                CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 14,
+                    CanvasFixture.solidImage(.red, rect: CGRect(x: 40, y: 20, width: 10, height: 8)))
+            }
+            let sourceIDs = manager.layers[0].cels.map(\.id)
+            let before = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 13, y: 32)), [0, 0, 255, 255])
+            manager.history.removeAll()
+            manager.beginMove()
+            let piece = try XCTUnwrap(manager.floatingPiece)
+            XCTAssertEqual(piece.sourceCelID, sourceID)
+            XCTAssertEqual(piece.targetCelID, sourceID)
+            XCTAssertEqual(piece.landingPose?.affine?.ty ?? .nan, 8, accuracy: 1e-7,
+                           "the parent uses document14, not source2's minus-eight pose")
+            var moved = piece.transform
+            moved.position.x += 8
+            manager.updateFloatingPose(transform: moved, distortQuad: nil)
+            XCTAssertTrue(manager.commitFloatingPieceIfNeeded())
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 13, y: 32))[3], 0)
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 23, y: 32)), [0, 0, 255, 255])
+            XCTAssertEqual(manager.layers[0].cels.map(\.id), sourceIDs, "Move creates no hidden raw-time cel")
+            XCTAssertEqual(manager.currentFrame, 14)
+            XCTAssertEqual(manager.history.undoStack.count, 1)
+            let after = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+            manager.undo()
+            XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), before)
+            manager.redo()
+            XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), after)
+        }
+    }
+
+    @MainActor
+    func testRepeatedRasterFillClearAndToNewLayerUseTheShownSourceAndHistory() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for sourceOnly in [false, true] {
+            for action in ["fill", "clear", "transfer"] {
+                let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
+                let manager = f.manager
+                manager.layers[0].kind = .raster
+                manager.layers[0].cels[0].vector = nil
+                manager.layers[0].cels[0].transformTracks = [:]
+                CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 0,
+                    CanvasFixture.solidImage(.blue, rect: CGRect(x: 10, y: 20, width: 10, height: 8)))
+                let source = manager.layers[0].cels[0]
+                let original = try XCTUnwrap(PixelOps.rasterize(cel: source, canvasSize: CanvasFixture.canvasSize)?.cgImage)
+                let storedBefore = try XCTUnwrap(CanvasFixture.rgbaBytes(original))
+                let before = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+                XCTAssertGreaterThan(try memoPixel(manager, at: CGPoint(x: 15, y: 32))[2], 200)
+                if action == "fill" {
+                    manager.brushColor = Color(.sRGB, red: 0, green: 1, blue: 0, opacity: 1)
+                    manager.toolProfiles.brush.opacity = 1
+                    manager.fillSelection()
+                    XCTAssertGreaterThan(try memoPixel(manager, at: CGPoint(x: 15, y: 32))[1], 200)
+                } else if action == "clear" {
+                    manager.clearSelectionPixels()
+                    XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 15, y: 32))[3], 0)
+                } else {
+                    manager.moveSelectionToNewLayer()
+                    XCTAssertEqual(manager.layers.count, 4, "the source-only raster drawing can transfer")
+                    guard manager.layers.count == 4 else { continue }
+                    XCTAssertEqual(manager.layers[1].cels[0].startFrame, source.startFrame)
+                    XCTAssertEqual(manager.layers[1].cels[0].frameCount, source.frameCount)
+                    XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), before,
+                                   "the inherited document-time parent carries both layers once")
+                }
+                let changed = try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[0].cels[0], canvasSize: CanvasFixture.canvasSize)?.cgImage)
+                XCTAssertNotEqual(CanvasFixture.rgbaBytes(changed), storedBefore, "the shown source raster changes")
+                XCTAssertEqual(manager.layers[0].cels.map(\.id), [source.id])
+                XCTAssertEqual(manager.currentFrame, 14)
+                XCTAssertEqual(manager.history.undoStack.count, 1)
+                let after = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+                manager.undo()
+                XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), before)
+                manager.redo()
+                XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), after)
+            }
+        }
+    }
+
+    /// Independent integer crop of compositor bytes, not the UIKit crop used by Copy.
+    private func clipboardCropBytes(_ image: CGImage, rect: CGRect) throws -> [UInt8] {
+        let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(image))
+        return (Int(rect.minY)..<Int(rect.maxY)).flatMap { y in
+            let start = (y * image.width + Int(rect.minX)) * 4
+            return Array(bytes[start..<(start + Int(rect.width) * 4)])
+        }
+    }
+
+    @MainActor
+    func testRepeatedCopyWritesActualShownPixelsWithSourceChannelsAndContainerOnlyBacking() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        let pasteboard = UIPasteboard.general
+        let savedItems = pasteboard.items
+        defer { pasteboard.items = savedItems; Compositor.backend = previous }
+        for sourceOnly in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
+            let manager = f.manager
+            if sourceOnly {
+                manager.addCel(layerIndex: 0, startFrame: 14, frameCount: 1)
+                manager.layers[0].cels[1].vector?.addFill(canvasSpacePath: loop(CGRect(x: 0, y: 0, width: 64, height: 64)), color: colour(1, 0, 0))
+            }
+            CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 0,
+                CanvasFixture.solidImage(.red, rect: CGRect(x: 10, y: 10, width: 10, height: 8)))
+            let rect = CGRect(x: 6, y: 6, width: 50, height: 44)
+            manager.selection = Selection(path: loop(rect), bounds: rect)
+            manager.history.removeAll()
+            let original = try selectionInk(f.vector)
+            let picture = try memoPicture(manager)
+            let expected = try clipboardCropBytes(picture, rect: rect)
+            XCTAssertGreaterThan(try memoPixel(manager, at: CGPoint(x: 15, y: 22))[0], 200,
+                                 "PREMISE: backing follows only the document-time parent")
+            XCTAssertGreaterThan(try memoPixel(manager, at: CGPoint(x: 15, y: 36))[2], 100,
+                                 "PREMISE: native blue follows source cel/group plus document parent")
+            pasteboard.image = CanvasFixture.solidImage(.magenta,
+                rect: CGRect(origin: .zero, size: rect.size), size: rect.size)
+            XCTAssertTrue(manager.copySelectionToPasteboard())
+            let copied = try XCTUnwrap(pasteboard.image?.cgImage, "Copy must publish an actual clipboard image")
+            XCTAssertEqual(copied.width, 50)
+            XCTAssertEqual(copied.height, 44)
+            XCTAssertEqual(CanvasFixture.rgbaBytes(copied), expected,
+                           "actual clipboard pixels match the shown source including independently placed backing and ink")
+            XCTAssertEqual(try selectionInk(f.vector), original, "Copy does not rewrite source ink")
+            XCTAssertEqual(manager.history.undoStack.count, 0)
+            XCTAssertEqual(manager.currentFrame, 14)
+        }
+    }
+
+    @MainActor
+    func testRepeatedCutCopiesAndClearsTheSameShownSourceAsOneUndoStep() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        let pasteboard = UIPasteboard.general
+        let savedItems = pasteboard.items
+        defer { pasteboard.items = savedItems; Compositor.backend = previous }
+        for sourceOnly in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
+            let manager = f.manager
+            if sourceOnly {
+                manager.addCel(layerIndex: 0, startFrame: 14, frameCount: 1)
+                manager.layers[0].cels[1].vector?.addFill(canvasSpacePath: loop(CGRect(x: 0, y: 0, width: 64, height: 64)), color: colour(1, 0, 0))
+            }
+            let sourceID = manager.layers[0].cels[0].id
+            let original = try selectionInk(f.vector)
+            let rawBefore = sourceOnly ? try selectionInk(XCTUnwrap(manager.layers[0].cels[1].vector)) : nil
+            let rect = try XCTUnwrap(manager.selection?.bounds)
+            let before = try memoPicture(manager)
+            let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(before))
+            let expected = try clipboardCropBytes(before, rect: rect)
+            manager.history.removeAll()
+            pasteboard.image = CanvasFixture.solidImage(.magenta,
+                rect: CGRect(origin: .zero, size: rect.size), size: rect.size)
+            XCTAssertTrue(manager.cutSelectionToPasteboard())
+            let copied = try XCTUnwrap(pasteboard.image?.cgImage)
+            XCTAssertEqual(CanvasFixture.rgbaBytes(copied), expected,
+                           "Cut puts the shown source pixels on the actual clipboard before clearing them")
+            XCTAssertEqual(f.vector.elements.map(\.id), [f.red], "Cut clears only the shown blue source mark")
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 15, y: 36))[3], 0, "the copied blue mark is visibly gone")
+            XCTAssertEqual(manager.layers[0].cels[0].id, sourceID)
+            if let rawBefore {
+                XCTAssertEqual(try selectionInk(XCTUnwrap(manager.layers[0].cels[1].vector)), rawBefore,
+                               "Cut leaves the raw-time other drawing unchanged")
+            }
+            XCTAssertEqual(manager.history.undoStack.count, 1, "copy plus clear is one artwork Undo")
+            XCTAssertEqual(manager.currentFrame, 14)
+            manager.undo()
+            XCTAssertEqual(try selectionInk(f.vector), original)
+            XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), pixels)
+            manager.redo()
+            XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 15, y: 36))[3], 0)
+            XCTAssertEqual(CanvasFixture.rgbaBytes(try XCTUnwrap(pasteboard.image?.cgImage)), expected,
+                           "Undo and Redo leave the successful clipboard result intact")
+        }
+    }
+
+    @MainActor
+    func testFailedRequiredCopyPreservesClipboardSourceAndHistoryForCopyAndCut() throws {
+        let pasteboard = UIPasteboard.general
+        let savedItems = pasteboard.items
+        defer { pasteboard.items = savedItems }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("repeat-clipboard-refusal-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let owner = RasterResidency(budgetBytes: 64 * 64 * 4 * 8, hasHeadroom: { _ in true })
+        let png = root.appendingPathComponent("owned-fixture.png")
+        try XCTUnwrap(CanvasFixture.solidImage(.red, rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)).pngData()).write(to: png)
+        let backing = try ProjectStore.RasterBacking.protect(png, using: owner).get()
+        let unreadable = RasterSource.backed(by: backing, using: owner)
+        // The existing protected-backing failure fixture: no project or original artwork is touched.
+        try FileManager.default.removeItem(at: backing.url)
+        for cutting in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: true)
+            let manager = f.manager
+            manager.layers[0].cels[0].bakedImage = unreadable
+            let original = try selectionInk(f.vector)
+            pasteboard.image = CanvasFixture.solidImage(.magenta, rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize))
+            let sentinel = try XCTUnwrap(CanvasFixture.rgbaBytes(XCTUnwrap(pasteboard.image?.cgImage)))
+            XCTAssertNil(PixelOps.rasterize(cel: manager.layers[0].cels[0], canvasSize: CanvasFixture.canvasSize),
+                         "PREMISE: required unreadable backing refuses the real flattened picture")
+            let copied = cutting ? manager.cutSelectionToPasteboard() : manager.copySelectionToPasteboard()
+            XCTAssertFalse(copied, "required render refusal is a failed Copy, so Cut cannot clear")
+            XCTAssertEqual(try selectionInk(f.vector), original, "failed Copy never deletes source ink")
+            XCTAssertTrue(manager.layers[0].cels[0].bakedImage === unreadable)
+            XCTAssertEqual(CanvasFixture.rgbaBytes(try XCTUnwrap(pasteboard.image?.cgImage)), sentinel,
+                           "failed Copy leaves the actual prior clipboard image intact")
+            XCTAssertEqual(manager.history.undoStack.count, 0, "failed Copy or Cut records no artwork step")
+            XCTAssertEqual(manager.currentFrame, 14)
+        }
+    }
+
+    @MainActor
+    func testRepeatClipboardSettlesTheEarlierSelectionEditBeforeCopyOrCut() throws {
+        let pasteboard = UIPasteboard.general
+        let savedItems = pasteboard.items
+        defer { pasteboard.items = savedItems }
+        for cutting in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: true)
+            let manager = f.manager
+            XCTAssertTrue(manager.beginSelectionEdit(.color))
+            manager.previewSelectionEdit(.color(colour(0, 1, 0)))
+            XCTAssertEqual(f.vector.elements.first { $0.id == f.blue }?.stroke?.color, colour(0, 0, 1),
+                           "PREMISE: the green edit is still held, not committed to source ink")
+            XCTAssertEqual(manager.history.undoStack.count, 0)
+            XCTAssertTrue(cutting ? manager.cutSelectionToPasteboard() : manager.copySelectionToPasteboard())
+            let copied = try XCTUnwrap(pasteboard.image?.cgImage)
+            let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(copied))
+            let offset = (10 * copied.width + 9) * 4 // source(15,36) minus crop origin(6,26)
+            XCTAssertGreaterThan(bytes[offset + 1], 100, "the actual clipboard receives the earlier edit's settled half-opacity green")
+            XCTAssertEqual(bytes[offset + 2], 0)
+            XCTAssertNil(manager.selectionEdit)
+            XCTAssertEqual(manager.history.undoStack.count, cutting ? 2 : 1,
+                           "the prior colour gesture keeps its step, and Cut adds exactly one")
+            if cutting {
+                XCTAssertEqual(f.vector.elements.map(\.id), [f.red])
+                manager.undo()
+            }
+            XCTAssertEqual(f.vector.elements.first { $0.id == f.blue }?.stroke?.color, colour(0, 1, 0))
+            manager.undo()
+            XCTAssertEqual(f.vector.elements.first { $0.id == f.blue }?.stroke?.color, colour(0, 0, 1))
+            XCTAssertEqual(manager.currentFrame, 14)
+        }
     }
 
     // MARK: - The readout

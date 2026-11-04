@@ -195,7 +195,7 @@ struct VectorFloatPart {
     let liftedInside: [UUID: VectorElement]
 
     /// **The pose each lifted element is *displayed* through at the frame it was lifted on** —
-    /// KEYFRAMES.md stage 5's transform channels resolved at `currentFrame`, keyed by the ids the
+    /// KEYFRAMES.md stage 5's transform channels resolved at the accepted source frame, keyed by the ids the
     /// split produced. Empty for every cel that shows its drawing where it stores it, which is every
     /// frame of a document nobody has keyframed and every frame at or after a key holding the rest
     /// pose.
@@ -210,9 +210,9 @@ struct VectorFloatPart {
     /// simply refused a posed frame, in silence — the owner's *"try to select it in an inbetween, it
     /// does not let you"*.
     ///
-    /// **Frozen at the lift, like `liftedInside` and `baseTransform`.** The playhead cannot move while
-    /// a float is up without settling it (`handleActiveContextChanged`), and re-reading the pose per
-    /// nudge would make a scrub silently re-interpret gestures already on the undo stack.
+    /// **Frozen for this accepted context, like `liftedInside` and `baseTransform`.** A same-cel
+    /// scrub lands authored movement and prepares these same IDs at the incoming shown time, keeping
+    /// the box up. A nudge never re-reads time or re-interprets an earlier gesture.
     let poses: [UUID: PoseMap]
 
     /// `vector.transform` at the moment of the lift. Every delta this part's geometry is written
@@ -235,12 +235,12 @@ struct VectorFloatPart {
     /// `VectorCanvas.mayDiverge`. False for ordinary artwork.
     let mayDiverge: Bool
 
-    /// **Whether this cel is the one its layer shows under the playhead** — the ink the artist can see
-    /// the box around. True for every part of every lift but a folder's All Frames Move (TODO (135)),
-    /// which carries the layer's other cels too: those take every nudge's map and nothing else. They
-    /// are not suppressed, drawn in the float's preview or measured into the box, because none of them
-    /// is on the glass — the preview stays the current frame's picture, and the box hugs it.
-    let isShown: Bool
+    /// The accepted shown source frame and already-resolved document-time parent. Nil only for a
+    /// folder's nonshown All Frames cels: those take the nearest-frame nudge map but are not measured,
+    /// suppressed or drawn in the preview. Stable layer/cel IDs, never this value's index, identify
+    /// a part when it later lands. Presence is the sole meaning of isShown.
+    let displayed: CanvasManager.DisplayedCel?
+    var isShown: Bool { displayed != nil }
 }
 
 /// **A folder's Move, as the float remembers it** — which folder was lifted, and under which scope.
@@ -261,9 +261,9 @@ struct VectorFloat {
     /// a folder's All Frames Move the cels on other frames as well** (TODO (135)), each a part with
     /// `isShown` false. The parts on the glass come first, so `parts[0]` is always one. Never empty.
     /// `parts[0]` is the layer the box was measured in: its `baseTransform` is the one the box's
-    /// placement is expressed against, and `handleActiveContextChanged` reads it as the cel the float
-    /// is *about* — a folder Move settles the moment the artist walks to any other layer or frame,
-    /// which is what a whole-piece drag across several layers should do.
+    /// placement is expressed against. `handleActiveContextChanged` uses its stable IDs for the
+    /// terminal target guard; an ordinary held-cel Move prepares the same IDs when its shown time
+    /// changes, while a folder retains its separate active-layer guard.
     var parts: [VectorFloatPart]
 
     /// The centre of the lifted content's local bounding box — the fixed point the box's transform is
@@ -434,6 +434,7 @@ extension CanvasManager {
     func beginVectorLassoMove() -> Bool {
         guard commitAllInteractiveState() else { return false }
         guard let selection, let target = activeVectorMoveTarget(),
+              let at = celIndices(forCel: target.celID, inLayer: target.layerID),
               selection.acts(onLayer: target.layerID, cel: target.celID) else { return false }
         let vector = target.vector
 
@@ -465,8 +466,8 @@ extension CanvasManager {
         // halves, so the dictionary the membership test was built from cannot answer for the pieces
         // the float is carrying. It can be rebuilt because membership is a *field*: `piece(of:)`
         // copies the parent whole and `splitForLassoMove` now carries a fill's group onto both halves.
-        let poses = celPoseMaps(split.elements, layerID: target.layerID, celID: target.celID,
-                                atFrame: currentFrame)
+        let poses = Self.poseMaps(split.elements, of: layers[at.layer].cels[at.cel],
+                                  showing: target.displayed.frame, inheriting: target.displayed.inheritedPose)
             .filter { split.insideIDs.contains($0.key) }
 
         // **The box is measured on the ink where it is *shown*.** `MoveBoxInk` of the stored pieces
@@ -492,7 +493,7 @@ extension CanvasManager {
                                    baseTransform: vector.transform,
                                    elementsBeforeLift: elementsBeforeLift,
                                    sourceVersion: vector.contentVersion, mayDiverge: split.mayDiverge,
-                                   isShown: true)
+                                   displayed: target.displayed)
         vectorFloat = Self.float(parts: [part], ink: ink, bounds: bounds,
                                  boxTransform: vector.layerTransform(pivot: pivot),
                                  selectionBeforeLift: selection)
@@ -573,9 +574,10 @@ extension CanvasManager {
               let at = celIndices(forCel: target.celID, inLayer: target.layerID) else { return false }
         let cel = layers[at.layer].cels[at.cel]
         guard let copies = Self.bakedForTransfer(selected,
-            through: Self.poseMappings(cel.transformTracks, atCelLocalFrame: currentFrame - cel.startFrame))
+            through: Self.poseMappings(cel.transformTracks, atCelLocalFrame: target.displayed.frame - cel.startFrame))
         else { return false }
         return commitVectorSelectionTransfer(copies, fromLayer: target.layerID, cel: target.celID,
+                                              displayed: target.displayed,
                                               sourceReplacement: nil, label: .duplicatePiece)
     }
 
@@ -587,8 +589,9 @@ extension CanvasManager {
     func moveVectorSelectionToNewLayer() -> Bool {
         guard structureUndoDepth == 0, gestureSnapshot == nil else { return false }
         guard commitAllInteractiveState() else { return false }
-        guard let selection, let target = activeVectorMoveTarget(),
-              selection.acts(onLayer: target.layerID, cel: target.celID) else { return false }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        guard let selection, let shown = displayedCel(actedOnBy: selection, in: walk),
+              let target = vectorMoveTarget(displayed: shown) else { return false }
         let source = target.vector
         let loops = Self.lassoLoops(of: selection, in: source, posedBy: target.poses)
         guard let split = source.splitForLassoMove(insideLoops: loops, membership: selectionMembership) else {
@@ -601,10 +604,11 @@ extension CanvasManager {
               let at = celIndices(forCel: target.celID, inLayer: target.layerID) else { return false }
         let cel = layers[at.layer].cels[at.cel]
         guard let moved = Self.bakedForTransfer(selected,
-            through: Self.poseMappings(cel.transformTracks, atCelLocalFrame: currentFrame - cel.startFrame))
+            through: Self.poseMappings(cel.transformTracks, atCelLocalFrame: shown.frame - cel.startFrame))
         else { return false }
         let remaining = split.elements.filter { !split.insideIDs.contains($0.id) }
         return commitVectorSelectionTransfer(moved, fromLayer: target.layerID, cel: target.celID,
+                                              displayed: shown,
                                               sourceReplacement: remaining, label: .moveToNewLayer)
     }
 
@@ -612,7 +616,7 @@ extension CanvasManager {
     /// the same reversal. A shallow structure snapshot cannot restore an in-place source edit.
     /// Only these actual lists are priced; no document-wide payload walk or pending transaction state.
     private func commitVectorSelectionTransfer(_ prepared: [VectorElement], fromLayer sourceLayerID: UUID,
-                                                cel sourceCelID: UUID,
+                                                cel sourceCelID: UUID, displayed shown: DisplayedCel,
                                                 sourceReplacement: [VectorElement]?,
                                                 label: HistoryActionLabel) -> Bool {
         guard let at = celIndices(forCel: sourceCelID, inLayer: sourceLayerID),
@@ -627,11 +631,12 @@ extension CanvasManager {
                           isVisible: true, kind: .vector,
                           parentFolderID: layers[at.layer].parentFolderID, cels: [cel])
         let ids = Set(prepared.map(\.id))
-        let poses = Self.poseMaps(prepared, through: [],
-                                 inheriting: containerPose(ofLayerAt: at.layer, atFrame: currentFrame))
+        let poses = Self.poseMaps(prepared, through: [], inheriting: shown.inheritedPose)
+        let displayed = DisplayedCel(index: 0, frame: shown.frame, inheritedPose: shown.inheritedPose)
         // The same pure lift/measurement the ordinary Move uses, before any transfer is published.
         guard let lift = canvas.lift(elementIDs: ids),
-              let float = preparedVectorFloat(target: (layer.id, cel.id, canvas, poses), lift: lift)
+              let float = preparedVectorFloat(target: (layer.id, cel.id, canvas, poses, displayed), lift: lift,
+                                               elementsBeforeLift: canvas.elements, selectionBeforeLift: nil)
         else { return false }
         let cost = UndoBudget.addingCost(4096, VectorUndoCost.bytes(
             fromLists: [elementsBefore, []], toLists: [sourceReplacement ?? elementsBefore, prepared]))
@@ -926,16 +931,18 @@ extension CanvasManager {
         guard commitAllInteractiveState() else { return false }
         guard folders.contains(where: { $0.id == folderID }) else { return false }
         let scope = folderMoveScope
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
         var shown: [VectorFloatPart] = []
         var elsewhere: [VectorFloatPart] = []
         var posedByShownPart: [[VectorElement]] = []
         for layerIndex in descendantLayerIndices(ofFolder: folderID) where layers[layerIndex].kind == .vector {
             let layerID = layers[layerIndex].id
-            guard inBetweenCelID(inLayer: layerID) == nil else {
+            let displayed = displayedCel(inLayer: layerIndex, atFrame: currentFrame, in: walk)
+            let shownCelIndex = displayed?.index
+            guard shownCelIndex.map({ layers[layerIndex].cels[$0].interpolation == nil }) ?? true else {
                 raise(.cannotMoveDerivedFrame)
                 return false
             }
-            let shownCelIndex = activeCelIndex(inLayer: layerIndex, atFrame: currentFrame)
             let celIndices: [Int]
             switch scope {
             case .thisCel: celIndices = shownCelIndex.map { [$0] } ?? []
@@ -947,8 +954,11 @@ extension CanvasManager {
                       let lift = vector.liftWholeCel() else { continue }
                 guard !refusesToDamageAnAnimation(lift.elements, movedIDs: lift.insideIDs) else { return false }
                 let carried = lift.elements.filter { lift.insideIDs.contains($0.id) }
-                let poses = celPoseMaps(vector.elements, layerID: layerID, celID: cel.id,
-                                        atFrame: Self.frame(of: cel, nearest: currentFrame))
+                let carriedDisplay = celIndex == shownCelIndex ? displayed : nil
+                let poses = (carriedDisplay.map {
+                    Self.poseMaps(vector.elements, of: cel, showing: $0.frame, inheriting: $0.inheritedPose)
+                } ?? celPoseMaps(vector.elements, layerID: layerID, celID: cel.id,
+                                 atFrame: Self.frame(of: cel, nearest: currentFrame)))
                     .filter { lift.insideIDs.contains($0.key) }
                 let part = VectorFloatPart(layerID: layerID, celID: cel.id,
                                            insideIDs: lift.insideIDs,
@@ -956,7 +966,7 @@ extension CanvasManager {
                                            poses: poses, baseTransform: vector.transform,
                                            elementsBeforeLift: vector.elements,
                                            sourceVersion: vector.contentVersion, mayDiverge: lift.mayDiverge,
-                                           isShown: celIndex == shownCelIndex)
+                                           displayed: carriedDisplay)
                 guard part.isShown else {
                     elsewhere.append(part)
                     continue
@@ -1082,11 +1092,11 @@ extension CanvasManager {
     /// The ordinary single-target lift as a value, measured on the shown ink before suppression or
     /// publication. A selection transfer can therefore prepare its complete Move box before editing.
     private func preparedVectorFloat(target: (layerID: UUID, celID: UUID, vector: VectorCanvas,
-                                           poses: [UUID: PoseMap]),
-                                  lift: (elements: [VectorElement], insideIDs: Set<UUID>,
-                                         mayDiverge: Bool)) -> VectorFloat? {
+                                           poses: [UUID: PoseMap], displayed: DisplayedCel),
+                                  lift: (elements: [VectorElement], insideIDs: Set<UUID>, mayDiverge: Bool),
+                                  elementsBeforeLift: [VectorElement],
+                                  selectionBeforeLift: Selection?) -> VectorFloat? {
         let vector = target.vector
-        let elementsBeforeLift = vector.elements
         // **Filtered by `insideIDs`, which is an identity on the whole-cel arm and is not on the
         // channel one.** `liftWholeCel` returns the whole display list with every id inside it, so
         // this line read `lift.elements` until the channel lift arrived; a group lift returns the
@@ -1109,18 +1119,54 @@ extension CanvasManager {
                                    baseTransform: vector.transform,
                                    elementsBeforeLift: elementsBeforeLift,
                                    sourceVersion: vector.contentVersion, mayDiverge: lift.mayDiverge,
-                                   isShown: true)
+                                   displayed: target.displayed)
         return Self.float(parts: [part], ink: ink, bounds: bounds,
-                          boxTransform: vector.layerTransform(pivot: pivot), selectionBeforeLift: nil)
+                          boxTransform: vector.layerTransform(pivot: pivot), selectionBeforeLift: selectionBeforeLift)
     }
 
     private func beginVectorFloat(target: (layerID: UUID, celID: UUID, vector: VectorCanvas,
-                                           poses: [UUID: PoseMap]),
+                                           poses: [UUID: PoseMap], displayed: DisplayedCel),
                                   lift: (elements: [VectorElement], insideIDs: Set<UUID>,
                                          mayDiverge: Bool)) -> Bool {
-        guard let float = preparedVectorFloat(target: target, lift: lift) else { return false }
+        guard let float = preparedVectorFloat(target: target, lift: lift,
+                                               elementsBeforeLift: target.vector.elements,
+                                               selectionBeforeLift: nil) else { return false }
         publishVectorFloat(float, in: target.vector)
         return true
+    }
+
+    /// A held drawing keeps its box through a scrub. Finish the accepted edit, then measure these
+    /// same IDs at the incoming source time; re-running lasso membership would select different ink.
+    func retargetVectorFloat(to shown: DisplayedCel) {
+        guard let float = vectorFloat, float.folder == nil, float.parts.count == 1 else { return }
+        let part = float.parts[0]
+        guard let vector = vectorCanvas(of: part), vector.contentVersion == part.sourceVersion
+        else { return cancelVectorFloat() }
+        let heldSelection = selection
+        if float.nudges > 0 { commitVectorFloatIfNeeded() }
+        guard let at = celIndices(forCel: part.celID, inLayer: part.layerID),
+              at.layer == currentLayerIndex else {
+            if float.nudges == 0 { cancelVectorFloat() }
+            return
+        }
+        // Array positions may have changed since lift. Only the stable IDs identify its source.
+        let displayed = DisplayedCel(index: at.cel, frame: shown.frame, inheritedPose: shown.inheritedPose)
+        guard let target = vectorMoveTarget(displayed: displayed),
+              part.insideIDs.isSubset(of: Set(target.vector.elements.map(\.id))),
+              let lift = target.vector.lift(elementIDs: part.insideIDs),
+              var prepared = preparedVectorFloat(target: target, lift: lift,
+                  elementsBeforeLift: float.nudges == 0 ? part.elementsBeforeLift : target.vector.elements,
+                  selectionBeforeLift: float.nudges == 0 ? float.selectionBeforeLift : heldSelection)
+        else {
+            if float.nudges == 0 { cancelVectorFloat() }
+            return
+        }
+        prepared.frame.boxAngle = float.frame.boxAngle
+        // A ready replacement must retire the old bitmap even when no geometry was authored.
+        // Keep its exact shown picture alive until the view admits the new hole and isolated ink.
+        if float.nudges == 0 { onLivePictureWillLand?(.vectorFloat(float)) }
+        publishVectorFloat(prepared, in: target.vector)
+        selection = heldSelection
     }
 
     /// Suppression is the lift's invalidation, so the optimistic content version is taken after it.
@@ -1617,21 +1663,16 @@ extension CanvasManager {
             vector.suppressedElementIDs = []
             celContentChangedOutsideStroke(layerID: part.layerID, celID: part.celID)
         }
-        // **KEYFRAMES.md §2.5's write-at-commit, and the whole of the transform channel's authoring
-        // path.** *"As soon as it starts moving, it should save a state of the unmoved item at
-        // keyframe A, then when the move 'bakes' — as in the box disappears — keyframe B receives the
-        // second position."* This is where the box disappears.
-        //
-        // **Here rather than in `applyToVectorFloat`, which is the ruling and not a convenience**: a
-        // nudge writes no key. The gesture is one artist decision however many `.changed` ticks it
-        // took, and keying per tick would put a handle on the graph editor for every sample of a drag.
+        // KEYFRAMES.md §2.5's write-at-commit: end this accepted edit before taking down its box or
+        // preparing the same selected IDs at a different shown time. A nudge writes no key; the
+        // existing baseline/seed/key writer decides what this completed edit owes, once.
         //
         // Everything about routing lives in `commitTransformPose`; a document with no keyframes in it
         // takes the `.storedValue` arm, which does nothing at all, so the ordinary Move is byte-for-byte
         // what it was.
         commitPoseFromFloat(float)
         // Keep the displayed latch alive until the view has retained its already-shown picture.
-        // This callback is specific to successful commit; cancel and history undo never enter here.
+        // Cancel and history undo never enter this successful landing seam.
         onLivePictureWillLand?(.vectorFloat(float))
         vectorFloat = nil
         selection = nil
@@ -1666,6 +1707,7 @@ extension CanvasManager {
                              y: float.pivot.y - float.contentSize.height / 2,
                              width: float.contentSize.width, height: float.contentSize.height)
         for part in float.parts {
+            guard let shown = part.displayed else { continue }
             let factors = Self.localDeltaFactors(for: part, in: float)
             let localDelta = factors.prefix.concatenating(float.mirror)
                 .concatenating(placement.concatenating(factors.base.inverted()))
@@ -1683,7 +1725,7 @@ extension CanvasManager {
             let existing = existingAnimationChannel(forMovedElementIDs: part.insideIDs,
                                                     layerID: part.layerID, celID: part.celID)
             guard transformWrite(layerID: part.layerID, celID: part.celID, channel: existing,
-                                 atFrame: currentFrame) != .storedValue else { continue }
+                                 atFrame: shown.frame) != .storedValue else { continue }
             guard let channel = existing ?? mintAnimationChannel(forMovedElementIDs: part.insideIDs,
                                                                 layerID: part.layerID,
                                                                 celID: part.celID) else { continue }
@@ -1705,9 +1747,9 @@ extension CanvasManager {
             // are only reached when the channel has no curve — is `O·D⁻¹·O⁻¹`, the pose that puts the
             // piece back.
             let outer = outerPoseMap(layerID: part.layerID, celID: part.celID, channel: channel,
-                                     atFrame: currentFrame)
+                                     atFrame: shown.frame, inheriting: shown.inheritedPose)
             let current = resolvedPoseMap(layerID: part.layerID, celID: part.celID, channel: channel,
-                                          atFrame: currentFrame)
+                                          atFrame: shown.frame)
             guard let outerInverse = outer.inverse else { continue }
             let keyed = current.concatenating(outer).concatenating(map).concatenating(outerInverse)
             // The box is measured on the ink as shown; the channel reads its components in the space
@@ -1718,7 +1760,7 @@ extension CanvasManager {
                                     width: restBox.width, height: restBox.height)
             commitTransformPose(layerID: part.layerID, celID: part.celID, channel: channel,
                                 restBox: channelBox, map: keyed, restElements: part.elementsBeforeLift,
-                                movedIDs: part.insideIDs, atFrame: currentFrame)
+                                movedIDs: part.insideIDs, atFrame: shown.frame)
         }
     }
 
@@ -1826,19 +1868,27 @@ extension CanvasManager {
     /// **The maps are taken against the pre-split display list**, which is what the lasso's membership
     /// test needs. A lift re-takes them against the post-split one, because a cut mints fresh ids.
     private func activeVectorMoveTarget() -> (layerID: UUID, celID: UUID, vector: VectorCanvas,
-                                              poses: [UUID: PoseMap])? {
+                                              poses: [UUID: PoseMap], displayed: DisplayedCel)? {
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        guard let shown = displayedCel(inLayer: currentLayerIndex, atFrame: currentFrame, in: walk) else { return nil }
+        return vectorMoveTarget(displayed: shown)
+    }
+
+    /// One displayed source and one write-admission rule for every ordinary vector Move/transfer.
+    private func vectorMoveTarget(displayed shown: DisplayedCel)
+        -> (layerID: UUID, celID: UUID, vector: VectorCanvas, poses: [UUID: PoseMap], displayed: DisplayedCel)? {
+        let celIndex = shown.index
         guard layers.indices.contains(currentLayerIndex),
-              layers[currentLayerIndex].kind == .vector else { return nil }
-        guard !activeCelIsInBetween else {
+              layers[currentLayerIndex].kind == .vector,
+              layers[currentLayerIndex].cels.indices.contains(celIndex) else { return nil }
+        let cel = layers[currentLayerIndex].cels[celIndex]
+        guard cel.interpolation == nil else {
             raise(.cannotMoveDerivedFrame)
             return nil
         }
-        guard let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
-              let vector = layers[currentLayerIndex].cels[celIndex].vector else { return nil }
-        let layerID = layers[currentLayerIndex].id
-        let celID = layers[currentLayerIndex].cels[celIndex].id
-        return (layerID, celID, vector,
-                celPoseMaps(vector.elements, layerID: layerID, celID: celID, atFrame: currentFrame))
+        guard let vector = cel.vector else { return nil }
+        return (layers[currentLayerIndex].id, cel.id, vector,
+                Self.poseMaps(vector.elements, of: cel, showing: shown.frame, inheriting: shown.inheritedPose), shown)
     }
 
     /// The canvas a part was taken from, resolved by id every time — the layer it lives on can have

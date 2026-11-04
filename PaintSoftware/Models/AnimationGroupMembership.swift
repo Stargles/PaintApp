@@ -96,6 +96,9 @@ struct SelectionAnimationGroupMemo: Equatable {
     var celID: UUID
     var frame: Int
     var vectorVersion: Int
+    /// The resolved channels and inherited pose used by the loop's pull-back, not stored ink.
+    var poseChannels: [String: [CGFloat]]
+    var inheritedPose: [CGFloat]?
     var membership: LassoMembership
     var registered: Int
     var answer: CanvasManager.SelectionAnimationGroup
@@ -137,12 +140,20 @@ extension CanvasManager {
     /// membership is a field on a stored element, so it wants a vector cel that is not derived.
     var animationGroupEditUnavailableReason: String? {
         guard layers.indices.contains(currentLayerIndex) else { return nil }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        return animationGroupEditUnavailableReason(at: displayedCel(inLayer: currentLayerIndex,
+                                                                   atFrame: currentFrame, in: walk)?.index)
+    }
+
+    private func animationGroupEditUnavailableReason(at celIndex: Int?) -> String? {
         guard layers[currentLayerIndex].kind == .vector,
-              let celIndex = activeCelIndex(inLayer: currentLayerIndex, atFrame: currentFrame),
+              let celIndex,
               layers[currentLayerIndex].cels[celIndex].vector != nil else {
             return "Animation groups hold drawn marks, so this works on vector layers only."
         }
-        if activeCelIsInBetween { return "An animation group can't be changed on an in-between frame." }
+        if layers[currentLayerIndex].cels[celIndex].interpolation != nil {
+            return "An animation group can't be changed on an in-between frame."
+        }
         return nil
     }
 
@@ -169,13 +180,14 @@ extension CanvasManager {
     /// whole), so the parent's group *is* the answer for the piece that will be edited — and a readout
     /// that cut geometry to draw a label would be a side effect in a getter.
     var selectionAnimationGroup: SelectionAnimationGroup {
-        guard animationGroupEditUnavailableReason == nil,
-              let selection,
-              let celIndex = activeCelIndex(actedOnBy: selection),
-              let vector = layers[currentLayerIndex].cels[celIndex].vector
+        guard layers.indices.contains(currentLayerIndex), let selection else { return .unavailable }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        guard let shown = displayedCel(actedOnBy: selection, in: walk),
+              animationGroupEditUnavailableReason(at: shown.index) == nil,
+              let vector = layers[currentLayerIndex].cels[shown.index].vector
         else { return .unavailable }
         let layerID = layers[currentLayerIndex].id
-        let celID = layers[currentLayerIndex].cels[celIndex].id
+        let celID = layers[currentLayerIndex].cels[shown.index].id
 
         let registered = Set(animationGroups.map(\.id))
         guard !registered.isEmpty else { return .untagged }
@@ -183,16 +195,21 @@ extension CanvasManager {
         guard elements.contains(where: { $0.animationGroupID.map(registered.contains) ?? false })
         else { return .untagged }
 
+        let cel = layers[currentLayerIndex].cels[shown.index]
+        let mappings = Self.poseMappings(cel.transformTracks, atCelLocalFrame: shown.frame - cel.startFrame)
+        let inherited = shown.inheritedPose
         let key = SelectionAnimationGroupMemo(
             pathObject: ObjectIdentifier(selection.path), bounds: selection.bounds,
             layerID: layerID, celID: celID, frame: currentFrame,
-            vectorVersion: vector.version, membership: selectionMembership,
+            vectorVersion: vector.version,
+            poseChannels: Dictionary(uniqueKeysWithValues: mappings.map { ($0.0.id, $0.1.encoded) }),
+            inheritedPose: inherited?.encoded, membership: selectionMembership,
             registered: registered.count, answer: .unavailable)
         if let memo = selectionAnimationGroupMemo, memo.matches(key) { return memo.answer }
 
         let loops = CanvasManager.lassoLoops(
             of: selection, in: vector,
-            posedBy: celPoseMaps(elements, layerID: layerID, celID: celID, atFrame: currentFrame))
+            posedBy: Self.poseMaps(elements, through: mappings, inheriting: inherited))
         let caught = vector.elementIDs(insideLoops: loops, membership: selectionMembership)
         var tags: Set<UUID> = []
         var untagged = false
@@ -236,10 +253,12 @@ extension CanvasManager {
         // geometry of a cel that is currently showing a hole and the float would bake its own copy of
         // that geometry over the top.
         guard commitAllInteractiveState() else { return false }
-        guard animationGroupEditUnavailableReason == nil,
-              let selection = requested,
-              let celIndex = activeCelIndex(actedOnBy: selection),
-              let vector = layers[currentLayerIndex].cels[celIndex].vector else { return false }
+        guard layers.indices.contains(currentLayerIndex), let selection = requested else { return false }
+        let walk = renderTreeAndPoses(atFrame: currentFrame)
+        guard let shown = displayedCel(actedOnBy: selection, in: walk),
+              animationGroupEditUnavailableReason(at: shown.index) == nil,
+              let vector = layers[currentLayerIndex].cels[shown.index].vector else { return false }
+        let celIndex = shown.index
         let layerID = layers[currentLayerIndex].id
         let celID = layers[currentLayerIndex].cels[celIndex].id
 
@@ -249,7 +268,8 @@ extension CanvasManager {
         let elementsBefore = vector.elements
         let loops = CanvasManager.lassoLoops(
             of: selection, in: vector,
-            posedBy: celPoseMaps(elementsBefore, layerID: layerID, celID: celID, atFrame: currentFrame))
+            posedBy: Self.poseMaps(elementsBefore, of: layers[currentLayerIndex].cels[celIndex],
+                                   showing: shown.frame, inheriting: shown.inheritedPose))
 
         // **The one branch the three rules cost**, `recolorSelection`'s verbatim: membership belongs to
         // the selection with no exception (LASSO_MOVE.md §5.26), and this is a fifth consumer of it
@@ -293,7 +313,7 @@ extension CanvasManager {
         // group with no track on this cel, and for a track resting at this frame — all three of which
         // mean "there is nothing to compensate for".
         let into = destination.map {
-            resolvedPoseMap(layerID: layerID, celID: celID, channel: .group($0), atFrame: currentFrame)
+            resolvedPoseMap(layerID: layerID, celID: celID, channel: .group($0), atFrame: shown.frame)
         } ?? .identity
         guard let intoInverse = into.inverse else {
             raise(.animationGroupEditRefused(.destinationIsFlatOnThisFrame))
@@ -311,7 +331,7 @@ extension CanvasManager {
             guard was != destination else { continue }
             let from = was.map {
                 resolvedPoseMap(layerID: layerID, celID: celID, channel: .group($0),
-                                atFrame: currentFrame)
+                                atFrame: shown.frame)
             } ?? .identity
             let compensation = from.concatenating(intoInverse)
             let tagged = element.taggedForAnimation(destination)
@@ -427,6 +447,7 @@ private extension SelectionAnimationGroupMemo {
     func matches(_ other: SelectionAnimationGroupMemo) -> Bool {
         pathObject == other.pathObject && bounds == other.bounds && layerID == other.layerID
             && celID == other.celID && frame == other.frame && vectorVersion == other.vectorVersion
+            && poseChannels == other.poseChannels && inheritedPose == other.inheritedPose
             && membership == other.membership && registered == other.registered
     }
 }

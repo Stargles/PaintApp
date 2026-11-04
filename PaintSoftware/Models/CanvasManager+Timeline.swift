@@ -77,6 +77,20 @@ extension CanvasManager {
         activeCelIndex(inLayer: index, atFrame: displayedFrame(forLayer: index, atFrame: frame))
     }
 
+    /// One edit entry read from the same render walk as its picture. The cel and its channels use
+    /// the shown source frame; an outer container can still use document time above a Repeat.
+    struct DisplayedCel {
+        let index: Int
+        let frame: Int
+        let inheritedPose: PoseMap?
+    }
+
+    func displayedCel(inLayer index: Int, atFrame frame: Int, in walk: RenderWalk) -> DisplayedCel? {
+        let shown = walk.frames[index] ?? frame
+        guard let cel = activeCelIndex(inLayer: index, atFrame: shown) else { return nil }
+        return DisplayedCel(index: cel, frame: shown, inheritedPose: walk.poses[index])
+    }
+
     /// How long a new cel starting at `startFrame` may actually be: `maxLength`, cut short by the
     /// nearest cel that begins at or after it so the two can't overlap. Nil when there's no room at
     /// all (the caller then does nothing).
