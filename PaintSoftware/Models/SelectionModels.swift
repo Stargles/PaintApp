@@ -2269,7 +2269,7 @@ extension CanvasManager {
             // all three consumers of a selection obey one answer with no exception, so Clear asks in
             // the same space Move does. Empty overrides on an ordinary cel.
             let loops = CanvasManager.lassoLoops(
-                of: selection, in: vectorCanvas,
+                of: selection,
                 posedBy: Self.poseMaps(vectorCanvas.elements, of: cel, showing: shown.frame,
                                        inheriting: shown.inheritedPose))
             let elementsBefore = vectorCanvas.elements
@@ -2401,7 +2401,7 @@ extension CanvasManager {
         let celIndex = shown.index
         let cel = layers[currentLayerIndex].cels[celIndex]
         let loops = CanvasManager.lassoLoops(
-            of: selection, in: vectorCanvas,
+            of: selection,
             posedBy: Self.poseMaps(vectorCanvas.elements, of: cel, showing: shown.frame,
                                   inheriting: shown.inheritedPose))
 

@@ -441,7 +441,7 @@ extension CanvasManager {
 
         let elements = vector.elements
         let loops = CanvasManager.lassoLoops(
-            of: selection, in: vector,
+            of: selection,
             posedBy: Self.poseMaps(elements, through: mappings, inheriting: inherited))
         let caught = vector.elementIDs(insideLoops: loops, membership: selectionMembership)
         let answer = SelectionStyle.of(elements, caught: caught)
@@ -494,7 +494,7 @@ extension CanvasManager {
         // is stored.
         let elementsBefore = vectorCanvas.elements
         let loops = CanvasManager.lassoLoops(
-            of: selection, in: vectorCanvas,
+            of: selection,
             posedBy: Self.poseMaps(elementsBefore, of: layers[currentLayerIndex].cels[celIndex],
                                    showing: shown.frame, inheriting: shown.inheritedPose))
         let membership = selectionMembership

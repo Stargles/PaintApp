@@ -208,7 +208,7 @@ extension CanvasManager {
         if let memo = selectionAnimationGroupMemo, memo.matches(key) { return memo.answer }
 
         let loops = CanvasManager.lassoLoops(
-            of: selection, in: vector,
+            of: selection,
             posedBy: Self.poseMaps(elements, through: mappings, inheriting: inherited))
         let caught = vector.elementIDs(insideLoops: loops, membership: selectionMembership)
         var tags: Set<UUID> = []
@@ -267,7 +267,7 @@ extension CanvasManager {
         // channel is showing the drawing somewhere other than where it is stored.
         let elementsBefore = vector.elements
         let loops = CanvasManager.lassoLoops(
-            of: selection, in: vector,
+            of: selection,
             posedBy: Self.poseMaps(elementsBefore, of: layers[currentLayerIndex].cels[celIndex],
                                    showing: shown.frame, inheriting: shown.inheritedPose))
 
