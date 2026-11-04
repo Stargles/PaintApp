@@ -549,6 +549,155 @@ final class OptionsPanelUITests: PaintUITestCase {
         return values
     }
 
+    /// Every displayed pixel in an interior ink patch, using the shared orientation-aware reader.
+    /// No paper filter: the fixture must prove the whole patch is painted before it is graded.
+    private func effectPatchReds(_ canvas: XCUIElement, x: ClosedRange<Double>, row: Double) throws -> [Int] {
+        let picture = try XCTUnwrap(ScreenshotPixels(canvas.screenshot().image))
+        let lowX = max(Int(x.lowerBound * Double(picture.width)), 0)
+        let highX = min(Int(x.upperBound * Double(picture.width)), picture.width - 1)
+        let lowY = max(Int((row - 0.003) * Double(picture.height)), 0)
+        let highY = min(Int((row + 0.003) * Double(picture.height)), picture.height - 1)
+        return (lowY...highY).flatMap { py in
+            (lowX...highX).map { px in
+                Int(picture.pixel(normalizedX: (Double(px) + 0.5) / Double(picture.width),
+                                  normalizedY: (Double(py) + 0.5) / Double(picture.height)).r)
+            }
+        }
+    }
+
+    func testScreenPickerCommitsBeforeUndoAndSurvivesRelaunch() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetGallery"]
+        XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 2048, height: 1024),
+                                      orientationBeforeCreatingCanvas: .landscapeLeft))
+        XCTAssertEqual(app.windows.firstMatch.frame.size, CGSize(width: 1080, height: 810),
+                       "PREMISE: the Screen picker is driven at the owner's landscape size")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let row = rowAboveTheDock(canvas)
+        let colorButton = app.buttons["toolbar.colorButton"]
+        colorButton.tap()
+        setHexField(app, app.textFields["colorPanel.hexField"], to: "6A6A6A")
+        colorButton.tap()
+        for offset in [-0.012, -0.006, 0, 0.006, 0.012] {
+            drawLine(on: canvas, from: CGVector(dx: 0.2, dy: row + offset),
+                     to: CGVector(dx: 0.8, dy: row + offset))
+        }
+        let ungraded = try settled { try effectPatchReds(canvas, x: 0.4...0.6, row: row) }
+        XCTAssertGreaterThan(ungraded.count, 100, "PREMISE: the patch contains real screenshot pixels")
+        XCTAssertTrue(ungraded.allSatisfy { abs($0 - 106) <= 8 }, "PREMISE: the entire patch is painted grey")
+        openLayerPanel(app)
+        addEffectLayerFromAddMenu(app)
+        app.buttons["layerOptions.blendModeButton"].tap()
+        app.buttons["layerOptions.blendMode.dither"].tap()
+        closeLayerRail(app)
+        let title = app.staticTexts["layerOptions.subMenuTitle"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertEqual(title.label, "Dither")
+        assertAboveTheDock(app, canvas, dy: row + 0.003, "The Screen picker's measured ink patch")
+        let dithered = try settled { try effectPatchReds(canvas, x: 0.4...0.6, row: row) }
+        attachScreenshot(XCUIScreen.main, "screen-picker-original-dither-owner-landscape")
+        XCTAssertGreaterThan(try XCTUnwrap(dithered.max()) - XCTUnwrap(dithered.min()), 50,
+                             "PREMISE: Dither paints a real pattern before the Screen pick")
+
+        app.buttons["effectSettings.screenButton"].tap()
+        app.buttons["effectSettings.screen.none"].tap()
+        let flat = try settled { try effectPatchReds(canvas, x: 0.4...0.6, row: row) }
+        attachScreenshot(XCUIScreen.main, "screen-picker-none-before-history-owner-landscape")
+        XCTAssertEqual(title.label, "Posterize")
+        XCTAssertLessThan(try XCTUnwrap(flat.max()) - XCTUnwrap(flat.min()), 20, "None removes the drawn screen")
+        XCTAssertTrue(flat.allSatisfy { $0 < 200 }, "The flat patch is ink, not exposed white paper")
+
+        // History comes before saving: a later finalizer must not hide a missing picker release.
+        app.buttons["sideToolbar.undoButton"].tap()
+        let restored = try settled { try effectPatchReds(canvas, x: 0.4...0.6, row: row) }
+        attachScreenshot(XCUIScreen.main, "screen-picker-one-undo-restores-dither-owner-landscape")
+        XCTAssertEqual(title.label, "Dither", "One Undo must undo this Screen pick, not the earlier catalogue pick")
+        XCTAssertGreaterThan(try XCTUnwrap(restored.max()) - XCTUnwrap(restored.min()), 50,
+                             "One Undo restores the actual pattern")
+        app.buttons["sideToolbar.redoButton"].tap()
+        let redone = try settled { try effectPatchReds(canvas, x: 0.4...0.6, row: row) }
+        attachScreenshot(XCUIScreen.main, "screen-picker-one-redo-restores-none-owner-landscape")
+        XCTAssertEqual(title.label, "Posterize")
+        XCTAssertLessThan(try XCTUnwrap(redone.max()) - XCTUnwrap(redone.min()), 20, "Redo restores flat ink")
+
+        saveEditorAndReturnToGallery(app)
+        app.terminate()
+        app.launchArguments = []
+        app.launch()
+        let tile = app.staticTexts.matching(NSPredicate(format: "label == %@", "Untitled")).firstMatch
+        XCTAssertTrue(tile.waitForExistence(timeout: 15))
+        tile.tap()
+        XCTAssertTrue(canvas.waitForExistence(timeout: 15))
+        openLayerPanel(app)
+        app.staticTexts["layerPanel.row.1"].tap()
+        closeLayerRail(app)
+        let reopened = try settled { try effectPatchReds(canvas, x: 0.4...0.6, row: row) }
+        attachScreenshot(XCUIScreen.main, "screen-picker-saved-none-reopened-owner-landscape")
+        XCTAssertEqual(app.buttons["effectSettings.screenButton"].value as? String, "None")
+        XCTAssertLessThan(try XCTUnwrap(reopened.max()) - XCTUnwrap(reopened.min()), 20,
+                          "The saved Screen pick remains flat after relaunch")
+    }
+
+    func testAnArtistDrawnToneCurvePeakAndTroughStayInsideTheirChosenBounds() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 2048, height: 1024),
+                                      orientationBeforeCreatingCanvas: .landscapeLeft))
+        XCTAssertEqual(app.windows.firstMatch.frame.size, CGSize(width: 1080, height: 810),
+                       "PREMISE: Curves is driven at the owner's landscape size")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let row = rowAboveTheDock(canvas)
+        for (hex, start, end) in [("333333", 0.2, 0.45), ("CCCCCC", 0.55, 0.8)] {
+            app.buttons["toolbar.colorButton"].tap()
+            setHexField(app, app.textFields["colorPanel.hexField"], to: hex)
+            app.buttons["toolbar.colorButton"].tap()
+            for offset in [-0.012, -0.006, 0, 0.006, 0.012] {
+                drawLine(on: canvas, from: CGVector(dx: start, dy: row + offset),
+                         to: CGVector(dx: end, dy: row + offset))
+            }
+        }
+        let originalDark = try settled { try effectPatchReds(canvas, x: 0.3...0.4, row: row) }
+        let originalLight = try settled { try effectPatchReds(canvas, x: 0.6...0.7, row: row) }
+        XCTAssertGreaterThan(originalDark.count, 100, "PREMISE: the peak-side patch contains real pixels")
+        XCTAssertGreaterThan(originalLight.count, 100, "PREMISE: the trough-side patch contains real pixels")
+        XCTAssertTrue(originalDark.allSatisfy { abs($0 - 51) <= 6 }, "PREMISE: the peak-side patch is solid 51 grey")
+        XCTAssertTrue(originalLight.allSatisfy { abs($0 - 204) <= 6 }, "PREMISE: the trough-side patch is solid 204 grey")
+        openLayerPanel(app)
+        addEffectLayerFromAddMenu(app)
+        app.buttons["layerOptions.blendModeButton"].tap()
+        app.buttons["layerOptions.blendMode.curves"].tap()
+        closeLayerRail(app)
+        let graph = app.otherElements["effectSettings.curveGraph"]
+        XCTAssertTrue(graph.waitForExistence(timeout: 5), "The artist can reach the actual curve graph")
+        assertAboveTheDock(app, canvas, dy: row + 0.003, "Both graded ink patches")
+        graph.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.2)).tap()
+        graph.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.8)).tap()
+        graph.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.2))
+            .press(forDuration: 0.1, thenDragTo: graph.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.1)))
+        graph.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.8))
+            .press(forDuration: 0.1, thenDragTo: graph.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.9)))
+        let chosenKnots = graph.value as? String
+        XCTAssertEqual(chosenKnots, "0.00,0.00;0.10,0.90;0.90,0.10;1.00,1.00",
+                       "PREMISE: real taps and drags placed the intended peak and trough")
+        let peakSide = try settled { try effectPatchReds(canvas, x: 0.3...0.4, row: row) }
+        let troughSide = try settled { try effectPatchReds(canvas, x: 0.6...0.7, row: row) }
+        attachScreenshot(XCUIScreen.main, "curve-artist-peak-and-trough-drawn-owner-landscape")
+        XCTAssertTrue(peakSide.allSatisfy { (26...233).contains($0) }, "Drawn ink must not overshoot the .9 peak")
+        XCTAssertTrue(troughSide.allSatisfy { (23...230).contains($0) }, "Drawn ink must not undershoot the .1 trough")
+        XCTAssertGreaterThan(try XCTUnwrap(peakSide.min()), 180, "The curve actually grades the dark ink")
+        XCTAssertLessThan(try XCTUnwrap(troughSide.max()), 70, "The curve actually grades the light ink")
+        app.buttons["sideToolbar.undoButton"].tap()
+        XCTAssertNotEqual(graph.value as? String, chosenKnots, "One Undo takes back the last actual handle drag")
+        app.buttons["sideToolbar.redoButton"].tap()
+        XCTAssertEqual(graph.value as? String, chosenKnots, "Redo restores the artist's exact knots")
+        let redonePeak = try settled { try effectPatchReds(canvas, x: 0.3...0.4, row: row) }
+        let redoneTrough = try settled { try effectPatchReds(canvas, x: 0.6...0.7, row: row) }
+        attachScreenshot(XCUIScreen.main, "curve-artist-peak-and-trough-redone-owner-landscape")
+        XCTAssertEqual(redonePeak, peakSide, "Redo restores the drawn peak-side ink")
+        XCTAssertEqual(redoneTrough, troughSide, "Redo restores the drawn trough-side ink")
+    }
+
     /// **TODO (60), cold start: Dither is reachable from the menu, shows its Screen Strength slider,
     /// and actually breaks a flat stroke into a pattern — the same claim
     /// `RecolorEffectLogicTests`-style model tests make, driven through the real app.** `0x6A6A6A`

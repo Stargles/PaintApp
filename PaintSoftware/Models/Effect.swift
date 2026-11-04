@@ -1584,7 +1584,9 @@ struct EffectParams: Equatable {
     /// field since the colour triple was.
     var guideMode: UInt32 = 0
     var guideSpacing: Float = 1
-    var guideSubdivisions: UInt32 = 0
+    /// Minor-line spacing divides `guideSpacing` by this, or is absent at 1. Resolve the stored
+    /// Int before narrowing so neither backend needs a bounded integer count or an overflowing +1.
+    var guideSubdivisionDivisor: Float = 1
     var guideAngle: Float = 0
     var guideLineWidth: Float = 1
     var guidePitch: Float = 0
@@ -1819,7 +1821,7 @@ extension Effect {
             func resolve(_ w: ColorWheels.Wheel) -> (a: Float, b: Float, l: Float) {
                 let strength = unit(w.strength)
                 let chroma = unit(w.saturation) * ColorWheels.rimChroma * strength
-                let radians = (w.hue.isFinite ? w.hue : 0) * .pi / 180
+                let radians = Self.periodicRadians(w.hue)
                 let lift = (w.luminance.isFinite ? min(max(w.luminance, -1), 1) : 0)
                     * ColorWheels.luminanceReach * strength
                 return (Float(chroma * cos(radians)), Float(chroma * sin(radians)), Float(lift))
@@ -1848,8 +1850,8 @@ extension Effect {
             func finite(_ v: Double, _ fallback: Double) -> Double { v.isFinite ? v : fallback }
             p.guideMode = guide.mode.code
             p.guideSpacing = Float(max(finite(guide.spacing, 64), 2))
-            p.guideSubdivisions = UInt32(max(guide.subdivisions, 0))
-            p.guideAngle = Float(finite(guide.angleDegrees, 30) * .pi / 180)
+            p.guideSubdivisionDivisor = Float(Double(max(guide.subdivisions, 0)) + 1)
+            p.guideAngle = Float(Self.periodicRadians(finite(guide.angleDegrees, 30)))
             p.guideLineWidth = Float(max(finite(guide.lineWidth, 1), 0))
             p.guidePitch = Float(Double.pi / Double(max(guide.density, 1)))
             p.guideHorizon = Float(finite(guide.horizon, 0.5))
@@ -2261,7 +2263,7 @@ extension Effect {
     }
 
     /// Keep periodic knobs finite before radians or Float narrowing; stored degrees stay unchanged.
-    private static func periodicRadians(_ degrees: Double) -> Double {
+    static func periodicRadians(_ degrees: Double) -> Double {
         guard degrees.isFinite else { return 0 }
         return degrees.truncatingRemainder(dividingBy: 360) * .pi / 180
     }
@@ -2467,7 +2469,118 @@ struct MonotoneCubic {
 
     private let xs: [Double]
     private let ys: [Double]
-    private let slopes: [Double]
+    private let slopes: [Derivative]
+
+    /// A derivative may exceed Double even when its knots and every Hermite value are finite.
+    /// Keep that number on the existing slope seam, without rounding it to infinity or capping it.
+    /// Ordinary arithmetic retains its original Double operation order and representation.
+    private struct Derivative {
+        private let coefficient: Double
+        private let power: Int
+
+        init(_ value: Double) { coefficient = value; power = 0 }
+
+        private init(coefficient: Double, power: Int) {
+            let value = Self.shift(coefficient, by: power)
+            if value.isNormal || coefficient == 0 {
+                self.coefficient = value
+                self.power = 0
+            } else {
+                self.coefficient = Self.significand(coefficient)
+                self.power = coefficient.exponent + power
+            }
+        }
+
+        private static func significand(_ value: Double) -> Double {
+            value.sign == .minus ? -abs(value.significand) : abs(value.significand)
+        }
+
+        private static func shift(_ value: Double, by power: Int) -> Double {
+            guard value != 0 else { return value }
+            return Double(sign: value.sign, exponent: value.exponent + power,
+                          significand: abs(value.significand))
+        }
+
+        var isZero: Bool { coefficient == 0 }
+        var isPositive: Bool { coefficient > 0 }
+        var isNegative: Bool { coefficient < 0 }
+        private var exponent: Int { coefficient.exponent + power }
+        private var value: Double { Self.shift(coefficient, by: power) }
+        private var magnitude: Derivative { Derivative(coefficient: abs(coefficient), power: power) }
+
+        func divided(by other: Derivative) -> Derivative {
+            guard !isZero else { return self }
+            let quotient = coefficient / other.coefficient
+            if power == 0, other.power == 0, quotient.isNormal {
+                return Derivative(quotient)
+            }
+            return Derivative(coefficient: Self.significand(coefficient) / Self.significand(other.coefficient),
+                              power: exponent - other.exponent)
+        }
+
+        func multiplied(by other: Derivative) -> Derivative {
+            guard !isZero, !other.isZero else { return Derivative(0) }
+            let product = coefficient * other.coefficient
+            if power == 0, other.power == 0, product.isNormal { return Derivative(product) }
+            return Derivative(coefficient: Self.significand(coefficient) * Self.significand(other.coefficient),
+                              power: exponent + other.exponent)
+        }
+
+        static func mean(_ left: Derivative, _ right: Derivative) -> Derivative {
+            let sum = left.coefficient + right.coefficient
+            if left.power == 0, right.power == 0, (sum / 2).isNormal { return Derivative(sum / 2) }
+            let common = max(left.exponent, right.exponent)
+            let a = shift(left.coefficient, by: left.power - common)
+            let b = shift(right.coefficient, by: right.power - common)
+            return Derivative(coefficient: (a + b) / 2, power: common)
+        }
+
+        private func exceedsMagnitude(of other: Derivative) -> Bool {
+            guard !isZero else { return false }
+            guard !other.isZero else { return true }
+            return exponent == other.exponent
+                ? abs(coefficient.significand) > abs(other.coefficient.significand)
+                : exponent > other.exponent
+        }
+
+        static func limited(_ left: Derivative, _ right: Derivative,
+                            by secant: Derivative) -> (Derivative, Derivative) {
+            // Preserve the exact established arithmetic whenever its intermediate values fit.
+            if left.power == 0, right.power == 0, secant.power == 0 {
+                let a = left.coefficient / secant.coefficient, b = right.coefficient / secant.coefficient
+                let magnitude = a * a + b * b
+                if magnitude.isFinite {
+                    guard magnitude > 9 else { return (left, right) }
+                    let tau = 3 / magnitude.squareRoot()
+                    let u = tau * a, v = tau * b
+                    let first = u * secant.coefficient, last = v * secant.coefficient
+                    if first.isFinite, last.isFinite,
+                       (first != 0 || left.isZero), (last != 0 || right.isZero) {
+                        return (Derivative(first), Derivative(last))
+                    }
+                }
+            }
+            let largest = left.exceedsMagnitude(of: right) ? left.magnitude : right.magnitude
+            // If both slopes are no larger than the secant, their norm cannot reach radius3.
+            guard largest.exceedsMagnitude(of: secant) else { return (left, right) }
+            let u = left.magnitude.divided(by: largest).value
+            let v = right.magnitude.divided(by: largest).value
+            let length = hypot(u, v) // u,v<=1; neither squaring nor this norm can overflow.
+            let relative = secant.magnitude.divided(by: largest)
+            guard length > 3 * relative.value else { return (left, right) }
+            // A scaled factor also preserves a tiny component whose ratio to the largest would
+            // underflow before multiplication. It is positive, preserving descending slopes too.
+            let factor = relative.multiplied(by: Derivative(3 / length))
+            return (left.multiplied(by: factor), right.multiplied(by: factor))
+        }
+
+        func hermiteTerm(basis: Double, width: Double) -> Double {
+            guard basis != 0, !isZero else { return 0 }
+            let front = basis * width, result = front * coefficient
+            if power == 0, front != 0, result.isFinite, result != 0 { return result }
+            return multiplied(by: Derivative(width)).multiplied(by: Derivative(basis)).value
+        }
+    }
 
     init(points: [CurvePoint]) {
         // Duplicate x values would divide by zero in the secant; the later one wins, which is what
@@ -2479,32 +2592,36 @@ struct MonotoneCubic {
         ys = sorted.map(\.y)
 
         guard xs.count > 1 else {
-            slopes = xs.isEmpty ? [] : [0]
+            slopes = xs.isEmpty ? [] : [Derivative(0)]
             return
         }
-        var secants: [Double] = []
-        for k in 0..<(xs.count - 1) { secants.append((ys[k + 1] - ys[k]) / (xs[k + 1] - xs[k])) }
+        var secants: [Derivative] = []
+        for k in 0..<(xs.count - 1) {
+            secants.append(Derivative(ys[k + 1] - ys[k]).divided(by: Derivative(xs[k + 1] - xs[k])))
+        }
 
-        var m = [Double](repeating: 0, count: xs.count)
+        var m = [Derivative](repeating: Derivative(0), count: xs.count)
         m[0] = secants[0]
         m[xs.count - 1] = secants[secants.count - 1]
-        for k in 1..<(xs.count - 1) { m[k] = (secants[k - 1] + secants[k]) / 2 }
+        for k in 1..<(xs.count - 1) {
+            let before = secants[k - 1], after = secants[k]
+            // A peak or trough has no tangent through it: retaining either neighbour's direction
+            // would turn the next span back past the artist's knot before following that span.
+            m[k] = (before.isPositive && after.isPositive) || (before.isNegative && after.isNegative)
+                ? Derivative.mean(before, after) : Derivative(0)
+        }
 
         // The Fritsch–Carlson limiter: a tangent longer than three times the secant is what produces
         // the overshoot, so the pair is scaled back onto the circle of radius 3.
         for k in 0..<secants.count {
-            if secants[k] == 0 {
-                m[k] = 0
-                m[k + 1] = 0
+            if secants[k].isZero {
+                m[k] = Derivative(0)
+                m[k + 1] = Derivative(0)
                 continue
             }
-            let a = m[k] / secants[k], b = m[k + 1] / secants[k]
-            let magnitude = a * a + b * b
-            if magnitude > 9 {
-                let tau = 3 / magnitude.squareRoot()
-                m[k] = tau * a * secants[k]
-                m[k + 1] = tau * b * secants[k]
-            }
+            let limited = Derivative.limited(m[k], m[k + 1], by: secants[k])
+            m[k] = limited.0
+            m[k + 1] = limited.1
         }
         slopes = m
     }
@@ -2521,9 +2638,9 @@ struct MonotoneCubic {
         let t = (x - xs[k]) / h
         let t2 = t * t, t3 = t2 * t
         return (2 * t3 - 3 * t2 + 1) * ys[k]
-            + (t3 - 2 * t2 + t) * h * slopes[k]
+            + slopes[k].hermiteTerm(basis: t3 - 2 * t2 + t, width: h)
             + (-2 * t3 + 3 * t2) * ys[k + 1]
-            + (t3 - t2) * h * slopes[k + 1]
+            + slopes[k + 1].hermiteTerm(basis: t3 - t2, width: h)
     }
 }
 

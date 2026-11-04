@@ -418,6 +418,50 @@ final class ColorWheelsEffectLogicTests: XCTestCase {
         XCTAssertEqual(effect.displayName, "Colour Wheels")
     }
 
+    func testHugeFiniteDecodedWheelHuesKeepTheirStoredAngleAndFiniteResolvedOffsets() throws {
+        for hue in [1e20, -1e20, 1e308, -1e308, Double.greatestFiniteMagnitude, -Double.greatestFiniteMagnitude] {
+            let original = Self.push(Wheel(hue: hue, saturation: 0.8, luminance: 0.2, strength: 0.75), global: true)
+            let decoded = try JSONDecoder().decode(Effect.self, from: JSONEncoder().encode(original))
+            XCTAssertEqual(decoded, original, "Periodic resolution must not rewrite the stored degrees")
+            let p = decoded.params
+            XCTAssertTrue(p.wheelGlobalA.isFinite && p.wheelGlobalB.isFinite && p.wheelGlobalL.isFinite,
+                          "A finite decoded hue must resolve to finite kernel inputs")
+            guard p.wheelGlobalA.isFinite && p.wheelGlobalB.isFinite && p.wheelGlobalL.isFinite else { continue }
+            let radians = hue.truncatingRemainder(dividingBy: 360) * Double.pi / 180
+            let chroma = 0.8 * Effect.ColorWheels.rimChroma * 0.75
+            XCTAssertEqual(p.wheelGlobalA, Float(chroma * cos(radians)), accuracy: 1e-7,
+                           "The resolved a offset uses the periodic angle, not a clamped or zero hue")
+            XCTAssertEqual(p.wheelGlobalB, Float(chroma * sin(radians)), accuracy: 1e-7,
+                           "The resolved b offset uses the periodic angle")
+            XCTAssertEqual(p.wheelGlobalL, 0.075, accuracy: 1e-7, "Hue must not change the luminance lift")
+            let off = Self.push(Wheel(hue: hue, saturation: 1, strength: 0), global: true).params
+            XCTAssertEqual(off.wheelGlobalA, 0, "Zero strength remains the identity at a huge hue")
+            XCTAssertEqual(off.wheelGlobalB, 0, "Zero strength must not multiply an invalid trig result")
+        }
+    }
+
+    func testHugeFiniteWheelHuePixelsMatchTheReducedHueOnBothBackends() throws {
+        try XCTSkipIf(MetalEffectEngine.shared == nil, "No Metal device in this test bundle")
+        let engine = try XCTUnwrap(MetalEffectEngine.shared)
+        let bytes = spectrumBytes()
+        for hue in [1e308, -1e308, Double.greatestFiniteMagnitude] {
+            let effect = Self.push(Wheel(hue: hue, saturation: 0.8), global: true)
+            let decoded = try JSONDecoder().decode(Effect.self, from: JSONEncoder().encode(effect))
+            let p = decoded.params
+            XCTAssertTrue(p.wheelGlobalA.isFinite && p.wheelGlobalB.isFinite,
+                          "Guard finite payloads before either consumer is called")
+            guard p.wheelGlobalA.isFinite && p.wheelGlobalB.isFinite else { return }
+            let reduced = Self.push(Wheel(hue: hue.truncatingRemainder(dividingBy: 360), saturation: 0.8), global: true)
+            let reference = cpu(decoded, bytes)
+            XCTAssertEqual(reference, cpu(reduced, bytes), "The CPU paints the reduced hue")
+            XCTAssertNotEqual(reference, bytes, "The huge-hue comparison must grade actual colour")
+            let rendered = try XCTUnwrap(engine.apply(decoded, to: bytes, width: Self.side, height: Self.side))
+            let reducedRender = try XCTUnwrap(engine.apply(reduced, to: bytes, width: Self.side, height: Self.side))
+            XCTAssertEqual(rendered, reducedRender, "Metal paints the same periodic hue")
+            XCTAssertLessThanOrEqual(maxChannelDelta(rendered, reference), 2, "Existing wheel backend tolerance")
+        }
+    }
+
     // MARK: - Persistence
 
     func testTheWheelsSurviveAJSONRoundTrip() throws {

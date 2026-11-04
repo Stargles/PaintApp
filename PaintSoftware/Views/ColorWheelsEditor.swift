@@ -179,7 +179,7 @@ struct ColorWheelsEditor: View {
         let radius = diameter / 2
         let reach = radius - dotDiameter / 2
         let saturation = wheel.saturation.isFinite ? min(max(wheel.saturation, 0), 1) : 0
-        let radians = (wheel.hue.isFinite ? wheel.hue : 0) * .pi / 180
+        let radians = Effect.periodicRadians(wheel.hue)
         return CGPoint(x: radius + reach * saturation * cos(radians),
                        y: radius - reach * saturation * sin(radians))
     }
@@ -199,7 +199,7 @@ struct ColorWheelsEditor: View {
     static func dotColour(_ wheel: Effect.ColorWheels.Wheel) -> Color {
         let saturation = wheel.saturation.isFinite ? min(max(wheel.saturation, 0), 1) : 0
         let strength = wheel.strength.isFinite ? min(max(wheel.strength, 0), 1) : 0
-        let radians = (wheel.hue.isFinite ? wheel.hue : 0) * .pi / 180
+        let radians = Effect.periodicRadians(wheel.hue)
         let chroma = saturation * Effect.ColorWheels.rimChroma * strength
         let luminance = wheel.luminance.isFinite ? min(max(wheel.luminance, -1), 1) : 0
         let L = min(max(ColorWheelDisc.discLightness

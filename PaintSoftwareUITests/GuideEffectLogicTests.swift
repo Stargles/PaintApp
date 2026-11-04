@@ -297,4 +297,77 @@ final class GuideEffectLogicTests: XCTestCase {
         XCTAssertEqual(broken.guideHorizon, 0.5, "A non-finite horizon is the default")
         XCTAssertEqual(Set(Effect.Guide.Mode.allCases.map(\.code)).count, 3, "The three codes are distinct")
     }
+
+    /// The saved count remains an Int. Only its derived divisor crosses the shared Float payload,
+    /// including the two edges that the former UInt32 cast and its consumer's +1 could not hold.
+    func testDecodedSubdivisionCountsKeepTheirIntDomainAndFiniteDivisor() throws {
+        let boundary = Int(UInt32.max)
+        let cases: [(Int, Float)] = [
+            (-1, 1), (0, 1), (1, 2), (8, 9),
+            (boundary - 1, 4_294_967_296), (boundary, 4_294_967_296),
+            (boundary + 1, 4_294_967_296), (Int.max, 9_223_372_036_854_775_808.0),
+        ]
+        for (count, expected) in cases {
+            let original = guide(.grid, subdivisions: count)
+            let decoded = try JSONDecoder().decode(Effect.self, from: JSONEncoder().encode(original))
+            XCTAssertEqual(decoded, original, "The current saved Int must survive without a new count cap")
+            let divisor = decoded.params.guideSubdivisionDivisor
+            XCTAssertTrue(divisor.isFinite && divisor >= 1, "Every accepted count yields a finite positive divisor")
+            XCTAssertEqual(divisor, expected, "Count \(count): the divisor is rounded only by the Float payload")
+        }
+        XCTAssertEqual(MemoryLayout<EffectParams>.size, 268, "The shared scalar block keeps its layout")
+        XCTAssertEqual(MemoryLayout<EffectParams>.stride, 268, "Changing a slot's scalar type must not move following fields")
+        XCTAssertEqual(MemoryLayout<EffectParams>.offset(of: \.guideSubdivisionDivisor), 228,
+                       "The divisor occupies the former subdivision slot")
+    }
+
+    func testOrdinaryAndHugeSubdivisionCountsDrawMinorLinesOnBothBackends() throws {
+        try XCTSkipIf(MetalEffectEngine.shared == nil, "No Metal device in this test bundle")
+        let engine = try XCTUnwrap(MetalEffectEngine.shared)
+        let bytes = whiteBytes()
+        let boundary = Int(UInt32.max)
+        for (count, probeX) in [(1, 8), (3, 4), (boundary - 1, 5), (boundary, 5), (boundary + 1, 5), (Int.max, 5)] {
+            let effect = guide(.grid, subdivisions: count)
+            let decoded = try JSONDecoder().decode(Effect.self, from: JSONEncoder().encode(effect))
+            let p = decoded.params
+            XCTAssertTrue(p.guideSubdivisionDivisor.isFinite && p.guideSubdivisionDivisor > 1,
+                          "Guard a finite minor-line divisor before rendering")
+            guard p.guideSubdivisionDivisor.isFinite && p.guideSubdivisionDivisor > 1 else { return }
+            let reference = cpu(decoded, bytes)
+            XCTAssertEqual(pixel(reference, probeX, 5), [255, 128, 128, 255],
+                           "Count \(count): minor lines remain half-opacity red")
+            XCTAssertEqual(pixel(reference, 16, 5), lineRed, "Major lines retain full opacity")
+            let rendered = try XCTUnwrap(engine.apply(decoded, to: bytes, width: Self.side, height: Self.side))
+            XCTAssertLessThanOrEqual(maxChannelDelta(rendered, reference), 2,
+                                    "Count \(count): both consumers use the same resolved divisor")
+            XCTAssertEqual(pixel(rendered, probeX, 5), [255, 128, 128, 255],
+                           "Metal must draw the actual minor line, not merely match an unchanged image")
+        }
+    }
+
+    func testHugeFiniteDecodedIsometricAnglesPaintTheirPeriodicAngle() throws {
+        try XCTSkipIf(MetalEffectEngine.shared == nil, "No Metal device in this test bundle")
+        let engine = try XCTUnwrap(MetalEffectEngine.shared)
+        let bytes = whiteBytes()
+        for angle in [1e308, -1e308, Double.greatestFiniteMagnitude] {
+            let original = guide(.isometric, angle: angle)
+            let decoded = try JSONDecoder().decode(Effect.self, from: JSONEncoder().encode(original))
+            XCTAssertEqual(decoded, original, "Resolution leaves saved Guide degrees unchanged")
+            let p = decoded.params
+            XCTAssertTrue(p.guideAngle.isFinite, "Guard the finite angle before either consumer")
+            guard p.guideAngle.isFinite else { return }
+            let degrees = angle.truncatingRemainder(dividingBy: 360)
+            XCTAssertEqual(p.guideAngle, Float(degrees * Double.pi / 180), "Reduce before radians and Float narrowing")
+            let reduced = guide(.isometric, angle: degrees)
+            let reference = cpu(decoded, bytes)
+            XCTAssertEqual(reference, cpu(reduced, bytes), "The CPU paints the periodic isometric families")
+            XCTAssertNotEqual(reference, bytes, "The comparison must draw lines")
+            let rendered = try XCTUnwrap(engine.apply(decoded, to: bytes, width: Self.side, height: Self.side))
+            let reducedRender = try XCTUnwrap(engine.apply(reduced, to: bytes, width: Self.side, height: Self.side))
+            XCTAssertEqual(rendered, reducedRender, "Metal receives the same periodic angle")
+            XCTAssertLessThanOrEqual(maxChannelDelta(rendered, reference), 2, "Existing Guide backend tolerance")
+        }
+        XCTAssertEqual(guide(.isometric, angle: .nan).params.guideAngle, Float(Double.pi / 6),
+                       "The established nonfinite Guide default stays 30 degrees")
+    }
 }

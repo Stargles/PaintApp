@@ -292,8 +292,8 @@ enum EffectReference {
         case kGuideGrid:
             let s = params.guideSpacing
             cover = max(coverage(nearest(q.x, s)), coverage(nearest(q.y, s)))
-            if params.guideSubdivisions > 0 {
-                let minor = s / Float(params.guideSubdivisions + 1)
+            if params.guideSubdivisionDivisor > 1 {
+                let minor = s / params.guideSubdivisionDivisor
                 cover = max(cover, 0.5 * max(coverage(nearest(q.x, minor)), coverage(nearest(q.y, minor))))
             }
         case kGuideIsometric:

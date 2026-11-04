@@ -314,6 +314,37 @@ final class LiveEditLogicTests: XCTestCase {
         XCTAssertEqual(new.manager.storedEffect(of: new.target), before, "and one Undo takes the whole drag back")
     }
 
+    /// The Screen picker owns this release in the view; this pins the existing release owner's
+    /// stored grade, pixels and single history step without pretending to prove that wiring.
+    @MainActor
+    func testADiscreteStoredScreenReleaseIsOneUndoStepWithItsDrawnPixels() throws {
+        let (manager, target) = curved()
+        let dither = Effect.posterize(.init(levels: 4, screen: .ordered, screenStrength: 1))
+        let flat = Effect.posterize(.init(levels: 4, screen: .none, screenStrength: 1))
+        manager.layers[1].effect = dither
+        func picture() throws -> [UInt8] {
+            let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: true,
+                                                               sizing: .liveComposite))
+            let image = try XCTUnwrap(recipe.composite(budgetBytes: manager.frameBaker.budgetBytes))
+            return try XCTUnwrap(CanvasFixture.rgbaBytes(image))
+        }
+        let before = try picture()
+        manager.holdStoredEffect(target, flat)
+        XCTAssertEqual(manager.storedEffect(of: target), dither, "A hold has not stored the pick")
+        manager.commitHeldGrade()
+        XCTAssertNil(manager.liveEdit, "A discrete pick releases its hold")
+        XCTAssertEqual(manager.storedEffect(of: target), flat, "The released pick is stored")
+        XCTAssertEqual(manager.history.undoStack.count, 1, "The pick is exactly one history step")
+        let after = try picture()
+        XCTAssertNotEqual(after, before, "Removing the screen changes the actual composite")
+        manager.undo()
+        XCTAssertEqual(manager.storedEffect(of: target), dither, "One Undo restores Dither")
+        XCTAssertEqual(try picture(), before, "Undo restores the drawn pattern")
+        manager.redo()
+        XCTAssertEqual(manager.storedEffect(of: target), flat, "One Redo restores None")
+        XCTAssertEqual(try picture(), after, "Redo restores the flat drawing")
+    }
+
     /// **A lift that changed nothing records nothing** — a popover opened and closed on the colour it
     /// had, a curve point put back where it was.
     @MainActor

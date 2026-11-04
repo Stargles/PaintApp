@@ -479,7 +479,7 @@ struct EffectParams {
     // The Guide, resolved (TODO (88)) — `EffectParams`' doc in Effect.swift names each.
     uint  guideMode;
     float guideSpacing;
-    uint  guideSubdivisions;
+    float guideSubdivisionDivisor;
     float guideAngle;
     float guideLineWidth;
     float guidePitch;
@@ -732,8 +732,8 @@ static inline float3 guideChannels(float3 c, constant EffectParams &params, uint
         case kGuideGrid: {
             float s = params.guideSpacing;
             cover = max(guideCoverage(guideNearest(q.x, s), params), guideCoverage(guideNearest(q.y, s), params));
-            if (params.guideSubdivisions > 0u) {
-                float minor = s / float(params.guideSubdivisions + 1u);
+            if (params.guideSubdivisionDivisor > 1.0f) {
+                float minor = s / params.guideSubdivisionDivisor;
                 cover = max(cover, 0.5f * max(guideCoverage(guideNearest(q.x, minor), params),
                                               guideCoverage(guideNearest(q.y, minor), params)));
             }

@@ -602,6 +602,205 @@ final class EffectParityLogicTests: XCTestCase {
         XCTAssertEqual(curve.value(at: 1), 0.9, accuracy: 1e-12)
     }
 
+    /// A tone curve may turn down and back up. Each span must keep its own direction and bounds,
+    /// including at a peak or trough where adjacent secants point in opposite directions.
+    func testToneCurvePeaksAndTroughsKeepEverySegmentWithinItsKnots() {
+        let fixtures: [[CurvePoint]] = [
+            [.init(x: 0, y: 0), .init(x: 0.1, y: 0.9), .init(x: 0.9, y: 0.1), .init(x: 1, y: 1)],
+            [.init(x: 0, y: 1), .init(x: 0.1, y: 0.1), .init(x: 0.9, y: 0.9), .init(x: 1, y: 0)],
+            [.init(x: 0, y: 0.2), .init(x: 0.07, y: 0.8), .init(x: 0.63, y: 0.4), .init(x: 1, y: 0.6)],
+        ]
+        for (fixtureIndex, points) in fixtures.enumerated() {
+            let curve = MonotoneCubic(points: points)
+            for point in points {
+                XCTAssertEqual(curve.value(at: point.x), point.y, accuracy: 1e-12,
+                               "Fixture \(fixtureIndex): the curve must meet each artist's knot")
+            }
+            for segment in 0..<(points.count - 1) {
+                let a = points[segment], b = points[segment + 1]
+                var previous = curve.value(at: a.x)
+                for step in 1...200 {
+                    let x = a.x + (b.x - a.x) * Double(step) / 200
+                    let value = curve.value(at: x)
+                    let context = "Fixture \(fixtureIndex), segment \(segment), x=\(x)"
+                    XCTAssertGreaterThanOrEqual(value, min(a.y, b.y) - 1e-12, context)
+                    XCTAssertLessThanOrEqual(value, max(a.y, b.y) + 1e-12, context)
+                    if b.y >= a.y {
+                        XCTAssertGreaterThanOrEqual(value, previous - 1e-12, context)
+                    } else {
+                        XCTAssertLessThanOrEqual(value, previous + 1e-12, context)
+                    }
+                    previous = value
+                }
+            }
+        }
+    }
+
+    /// A flat tail must zero its joining tangent before the preceding span is limited. With these
+    /// knots the preceding span's tangents are 3 and 0: at t = 2/5 its Hermite value is .892.
+    /// Averaging through the flat first needlessly rescales the other tangent and yields .8911129.
+    func testAFlatToneCurveTailKeepsTheAdjacentHermiteValue() {
+        let curve = MonotoneCubic(points: [
+            .init(x: 0, y: 0), .init(x: 0.05, y: 0.5),
+            .init(x: 0.55, y: 1), .init(x: 1, y: 1),
+        ])
+        XCTAssertEqual(curve.value(at: 0.25), 0.892, accuracy: 1e-12,
+                       "The flat tail must not alter the adjoining bounded Hermite span")
+    }
+
+    /// Independent byte bounds: input 51/255 and 204/255 lie between the .9 peak and .1 trough.
+    /// The renderer's shared LUT must therefore stay between output bytes 26 and 230 there.
+    func testToneCurveLookupTableCannotPaintBeyondTheArtistPeakAndTrough() {
+        let effect = Effect.curves(.init(points: [
+            .init(x: 0, y: 0), .init(x: 0.1, y: 0.9),
+            .init(x: 0.9, y: 0.1), .init(x: 1, y: 1),
+        ]))
+        let table = effect.lookupTable
+        // The extrema have zero tangents. On their shared span the Hermite is therefore
+        // .9 + (.1 - .9) * (3t² - 2t³): t=1/8 and 7/8 round to 221 and 34.
+        XCTAssertEqual(table[51 * 4], 221, "The peak-side input is graded, not merely left inside the bounds")
+        XCTAssertEqual(table[204 * 4], 34, "The trough-side input follows the same bounded cubic")
+        for input in [51, 204] {
+            for channel in 0..<3 {
+                let output = Int(table[input * 4 + channel])
+                XCTAssertGreaterThanOrEqual(output, 26, "Input \(input): below the artist's .1 trough")
+                XCTAssertLessThanOrEqual(output, 230, "Input \(input): above the artist's .9 peak")
+            }
+            XCTAssertEqual(table[input * 4 + 3], 255, "The transfer table is opaque")
+        }
+        let bytes: [UInt8] = [51, 51, 51, 255, 204, 204, 204, 255]
+        let painted = EffectReference.apply(effect, to: bytes, width: 2, height: 1)
+        XCTAssertEqual(Array(painted[0..<3]), Array(table[51 * 4..<(51 * 4 + 3)]),
+                       "The CPU consumer must paint the bounded peak-side table entry")
+        XCTAssertEqual(Array(painted[4..<7]), Array(table[204 * 4..<(204 * 4 + 3)]),
+                       "The CPU consumer must paint the bounded trough-side table entry")
+    }
+
+    /// Finite current-format coordinates need no editor spacing rule to remain valid. In real
+    /// arithmetic the long span's limited tangents tend to 1.5 and 0, giving .9375 at its midpoint.
+    func testFiniteSubnormalToneCurveKnotsKeepTheirHermiteValues() throws {
+        let tiny = Double.leastNonzeroMagnitude
+        for gap in [tiny, 4 * tiny] {
+            for descending in [false, true] {
+                let points: [CurvePoint] = [.init(x: 0, y: 0), .init(x: gap, y: 0.5), .init(x: 1, y: 1)]
+                    .map { .init(x: $0.x, y: descending ? 1 - $0.y : $0.y) }
+                let decoded = try JSONDecoder().decode(Effect.Curves.self,
+                    from: JSONEncoder().encode(Effect.Curves(points: points)))
+                XCTAssertEqual(decoded.points, points, "current decoding must preserve every finite knot")
+                let curve = MonotoneCubic(points: decoded.points)
+                for point in points {
+                    XCTAssertEqual(curve.value(at: point.x), point.y, accuracy: 1e-12,
+                                   "the finite curve meets its knot, including the internal tiny knot")
+                }
+                XCTAssertEqual(curve.value(at: 0.5), descending ? 0.0625 : 0.9375, accuracy: 1e-12,
+                               "the bounded long-span Hermite retains its actual joining tangent")
+                if gap == 4 * tiny {
+                    // At t=.5, the narrow span's left h*m is .5 and its right h*m tends to0.
+                    XCTAssertEqual(curve.value(at: 2 * tiny), descending ? 0.6875 : 0.3125, accuracy: 1e-12,
+                                   "a representable interior sample rules out merely capping an enormous slope")
+                }
+            }
+        }
+        let internalSpan = MonotoneCubic(points: [.init(x: 0, y: 0), .init(x: 2 * tiny, y: 0.25),
+                                                .init(x: 6 * tiny, y: 0.75), .init(x: 1, y: 1)])
+        XCTAssertEqual(internalSpan.value(at: 4 * tiny), 0.5625, accuracy: 1e-12,
+                       "the internal tiny span keeps its left h*m=.5 after the later limiter")
+        for descending in [false, true] {
+            let points: [CurvePoint] = [.init(x: 0, y: 0.5), .init(x: tiny, y: 0),
+                .init(x: 10 * tiny, y: 0.1), .init(x: 11 * tiny, y: 0.5), .init(x: 1, y: 1)]
+                .map { .init(x: $0.x, y: descending ? 1 - $0.y : $0.y) }
+            // The extremum has zero left tangent; the right tangent limits to3*secant, so y=.1*t³.
+            let t = 4.0 / 9, expected = 0.1 * t * t * t
+            XCTAssertEqual(MonotoneCubic(points: points).value(at: 5 * tiny),
+                           descending ? 1 - expected : expected, accuracy: 1e-12,
+                           "a zero extremum tangent stays zero beside an unrepresentable derivative")
+            XCTAssertEqual(MonotoneCubic(points: points).value(at: 0.5),
+                           descending ? 0.0625 : 0.9375, accuracy: 1e-12,
+                           "a tiny scaled ratio retains precision before the long-span tangent is recovered")
+        }
+    }
+
+    /// Secants themselves may be finite while their arithmetic mean or squared limiter norm is not.
+    /// Independent high-precision evaluation of the same FC equations gives these midpoint values.
+    func testFiniteToneCurveMeansAndLimiterNormsDoNotLoseTheirTangents() {
+        let fixtures: [(points: [CurvePoint], midpoint: Double)] = [
+            ([.init(x: 0, y: 0), .init(x: 1e-200, y: 0.5), .init(x: 1, y: 1)], 0.9375),
+            ([.init(x: 0, y: 0), .init(x: 1e-309, y: 0.1), .init(x: 2e-309, y: 0.2), .init(x: 1, y: 1)], 0.9),
+        ]
+        let meanCurve = MonotoneCubic(points: fixtures[1].points)
+        XCTAssertEqual(meanCurve.value(at: 0.5e-309), 0.05, accuracy: 1e-12,
+                       "the finite mean remains on the first narrow span, not just on the long tail")
+        XCTAssertEqual(meanCurve.value(at: 1.5e-309), 0.1625, accuracy: 1e-12,
+                       "the internal narrow span retains h*m=.1 from its overflow-safe mean")
+        for fixture in fixtures {
+            for descending in [false, true] {
+                let points = fixture.points.map { CurvePoint(x: $0.x, y: descending ? 1 - $0.y : $0.y) }
+                let curve = MonotoneCubic(points: points)
+                XCTAssertEqual(curve.value(at: 0.5), descending ? 1 - fixture.midpoint : fixture.midpoint,
+                               accuracy: 1e-12, "finite mean/norm arithmetic must preserve the signed limiting circle")
+                var previous = curve.value(at: 0)
+                for sample in 1...256 {
+                    let value = curve.value(at: Double(sample) / 256)
+                    XCTAssertTrue(value.isFinite, "finite input knots have a finite interpolated value")
+                    XCTAssertGreaterThanOrEqual(value, 0)
+                    XCTAssertLessThanOrEqual(value, 1)
+                    XCTAssertGreaterThanOrEqual(descending ? previous - value : value - previous, -1e-12,
+                                                "the curve keeps its original monotone direction")
+                    previous = value
+                }
+            }
+        }
+    }
+
+    /// At ordinary LUT inputs these narrow spans have vanished: the remaining cubic is exactly
+    /// 1-amplitude*(1-x)^3 to byte precision. This independently pins all table and CPU output bytes.
+    func testFiniteNarrowToneCurvesBuildAndPaintTheExpectedTransferTable() {
+        let fixtures: [(points: [CurvePoint], amplitude: Double)] = [
+            ([.init(x: 0, y: 0), .init(x: Double.leastNonzeroMagnitude, y: 0.5), .init(x: 1, y: 1)], 0.5),
+            ([.init(x: 0, y: 0), .init(x: 1e-200, y: 0.5), .init(x: 1, y: 1)], 0.5),
+            ([.init(x: 0, y: 0), .init(x: 1e-309, y: 0.1), .init(x: 2e-309, y: 0.2), .init(x: 1, y: 1)], 0.8),
+        ]
+        for fixture in fixtures {
+            for descending in [false, true] {
+                let points = fixture.points.map { CurvePoint(x: $0.x, y: descending ? 1 - $0.y : $0.y) }
+                let curve = MonotoneCubic(points: points)
+                // Refuse the unsafe integer conversion after a meaningful failure on the old code.
+                guard (0..<256).allSatisfy({ curve.value(at: Double($0) / 255).isFinite }) else {
+                    XCTFail("PREMISE: all finite curve samples must reach the LUT as finite values")
+                    return
+                }
+                var expected: [UInt8] = [], source: [UInt8] = []
+                for input in 0..<256 {
+                    let x = Double(input) / 255, tail = 1 - x
+                    let risen = input == 0 ? 0 : 1 - fixture.amplitude * tail * tail * tail
+                    let output = UInt8(((descending ? 1 - risen : risen) * 255).rounded())
+                    expected += [output, output, output, 255]
+                    source += [UInt8(input), UInt8(input), UInt8(input), 255]
+                }
+                let effect = Effect.curves(.init(points: points))
+                XCTAssertTrue(effect.lookupTable == expected, "every LUT byte follows the independent bounded cubic")
+                XCTAssertTrue(EffectReference.apply(effect, to: source, width: 256, height: 1) == expected,
+                              "the CPU consumer paints that same finite cubic without losing its sign")
+            }
+        }
+    }
+
+    /// Frozen source-equation controls for the unchanged ordinary Double operation order. The
+    /// digest observes every RGBA table byte without printing a large array on an intentional red.
+    func testOrdinaryToneCurveTransferBytesRemainUnchanged() {
+        let fixtures: [(points: [CurvePoint], digest: UInt64)] = [
+            ([.init(x: 0, y: 0), .init(x: 1, y: 1)], 1358121096097866021),
+            ([.init(x: 0, y: 0), .init(x: 0.25, y: 0.05), .init(x: 0.3, y: 0.7), .init(x: 1, y: 1)], 2352671168720293732),
+            ([.init(x: 0, y: 0), .init(x: 0.1, y: 0.9), .init(x: 0.9, y: 0.1), .init(x: 1, y: 1)], 4041752290282999573),
+            ([.init(x: 0, y: 0), .init(x: 0.05, y: 0.5), .init(x: 0.55, y: 1), .init(x: 1, y: 1)], 13898826385799903884),
+        ]
+        for fixture in fixtures {
+            let table = Effect.curves(.init(points: fixture.points)).lookupTable
+            let digest = table.reduce(UInt64(14695981039346656037)) { ($0 ^ UInt64($1)) &* 1099511628211 }
+            XCTAssertEqual(digest, fixture.digest, "the existing ordinary curve keeps all transfer bytes")
+        }
+    }
+
     // MARK: - Persistence
     //
     // §4.4's wrappers are what will own a stored effect and neither exists, so nothing writes one into

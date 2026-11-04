@@ -420,6 +420,7 @@ struct EffectSettingsBar: View {
                             title: { $0.rawValue.capitalized },
                             identifier: { "effectSettings.screen.\($0.rawValue)" }) { screen in
                     params.screen = screen; onChange(.posterize(params))
+                    onEditEnded()
                 }
             }
             if params.screen != .none {
