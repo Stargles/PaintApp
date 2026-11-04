@@ -3847,9 +3847,7 @@ final class PerfBaselineTests: XCTestCase {
                 }
                 // An identity placement takes `resized(to:placing:)`'s own early-out — `baked
                 // .isIdentity ? _elements` — so this is the per-cel floor: the lock, the element
-                // array retained rather than rebuilt, one `VectorCanvas`. **It is also, to within
-                // that one allocation, exactly what a translation-only `_transform` would cost**,
-                // because that shape hands the same array on and puts the shift in a matrix.
+                // array retained rather than rebuilt, one `VectorCanvas`.
                 func walkVectorFloor() {
                     let identity = CGRect(origin: .zero, size: owners)
                     for layer in manager.layers {
