@@ -889,12 +889,12 @@ final class SelectionEditLogicTests: XCTestCase {
             XCTAssertEqual(manager.selection?.objects?.elements, Set([right.id]), "Undo restores the subtracted source object")
             XCTAssertEqual(manager.selectionStyle.editableObjects[.text], right.id)
             XCTAssertTrue(manager.editSelectedObject(.text))
-            manager.textRecipe.string = "BC"
+            manager.textRecipe.string = "C"
             manager.textRecipeDidChange()
             manager.commitInteractiveText()
             XCTAssertEqual(vector.elements.compactMap(\.text).map(\.id), [left.id, right.id])
             XCTAssertEqual(vector.elements.compactMap(\.text).first { $0.id == left.id }, left)
-            XCTAssertEqual(vector.elements.compactMap(\.text).first { $0.id == right.id }?.recipe.string, "BC")
+            XCTAssertEqual(vector.elements.compactMap(\.text).first { $0.id == right.id }?.recipe.string, "C")
             XCTAssertEqual(manager.history.undoStack.count, 2, "one tap selection and one text edit")
             let editedPixels = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
             XCTAssertFalse(editedPixels == beforePixels, "typing changes the actual repeated source letters")
@@ -902,7 +902,7 @@ final class SelectionEditLogicTests: XCTestCase {
             XCTAssertTrue(try selectionInk(vector) == original)
             XCTAssertTrue(try CanvasFixture.rgbaBytes(memoPicture(manager)) == beforePixels)
             manager.redo()
-            XCTAssertEqual(vector.elements.compactMap(\.text).first { $0.id == right.id }?.recipe.string, "BC")
+            XCTAssertEqual(vector.elements.compactMap(\.text).first { $0.id == right.id }?.recipe.string, "C")
             XCTAssertTrue(try CanvasFixture.rgbaBytes(memoPicture(manager)) == editedPixels)
         }
     }
