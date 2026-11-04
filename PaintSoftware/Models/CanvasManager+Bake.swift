@@ -216,7 +216,7 @@ extension CanvasManager {
                 layers[at.layer].cels[at.cel].pendingPoseBaselines = [:]
             }
             layers[at.layer].cels[at.cel].vector =
-                VectorCanvas(size: vector.size, elements: elements, transform: vector.transform)
+                VectorCanvas(size: vector.size, elements: elements)
         } else {
             guard !cel.isCertainlyBlank else { return true }
             let image: UIImage

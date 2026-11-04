@@ -2018,8 +2018,7 @@ extension CanvasManager {
             return
         }
         guard let float = vectorFloat else { return }
-        // Aspect 1, not the lift's: a float always lifts unstretched, since the box is built from
-        // `layerTransform(pivot:)` and that reads a similarity. See `beginVectorLassoMove`.
+        // Every lift starts unstretched; Reset restores that whole shape.
         // `distort: nil` for the same reason `aspect: 1` is here: "snap it back to where I picked it
         // up" includes the shape it was picked up in, and a lift is always undistorted.
         applyToVectorFloat(transform: float.liftFrameTransform, aspect: 1, stretchAxis: 0,

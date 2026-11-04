@@ -361,28 +361,4 @@ final class VectorTextPersistenceLogicTests: XCTestCase {
         XCTAssertEqual(kinds(canvas.elements), ["fill"])
     }
 
-    // MARK: - The layer's own transform
-
-    /// Storage is local space and `render()` applies the layer transform afterwards, so a frame
-    /// captured where the finger was has to be mapped in — the same rule `addStroke(canvasSpaceStroke:)`
-    /// and `addFill(canvasSpacePath:)` already follow. A round trip through both directions is exact.
-    func testCanvasSpaceAndLocalSpaceRoundTrip() {
-        let canvas = VectorCanvas(size: Self.canvasSize, elements: [],
-                                  transform: CGAffineTransform(translationX: 100, y: -40)
-                                    .concatenating(CGAffineTransform(scaleX: 2, y: 2)))
-        let element = text()
-        let local = canvas.localText(fromCanvas: element)
-        let back = canvas.canvasText(fromLocal: local)
-
-        XCTAssertNotEqual(local.frame.corners, element.frame.corners,
-                          "A non-identity layer transform must actually move the stored frame.")
-        for (a, b) in zip(back.frame.corners, element.frame.corners) {
-            XCTAssertEqual(a.x, b.x, accuracy: 1e-9)
-            XCTAssertEqual(a.y, b.y, accuracy: 1e-9)
-        }
-        XCTAssertEqual(back.frame.size.width, element.frame.size.width, accuracy: 1e-9)
-        XCTAssertEqual(back.recipe.typography.pointSize, element.recipe.typography.pointSize,
-                       accuracy: 1e-9,
-                       "The point size travels with the box, or a scaled layer re-lays the glyphs out wrong.")
-    }
 }

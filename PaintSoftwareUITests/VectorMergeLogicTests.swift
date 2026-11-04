@@ -515,17 +515,6 @@ final class VectorMergeLogicTests: XCTestCase {
         XCTAssertTrue(hiddenBelow.layers[0].isVisible)
     }
 
-    /// `render()` applies `_transform` by resampling the finished content, so two differently
-    /// transformed lists are not one list. Nothing in the app writes `setTransform`, so this guards a
-    /// state only a test can build — which is exactly why it needs a test.
-    func testDifferingCanvasTransformsFallBackToPixels() throws {
-        let manager = plainPair()
-        manager.layers[1].cels[0].vector?.setTransform(CGAffineTransform(translationX: 6, y: 0))
-
-        try assertSurvivorMatchesTheCompositeItReplaced(manager, "a transformed upper canvas")
-
-        XCTAssertEqual(manager.layers[0].kind, .raster)
-    }
 
     /// **The float settle, which the vector arm has to say for itself.**
     ///

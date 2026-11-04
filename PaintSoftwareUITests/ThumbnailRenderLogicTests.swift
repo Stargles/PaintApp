@@ -17,8 +17,7 @@ import UIKit
 /// *canvas's* resolution and resampling it into a 480-point box. A wall-clock bound would say that on
 /// this machine and nothing at all on the owner's iPad 9, and CLAUDE.md forbids one in the fast tier
 /// besides. `VectorCanvas.rasterizations` counts canvas-sized walks and `reducedRasterizations`
-/// counts the small ones, so "which size was asked for" is a number — `localContentBoundsRasterizations`'
-/// idiom, one seam along. The timings live in `ThumbnailRenderBench`.
+/// counts the small ones, so "which size was asked for" is a number. The timings live in `ThumbnailRenderBench`.
 final class ThumbnailRenderLogicTests: XCTestCase {
 
     /// **`CanvasManager.maxCanvasExtent`, which is what the owner's `Test1` is** — 36 megapixels, and

@@ -615,7 +615,7 @@ final class CanvasManager: ObservableObject {
                                                                                    y: centre.y + cascade),
                                                                  scale: fit, rotation: 0))
         let shown = placedInLayerSpace(.image(drawn), onLayerAt: surface.layerIndex).image ?? drawn
-        let element = vector.addImage(canvasSpaceElement: shown)
+        let element = vector.addImage(shown)
         scheduleThumbnailRegen(layerIndex: surface.layerIndex, celIndex: surface.celIndex)
         // VectorCanvas is a reference type; nudge SwiftUI so the canvas view reconciles + re-renders.
         objectWillChange.send()
@@ -4680,8 +4680,8 @@ final class CanvasManager: ObservableObject {
     var textGestureLayerID: UUID?
     var textGestureCelID: UUID?
     /// The pose this text is shown through, captured on opening: the element's complete group/cel/
-    /// container pose for a re-edit, or `inkPose` for a new ungrouped box. The carried vector transform
-    /// is applied after it for display and removed before its inverse when the edit lands.
+    /// container pose for a re-edit, or `inkPose` for a new ungrouped box. The pose is removed
+    /// through its inverse when the edit lands.
     var textGesturePose: PoseMap?
     /// The handle drag in flight, or nil. Holds the **whole starting quad and the anchor**, latched
     /// at touch-down, so a mid-drag pinch-zoom cannot move the reference frame under the gesture

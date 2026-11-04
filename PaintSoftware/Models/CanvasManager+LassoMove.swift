@@ -210,17 +210,10 @@ struct VectorFloatPart {
     /// simply refused a posed frame, in silence — the owner's *"try to select it in an inbetween, it
     /// does not let you"*.
     ///
-    /// **Frozen for this accepted context, like `liftedInside` and `baseTransform`.** A same-cel
+    /// **Frozen for this accepted context, like `liftedInside`.** A same-cel
     /// scrub lands authored movement and prepares these same IDs at the incoming shown time, keeping
     /// the box up. A nudge never re-reads time or re-interprets an earlier gesture.
     let poses: [UUID: PoseMap]
-
-    /// `vector.transform` at the moment of the lift. Every delta this part's geometry is written
-    /// through is measured from here — and since the box is measured in the *first* part's space, a
-    /// part whose canvas carries a different transform conjugates the box's delta by the two
-    /// (`CanvasManager.localDelta(for:)`). Identical across every part of a folder Move on any
-    /// document a Move has written since 2026-08-27, when Move stopped writing this field at all.
-    let baseTransform: CGAffineTransform
 
     /// The whole display list before the split — what a cancel or an undo past the first nudge puts
     /// back, verbatim.
@@ -260,8 +253,7 @@ struct VectorFloat {
     /// **The layers this float carries, one for every lift but a folder's** — TODO (71) — **and under
     /// a folder's All Frames Move the cels on other frames as well** (TODO (135)), each a part with
     /// `isShown` false. The parts on the glass come first, so `parts[0]` is always one. Never empty.
-    /// `parts[0]` is the layer the box was measured in: its `baseTransform` is the one the box's
-    /// placement is expressed against. `handleActiveContextChanged` uses its stable IDs for the
+    /// `parts[0]` identifies the shown cel. `handleActiveContextChanged` uses its stable IDs for the
     /// terminal target guard; an ordinary held-cel Move prepares the same IDs when its shown time
     /// changes, while a folder retains its separate active-layer guard.
     var parts: [VectorFloatPart]
@@ -293,20 +285,13 @@ struct VectorFloat {
     /// the geometry is.
     let ink: MoveBoxInk
 
-    /// `parts[0].baseTransform` — the space the box's placement is expressed in.
-    var baseTransform: CGAffineTransform { parts[0].baseTransform }
-
-    /// Where the box is now. `frame.transform` at lift satisfies
-    /// `VectorCanvas.affine(from: frame.transform, pivot: pivot) == baseTransform`.
+    /// Where the Move box places the lifted geometry now.
     var frame: ObjectTransformFrame
 
     /// `frame.transform` exactly as the lift produced it — where **Reset** puts the piece back to,
     /// and the angle `FixedAngleRotation` measures its grid from.
     ///
-    /// Held separately rather than re-derived from `baseTransform` and `pivot` at the moment Reset is
-    /// pressed: the two agree at lift by construction, and re-deriving would make Reset's answer
-    /// depend on a `layerTransform(pivot:)` round trip that a later whole-layer transform could have
-    /// moved underneath it.
+    /// Held exactly as lifted so Reset and fixed-angle steps share the same anchor.
     let liftFrameTransform: LayerTransform
 
     /// What **Mirror** has done to the piece, in the layer's own local space, about `pivot`. Identity
@@ -439,9 +424,9 @@ extension CanvasManager {
         let vector = target.vector
 
         // The loop in the space the ink is stored in, pulled back into each element's own space for a
-        // cel a pose channel is carrying (`lassoLoops(of:in:posedBy:)`): the artist drew around ink
+        // cel a pose channel is carrying (`lassoLoops(of:posedBy:)`): the artist drew around ink
         // they can see, and the display list this is about to test is at rest.
-        let loops = Self.lassoLoops(of: selection, in: vector, posedBy: target.poses)
+        let loops = Self.lassoLoops(of: selection, posedBy: target.poses)
         guard let split = vector.splitForLassoMove(insideLoops: loops,
                                                    membership: selectionMembership) else {
             noteALassoThatCaughtNothing(vector: vector, loops: loops)
@@ -482,7 +467,6 @@ extension CanvasManager {
             vector.bumpVersion()
             return false
         }
-        let pivot = CGPoint(x: bounds.midX, y: bounds.midY)
         // Every handle: the four corners scale the piece uniformly about its centre and the knob turns
         // it, the same six the whole-cel box has always offered. What used to restrict this to the
         // move band was a real correctness bound and is now discharged — `VectorCanvas.mapping`
@@ -490,30 +474,26 @@ extension CanvasManager {
         // angle, and its doc comment is where the exactness argument and its floors live.
         let part = VectorFloatPart(layerID: target.layerID, celID: target.celID,
                                    insideIDs: split.insideIDs, liftedInside: lifted, poses: poses,
-                                   baseTransform: vector.transform,
                                    elementsBeforeLift: elementsBeforeLift,
                                    sourceVersion: vector.contentVersion, mayDiverge: split.mayDiverge,
                                    displayed: target.displayed)
         vectorFloat = Self.float(parts: [part], ink: ink, bounds: bounds,
-                                 boxTransform: vector.layerTransform(pivot: pivot),
                                  selectionBeforeLift: selection)
         celContentChangedOutsideStroke(layerID: target.layerID, celID: target.celID)
         refreshUndoRedoState()
         return true
     }
 
-    /// **The float, from its parts and its measured box.** The box lifts unstretched
-    /// (`ObjectTransformFrame.aspect` defaults to 1) whatever the layer's own transform is, because
-    /// `layerTransform(pivot:)` reads a similarity — so Reset's target is 1 and needs no stored field
-    /// of its own beside `liftFrameTransform`. Every handle is offered: the four corners scale the
-    /// piece about its centre and the knob turns it, the six the whole-cel box has always had.
+    /// Builds the float from its parts and measured box. It lifts unstretched at the ink's pivot;
+    /// every scale/rotation handle is offered, and Reset restores this exact lift frame.
     private static func float(parts: [VectorFloatPart], ink: MoveBoxInk, bounds: CGRect,
-                              boxTransform: LayerTransform,
                               selectionBeforeLift: Selection?,
                               folder: FolderLift? = nil) -> VectorFloat {
-        let frame = ObjectTransformFrame(transform: boxTransform, contentSize: bounds.size)
+        let pivot = CGPoint(x: bounds.midX, y: bounds.midY)
+        let frame = ObjectTransformFrame(transform: LayerTransform(position: pivot, scale: 1, rotation: 0),
+                                         contentSize: bounds.size)
         return VectorFloat(parts: parts,
-                           pivot: CGPoint(x: bounds.midX, y: bounds.midY), contentSize: bounds.size,
+                           pivot: pivot, contentSize: bounds.size,
                            ink: ink, frame: frame,
                            liftFrameTransform: frame.transform, mirror: .identity,
                            selectionBeforeLift: selectionBeforeLift, folder: folder, wantsLatch: true,
@@ -564,7 +544,7 @@ extension CanvasManager {
         guard let selection, let target = activeVectorMoveTarget(),
               selection.acts(onLayer: target.layerID, cel: target.celID) else { return false }
         let source = target.vector
-        let loops = Self.lassoLoops(of: selection, in: source, posedBy: target.poses)
+        let loops = Self.lassoLoops(of: selection, posedBy: target.poses)
         guard let split = source.splitForLassoMove(insideLoops: loops, membership: selectionMembership) else {
             noteALassoThatCaughtNothing(vector: source, loops: loops)
             return false
@@ -593,7 +573,7 @@ extension CanvasManager {
         guard let selection, let shown = displayedCel(actedOnBy: selection, in: walk),
               let target = vectorMoveTarget(displayed: shown) else { return false }
         let source = target.vector
-        let loops = Self.lassoLoops(of: selection, in: source, posedBy: target.poses)
+        let loops = Self.lassoLoops(of: selection, posedBy: target.poses)
         guard let split = source.splitForLassoMove(insideLoops: loops, membership: selectionMembership) else {
             noteALassoThatCaughtNothing(vector: source, loops: loops)
             return false
@@ -624,7 +604,7 @@ extension CanvasManager {
         guard admitChildChange(inContainer: layers[at.layer].parentFolderID) else { return false }
         let sourceCel = layers[at.layer].cels[at.cel]
         let elementsBefore = source.elements
-        let canvas = VectorCanvas(size: source.size, elements: prepared, transform: source.transform)
+        let canvas = VectorCanvas(size: source.size, elements: prepared)
         let cel = Cel(id: UUID(), startFrame: sourceCel.startFrame, frameCount: sourceCel.frameCount,
                       raster: .empty(size: canvasSize ?? source.size), vector: canvas)
         let layer = Layer(id: UUID(), name: defaultLayerName(for: .vector), opacity: 1,
@@ -808,19 +788,7 @@ extension CanvasManager {
     ///
     /// The owner's own framing, 2026-08-27: *"the move tool without the lasso tool would pretty much
     /// use the exact same code as if the entire canvas was lassoed around, then move was clicked
-    /// on"*. This is that, and the point of it is the defect it retires. The old whole-cel path wrote
-    /// `VectorCanvas._transform`, and `render()` rasterizes the display list into a context of
-    /// exactly `size` at the *local* origin and applies `_transform` to the finished bitmap
-    /// afterwards — so the clip happens in local space, **before** the transform. After a shrink by
-    /// *k*, `addStroke(canvasSpaceStroke:)` stores `canvasPoint · _transform⁻¹`, and everything
-    /// landing outside the local canvas rect is clipped away at the next render. What survives is the
-    /// canvas rect scaled by *k* about the original ink's bounding-box centre, which is verbatim what
-    /// the owner reported: *"only the part of the line in a box around the original object gets
-    /// baked"*.
-    ///
-    /// A float moves **geometry**, so `_transform` is never written and no clip is ever introduced.
-    /// `LASSO_MOVE.md` §5.1's ruling that Move with no selection moves the whole cel is unchanged —
-    /// only the machinery under it is.
+    /// on"*. The whole display list travels through the same geometry owner as a lassoed piece.
     ///
     /// **`selectionBeforeLift` is nil**, which is the whole of what this shares with the lasso arm
     /// apart from the lift: there is no loop, so there is nothing to travel and nothing to put back.
@@ -828,9 +796,8 @@ extension CanvasManager {
     ///
     /// **Three accepted costs, ruled on by the owner before this shipped** — none of them are bugs:
     ///
-    ///   * *The box inflates — on a fresh lift of tilted content, and not otherwise.* The old pivot
-    ///     and size came from `localContentBounds()`, an alpha scan that is invariant under
-    ///     `_transform`; a float's come from `localBounds(of:)`, a geometric AABB padded by
+    ///   * *The box inflates — on a fresh lift of tilted content, and not otherwise.* Its pivot
+    ///     and size come from `localBounds(of:)`, a geometric AABB padded by
     ///     `stampRadius`. **Within one lift the *stored* box is fixed**: `contentSize` is written here
     ///     and at the lasso lift and nowhere else, and `applyToVectorFloat` writes only the transform,
     ///     the aspect and the mirror — so no drag, Rotate press or Mirror can grow it
@@ -963,7 +930,7 @@ extension CanvasManager {
                 let part = VectorFloatPart(layerID: layerID, celID: cel.id,
                                            insideIDs: lift.insideIDs,
                                            liftedInside: Dictionary(uniqueKeysWithValues: carried.map { ($0.id, $0) }),
-                                           poses: poses, baseTransform: vector.transform,
+                                           poses: poses,
                                            elementsBeforeLift: vector.elements,
                                            sourceVersion: vector.contentVersion, mayDiverge: lift.mayDiverge,
                                            displayed: carriedDisplay)
@@ -976,15 +943,8 @@ extension CanvasManager {
                 posedByShownPart.append(Self.posed(carried, by: poses))
             }
         }
-        guard let first = shown.first, let firstCanvas = vectorCanvas(of: first) else { return false }
-        // **One box over every part on the glass, in the first part's space.** A part stored under
-        // another canvas transform is carried into it before it is measured — the identity, and
-        // untouched, on every document Move has written since it stopped writing that transform.
-        var measured: [VectorElement] = []
-        for (part, posed) in zip(shown, posedByShownPart) {
-            let into = Self.localDeltaFactors(for: part, against: first.baseTransform).prefix
-            measured += into.isIdentity ? posed : posed.map { VectorCanvas.mapping($0, throughStretch: into) }
-        }
+        // Every part is measured where its active pose shows it on the canvas.
+        let measured = posedByShownPart.flatMap { $0 }
         let ink = MoveBoxInk(of: measured)
         // Nothing has been suppressed yet, so a folder with nothing measurable in it is a plain
         // refusal with nothing to put back.
@@ -999,9 +959,7 @@ extension CanvasManager {
             vector.suppressedElementIDs = shown[index].insideIDs
             shown[index].sourceVersion = vector.contentVersion
         }
-        let pivot = CGPoint(x: bounds.midX, y: bounds.midY)
         vectorFloat = Self.float(parts: shown + elsewhere, ink: ink, bounds: bounds,
-                                 boxTransform: firstCanvas.layerTransform(pivot: pivot),
                                  selectionBeforeLift: nil,
                                  folder: FolderLift(folderID: folderID, scope: scope))
         for part in shown {
@@ -1113,15 +1071,13 @@ extension CanvasManager {
         guard let bounds = ink.bounds() else {
             return nil
         }
-        let pivot = CGPoint(x: bounds.midX, y: bounds.midY)
         let part = VectorFloatPart(layerID: target.layerID, celID: target.celID,
                                    insideIDs: lift.insideIDs, liftedInside: lifted, poses: poses,
-                                   baseTransform: vector.transform,
                                    elementsBeforeLift: elementsBeforeLift,
                                    sourceVersion: vector.contentVersion, mayDiverge: lift.mayDiverge,
                                    displayed: target.displayed)
         return Self.float(parts: [part], ink: ink, bounds: bounds,
-                          boxTransform: vector.layerTransform(pivot: pivot), selectionBeforeLift: selectionBeforeLift)
+                          selectionBeforeLift: selectionBeforeLift)
     }
 
     private func beginVectorFloat(target: (layerID: UUID, celID: UUID, vector: VectorCanvas,
@@ -1219,12 +1175,8 @@ extension CanvasManager {
 
     /// One gesture's worth of movement, written into the model as **one** undo step.
     ///
-    /// The arithmetic, checked against the source rather than assumed: `layerTransform(pivot:)` gives
-    /// `position = pivot·_transform`, and `affine(from:pivot:)` rebuilds `p ↦ M·p + t` for
-    /// `_transform = M + t`, i.e. exactly `_transform`. So at lift `A(frame.transform) == baseTransform`,
-    /// and a box dragged to `t` wants stored geometry mapped by `A(t)·base⁻¹` — which is the identity
-    /// when `t` is the lift's own transform, and is what
-    /// `LassoMoveLogicTests.testAZeroDeltaNudgeChangesNoSampleAndNoPixel` pins.
+    /// The box lifts at its geometry's pivot with unit scale and zero rotation, so a zero-delta
+    /// nudge is identity. Real per-element poses are conjugated through `restDelta`.
     /// `aspect` defaults to the one the float already carries, so a Uniform drag, the rotate knob and
     /// the move band all leave a Freeform stretch alone — the owner's *"a Freeform stretch survives a
     /// switch to Uniform: 3:1 stays 3:1 and scales from there"* (2026-08-26), which falls out of the
@@ -1245,36 +1197,19 @@ extension CanvasManager {
                            mirror: vectorFloat?.mirror ?? .identity)
     }
 
-    /// **The whole map a Distort adds, and it is one expression** —
-    /// `base⁻¹ · B · residue · B⁻¹ · A · mirror`, read right to left, where `A` is the box's affine
-    /// placement (`VectorCanvas.affine(from:aspect:stretchAxis:pivot:)`), `B` is the box as drawn
-    /// (`ObjectTransformFrame.boxToCanvas` of the frozen distort box) and `base` is the layer's own
-    /// transform, which turns a canvas answer back into the space the display list is stored in.
-    ///
-    /// **Read it as a sentence**: mirror the ink, place it on the canvas where the box says, express
-    /// that in the box's own coordinates, warp it by the residue, put it back on the canvas, and store
-    /// it in the layer. Only the middle term is new; the two on each side are the box's own affine and
-    /// its inverse, which is what makes a Move, a scale, a turn and a Freeform compose over a distort
-    /// instead of fighting it.
-    ///
-    /// **It reduces to `localDelta` exactly when the residue is the identity**, because `B` and `B⁻¹`
-    /// then cancel — which is the reduction that lets the affine branch stay bit-for-bit what it was
-    /// rather than being routed through here with a unit quad.
-    ///
-    /// Nil for no distort at all (the caller takes the affine branch) and for a box or a layer
-    /// transform with no inverse (the caller refuses the nudge).
+    /// Maps mirror → placement → box coordinates → projective residue → canvas coordinates.
+    /// Nil for no Distort, or for a box without an inverse; callers refuse an invalid nudge.
     static func distortMap(_ distort: BoxDistort?, transform: LayerTransform, aspect: CGFloat,
                            stretchAxis: CGFloat, placement: CGAffineTransform,
-                           mirror: CGAffineTransform, base: CGAffineTransform) -> Homography? {
+                           mirror: CGAffineTransform) -> Homography? {
         guard let distort else { return nil }
         let box = ObjectTransformFrame.distortFrame(distort, transform: transform, aspect: aspect,
                                                     stretchAxis: stretchAxis)
         guard let boxToCanvas = box.boxToCanvas,
               abs(boxToCanvas.a * boxToCanvas.d - boxToCanvas.b * boxToCanvas.c) > .ulpOfOne,
-              let residue = box.distortResidue,
-              let baseInverse = Self.invertedAffine(base) else { return nil }
+              let residue = box.distortResidue else { return nil }
         let toBox = boxToCanvas.inverted()
-        return Homography(boxToCanvas.concatenating(baseInverse))
+        return Homography(boxToCanvas)
             * residue
             * Homography(mirror.concatenating(placement).concatenating(toBox))
     }
@@ -1295,7 +1230,7 @@ extension CanvasManager {
         // from, and the latch is dropped whenever it changes, so it is a constant factor in both
         // halves of every delta this feeds and cancels.
         return distortMap(distort, transform: transform, aspect: aspect, stretchAxis: stretchAxis,
-                          placement: placement, mirror: .identity, base: .identity)
+                          placement: placement, mirror: .identity)
             ?? Homography(placement)
     }
 
@@ -1383,7 +1318,7 @@ extension CanvasManager {
     /// **`distort` is the fifth**, and it is the one the box cannot express even in principle — see
     /// `VectorFloat.distort`. It arrives here rather than through `frame.transform` for the reason the
     /// other two do, and it composes *inside* the mirror and *outside* nothing: the map a nudge builds
-    /// is `base⁻¹ · A · B · residue · B⁻¹ · A · mirror` read right to left, where `B` is the box as
+    /// is `B · residue · B⁻¹ · A · mirror` read right to left, where `B` is the box as
     /// drawn. No default, unlike the two above: an arm that silently dropped it would flatten the
     /// artist's keystone on the next Rotate 45°, and there is exactly one way to find that out at
     /// compile time.
@@ -1408,9 +1343,8 @@ extension CanvasManager {
         //
         // **`frame.boxAngle` is deliberately absent from this expression**, and it is the one place
         // where its absence is load-bearing rather than merely tidy. The box angle is chrome
-        // (LASSO_MOVE.md §5.19–21): adding it here would break the lift invariant
-        // `VectorCanvas.affine(from: frame.transform, pivot:) == baseTransform`, so a piece would
-        // jump the instant the yellow knob was touched.
+        // (LASSO_MOVE.md §5.19–21): adding it here would move the ink on the gesture after
+        // the yellow knob was touched.
         // `LassoMoveLogicTests.testANonZeroBoxAngleChangesNoSampleAndNoPixel` is the tripwire.
         //
         // **`stretchAxis` is here and is not the same field**, which is the distinction phase 2 rests
@@ -1422,20 +1356,14 @@ extension CanvasManager {
                                             stretchAxis: stretchAxis, pivot: float.pivot)
         var swaps: [VectorFloatSwap] = []
         for (part, vector) in zip(float.parts, canvases) {
-            // **The delta, in this part's own stored space** — `localDeltaFactors(for:in:)`, which is
-            // `mirror · placement · base⁻¹` for the part the box was measured in and a conjugate of
-            // it for a part stored under another transform.
-            let factors = Self.localDeltaFactors(for: part, in: float)
-            let localDelta = factors.prefix.concatenating(mirror)
-                .concatenating(placement.concatenating(factors.base.inverted()))
+            let localDelta = mirror.concatenating(placement)
             // **The projective factor, or nil for every gesture that is not a Distort — which is
             // every gesture in every document until a corner is pulled.** Nil takes the branch below
             // bit for bit, so a Move, a scale, a turn, a Freeform and a Mirror are exactly the
             // documents they were.
             let projected = Self.distortMap(distort, transform: transform, aspect: aspect,
                                             stretchAxis: stretchAxis, placement: placement,
-                                            mirror: factors.prefix.concatenating(mirror),
-                                            base: factors.base)
+                                            mirror: mirror)
             // A quad the drag cannot produce but a decoded or composed pose could — a collapsed box,
             // a pose with no inverse. Refusing the whole nudge beats writing geometry through a map
             // that has no meaning; the artist sees the piece not move and can drag again, which is
@@ -1708,14 +1636,11 @@ extension CanvasManager {
                              width: float.contentSize.width, height: float.contentSize.height)
         for part in float.parts {
             guard let shown = part.displayed else { continue }
-            let factors = Self.localDeltaFactors(for: part, in: float)
-            let localDelta = factors.prefix.concatenating(float.mirror)
-                .concatenating(placement.concatenating(factors.base.inverted()))
+            let localDelta = float.mirror.concatenating(placement)
             let projected = Self.distortMap(float.distort, transform: float.frame.transform,
                                             aspect: float.frame.aspect,
                                             stretchAxis: float.frame.stretchAxis, placement: placement,
-                                            mirror: factors.prefix.concatenating(float.mirror),
-                                            base: factors.base)
+                                            mirror: float.mirror)
             let map = projected.map(PoseMap.init) ?? PoseMap(localDelta)
             guard !map.isIdentity else { continue }
             // **Ask before creating anything.** The route is a function of the *existing* channel, and
@@ -1824,10 +1749,8 @@ extension CanvasManager {
                             aspect: CGFloat? = nil,
                             stretchAxis: CGFloat? = nil,
                             mirror: CGAffineTransform? = nil) -> CGAffineTransform {
-        // Canvas → local (where the reflection is expressed, about `pivot`) → canvas. Exactly the
-        // sandwich `applyToVectorFloat` builds for the geometry, read one space out.
-        float.baseTransform.inverted()
-            .concatenating(mirror ?? float.mirror)
+        // The reflection precedes placement, exactly as `applyToVectorFloat` writes the geometry.
+        (mirror ?? float.mirror)
             .concatenating(VectorCanvas.affine(from: transform, aspect: aspect ?? float.frame.aspect,
                                                stretchAxis: stretchAxis ?? float.frame.stretchAxis,
                                                pivot: float.pivot))
@@ -1897,31 +1820,6 @@ extension CanvasManager {
         guard let layerIndex = layerIndex(ofID: part.layerID),
               let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == part.celID }) else { return nil }
         return layers[layerIndex].cels[celIndex].vector
-    }
-
-    /// **The box's delta, in the space one part's geometry is stored in.** For the part the box was
-    /// measured in this is `mirror · placement · base⁻¹` — reflect about the pivot, place where the
-    /// box says, and bring the canvas answer back into local space. A part whose canvas carries a
-    /// different transform is first carried into that space and last carried out of its own:
-    /// `B_k · B_0⁻¹ · mirror · placement · B_k⁻¹`, read left to right. **The first is not a special
-    /// case of the second by rounding** — `B_0 · B_0⁻¹` is the identity only to the ulp — so every
-    /// part sharing the box's base takes the first expression bit for bit, which is every part of
-    /// every float on a document Move has written since 2026-08-27.
-    ///
-    /// Returns the two factors separately because the projective arm (`distortMap`) composes them
-    /// around its own residue rather than as one matrix: `prefix` is what is applied *before* the
-    /// mirror, and `base` is what the answer is brought back through.
-    static func localDeltaFactors(for part: VectorFloatPart, in float: VectorFloat)
-        -> (prefix: CGAffineTransform, base: CGAffineTransform) {
-        localDeltaFactors(for: part, against: float.baseTransform)
-    }
-
-    /// `localDeltaFactors(for:in:)` against a base named directly — what a folder lift asks before
-    /// it has a float to ask through.
-    static func localDeltaFactors(for part: VectorFloatPart, against base: CGAffineTransform)
-        -> (prefix: CGAffineTransform, base: CGAffineTransform) {
-        guard part.baseTransform != base else { return (.identity, base) }
-        return (part.baseTransform.concatenating(base.inverted()), part.baseTransform)
     }
 
     /// The local-space bounding box of a set of elements, from their geometry rather than from a

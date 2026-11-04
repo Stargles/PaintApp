@@ -167,8 +167,6 @@ final class CanvasResizeLogicTests: XCTestCase {
                 }
                 if let vector = cel.vector {
                     XCTAssertEqual(vector.size, newSize, "vector tier, \(where_)")
-                    XCTAssertTrue(vector.transform.isIdentity,
-                                  "the shift bakes into the geometry; a cel transform is what clipped later ink — \(where_)")
                 }
                 XCTAssertNil(cel.thumbnail,
                              "a thumbnail of the old extent is stale; it is nil'd for the deferred backfill — \(where_)")
@@ -516,20 +514,8 @@ final class CanvasResizeLogicTests: XCTestCase {
             """)
     }
 
-    /// **§2's second identity: the composition with an existing layer transform.** 324 cases —
-    /// `k_T ∈ {0.31, 1, 2.7}` × `θ ∈ {0°, 17°, 90°, 213°}` × three translations × three resizes ×
-    /// three probe points, the same grid §2 measured on, where it recorded a worst deviation of
-    /// 1.8e-12 pt.
-    ///
-    /// **Two forms are pinned against each other, and neither is redundant.** §2 states the closed
-    /// form as *"scale the elements by `k`, replace `_transform`'s translation with
-    /// `(k·tx + dx, k·ty + dy)`, leave `a, b, c, d` untouched"*. `VectorCanvas.resized(to:placing:)`
-    /// does something stronger — it bakes `_transform ∘ placement` into the elements and hands back an
-    /// **identity** transform, since TODO item (12) stage 3 left the app with no producer of a
-    /// non-identity cel transform. Those are the same rendered point and different stored bytes, so
-    /// this asserts both land on `M(T(p))`: the document's stated derivation stays honest, and the
-    /// shipped primitive is checked against it rather than against itself.
-    func testTheCompositionWithALayerTransformIsSection2sClosedForm() throws {
+    /// Resize maps previously placed canonical geometry through the independently computed M(T(p)); 324 finite cases.
+    func testResizingPreviouslyPlacedGeometryMatchesTheIndependentComposition() throws {
         let translations = [CGPoint(x: 0, y: 0), CGPoint(x: 12, y: -7), CGPoint(x: -33.5, y: 41)]
         let probes = [CGPoint(x: 0, y: 0), CGPoint(x: 13, y: 29), CGPoint(x: 63.5, y: 2.25)]
         var cases = 0
@@ -545,19 +531,16 @@ final class CanvasResizeLogicTests: XCTestCase {
                             cases += 1
                             let expected = p.applying(T).applying(map.transform)
 
-                            // The shipped primitive: bake everything, hand back identity.
+                            // Previously placed canonical geometry, then the real resize owner.
                             let canvas = VectorCanvas(size: old,
-                                                      elements: [.stroke(Self.stroke(at: [p], size: 8))],
-                                                      transform: T)
+                                                      elements: [.stroke(Self.stroke(at: [p.applying(T)], size: 8 * kT))])
                             let out = canvas.resized(to: new, placing: map.contentRect)
-                            XCTAssertTrue(out.transform.isIdentity,
-                                          "the shift bakes into the geometry — \(old) → \(new) \(mode)")
                             let baked = try XCTUnwrap(out.strokes.first).samples[0]
                             worst = max(worst, abs(baked.x - expected.x))
                             worst = max(worst, abs(baked.y - expected.y))
 
-                            // §2's closed form: elements at `k·L`, `_transform`'s translation
-                            // rewritten, linear part untouched.
+                            // Independent closed form: scale before the old linear part,
+                            // then scale its translation and add the new placement.
                             var rewritten = T
                             rewritten.tx = map.scale * T.tx + map.offset.x
                             rewritten.ty = map.scale * T.ty + map.offset.y
@@ -808,7 +791,6 @@ final class CanvasResizeLogicTests: XCTestCase {
                 if let baked = cel.bakedImage { XCTAssertEqual(baked.size, newSize, "bakedImage, \(where_)") }
                 if let vector = cel.vector {
                     XCTAssertEqual(vector.size, newSize, "vector tier, \(where_)")
-                    XCTAssertTrue(vector.transform.isIdentity, "\(where_)")
                 }
             }
         }

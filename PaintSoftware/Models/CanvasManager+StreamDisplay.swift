@@ -49,7 +49,7 @@ extension CanvasManager {
             }
             for elementID in entry.ids {
                 if let rect = entry.vector.streamWindow(id: elementID) {
-                    footprint = footprint.union(rect.applying(entry.vector.transform))
+                    footprint = footprint.union(rect)
                 }
             }
         }

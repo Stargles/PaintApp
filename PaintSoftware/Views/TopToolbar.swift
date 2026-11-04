@@ -182,8 +182,7 @@ struct TopToolbar: View {
         // next time something else forces a commit, producing exactly the "content teleports back"
         // bug this guards against.
         guard canvasManager.commitAllInteractiveState() else { return }
-        // On a vector layer, Move lifts geometry into a float and drags it with the on-canvas box —
-        // no raster floating piece, and, since 2026-08-27, no whole-layer `_transform` either.
+        // Move lifts vector geometry into the shared float and drags it with the on-canvas box.
         if canvasManager.activeLayerIsVector {
             // **The interpolated-cel refusal used to be spelled again here, and it is not any more.**
             // It is `CanvasManager.activeVectorMoveTarget`'s, which both lifts go through, and it
@@ -198,16 +197,7 @@ struct TopToolbar: View {
                 canvasManager.beginVectorLassoMove()
                 return
             }
-            // No loop: the whole cel travels, through the *same* float. This used to toggle
-            // `CanvasManager.isVectorTransforming`, which wrote `VectorCanvas._transform` — and a cel
-            // carrying a shrink clips every later canvas-space stroke to the canvas rect scaled about
-            // the old ink's centre, because `render()` rasterizes the display list at the local origin
-            // and applies the transform to the finished bitmap afterwards. That was live artwork loss
-            // on the owner's iPad (2026-08-27). A float moves geometry and writes no transform, so the
-            // clip has nowhere to come from. See `CanvasManager.beginVectorWholeCelMove`. The flag and
-            // every consumer of it were deleted in TODO item (12) stage 2, once this line had made it
-            // permanently false.
-            //
+            // No loop: the whole cel travels through the same float.
             // The second tap is the `vectorFloat != nil` arm at the top of this method, which is why
             // this is a plain begin rather than a toggle.
             canvasManager.beginVectorWholeCelMove()

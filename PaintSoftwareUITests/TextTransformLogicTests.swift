@@ -649,6 +649,37 @@ final class TextTransformLogicTests: XCTestCase {
                                  "And the column is no wider than the box is tall.")
     }
 
+    /// A vector text element keeps its authored frame affine; the reference uses the literal CTM
+    /// directly rather than TextFrame.affineTransform or another vector canvas.
+    func testVectorTextDrawMatchesAnIndependentLiteralFrameCTM() throws {
+        let box = CGSize(width: 96, height: 32)
+        let placement = CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: 140, ty: 40)
+        let words = recipe("MMMM", pointSize: 24)
+        let corners = TextFrame.uprightCorners(origin: .zero, size: box).map { $0.applying(placement) }
+        let frame = TextFrame(size: box, corners: corners, mode: .affine, autoSize: false)
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: [.text(VectorTextElement(recipe: words, frame: frame))])
+        let actual = try XCTUnwrap(canvas.render())
+        let format = PixelOps.transparentFormat()
+        format.preferredRange = .standard
+        let expected = UIGraphicsImageRenderer(size: Self.canvasSize, format: format).image { context in
+            context.cgContext.concatenate(placement)
+            TextLayout.draw(words, font: TextLayout.resolvedFont(for: words).font,
+                            boxSize: box, clip: true, into: context.cgContext)
+        }
+        let expectedBytes = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(expected.cgImage)))
+        let actualBytes = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(actual.cgImage)))
+        XCTAssertTrue(stride(from: 3, to: expectedBytes.count, by: 4).contains { expectedBytes[$0] > 200 },
+                      "PREMISE: the independent literal frame draws real letters away from the origin")
+        XCTAssertTrue(actualBytes == expectedBytes,
+                      "the vector draw applies the authored text frame once, with no canvas transform state")
+        for (name, picture) in [("vector-text-authored-frame", actual), ("vector-text-literal-ctm", expected)] {
+            let attachment = XCTAttachment(image: picture)
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
     // MARK: - Stage 5: the seam with the new solver
 
     /// **The claim stage 5's entry makes, measured rather than assumed.** ADD_TEXT.md §3 stage 5:

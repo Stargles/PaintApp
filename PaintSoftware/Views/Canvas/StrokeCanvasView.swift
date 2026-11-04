@@ -816,7 +816,7 @@ final class StrokeCanvasView: CanvasPlaneView {
             }
             streamSurfaces[elementID] = surface
         }
-        surface.present(window: window, placement: vectorCanvas.transform) { cg in
+        surface.present(window: window, placement: .identity) { cg in
             vectorCanvas.drawStreamWindow(id: elementID, into: cg, isolating: ids, posedBy: posedBy)
         }
     }
@@ -1264,7 +1264,7 @@ final class StrokeCanvasView: CanvasPlaneView {
 
     // MARK: - The lasso move's floating piece
 
-    /// The layer transform the float's image was rendered at, latched for the float's life. Nil at all
+    /// The live placement affine the float's image was rendered at, latched for the float's life. Nil at all
     /// other times, and its nil-ness is the switch that suppresses `refreshDisplay`.
     private var vectorFloatBase: CGAffineTransform?
 
@@ -1273,8 +1273,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     var hasVectorFloat: Bool { vectorFloatBase != nil }
 
     /// Start showing a lifted piece over this layer, with the source already showing the hole it came
-    /// out of. `image` is canvas-space (`VectorCanvas.renderIsolated(ids:)`), `base` the layer's own
-    /// transform at the moment of the lift.
+    /// out of. `image` is canvas-space (`VectorCanvas.renderIsolated(ids:)`), `base` its live placement affine at the latch.
     ///
     /// **This latch is the whole performance story of a Move.** Three canvas-sized renders for
     /// the entire move — the hole, the float, and the bake — independent of how many times the artist
@@ -2263,7 +2262,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                 guard case .stroke(let stroke)? = CanvasManager.inLayerSpace(.stroke(drawn),
                                                                              shownThrough: timing.poses[run.slot])
                 else { continue }
-                canvas.addStroke(canvasSpaceStroke: stroke)
+                canvas.addStroke(stroke)
                 changed = true
                 // `foldGestureDamage`'s rule against this run's own accumulator rather than the
                 // gesture-wide one: each canvas is restored on its own, so each carries its own
@@ -2665,9 +2664,8 @@ final class StrokeCanvasView: CanvasPlaneView {
                 let stroke = VectorStroke(brush: profile.preset, color: CodableColor(red: Double(r), green: Double(g), blue: Double(b), alpha: Double(a)),
                                           size: gestureBrushSize, opacity: profile.opacity, samples: run,
                                           seed: strokeSeed)
-                // Samples are in canvas space; this overload maps them into layer-local space so a
-                // stroke on an already-moved layer lands under the finger.
-                vectorCanvas.addStroke(canvasSpaceStroke: stroke)
+                // The committed run is stored directly in canonical element coordinates.
+                vectorCanvas.addStroke(stroke)
                 vectorContentChanged = true
                 foldGestureDamage(vectorCanvas)
             }

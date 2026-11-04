@@ -231,10 +231,7 @@ final class InkPoseLogicTests: XCTestCase {
         assertSame(onScreen.frame.corners.first, tap, "the box is not shown at the tap")
     }
 
-    private func groupedTextFixture(
-        carried: CGAffineTransform = CGAffineTransform(rotationAngle: -0.1)
-            .concatenating(CGAffineTransform(translationX: 5, y: 8))
-    ) throws -> (manager: CanvasManager, vector: VectorCanvas,
+    private func groupedTextFixture() throws -> (manager: CanvasManager, vector: VectorCanvas,
                  original: VectorTextElement, shownCorners: [CGPoint],
                  shownThrough: CGAffineTransform) {
         let container = CGAffineTransform(translationX: -8, y: 12)
@@ -250,7 +247,7 @@ final class InkPoseLogicTests: XCTestCase {
         let original = VectorTextElement(recipe: recipe,
             frame: TextFrame(origin: CGPoint(x: 20, y: 30), size: CGSize(width: 58, height: 44), autoSize: false),
             motionGroupID: UUID(), animationGroupID: group.id)
-        let vector = VectorCanvas(size: Self.size, elements: [.text(original)], transform: carried)
+        let vector = VectorCanvas(size: Self.size, elements: [.text(original)])
         fx.manager.layers[0].cels[0].vector = vector
         fx.manager.layers[0].cels[0].transformTracks = [
             TransformChannelID.group(group.id).id: CanvasFixture.poseTrack([(0, PoseQuad(box: Self.box, mappedBy: groupMap))]),
@@ -258,13 +255,13 @@ final class InkPoseLogicTests: XCTestCase {
         ]
         fx.manager.history.removeAll()
         let corners = original.frame.corners.map {
-            $0.applying(groupMap).applying(celMap).applying(container).applying(carried)
+            $0.applying(groupMap).applying(celMap).applying(container)
         }
         return (fx.manager, vector, original, corners,
-                groupMap.concatenating(celMap).concatenating(container).concatenating(carried))
+                groupMap.concatenating(celMap).concatenating(container))
     }
 
-    func testGroupedTextHitAndEditorUseTheCompleteDrawnQuadBeforeTheCarriedTransform() throws {
+    func testGroupedTextHitAndEditorUseTheCompleteDrawnQuad() throws {
         let fx = try groupedTextFixture()
         let manager = fx.manager
         let image = try XCTUnwrap(manager.posedCelContent(for: manager.layers[0].cels[0], atFrame: 0,
@@ -280,7 +277,7 @@ final class InkPoseLogicTests: XCTestCase {
         manager.beginTextSession(at: tap)
         XCTAssertEqual(manager.textEditingElementID, fx.original.id, "the text tool reopens the shown label")
         for (actual, expected) in zip(manager.textFrame.corners, fx.shownCorners) {
-            assertSame(actual, expected, "the editor follows group, cel, container, then carried transform")
+            assertSame(actual, expected, "the editor follows group, cel, then container pose")
         }
         XCTAssertNotEqual(manager.textFrame.corners,
                           TextFrame.uprightCorners(origin: expectedBox.origin, size: expectedBox.size),
@@ -310,13 +307,13 @@ final class InkPoseLogicTests: XCTestCase {
         XCTAssertTrue(manager.commitInteractiveText())
         let stored = try XCTUnwrap(fx.vector.elements.first?.text)
         for (actual, expected) in zip(stored.frame.corners, expectedShown.map({ $0.applying(fx.shownThrough.inverted()) })) {
-            assertSame(actual, expected, "landing undoes carried, container, cel and group in reverse order")
+            assertSame(actual, expected, "landing undoes container, cel and group in reverse order")
         }
         XCTAssertEqual(stored.motionGroupID, fx.original.motionGroupID)
         XCTAssertEqual(stored.animationGroupID, fx.original.animationGroupID)
         let posed = try XCTUnwrap(manager.celPoseMaps(fx.vector.elements, layerID: manager.layers[0].id,
             celID: manager.layers[0].cels[0].id, atFrame: 0)[stored.id])
-        let shown = fx.vector.canvasText(fromLocal: try XCTUnwrap(VectorCanvas.mapping(.text(stored), through: posed)?.text))
+        let shown = try XCTUnwrap(VectorCanvas.mapping(.text(stored), through: posed)?.text)
         for (actual, expected) in zip(shown.frame.corners, expectedShown) {
             assertSame(actual, expected, "the committed drawing round-trips to the edited quad")
         }
@@ -330,10 +327,8 @@ final class InkPoseLogicTests: XCTestCase {
     }
 
     func testGroupedTextNoOpEditUndoRedoAndCurrentPackageKeepIdentityAndPose() throws {
-        let fx = try groupedTextFixture(carried: .identity)
+        let fx = try groupedTextFixture()
         let manager = fx.manager
-        XCTAssertTrue(fx.vector.transform.isIdentity,
-                      "PREMISE: current editor geometry is canonical before the current-package roundtrip")
         XCTAssertTrue(manager.beginEditingText(elementID: fx.original.id))
         XCTAssertTrue(manager.commitInteractiveText())
         XCTAssertEqual(fx.vector.elements.compactMap(\.text), [fx.original], "a no-op is the exact original, without inverse-rounding drift")
@@ -514,8 +509,8 @@ final class InkPoseLogicTests: XCTestCase {
         for (actual, stored) in zip(manager.textFrame.corners, original.frame.corners) {
             let grouped = try XCTUnwrap(groupMap.map(stored))
             let expected = grouped.applying(CGAffineTransform(translationX: 9, y: -4))
-                .applying(CGAffineTransform(translationX: -8, y: 12)).applying(fx.vector.transform)
-            assertSame(actual, expected, "projective group, cel, container and carried pose compose in render order")
+                .applying(CGAffineTransform(translationX: -8, y: 12))
+            assertSame(actual, expected, "projective group, cel and container pose compose in render order")
         }
         XCTAssertTrue(manager.commitInteractiveText())
         XCTAssertEqual(fx.vector.elements.first?.text, original,
@@ -597,8 +592,7 @@ final class InkPoseLogicTests: XCTestCase {
         let original = VectorTextElement(recipe: recipe,
             frame: TextFrame(origin: CGPoint(x: 20, y: 30), size: CGSize(width: 58, height: 44), autoSize: false),
             motionGroupID: UUID(), animationGroupID: group.id)
-        let carried = CGAffineTransform(rotationAngle: 0.1).concatenating(CGAffineTransform(translationX: 5, y: 8))
-        let vector = VectorCanvas(size: Self.size, elements: [.text(original)], transform: carried)
+        let vector = VectorCanvas(size: Self.size, elements: [.text(original)])
         manager.layers[0].cels[0].vector = vector
         let last = sourceOnly ? 2 : 23
         manager.layers[0].cels[0].transformTracks = [
@@ -614,7 +608,7 @@ final class InkPoseLogicTests: XCTestCase {
         manager.history.removeAll()
         // Repeat resolves the cel/group at 2; the poser above Repeat still resolves at 14.
         let corners = original.frame.corners.map {
-            $0.applying(groupMap(2)).applying(celMap(2)).applying(outerMap(14)).applying(carried)
+            $0.applying(groupMap(2)).applying(celMap(2)).applying(outerMap(14))
         }
         return (manager, vector, original, corners)
     }

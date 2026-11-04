@@ -162,8 +162,8 @@ final class WindowSurfaceView: UIView {
     /// **One frame, as the main thread mints it**: where it goes and how it is drawn.
     ///
     /// `window` is the picture's rectangle in the parent's points before `placement`; `placement` is
-    /// the affine the picture is drawn *before* and this layer applies — a vector canvas's own
-    /// (`VectorCanvas.transform`), or the stretch of a reduced composite over the canvas. `draw` runs
+    /// the affine this layer applies after drawing, such as the stretch of a reduced composite
+    /// over the canvas. `draw` runs
     /// on the view's queue with a UIKit context whose origin is the window's top-left corner and
     /// returns the rectangle it actually drew — `VectorCanvas.drawStreamWindow`'s answer — or nil to
     /// abandon; a rectangle other than `window` means the element moved between the two reads, and the

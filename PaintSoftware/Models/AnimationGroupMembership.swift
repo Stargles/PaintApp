@@ -162,7 +162,7 @@ extension CanvasManager {
     /// **Which group the loop's ink is in.** Read once per `SelectPanel` body pass, so the expensive
     /// half is behind three gates and a one-entry memo.
     ///
-    /// The expensive half is genuinely expensive — `localPath(fromCanvas:)`, a `normalized` boolean op
+    /// The expensive half is genuinely expensive — a `normalized` boolean op
     /// over a path that is usually self-intersecting, a per-element pull-back through the frame's
     /// poses, and a containment test per element — which is fine once per `recolorSelection` and not
     /// fine once per layout pass. So:

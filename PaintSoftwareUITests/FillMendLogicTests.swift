@@ -1309,7 +1309,6 @@ final class FillMendLogicTests: XCTestCase {
 
     private func supportReference(_ strokes: [VectorStroke], side: Int = 96,
                                   canvasSize: CGSize? = nil, window: FillWindow? = nil,
-                                  transform: CGAffineTransform = .identity,
                                   emptyReferenceAbove: Bool = false, unknownRects: [CGRect] = []) throws -> CanvasManager.FillReference {
         let manager = CanvasManager()
         let size = canvasSize ?? CGSize(width: side, height: side)
@@ -1319,8 +1318,6 @@ final class FillMendLogicTests: XCTestCase {
         canvas.elements = strokes.map(VectorElement.stroke) + unknownRects.map {
             .fill(VectorFillElement(path: CGPath(rect: $0, transform: nil), color: CodableColor(UIColor.black)))
         }
-        canvas.transform = transform
-        canvas.bumpVersion()
         if !unknownRects.isEmpty { _ = try XCTUnwrap(canvas.render(), "measure actual unknown-object bounds before capture") }
         if emptyReferenceAbove {
             manager.addVectorLayer()
@@ -1671,12 +1668,25 @@ final class FillMendLogicTests: XCTestCase {
             XCTAssertThrowsError(try VectorMendSupport.produce(reference, admission: admission),
                                  "admission refusal returns no partial accepting certificate")
         }
-        let reduced = FillWindow.fitting(CGRect(x: 0, y: 0, width: 96, height: 96),
-                                         in: CGSize(width: 96, height: 96), pixelBudget: 48 * 48)
-        let resampled = try supportReference([stroke], window: reduced, transform: .init(scaleX: 2, y: 2))
-        let unsupported = try VectorMendSupport.produce(resampled.support,
+        let size = CGSize(width: 96, height: 96)
+        let snapshot = VectorCanvas(size: size, strokes: [stroke]).freezeFillReference()
+        var support: VectorMendSupport.Reference.Builder? = try .init(width: 96, height: 96,
+            maximumRecords: 1, admission: .init(bytes: 64 * 1024 * 1024, work: 64_000_000))
+        var completed = false
+        let resampled = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
+            // The image frame doubles while the drawing context halves: their product is identity,
+            // but neither individual stage meets the native reference contract.
+            context.cgContext.scaleBy(x: 0.5, y: 0.5)
+            completed = snapshot.drawFillReference(into: context.cgContext,
+                frameRect: CGRect(x: 0, y: 0, width: 192, height: 192), width: 96, height: 96,
+                excludingElement: nil, support: &support) != nil
+        }
+        XCTAssertTrue(completed, "the actual reference image draw completes")
+        let referenceSupport = try XCTUnwrap(support).finish()
+        let unsupported = try VectorMendSupport.produce(referenceSupport,
             admission: .init(bytes: 64 * 1024 * 1024, work: 64_000_000))
-        XCTAssertTrue(resampled.rgba.contains { $0 != 0 }, "the actual resampled reference still draws")
+        let resampledBytes = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(resampled.cgImage)))
+        XCTAssertTrue(resampledBytes.contains { $0 != 0 }, "the actual resampled reference still draws")
         XCTAssertTrue(unsupported.canonicalCoverage.isEmpty,
                       "opposite image-stage scales cannot forge native support by composing to identity")
 

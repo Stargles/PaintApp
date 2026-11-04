@@ -49,7 +49,7 @@ final class EditSelectedObjectLogicTests: XCTestCase {
     }
 
     private func gradientFill(_ vector: VectorCanvas) -> UUID {
-        vector.addFill(canvasSpacePath: CGPath(rect: CGRect(x: 0, y: 0, width: 64, height: 64), transform: nil),
+        vector.addFill(path: CGPath(rect: CGRect(x: 0, y: 0, width: 64, height: 64), transform: nil),
                        paint: .linearGradient(.spanning(CGRect(x: 0, y: 0, width: 64, height: 64), angle: 0))).id
     }
 
@@ -86,7 +86,7 @@ final class EditSelectedObjectLogicTests: XCTestCase {
     func testNothingEditableMeansNoEntry() {
         let (manager, layerIndex, vector) = vectorFixture()
         vector.addStroke(stroke(y: 10))
-        vector.addFill(canvasSpacePath: CGPath(rect: CGRect(x: 30, y: 30, width: 10, height: 10), transform: nil),
+        vector.addFill(path: CGPath(rect: CGRect(x: 30, y: 30, width: 10, height: 10), transform: nil),
                        color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
         select(manager, layerIndex, everything)
 

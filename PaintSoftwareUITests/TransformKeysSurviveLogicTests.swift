@@ -87,7 +87,7 @@ final class TransformKeysSurviveLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 0)
         manager.addVectorLayer(name: "Ink")
         manager.layers[manager.layers.count - 1].cels[0].vector!.addFill(
-            canvasSpacePath: CGPath(rect: CGRect(x: 4, y: 14, width: 10, height: 10), transform: nil),
+            path: CGPath(rect: CGRect(x: 4, y: 14, width: 10, height: 10), transform: nil),
             color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
 
         manager.addTransformLayer(name: "Still")

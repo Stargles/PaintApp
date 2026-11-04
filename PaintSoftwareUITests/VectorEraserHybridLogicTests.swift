@@ -1562,7 +1562,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let (canvas, _, _) = try erased(scene)
         XCTAssertEqual(canvas.elements.last?.stroke?.composite, .erase, "Setup: a punch is on top")
 
-        canvas.addFill(canvasSpacePath: CGPath(rect: CGRect(origin: .zero, size: scene.canvasSize),
+        canvas.addFill(path: CGPath(rect: CGRect(origin: .zero, size: scene.canvasSize),
                                                transform: nil),
                        color: CodableColor(red: 0.1, green: 0.4, blue: 0.9, alpha: 1))
 

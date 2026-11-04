@@ -66,12 +66,12 @@ final class LiveElementEditLogicTests: XCTestCase {
     private func scene() -> (manager: CanvasManager, layerIndex: Int, vector: VectorCanvas, caught: Set<UUID>) {
         let (manager, layerIndex, vector) = fixture()
         manager.selectionMembership = .enclosed
-        vector.addFill(canvasSpacePath: CGPath(rect: CGRect(x: 20, y: 20, width: 80, height: 60), transform: nil),
+        vector.addFill(path: CGPath(rect: CGRect(x: 20, y: 20, width: 80, height: 60), transform: nil),
                        color: colour(0.8, 0.1, 0.1))
         vector.addStroke(stroke(y: 50, colour: colour(0.1, 0.1, 0.8)))
         let caught = Set(vector.elements.map(\.id))
         vector.addStroke(stroke(y: 40, size: 8, colour: colour(0.05, 0.05, 0.05), from: 70, to: 150))
-        vector.addFill(canvasSpacePath: CGPath(rect: CGRect(x: 150, y: 150, width: 60, height: 60), transform: nil),
+        vector.addFill(path: CGPath(rect: CGRect(x: 150, y: 150, width: 60, height: 60), transform: nil),
                        color: colour(0.1, 0.6, 0.1))
         vector.addStroke(stroke(y: 180, colour: colour(0.1, 0.1, 0.1), from: 120, to: 230))
         select(manager, layerIndex, CGRect(x: 10, y: 10, width: 100, height: 80))
@@ -242,7 +242,7 @@ final class LiveElementEditLogicTests: XCTestCase {
         XCTAssertEqual(live.window, live.window.integral, "whole pixels, so the clip is not antialiased")
         for id in caught {
             let element = try XCTUnwrap(vector.elements.first { $0.id == id })
-            let alone = (try XCTUnwrap(VectorCanvas(size: vector.size, elements: [element], transform: vector.transform).render()))
+            let alone = (try XCTUnwrap(VectorCanvas(size: vector.size, elements: [element]).render()))
             let ink = try XCTUnwrap(PixelOps.opaqueContentBounds(alone), "the element has ink")
             XCTAssertTrue(live.window.insetBy(dx: -1, dy: -1).contains(ink), "the window holds \(ink)")
         }

@@ -184,15 +184,13 @@ final class FolderMoveLogicTests: XCTestCase {
         }
     }
 
-    /// **A part stored under another canvas transform is moved by the same canvas-space delta**, so
-    /// the two layers' ink lands the same distance apart from where it started — the conjugation
-    /// `localDeltaFactors(for:in:)` does for a part whose base differs from the box's. A build that
-    /// applied the box's local delta to every part would move the transformed layer's stored samples
-    /// by 7 in *its* local space, which under a 2× canvas transform is 14 on the canvas.
-    func testALayerUnderAnotherCanvasTransformMovesTheSameCanvasDistance() throws {
+    /// A real cel pose changes each part's stored-space delta while both shown drawings move seven points.
+    func testALayerUnderACelPoseMovesTheSameShownCanvasDistance() throws {
         let fx = try fixture()
         let scaled = fx.inner[1]
-        canvas(fx.manager, scaled).transform = CGAffineTransform(scaleX: 2, y: 2)
+        let box = CGRect(origin: .zero, size: try XCTUnwrap(fx.manager.canvasSize))
+        fx.manager.layers[scaled].cels[0].transformTracks[TransformChannelID.cel.id] =
+            CanvasFixture.poseTrack([(0, PoseQuad(box: box, mappedBy: CGAffineTransform(scaleX: 2, y: 2)))])
         let beforeA = xs(fx.manager, fx.inner[0]), beforeB = xs(fx.manager, scaled)
 
         XCTAssertTrue(fx.manager.beginVectorFolderMove(fx.folder))

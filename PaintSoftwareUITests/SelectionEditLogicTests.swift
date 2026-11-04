@@ -305,7 +305,7 @@ final class SelectionEditLogicTests: XCTestCase {
             let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
             let manager = f.manager
             f.vector.elements = []
-            f.vector.addFill(canvasSpacePath: loop(CGRect(x: 42, y: 20, width: 10, height: 8)), color: colour(0, 0, 1))
+            f.vector.addFill(path: loop(CGRect(x: 42, y: 20, width: 10, height: 8)), color: colour(0, 0, 1))
             let originalID = try XCTUnwrap(f.vector.elements.first?.id)
             manager.layers[0].cels[0].transformTracks.removeValue(forKey: TransformChannelID.group(f.blueGroup).id)
             if !sourceOnly {
@@ -400,7 +400,7 @@ final class SelectionEditLogicTests: XCTestCase {
             let manager = f.manager
             let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
             f.vector.elements = []
-            f.vector.addFill(canvasSpacePath: loop(CGRect(x: 20, y: 20, width: 8, height: 8)), color: colour(0, 0, 1))
+            f.vector.addFill(path: loop(CGRect(x: 20, y: 20, width: 8, height: 8)), color: colour(0, 0, 1))
             manager.layers[0].cels[0].startFrame = 2
             manager.layers[0].cels[0].frameCount = 22
             let sourceID = manager.layers[0].cels[0].id
@@ -508,8 +508,8 @@ final class SelectionEditLogicTests: XCTestCase {
         let manager = f.manager
         let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
         f.vector.elements = []
-        f.vector.addFill(canvasSpacePath: loop(CGRect(x: 2, y: 44, width: 8, height: 8)), color: colour(1, 0, 0))
-        f.vector.addFill(canvasSpacePath: loop(CGRect(x: 20, y: 20, width: 8, height: 8)), color: colour(0, 0, 1))
+        f.vector.addFill(path: loop(CGRect(x: 2, y: 44, width: 8, height: 8)), color: colour(1, 0, 0))
+        f.vector.addFill(path: loop(CGRect(x: 20, y: 20, width: 8, height: 8)), color: colour(0, 0, 1))
         let blue = try XCTUnwrap(f.vector.elements.last?.id)
         f.vector.elements = f.vector.elements.map { $0.id == blue ? $0.taggedForAnimation(f.blueGroup) : $0 }
         f.vector.bumpVersion()
@@ -572,7 +572,7 @@ final class SelectionEditLogicTests: XCTestCase {
             let f = try repeatedSelectionFixture(sourceOnly: false)
             let manager = f.manager
             f.vector.elements = []
-            f.vector.addFill(canvasSpacePath: loop(CGRect(x: 20, y: 20, width: 8, height: 8)), color: colour(0, 0, 1))
+            f.vector.addFill(path: loop(CGRect(x: 20, y: 20, width: 8, height: 8)), color: colour(0, 0, 1))
             manager.layers[0].cels[0].transformTracks = [:]
             manager.layers[1].transform = nil
             manager.layers[2].transform = nil
@@ -620,7 +620,7 @@ final class SelectionEditLogicTests: XCTestCase {
         let f = try repeatedSelectionFixture(sourceOnly: false)
         let manager = f.manager
         f.vector.elements = []
-        f.vector.addFill(canvasSpacePath: loop(CGRect(x: 20, y: 20, width: 8, height: 8)), color: colour(0, 0, 1))
+        f.vector.addFill(path: loop(CGRect(x: 20, y: 20, width: 8, height: 8)), color: colour(0, 0, 1))
         manager.layers[0].cels[0].transformTracks = [:]
         manager.layers[1].transform = nil
         manager.layers[2].transform = nil
@@ -670,7 +670,7 @@ final class SelectionEditLogicTests: XCTestCase {
         let f = try repeatedSelectionFixture(sourceOnly: false)
         let manager = f.manager
         f.vector.elements = []
-        f.vector.addFill(canvasSpacePath: loop(CGRect(x: 20, y: 20, width: 8, height: 8)), color: colour(0, 0, 1))
+        f.vector.addFill(path: loop(CGRect(x: 20, y: 20, width: 8, height: 8)), color: colour(0, 0, 1))
         manager.layers[0].cels[0].transformTracks = [:]
         manager.layers[1].transform = nil
         manager.layers[2].transform = nil
@@ -919,7 +919,7 @@ final class SelectionEditLogicTests: XCTestCase {
             // remaining element share the one pose required by the editor's existing live window.
             vector.elements = []
             let rect = CGRect(x: 42, y: 20, width: 12, height: 8)
-            let id = vector.addFill(canvasSpacePath: loop(rect),
+            let id = vector.addFill(path: loop(rect),
                 paint: .linearGradient(.spanning(rect, angle: 0))).id
             let original = try selectionInk(vector)
             let before = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
@@ -1272,7 +1272,7 @@ final class SelectionEditLogicTests: XCTestCase {
             let manager = f.manager
             if sourceOnly {
                 manager.addCel(layerIndex: 0, startFrame: 14, frameCount: 1)
-                manager.layers[0].cels[1].vector?.addFill(canvasSpacePath: loop(CGRect(x: 0, y: 0, width: 64, height: 64)), color: colour(1, 0, 0))
+                manager.layers[0].cels[1].vector?.addFill(path: loop(CGRect(x: 0, y: 0, width: 64, height: 64)), color: colour(1, 0, 0))
             }
             CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 0,
                 CanvasFixture.solidImage(.red, rect: CGRect(x: 10, y: 10, width: 10, height: 8)))
@@ -1312,7 +1312,7 @@ final class SelectionEditLogicTests: XCTestCase {
             let manager = f.manager
             if sourceOnly {
                 manager.addCel(layerIndex: 0, startFrame: 14, frameCount: 1)
-                manager.layers[0].cels[1].vector?.addFill(canvasSpacePath: loop(CGRect(x: 0, y: 0, width: 64, height: 64)), color: colour(1, 0, 0))
+                manager.layers[0].cels[1].vector?.addFill(path: loop(CGRect(x: 0, y: 0, width: 64, height: 64)), color: colour(1, 0, 0))
             }
             let sourceID = manager.layers[0].cels[0].id
             let original = try selectionInk(f.vector)

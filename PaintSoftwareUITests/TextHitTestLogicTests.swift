@@ -70,9 +70,8 @@ final class TextHitTestLogicTests: XCTestCase {
                                                   autoSize: false))
     }
 
-    private func canvas(_ elements: [VectorElement],
-                        transform: CGAffineTransform = .identity) -> VectorCanvas {
-        VectorCanvas(size: Self.canvasSize, elements: elements, transform: transform)
+    private func canvas(_ elements: [VectorElement]) -> VectorCanvas {
+        VectorCanvas(size: Self.canvasSize, elements: elements)
     }
 
     // MARK: - The rotated box, which is the whole point
@@ -148,15 +147,14 @@ final class TextHitTestLogicTests: XCTestCase {
                      "A zero-area quad has no inside; only the slop collar may reach it.")
     }
 
-    /// The tap arrives in canvas space and the frame is stored in the layer's local space, so the
-    /// layer's own transform has to come off the point first. Without it, tapping a moved layer's
-    /// label opens nothing and the artist gets a second box on top of the first.
-    func testTheLayersOwnTransformIsTakenOffTheTap() {
+    /// The active shown pose moves the tap target while the stored box no longer hits.
+    func testTheShownPoseCarriesTheHitAndLeavesTheStoredBoxBlank() {
         let element = upright(origin: CGPoint(x: 40, y: 40), size: CGSize(width: 80, height: 40))
-        let moved = canvas([.text(element)], transform: CGAffineTransform(translationX: 60, y: 20))
-        XCTAssertEqual(moved.topmostText(atCanvasPoint: CGPoint(x: 120, y: 80), slop: 0)?.id, element.id,
+        let moved = canvas([.text(element)])
+        let poses = [element.id: PoseMap(CGAffineTransform(translationX: 60, y: 20))]
+        XCTAssertEqual(moved.topmostText(atCanvasPoint: CGPoint(x: 120, y: 80), slop: 0, posedBy: poses)?.id, element.id,
                        "The object renders 60 right and 20 down of where it is stored; the tap must follow.")
-        XCTAssertNil(moved.topmostText(atCanvasPoint: CGPoint(x: 60, y: 60), slop: 0),
+        XCTAssertNil(moved.topmostText(atCanvasPoint: CGPoint(x: 60, y: 60), slop: 0, posedBy: poses),
                      "Where it *used* to be is now blank canvas.")
     }
 

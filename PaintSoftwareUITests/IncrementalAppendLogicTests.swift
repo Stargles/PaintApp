@@ -126,9 +126,8 @@ final class IncrementalAppendLogicTests: XCTestCase {
     /// The full re-walk of `canvas`'s display list, guaranteed cold: a freshly constructed canvas
     /// has no memo and no base, so it *cannot* take the fast path. The `dabs` it reports is the
     /// whole layer's dab count, which is what the fast path must not be spending.
-    private func fullReWalk(of canvas: VectorCanvas,
-                            transform: CGAffineTransform = .identity) throws -> (image: UIImage, dabs: Int) {
-        let cold = VectorCanvas(size: canvas.size, elements: canvas.elements, transform: transform)
+    private func fullReWalk(of canvas: VectorCanvas) throws -> (image: UIImage, dabs: Int) {
+        let cold = VectorCanvas(size: canvas.size, elements: canvas.elements)
         let image = (try XCTUnwrap(cold.render()))
         XCTAssertEqual(cold.rasterizations, 1, "the reference arm must have rasterized exactly once")
         return (image, cold.lastRenderDabCount)
@@ -158,16 +157,13 @@ final class IncrementalAppendLogicTests: XCTestCase {
         canvas.addStroke(Self.stroke(3))
         XCTAssertEqual(canvas.lastDamage, .appended(count: 1), "addStroke")
 
-        canvas.addStroke(canvasSpaceStroke: Self.stroke(4))
-        XCTAssertEqual(canvas.lastDamage, .appended(count: 1), "addStroke(canvasSpaceStroke:)")
-
         canvas.addFill(Self.fill())
         XCTAssertEqual(canvas.lastDamage, .appended(count: 1), "addFill — LASSO_FILL.md §2a appends")
 
-        canvas.addFill(canvasSpacePath: CGPath(rect: CGRect(x: 2, y: 2, width: 9, height: 9),
+        canvas.addFill(path: CGPath(rect: CGRect(x: 2, y: 2, width: 9, height: 9),
                                                transform: nil),
                        color: CodableColor(red: 0, green: 0, blue: 1, alpha: 1))
-        XCTAssertEqual(canvas.lastDamage, .appended(count: 1), "addFill(canvasSpacePath:)")
+        XCTAssertEqual(canvas.lastDamage, .appended(count: 1), "addFill(path:)")
 
         var recipe = TextRecipe(string: "hi")
         recipe.typography.pointSize = 10
@@ -198,11 +194,6 @@ final class IncrementalAppendLogicTests: XCTestCase {
         canvas.suppressedElementIDs = [canvas.elements[0].id]
         XCTAssertEqual(canvas.lastDamage, .everything, "suppression hides an element in the middle")
         canvas.suppressedElementIDs = []
-
-        canvas.setTransform(CGAffineTransform(translationX: 3, y: 4))
-        XCTAssertEqual(canvas.lastDamage, .everything,
-                       "a layer transform resamples the whole picture; there is nothing to append to")
-        canvas.setTransform(.identity)
 
         canvas.bumpVersion()
         XCTAssertEqual(canvas.lastDamage, .everything, "bumpVersion is undo's seam and knows nothing")
@@ -454,24 +445,6 @@ final class IncrementalAppendLogicTests: XCTestCase {
         assertIdentical(incremental, reference.image, "a normal stroke appended onto a multiply run")
     }
 
-    /// **A layer transform means the memo is the *resampled* picture**, and resampling a composite
-    /// is not compositing two resampled halves. The base is therefore not available and the append
-    /// re-walks.
-    func testAnAppendOntoATransformedLayerFallsBackToTheFullWalk() throws {
-        let transform = CGAffineTransform(rotationAngle: 0.3).translatedBy(x: 5, y: 7)
-        let canvas = VectorCanvas(size: Self.canvasSize,
-                                  elements: (0..<8).map { .stroke(Self.stroke($0)) },
-                                  transform: transform)
-        _ = canvas.render()
-
-        canvas.addStroke(Self.stroke(32))
-        let incremental = (try XCTUnwrap(canvas.render()))
-
-        let reference = try fullReWalk(of: canvas, transform: transform)
-        XCTAssertEqual(canvas.lastRenderDabCount, reference.dabs,
-                       "a transformed layer has no pre-transform picture to append to")
-        assertIdentical(incremental, reference.image, "an append onto a rotated layer")
-    }
 
     /// An element inserted anywhere but the end is the whole of TODO's dirty-rect item, and until
     /// that exists it must re-walk. An image goes under the line art, so it is the shipped mutation
@@ -614,7 +587,7 @@ final class IncrementalAppendLogicTests: XCTestCase {
             stroke.brush.size = 6
             stroke.size = 6
             let expected = soloDabs(.stroke(stroke))
-            canvas.addStroke(canvasSpaceStroke: stroke)
+            canvas.addStroke(stroke)
             _ = canvas.render()
             // The first stroke on a blank cel is the whole layer, so it cannot be a fast path and
             // must not be counted as one.

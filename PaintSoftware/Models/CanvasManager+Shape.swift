@@ -137,7 +137,7 @@ extension CanvasManager {
         if layers[layerIndex].kind == .vector {
             let before = cel.vector?.elements ?? []
             let prepared = cel.vector?.makeCopy() ?? .empty(size: cel.raster.size)
-            prepared.addStroke(canvasSpaceStroke: stroke)
+            prepared.addStroke(stroke)
             cel.vector = prepared
             staging[celID] = cel
             let elements = prepared.elements

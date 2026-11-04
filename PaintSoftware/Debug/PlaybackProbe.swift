@@ -434,7 +434,7 @@ enum PlaybackProbe {
                                                  y: size.height * (0.15 + 0.7 * t), pressure: 1)],
                                    channels: .pressureOnly))
         let before = vector.elements
-        vector.addStroke(canvasSpaceStroke: stroke)
+        vector.addStroke(stroke)
         canvasManager.registerVectorElementsUndo(
             vectorCanvas: vector, oldElements: before, newElements: vector.elements,
             layerID: canvasManager.layers[layerIndex].id,
@@ -725,7 +725,7 @@ enum PlaybackProbe {
             let cell = CGRect(x: size.width * (0.08 + 0.3 * CGFloat(index % cols)),
                               y: size.height * (0.08 + 0.2 * CGFloat(index / cols)),
                               width: size.width * 0.26, height: size.height * 0.16)
-            vector.addFill(canvasSpacePath: CGPath(roundedRect: cell, cornerWidth: 80, cornerHeight: 80, transform: nil),
+            vector.addFill(path: CGPath(roundedRect: cell, cornerWidth: 80, cornerHeight: 80, transform: nil),
                            color: CodableColor(red: 0.2, green: 0.4, blue: 0.9, alpha: 1))
         }
     }

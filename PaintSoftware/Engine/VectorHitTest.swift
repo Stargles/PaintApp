@@ -62,7 +62,7 @@ enum VectorHitTest {
     /// off it — its quad for text and the placed kinds, which is exact however the box has been
     /// turned, and the box around its ink for a stroke or a fill. What a Tap selection traces: the
     /// loop that stands in for the object, which the selection's rule then reads as it reads any loop
-    /// (`CanvasManager.lassoLoops(of:in:posedBy:)`). Nil for an element with no shape to hold — a
+    /// (`CanvasManager.lassoLoops(of:posedBy:)`). Nil for an element with no shape to hold — a
     /// stroke with no samples, an unreadable fill.
     static func outline(of element: VectorElement) -> CGPath? {
         switch element {

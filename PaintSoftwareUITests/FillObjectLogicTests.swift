@@ -53,8 +53,7 @@ final class FillObjectLogicTests: XCTestCase {
     /// says what the cel says.
     private func heldFlattened(_ manager: CanvasManager) throws -> CGImage? {
         guard let live = manager.liveCelContentEdit, let vector = live.vectorCanvas else { return nil }
-        return (try XCTUnwrap(VectorCanvas(size: vector.size, elements: live.elements,
-                            transform: vector.transform).render())).cgImage
+        return (try XCTUnwrap(VectorCanvas(size: vector.size, elements: live.elements).render())).cgImage
     }
 
     private func pixel(_ image: CGImage, _ x: Int, _ y: Int) -> [Int] {
@@ -535,7 +534,7 @@ final class FillObjectLogicTests: XCTestCase {
     func testAMovedGradientFillRampsWhereItWentNotWhereItWas() throws {
         let (manager, layerIndex, vector) = vectorFixture()
         let rect = CGRect(x: 0, y: 0, width: 32, height: 64)
-        vector.addFill(canvasSpacePath: CGPath(rect: rect, transform: nil),
+        vector.addFill(path: CGPath(rect: rect, transform: nil),
                        paint: .linearGradient(.spanning(rect, angle: 0)))
         let id = try XCTUnwrap(vector.elements.first?.id)
         XCTAssertTrue(manager.beginVectorMove(ofElementIDs: [id]))
@@ -555,7 +554,7 @@ final class FillObjectLogicTests: XCTestCase {
         // resampling a bitmap. The actual image comes from the real Move owner and cel flatten.
         let (stretchedManager, stretchedLayer, stretchedVector) = vectorFixture()
         let diagonalRect = CGRect(x: 16, y: 16, width: 16, height: 16)
-        stretchedVector.addFill(canvasSpacePath: CGPath(rect: diagonalRect, transform: nil),
+        stretchedVector.addFill(path: CGPath(rect: diagonalRect, transform: nil),
                                 paint: .linearGradient(.fresh(from: CGPoint(x: 16, y: 16),
                                                               to: CGPoint(x: 32, y: 32))))
         let originalElements = stretchedVector.elements
@@ -568,13 +567,14 @@ final class FillObjectLogicTests: XCTestCase {
         let stretchedImage = try XCTUnwrap(flattened(stretchedManager, layerIndex: stretchedLayer))
 
         // x2/y1 about (24,24): the original interior point (28,20) lands at (32,20).
-        let referenceCanvas = VectorCanvas(size: CanvasFixture.canvasSize, elements: originalElements,
-            transform: CGAffineTransform(a: 2, b: 0, c: 0, d: 1, tx: -24, ty: 0))
+        let referenceAffine = CGAffineTransform(a: 2, b: 0, c: 0, d: 1, tx: -24, ty: 0)
+        let referenceCanvas = VectorCanvas(size: CanvasFixture.canvasSize, elements: originalElements)
         let original = referenceCanvas.freeze(quality: .full)
         let referenceFormat = PixelOps.transparentFormat()
         referenceFormat.preferredRange = .standard
         let nativeReference = UIGraphicsImageRenderer(size: CanvasFixture.canvasSize,
             format: referenceFormat).image { context in
+                context.cgContext.concatenate(referenceAffine)
                 _ = original.draw(into: context.cgContext,
                                   frameRect: CGRect(origin: .zero, size: CanvasFixture.canvasSize),
                                   quality: .full)
@@ -601,7 +601,7 @@ final class FillObjectLogicTests: XCTestCase {
                                   dy: mappedGradient.to.y - mappedGradient.from.y)
         // Independent source-space projection through the literal reference CTM's inverse. Three
         // noncollinear actual pixel centres distinguish a transported field from pushed endpoints.
-        let inverseReference = referenceCanvas.transform.inverted()
+        let inverseReference = referenceAffine.inverted()
         for point in [CGPoint(x: 32.5, y: 20.5), CGPoint(x: 16.5, y: 20.5), CGPoint(x: 32.5, y: 28.5)] {
             let sourcePoint = point.applying(inverseReference)
             let expectedFraction = ((sourcePoint.x - sourceGradient.from.x) * sourceSpan.dx
@@ -919,7 +919,7 @@ final class FillObjectLogicTests: XCTestCase {
         manager.addVectorLayer()
         let ordinaryLayer = manager.currentLayerIndex
         let ordinary = try XCTUnwrap(manager.layers[ordinaryLayer].cels[0].vector)
-        ordinary.addFill(canvasSpacePath: CGPath(rect: CGRect(x: 8, y: 44, width: 8, height: 8), transform: nil),
+        ordinary.addFill(path: CGPath(rect: CGRect(x: 8, y: 44, width: 8, height: 8), transform: nil),
                          color: CodableColor(red: 0, green: 1, blue: 1, alpha: 1))
         XCTAssertFalse(ordinary.hasCachedImage, "PREMISE: the ordinary reference has not rendered")
         let sources = [(layer: manager.layers[layer], cel: manager.layers[layer].cels[0]),
@@ -1073,7 +1073,7 @@ final class FillObjectLogicTests: XCTestCase {
     func testChangeColourSkipsAGradientAndOpacityReachesIt() throws {
         let (manager, layerIndex, vector) = vectorFixture()
         let rect = CGRect(x: 10, y: 10, width: 40, height: 40)
-        vector.addFill(canvasSpacePath: CGPath(rect: rect, transform: nil),
+        vector.addFill(path: CGPath(rect: rect, transform: nil),
                        paint: .linearGradient(.spanning(rect, angle: 0)))
         let before = try XCTUnwrap(vector.elements.first?.fill?.paint)
         let loop = CGPath(rect: CGRect(x: 2, y: 2, width: 60, height: 60), transform: nil)

@@ -736,7 +736,7 @@ extension CanvasManager {
             guard !path.isEmpty else { return { [weak self] in self?.finishInteractiveFill() } }
             let before = cel.vector?.elements ?? []
             let prepared = cel.vector?.makeCopy() ?? .empty(size: cel.raster.size)
-            let added = prepared.addFill(canvasSpacePath: path, paint: .solid(fillGestureFillColor))
+            let added = prepared.addFill(path: path, paint: .solid(fillGestureFillColor))
             cel.vector = prepared
             staging[celID] = cel
             let elements = prepared.elements
@@ -869,9 +869,8 @@ extension CanvasManager {
         let layerID = layers[layerIndex].id
         let celID = layers[layerIndex].cels[celIndex].id
         let elementsBefore = vectorCanvas.elements
-        // The path is in the layer's own space; `addFill(canvasSpacePath:)` takes it the rest of the way
-        // in through the cel's own `transform`.
-        let added = vectorCanvas.addFill(canvasSpacePath: path, paint: paint)
+        // The input pose has already been pulled back; insertion stores this canonical path.
+        let added = vectorCanvas.addFill(path: path, paint: paint)
         registerVectorElementsUndo(vectorCanvas: vectorCanvas, oldElements: elementsBefore,
                                    newElements: vectorCanvas.elements,
                                    layerID: layerID, celID: celID, label: label,

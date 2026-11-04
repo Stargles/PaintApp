@@ -175,7 +175,7 @@ final class BakeInvariantLogicTests: XCTestCase {
         case .vector(let name, let band, let colour):
             manager.addVectorLayer(name: name)
             let vector = manager.layers[manager.layers.count - 1].cels[0].vector!
-            vector.addFill(canvasSpacePath: CGPath(rect: CGRect(x: 8, y: self.band(band), width: 10, height: 10),
+            vector.addFill(path: CGPath(rect: CGRect(x: 8, y: self.band(band), width: 10, height: 10),
                                                     transform: nil), color: colour)
             vector.addStroke(VectorStroke(id: UUID(), brush: TestBrushes.pencil, color: colour, size: 4, opacity: 1,
                                           samples: StrokeSamples([VectorSample(x: 24, y: self.band(band) + 5, pressure: 1),
@@ -185,7 +185,7 @@ final class BakeInvariantLogicTests: XCTestCase {
             manager.addVectorLayer(name: name)
             manager.layers[manager.layers.count - 1].cels = [(0, 1), (1, 1), (2, 10)].enumerated().map { i, block in
                 let vector = VectorCanvas.empty(size: size)
-                vector.addFill(canvasSpacePath: CGPath(rect: CGRect(x: 6 + 12 * CGFloat(i), y: self.band(band),
+                vector.addFill(path: CGPath(rect: CGRect(x: 6 + 12 * CGFloat(i), y: self.band(band),
                                                                     width: 8, height: 10), transform: nil),
                                color: Self.red)
                 return Cel(id: UUID(), startFrame: block.0, frameCount: block.1, raster: .empty(size: size), vector: vector)
@@ -194,7 +194,7 @@ final class BakeInvariantLogicTests: XCTestCase {
             manager.addVectorLayer(name: name)
             let at = manager.layers.count - 1
             manager.layers[at].cels[0].vector!.addFill(
-                canvasSpacePath: CGPath(rect: CGRect(x: 8, y: self.band(band), width: 10, height: 10), transform: nil),
+                path: CGPath(rect: CGRect(x: 8, y: self.band(band), width: 10, height: 10), transform: nil),
                 color: Self.red)
             let rest = PoseQuad(restingIn: canvasRect)
             CanvasFixture.setPoseTrack(manager, layerID: manager.layers[at].id, celID: manager.layers[at].cels[0].id,

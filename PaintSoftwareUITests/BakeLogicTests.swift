@@ -69,7 +69,7 @@ final class BakeLogicTests: XCTestCase {
         let at = manager.layers.firstIndex { $0.name == name }!
         let vector = manager.layers[at].cels[0].vector!
         for (rect, colour) in fills {
-            vector.addFill(canvasSpacePath: CGPath(rect: rect, transform: nil), color: colour)
+            vector.addFill(path: CGPath(rect: rect, transform: nil), color: colour)
         }
         return manager.layers[at].id
     }
@@ -219,7 +219,7 @@ final class BakeLogicTests: XCTestCase {
         let sky = manager.layers[manager.currentLayerIndex].id
         let gradient = LinearGradientPaint(start: red, end: blue, from: .zero, to: CGPoint(x: 0, y: side))
         manager.layers[index(sky, manager)].cels[0].vector!
-            .addFill(canvasSpacePath: CGPath(rect: whole, transform: nil), paint: .linearGradient(gradient))
+            .addFill(path: CGPath(rect: whole, transform: nil), paint: .linearGradient(gradient))
         let grade = addEffect(manager, Self.hueRotate)
 
         XCTAssertNotNil(bakePlan(manager.bakeLayer(id: grade)))

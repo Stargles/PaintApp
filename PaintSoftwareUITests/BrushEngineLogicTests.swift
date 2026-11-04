@@ -944,10 +944,7 @@ final class BrushEngineLogicTests: XCTestCase {
     // could separate them afterwards: Move only carries the whole cel, and `splitForLassoMove` (below)
     // selects an image purely by its stored centre, so two bit-identical centres can never be told
     // apart by any loop. The import cascades by a step of canvas points per picture already on the
-    // cel (`CanvasManager.addedImageElement`), and
-    // `VectorCanvas.addImage(canvasSpaceElement:)` maps the canvas-space centre through
-    // `_transform.inverted()` before storing (storage is local, like every other element on this
-    // canvas), under the one lock acquisition that reads `_transform`.
+    // cel (`CanvasManager.addedImageElement`), through the active shown pose before insertion.
 
     /// A manager holding one vector layer, active — what an import lands on.
     private func importFixture() -> (manager: CanvasManager, vector: VectorCanvas)? {
@@ -974,20 +971,18 @@ final class BrushEngineLogicTests: XCTestCase {
                           + "on the exact same stored position, or it is permanently indistinguishable from it")
     }
 
-    /// The naive fix — adding a step straight to the canvas-centre expression — is wrong because that
-    /// value is local-space storage while the centre is computed in canvas space: on a layer with a
-    /// non-identity transform it both mis-places the image and bakes the space error into the cascade
-    /// too. This pins the correct mapping directly: an image's local position, carried back through the
-    /// very `transform` it was added under, must land exactly on the canvas point it was given, and its
-    /// local `scale` must render back out at the `fit` it was given.
-    func testAddImageCanvasSpaceElementMapsPositionAndScaleThroughTheLayersTransform() throws {
+    /// Input placement pulls an image through the real shown pose; canonical insertion preserves that placement.
+    func testAPlacedImageMapsPositionAndScaleThroughTheShownPose() throws {
         let transform = CGAffineTransform(translationX: 100, y: 50).scaledBy(x: 2, y: 2)
-        let canvas = VectorCanvas(size: Self.canvasSize, elements: [], transform: transform)
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: [])
         let canvasCentre = CGPoint(x: Self.canvasSize.width / 2, y: Self.canvasSize.height / 2)
         let fit: CGFloat = 0.8
 
-        let element = canvas.addImage(canvasSpaceElement: VectorImageElement(
-            source: try CanvasFixture.placedSource(solidImage(.blue)), transform: LayerTransform(position: canvasCentre, scale: fit, rotation: 0)))
+        let shown = VectorImageElement(
+            source: try CanvasFixture.placedSource(solidImage(.blue)),
+            transform: LayerTransform(position: canvasCentre, scale: fit, rotation: 0))
+        let placed = try XCTUnwrap(CanvasManager.inLayerSpace(.image(shown), shownThrough: PoseMap(transform))?.image)
+        let element = canvas.addImage(placed)
 
         let mappedBackToCanvas = element.transform.position.applying(transform)
         XCTAssertEqual(mappedBackToCanvas.x, canvasCentre.x, accuracy: 0.001,
@@ -995,7 +990,7 @@ final class BrushEngineLogicTests: XCTestCase {
         XCTAssertEqual(mappedBackToCanvas.y, canvasCentre.y, accuracy: 0.001,
                        "The stored local position must map back to the canvas centre through the layer's own transform")
 
-        XCTAssertEqual(element.transform.scale * canvas.transformScale, fit, accuracy: 0.0001,
+        XCTAssertEqual(element.transform.scale * 2, fit, accuracy: 0.0001,
                        "The stored local scale must render back out at the canvas-space `fit` it was given")
     }
 
@@ -1024,7 +1019,7 @@ final class BrushEngineLogicTests: XCTestCase {
 
     /// Undo removes the second import; redo must put back the very same element at the very same
     /// cascaded offset, not reconstruct a fresh one. `insertImage` binds `element` once
-    /// from `VectorCanvas.addImage(canvasSpaceElement:)`'s return value, outside both closures, so redo
+    /// from `VectorCanvas.addImage(_:)`'s return value, outside both closures, so redo
     /// replays that captured value — recomputing the cascade inside the redo closure instead (from the
     /// cel's live image count, read at redo time rather than at the moment of the original import) would
     /// still often land on the same number by coincidence, but it would build a *new* `VectorImageElement`

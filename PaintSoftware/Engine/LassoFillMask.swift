@@ -353,7 +353,7 @@ struct LassoFillDiagnostic: Identifiable {
 /// just been rendered — it is the whole new cost of starting a fill: **177 ms at 4,000 strokes**, in
 /// Debug on a simulator. Not optimised, because PERFORMANCE.md's rule is a measured need and there is
 /// none yet; the lever if one appears is a memo keyed on the canvas's `contentVersion` plus its
-/// transform and suppressed set, which is exactly the tuple `appendWalls` reads.
+/// suppressed set, which is exactly what `appendWalls` reads.
 ///
 /// Carrying the colour rather than a flag cost **12 ms at 4,000 strokes** against the boolean version
 /// (161.4 → 177.1) and a `count * 4` buffer instead of `count`. It is what keeps Threshold working;
@@ -486,7 +486,7 @@ enum StrokeWallMask {
     /// wall exactly as far as 5% ink is a wall for the painted pixels**, which is the same answer the
     /// artist already gets from the Threshold slider, and it is why this needed no cut-off nobody
     /// could predict from looking at the canvas.
-    static func appendWalls(elements: [VectorElement], suppressed: Set<UUID>, transform: CGAffineTransform,
+    static func appendWalls(elements: [VectorElement], suppressed: Set<UUID>,
                             to strokes: inout [(path: CGPath, colour: UIColor)]) {
         for element in elements {
             guard case .stroke(let stroke) = element,
@@ -495,7 +495,7 @@ enum StrokeWallMask {
             let points = StrokePath(stroke.samples).flattened
             guard points.count > 1 else { continue }
             let path = CGMutablePath()
-            path.addLines(between: points, transform: transform)
+            path.addLines(between: points)
             strokes.append((path, stroke.color.uiColor.withAlphaComponent(
                 CGFloat(stroke.color.alpha * stroke.opacity))))
         }

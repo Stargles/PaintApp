@@ -6,28 +6,16 @@ repo with its citation) or INFERRED (read off the source, not observed on the de
 
 # The layer transform — keep it, or bake it into the geometry?
 
-> **Shipped, 2026-08-27.** The ruling was adopted in three passes, which do not map one-to-one onto
-> §7's stages — TODO item (12) renumbered them. **Stage 1** (`cf5de83`) pointed Move-with-no-selection
-> at `beginVectorWholeCelMove`, so the only writer of `_transform` stopped writing it and defect A
-> stopped being reachable. **Stage 2** deleted `isVectorTransforming` and every consumer of it, having
-> first verified the flag was permanently false. **Stage 3** made the persisted field decode-only:
-> `VectorCanvasData.canvasSpaceElements(resolvingImages:)` bakes what a file carries, `encode(to:)`
-> writes no `transform` key at all, and `resized(to:offset:)` bakes its shift instead of composing it.
+> **Current runtime model.** A vector canvas owns canonical elements and their render bookkeeping.
+> Move, resize and Distort write element geometry; animation poses remain in the shared pose model.
+> There is no whole-canvas runtime affine, inverse insertion bridge or bounds alpha-scan memo.
+> The advisory file affine is normalized once by `VectorCanvasData.canvasSpaceElements` before
+> runtime construction; current saves omit it. This cleanup changes no saved schema or accepted
+> file geometry.
 >
-> **No path in this app writes a non-identity `VectorCanvas._transform` any more**, which is the
-> precondition TODO item (8) was blocked on: a persisted sample *is* a canvas coordinate, so "the
-> centre of the current canvas" is a well-defined encoding origin.
->
-> §7's **stage 3 — delete the field** was judged and *not* taken. It is dead-*valued*, not trivially
-> dead: twenty read sites remain and five test files exercise non-identity transforms deliberately,
-> which is the eleven-inversion churn this document already priced at two to three days for clarity
-> and no behaviour. §2 item 7's two dead accessors were taken with stage 2/3 —
-> `localSamples(fromCanvas:)` is gone (zero callers anywhere); `transformScale` stays, since its one
-> caller, `BrushEngineLogicTests`, is a live test of local-space storage.
->
-> The disclosure in §9.1 did not arise: the owner accepted the `stampSpacing` bargain for stage 1
-> explicitly (*"Accept all three, ship stage 1"*), and stage 3's own bake is a pure translation, where
-> none of `mapping`'s three floors can bind.
+> **Historical rollout, 2026-08-27.** Move was routed to `beginVectorWholeCelMove`, obsolete live
+> transform state was removed, and file transforms became decode-only. Runtime field deletion was
+> deferred then; the later atomic cleanup removes that inactive family after a fresh producer census.
 
 **Read what follows as the pre-ship snapshot this document analyzed, not current API (TODO(45),
 2026-09-11).** §1's census and the whole-cel Move bracket §2/§4 describe in present tense —

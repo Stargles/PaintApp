@@ -348,7 +348,6 @@ struct VideoCelIdentity: Hashable, BakeKeyEncodable {
     let canvas: UUID
     let vectorVersion: Int
     let suppressed: [String]
-    let carried: [CGFloat]
     let maps: [String: [CGFloat]]
     let inherited: [CGFloat]?
     /// One per video element the cel draws, **sorted by element id** so the display list's order
@@ -366,7 +365,6 @@ struct VideoCelIdentity: Hashable, BakeKeyEncodable {
         e.uuid(canvas)
         e.int(vectorVersion)
         e.array(suppressed) { e, id in e.string(id) }
-        e.array(carried) { e, value in e.cgFloat(value) }
         e.array(maps.keys.sorted()) { e, key in
             e.string(key)
             e.array(maps[key] ?? []) { e, value in e.cgFloat(value) }

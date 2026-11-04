@@ -290,7 +290,7 @@ final class VectorEraserCommitLogicTests: XCTestCase {
         for _ in 0..<2 {
             manager.addVectorLayer()
             let canvas = try XCTUnwrap(manager.layers.last?.cels.first?.vector)
-            canvas.addFill(canvasSpacePath: CGPath(rect: CGRect(origin: .zero, size: size), transform: nil),
+            canvas.addFill(path: CGPath(rect: CGRect(origin: .zero, size: size), transform: nil),
                            color: CodableColor(red: 0.1, green: 0.3, blue: 0.9, alpha: 1))
             canvases.append(canvas)
         }

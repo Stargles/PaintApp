@@ -812,9 +812,6 @@ extension CanvasManager {
     /// * *Neither cel holds pixels.* A vector cel still has the raster, fill and baked tiers, and
     ///   `rasterizeUncached` draws them **under** the vector ink. Two cels with pixel tiers do not
     ///   concatenate into one.
-    /// * *Both transforms identity.* `render()` applies `_transform` by resampling the finished
-    ///   content, so two differently-transformed lists are not one list. Nothing in the app writes
-    ///   `VectorCanvas.setTransform`, so this is a guard against a state only a test can build.
     /// * *No `.erase` stroke in B.* `renderLocalContent`'s rule 3: a punch composites `destinationOut`
     ///   against everything beneath it **in its own list**. Concatenated, B's erasers start eating A's
     ///   ink — which is not a kind mismatch, it is a hole through the artist's drawing. An `.erase` in
@@ -862,7 +859,6 @@ extension CanvasManager {
                                             belowVisible: Bool, aboveVisible: Bool) -> Bool {
         guard let belowCanvas = belowCel.vector, let aboveCanvas = aboveCel.vector,
               holdsOnlyVectorInk(belowCel), holdsOnlyVectorInk(aboveCel),
-              belowCanvas.transform.isIdentity, aboveCanvas.transform.isIdentity,
               derivedCelContent(for: belowCel, atFrame: belowCel.startFrame) == nil,
               derivedCelContent(for: aboveCel, atFrame: aboveCel.startFrame) == nil else { return false }
 

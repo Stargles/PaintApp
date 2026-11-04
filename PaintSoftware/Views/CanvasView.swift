@@ -2369,8 +2369,8 @@ struct CanvasView: UIViewRepresentable {
                     }
                     let before = vector.elements.filter { part.insideIDs.contains($0.id) }
                     let after = elements.filter { part.insideIDs.contains($0.id) }
-                    if let old = CanvasManager.localBounds(of: before) { bounds = bounds.union(old.applying(vector.transform)) }
-                    if let new = CanvasManager.localBounds(of: after) { bounds = bounds.union(new.applying(vector.transform)) }
+                    if let old = CanvasManager.localBounds(of: before) { bounds = bounds.union(old) }
+                    if let new = CanvasManager.localBounds(of: after) { bounds = bounds.union(new) }
                     let refs = Set(vector.streams.filter(\.rendersInPlace).map(\.id))
                     var value = values[part.layerID] ?? PixelOps.CelDisplay()
                     value.vector = vector.freezeDisplay(referenceIDs: refs,
@@ -3131,7 +3131,7 @@ struct CanvasView: UIViewRepresentable {
         }
 
         /// One delta. **The whole per-touch-move cost of a Move drag is this function**, so what is
-        /// not in it matters as much as what is: no `localContentBounds()`, no `render()`, no
+        /// not in it matters as much as what is: no `render()`, no
         /// canvas-sized allocation. The model write is an affine assignment, the display is a
         /// `UIView.transform`, and the box redraws five `CALayer`s.
         func objectTransformDragged(to point: CGPoint, snapsRotation: Bool) {

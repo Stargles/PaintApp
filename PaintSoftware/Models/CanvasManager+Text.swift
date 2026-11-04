@@ -164,7 +164,7 @@ extension CanvasManager {
     /// is the session's **first and only** invalidation until it commits.
     private func reopenText(_ existing: VectorTextElement, in vectorCanvas: VectorCanvas,
                             layerID: UUID, celID: UUID, shownThrough pose: PoseMap?) -> Bool {
-        guard let draft = shownText(existing, in: vectorCanvas, through: pose) else {
+        guard let draft = shownText(existing, through: pose) else {
             raise(.drawingSourceUnavailable); return false
         }
         bindTextSession(toLayer: layerID, cel: celID, shownThrough: pose)
@@ -181,17 +181,14 @@ extension CanvasManager {
         return true
     }
 
-    /// A text element shown exactly in render order: its group/cel/container pose in local space,
-    /// then the vector canvas's carried transform. Refuse an unrepresentable quad before suppressing.
-    private func shownText(_ text: VectorTextElement, in vectorCanvas: VectorCanvas,
-                           through pose: PoseMap?) -> VectorTextElement? {
+    /// Applies the complete group/cel/container pose and refuses an unrepresentable quad before suppression.
+    private func shownText(_ text: VectorTextElement, through pose: PoseMap?) -> VectorTextElement? {
         let posed: VectorTextElement
         if let pose {
             guard let mapped = VectorCanvas.mapping(.text(text), through: pose)?.text else { return nil }
             posed = mapped
         } else { posed = text }
-        let shown = vectorCanvas.canvasText(fromLocal: posed)
-        return shown.frame.homography == nil ? nil : shown
+        return posed.frame.homography == nil ? nil : posed
     }
 
     /// The string changed — the overlay's `textViewDidChange`, coalesced to one call per frame by
@@ -464,8 +461,8 @@ extension CanvasManager {
             raise(.drawingSourceUnavailable); return nil
         }
         let unchanged: VectorTextElement?
-        if layers[layerIndex].kind == .vector, let original, let vector = cel.vector,
-           let prior = shownText(original, in: vector, through: ended.pose),
+        if layers[layerIndex].kind == .vector, let original,
+           let prior = shownText(original, through: ended.pose),
            ended.recipe == prior.recipe, ended.frame == prior.frame {
             // Compare the untouched draft before measuring it: a render font bound or a display
             // pose is not an edit to the stored layout, mode or auto-size bit.
@@ -490,8 +487,7 @@ extension CanvasManager {
             } else if let unchanged {
                 element = unchanged
             } else {
-                let local = prepared.localText(fromCanvas: shown)
-                guard let pulled = Self.inLayerSpace(.text(local), shownThrough: ended.pose)?.text,
+                guard let pulled = Self.inLayerSpace(.text(shown), shownThrough: ended.pose)?.text,
                       pulled.frame.homography != nil else { raise(.drawingSourceUnavailable); return nil }
                 element = pulled
             }

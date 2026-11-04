@@ -810,16 +810,14 @@ final class InkDistortLogicTests: XCTestCase {
                                             stretchAxis: 0, pivot: float.pivot)
         let map = try XCTUnwrap(CanvasManager.distortMap(distort, transform: float.frame.transform,
                                                          aspect: 1, stretchAxis: 0,
-                                                         placement: placement, mirror: .identity,
-                                                         base: float.baseTransform))
+                                                         placement: placement, mirror: .identity))
         // The same call with a hand-turned box: the *live* angle is not a parameter of this function
         // at all, and the frozen one is what `BoxDistort` carries.
         var turned = distort
         turned.boxAngle = 0.7
         let other = try XCTUnwrap(CanvasManager.distortMap(turned, transform: float.frame.transform,
                                                            aspect: 1, stretchAxis: 0,
-                                                           placement: placement, mirror: .identity,
-                                                           base: float.baseTransform))
+                                                           placement: placement, mirror: .identity))
         XCTAssertNotEqual(map, other, "setup: the frozen angle really is in the map")
         // `turnVectorFloatBox` writes `frame.boxAngle` and never `distort.boxAngle`, which is the
         // whole guarantee — asserted through the manager in `testTurningTheBoxAfterADistort…` below.

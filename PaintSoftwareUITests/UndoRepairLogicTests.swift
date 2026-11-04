@@ -475,7 +475,7 @@ final class UndoRepairLogicTests: XCTestCase {
     /// **A fill says where it landed, which is the only rectangle its undo step can carry.**
     ///
     /// A stroke's extent is a dab walk and has to be measured; a fill's is the path being filled, and
-    /// `draw(fill:into:)` adds that very path and fills it — so `addFill(canvasSpacePath:…)` returns
+    /// `draw(fill:into:)` adds that very path and fills it — so `addFill(path:…)` returns
     /// an exact bound, widened by the one point of antialiased fringe. `CanvasManager`'s two fill
     /// commits pass it straight to `registerVectorElementsUndo`, which is what makes redoing a fill on
     /// a dense cel cost the fill rather than the cel.
@@ -496,7 +496,7 @@ final class UndoRepairLogicTests: XCTestCase {
         let canvas = Self.drawnCanvas(48)
         let withoutFill = canvas.elements
         let rect = CGRect(x: 20.3, y: 20.7, width: 40.4, height: 30.2)
-        let landed = canvas.addFill(canvasSpacePath: CGPath(ellipseIn: rect, transform: nil),
+        let landed = canvas.addFill(path: CGPath(ellipseIn: rect, transform: nil),
                                     color: CodableColor(red: 0.9, green: 0.2, blue: 0.1, alpha: 1))
         XCTAssertTrue(landed.contains(rect),
                       "\(landed) does not contain the path it was told to fill")

@@ -216,18 +216,18 @@ final class SampleRecordLogicTests: XCTestCase {
         }
     }
 
-    /// **The round trip through a layer's own transform** — canvas space in, layer space stored, canvas
-    /// space back out. The composition of the two rotations has to be the identity on the angle, or a
-    /// stroke drawn on a turned layer would render with its nib pointing somewhere the pen never was.
+    /// The active input pose pull-back and shown pose preserve the captured nib direction.
     func testAzimuthSurvivesTheCanvasToLayerRoundTripThatEveryStoredStrokeMakes() throws {
         let canvas = VectorCanvas(size: CGSize(width: 400, height: 400))
-        canvas.setTransform(CGAffineTransform(rotationAngle: 0.9).translatedBy(x: 25, y: -10))
+        let pose = PoseMap(CGAffineTransform(rotationAngle: 0.9).translatedBy(x: 25, y: -10))
         let drawn = fullRun()
-        canvas.addStroke(canvasSpaceStroke: VectorStroke(
+        let stroke = VectorStroke(
             brush: TestBrushes.hardRound, color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
-            size: 8, opacity: 1, samples: drawn))
+            size: 8, opacity: 1, samples: drawn)
+        canvas.addStroke(try XCTUnwrap(CanvasManager.inLayerSpace(.stroke(stroke), shownThrough: pose)?.stroke))
 
-        let stored = try XCTUnwrap(canvas.strokes.first).samples
+        let storedStroke = try XCTUnwrap(canvas.strokes.first)
+        let stored = storedStroke.samples
         XCTAssertTrue(stored.carries(.tiltAzimuth), "the layer transform must not drop the channel")
         for i in stored.indices {
             assertSameDirection(stored.value(.tiltAzimuth, at: i),
@@ -235,7 +235,7 @@ final class SampleRecordLogicTests: XCTestCase {
                                 "stored azimuth is not in the layer's own space")
         }
 
-        let backInCanvasSpace = stored.transformed(by: canvas.transform)
+        let backInCanvasSpace = try XCTUnwrap(VectorCanvas.mapping(.stroke(storedStroke), through: pose)?.stroke).samples
         for i in stored.indices {
             assertSameDirection(backInCanvasSpace.value(.tiltAzimuth, at: i),
                                 drawn.value(.tiltAzimuth, at: i), "the round trip moved the nib")

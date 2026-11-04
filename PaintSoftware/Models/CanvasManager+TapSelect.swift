@@ -8,7 +8,7 @@ import Foundation
 // > brushstrokes/fill shapes, etc."* — owner.
 //
 // A tap names an object, and everything that reads a selection already reads it through `Selection`
-// and the loops it makes (`CanvasManager.lassoLoops(of:in:posedBy:)`), so tapped objects are that
+// and the loops it makes (`CanvasManager.lassoLoops(of:posedBy:)`), so tapped objects are that
 // same value with their elements named (`Selection.elements`): Move, Recolour, Size, Opacity, Clear,
 // Duplicate, To New Layer, the animation-group edits and the Edit entries act on them exactly as they
 // act on a lassoed region.

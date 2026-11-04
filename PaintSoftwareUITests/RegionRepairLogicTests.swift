@@ -638,18 +638,8 @@ final class RegionRepairLogicTests: XCTestCase {
 
     // MARK: - (5) The conditions the repair shares with the append
 
-    /// A moved or partly-hidden cel falls back, for `appendableBase`'s two reasons: the overall
-    /// transform is applied by resampling the finished content, and a resample of a repair is not a
-    /// repair of a resample; and a suppressed element is not in the picture the base holds.
-    func testATransformedOrSuppressedCelFallsBackToTheFullWalk() {
-        let moved = Self.drawnCanvas(24)
-        moved.setTransform(CGAffineTransform(translationX: 5, y: 3))
-        _ = moved.render()
-        XCTAssertTrue(moved.erase(alongPath: Self.flick(over: 9), brush: Self.brush(),
-                                  size: 14, opacity: 1, mode: .cutPoints, seed: 0))
-        _ = moved.render()
-        XCTAssertEqual(moved.regionRepairs, 0, "a transformed cel cannot repair in place")
-
+    /// A suppressed cel cannot seed a repair base because the standing image omits stored elements.
+    func testASuppressedCelFallsBackToTheFullWalk() {
         let hidden = Self.drawnCanvas(24)
         hidden.suppressedElementIDs = [hidden.elements[0].id]
         _ = hidden.render()

@@ -167,7 +167,7 @@ final class VideoCropLogicTests: XCTestCase {
             clip.mappedFrameRate = 1
             clip.naturalSize = CGSize(width: 16, height: 16)
             vector.elements = [.video(clip)]
-            vector.addFill(canvasSpacePath: CGPath(rect: CGRect(x: 4, y: 4, width: 12, height: 12), transform: nil),
+            vector.addFill(path: CGPath(rect: CGRect(x: 4, y: 4, width: 12, height: 12), transform: nil),
                            color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1))
             manager.layers[1].cels[0].frameCount = 12
             manager.layers[1].cels.append(Cel(id: UUID(), startFrame: 15, frameCount: 2,

@@ -412,14 +412,12 @@ final class StrokeWallLogicTests: XCTestCase {
                      "a cel whose only element is a fill contributes no path wall at all")
     }
 
-    /// The wall is built from the same `VectorCanvas` the reference composite renders, so it has to
-    /// go through the same layer transform — otherwise a moved layer is walled where its ink is
-    /// stored rather than where it is drawn.
-    func testTheWallFollowsTheLayersOwnTransform() throws {
+    /// Walls follow the same canonical stroke coordinates that the reference drawing renders.
+    func testTheWallFollowsThePlacedStrokeGeometry() throws {
         let cel = canvas([stroke([CGPoint(x: 20, y: 80), CGPoint(x: 140, y: 80)], brush: solidBrush())])
         XCTAssertTrue(isWall(try XCTUnwrap(wallMask([cel])), 80, 80), "premise: untransformed, it is at y = 80")
 
-        cel.transform = CGAffineTransform(translationX: 0, y: 30)
+        cel.elements = cel.elements.map { VectorCanvas.mapping($0, throughSimilarity: CGAffineTransform(translationX: 0, y: 30)) }
         let moved = try XCTUnwrap(wallMask([cel]))
         XCTAssertFalse(isWall(moved, 80, 80), "the wall moved with the layer")
         XCTAssertTrue(isWall(moved, 80, 110), "…to where the transform puts the ink")

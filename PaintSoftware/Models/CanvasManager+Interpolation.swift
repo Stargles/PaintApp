@@ -1443,7 +1443,7 @@ extension CanvasManager {
     /// A video element is movable like any other (KEYFRAMES §3.4 rules `animationGroupID` onto every
     /// kind), so a cel can hold both a video and transform channels, and one cel must have one
     /// derivation. This resolves the channels exactly as `posedCelContent` does — the same
-    /// `poseMappings`, the same `posed(_:through:inheriting:)`, the same carried transform — and then
+    /// `poseMappings`, the same `posed(_:through:inheriting:)`, the same canonical geometry — and then
     /// resolves each video's source frame on top. `posedCelContent` is unreached for such a cel and
     /// `derivedCelContent` says so at the call site.
     ///
@@ -1477,7 +1477,6 @@ extension CanvasManager {
         let suppressed = vector.suppressedElementIDs
         let elements = suppressed.isEmpty ? vector.elements
                                           : vector.elements.filter { !suppressed.contains($0.id) }
-        let carried = vector.transform
 
         // One cut per video still on the display list. A cel whose only video is suppressed under a
         // live lasso float has nothing to resolve, and answering nil hands it back to the pose arm
@@ -1501,7 +1500,6 @@ extension CanvasManager {
             canvas: vector.residencyID,
             vectorVersion: vector.documentVersion,
             suppressed: suppressed.map(\.uuidString).sorted(),
-            carried: [carried.a, carried.b, carried.c, carried.d, carried.tx, carried.ty],
             maps: Dictionary(uniqueKeysWithValues: mappings.map { ($0.0.id, $0.1.encoded) }),
             inherited: container.map(\.encoded),
             cuts: cuts,
@@ -1527,8 +1525,7 @@ extension CanvasManager {
             }
             return VectorCanvas(size: canvasSize,
                                 elements: Self.posed(resolved, through: mappings,
-                                                     inheriting: container),
-                                transform: carried).render(quality: quality)
+                                                     inheriting: container)).render(quality: quality)
         }
     }
 

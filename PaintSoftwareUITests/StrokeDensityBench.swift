@@ -243,7 +243,7 @@ final class StrokeDensityBench: XCTestCase {
         //     one that changed. It still invalidates and still rasterizes; what it no longer does
         //     is stamp the layer again.
         let elementsBefore = canvas.elements
-        let append = step("append") { canvas.addStroke(canvasSpaceStroke: Self.benchStroke(n)) }
+        let append = step("append") { canvas.addStroke(Self.benchStroke(n)) }
         XCTAssertTrue(append.rewalked, "a committed stroke must still invalidate and rasterize")
         XCTAssertEqual(append.dabs, oneStrokeDabs,
                        "the append must stamp the new stroke's dabs and nothing else — "
@@ -273,19 +273,12 @@ final class StrokeDensityBench: XCTestCase {
         XCTAssertEqual(Double(undo.dabs), Double(baseDabs), accuracy: 1,
                        "undo re-stamps the restored display list in full")
 
-        // (d) A layer transform — `invalidateRenderOnly`, so the render is dropped even though the
-        //     local content did not change.
-        let transform = step("transform") { canvas.setTransform(CGAffineTransform(translationX: 12, y: 7)) }
-        XCTAssertTrue(transform.rewalked, "a layer transform drops the render memo")
-        XCTAssertEqual(Double(transform.dabs), Double(baseDabs), accuracy: 1,
-                       "and re-stamps every dab to produce a picture it then merely translates")
-
-        // (e) Evicting the cache (`CanvasManager.evictDistantVectorRenderCaches`) — content
+        // (d) Evicting the cache (`CanvasManager.evictDistantVectorRenderCaches`) — content
         //     untouched, render gone.
         let evict = step("evict") { canvas.dropCachedImage() }
         XCTAssertTrue(evict.rewalked, "an evicted cel re-walks on the next render")
 
-        // (f) A freshly loaded cel is memo-cold by construction, so a document open pays one full
+        // (e) A freshly loaded cel is memo-cold by construction, so a document open pays one full
         //     re-walk per vector cel it displays.
         let loaded = VectorCanvas(size: Self.canvasSize, elements: canvas.elements)
         XCTAssertEqual(loaded.rasterizations, 0)
@@ -372,8 +365,7 @@ final class StrokeDensityBench: XCTestCase {
     /// The shipped pen-up sequence (`StrokeCanvasView.endVectorStroke` → `refreshDisplay` →
     /// `startVectorRender`) is:
     ///
-    /// * **main thread** — `addStroke(canvasSpaceStroke:)` (which maps the samples into layer space
-    ///   and inserts into the display list, copying the array because the undo snapshot taken at
+    /// * **main thread** — `addStroke(_:)` (which inserts canonical samples into the display list, copying the array because the undo snapshot taken at
     ///   touch-down still holds a reference to it), then `registerVectorUndo`, then `refreshDisplay`
     ///   asking `cachedRender()` and dispatching;
     /// * **`renderQueue`** — the full re-walk;
@@ -395,7 +387,7 @@ final class StrokeDensityBench: XCTestCase {
                 let before = canvas.elements
 
                 let commitStart = CFAbsoluteTimeGetCurrent()
-                canvas.addStroke(canvasSpaceStroke: Self.benchStroke(n + 1))
+                canvas.addStroke(Self.benchStroke(n + 1))
                 let cached = canvas.cachedRender()
                 let commit = CFAbsoluteTimeGetCurrent() - commitStart
                 if case .needsRasterize = cached {} else {

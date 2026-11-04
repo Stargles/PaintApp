@@ -47,11 +47,11 @@ final class TapSelectLogicTests: XCTestCase {
 
     @discardableResult
     private func flatFill(_ vector: VectorCanvas, _ r: CGRect) -> UUID {
-        vector.addFill(canvasSpacePath: rect(r), paint: .solid(red)).id
+        vector.addFill(path: rect(r), paint: .solid(red)).id
     }
 
     private func gradientFill(_ vector: VectorCanvas, _ r: CGRect = CGRect(x: 0, y: 0, width: 64, height: 64)) -> UUID {
-        vector.addFill(canvasSpacePath: rect(r), paint: .linearGradient(.spanning(r, angle: 0))).id
+        vector.addFill(path: rect(r), paint: .linearGradient(.spanning(r, angle: 0))).id
     }
 
     private func element(_ id: UUID, in vector: VectorCanvas) -> VectorElement? {
@@ -210,7 +210,7 @@ final class TapSelectLogicTests: XCTestCase {
         let ring = CGMutablePath()
         ring.addRect(CGRect(x: 10, y: 10, width: 40, height: 40))
         ring.addRect(CGRect(x: 20, y: 20, width: 20, height: 20))
-        let id = vector.addFill(canvasSpacePath: ring, paint: .solid(red), evenOddFill: true).id
+        let id = vector.addFill(path: ring, paint: .solid(red), evenOddFill: true).id
         let fill = element(id, in: vector)!
         XCTAssertTrue(VectorHitTest.covers(fill, point: CGPoint(x: 14, y: 30), slop: 0), "on the ring")
         XCTAssertFalse(VectorHitTest.covers(fill, point: CGPoint(x: 30, y: 30), slop: 0), "in the hole")

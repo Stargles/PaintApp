@@ -62,7 +62,7 @@ final class BakeTransformLogicTests: XCTestCase {
         manager.addVectorLayer(name: name)
         let at = manager.layers.firstIndex { $0.name == name }!
         let vector = manager.layers[at].cels[0].vector!
-        vector.addFill(canvasSpacePath: CGPath(rect: CGRect(x: 4, y: y, width: 10, height: 10), transform: nil),
+        vector.addFill(path: CGPath(rect: CGRect(x: 4, y: y, width: 10, height: 10), transform: nil),
                        color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
         vector.addStroke(pencil([CGPoint(x: 8, y: y + 20), CGPoint(x: 16, y: y + 20), CGPoint(x: 26, y: y + 22)]))
         return manager.layers[at].id
@@ -373,7 +373,7 @@ final class BakeTransformLogicTests: XCTestCase {
         let at = manager.layers.firstIndex { $0.name == name }!
         manager.layers[at].cels = blocks.enumerated().map { i, block in
             let vector = VectorCanvas.empty(size: size)
-            vector.addFill(canvasSpacePath: CGPath(rect: CGRect(x: 4 + 12 * CGFloat(i), y: 14, width: 8, height: 10), transform: nil),
+            vector.addFill(path: CGPath(rect: CGRect(x: 4 + 12 * CGFloat(i), y: 14, width: 8, height: 10), transform: nil),
                            color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
             return Cel(id: UUID(), startFrame: block.start, frameCount: block.length, raster: .empty(size: size), vector: vector)
         }

@@ -570,28 +570,17 @@ final class LassoMoveLogicTests: XCTestCase {
                        "the rendered ink must follow the nudge, not only the stored samples")
     }
 
-    /// **The bake identity.** A zero-delta nudge changes no sample and no pixel — including on a
-    /// layer whose own transform is neither identity nor a pure translation, which is the only case
-    /// where `.concatenating(baseTransform.inverted())` can be wrong.
-    ///
-    /// The rotated case was added with the corner and rotate handles: `mapping` now reads
-    /// `hypot(t.a, t.b)` and `atan2(t.b, t.a)` off the delta, so a base transform that is not
-    /// axis-aligned is on the bake path in a way it was not before, and a zero-delta nudge is where a
-    /// mis-derived scale or angle would show up as a piece that jumps the moment it is picked up.
-    func testAZeroDeltaNudgeChangesNoSampleAndNoPixelOnATransformedLayer() throws {
+    /// A zero nudge preserves samples and pixels of geometry placed, rotated or scaled before the lift.
+    func testAZeroDeltaNudgeChangesNoSampleAndNoPixelOnPreviouslyPlacedGeometry() throws {
         for transform in [CGAffineTransform.identity,
                           CGAffineTransform(translationX: 7, y: -3).scaledBy(x: 1.4, y: 1.4),
                           CGAffineTransform(rotationAngle: 0.4).concatenating(
                             CGAffineTransform(translationX: 6, y: 9))] {
             let (manager, layerIndex, vector) = fixture()
-            vector.setTransform(transform)
             vector.addStroke(stroke(from: CGPoint(x: 6, y: 22), to: CGPoint(x: 40, y: 22), size: 5))
             vector.addStroke(stroke(from: CGPoint(x: 6, y: 34), to: CGPoint(x: 40, y: 34), size: 5))
-            // The loop is CANVAS space; the stored geometry is LOCAL. On a transformed layer the two
-            // are different rectangles, and skipping the mapping is silently wrong here and only here.
-            // Built as a transformed *path* rather than `CGRect.applying`, which answers with a
-            // bounding box and so would quietly select a different set of strokes once the layer is
-            // turned.
+            vector.elements = vector.elements.map { VectorCanvas.mapping($0, throughSimilarity: transform) }
+            // The selection follows the same literal initial placement as the canonical ink.
             let localLoop = CGRect(x: 20, y: 4, width: 40, height: 50)
             var mapping = transform
             let canvasLoop = CGPath(rect: localLoop, transform: &mapping)
@@ -619,12 +608,10 @@ final class LassoMoveLogicTests: XCTestCase {
         }
     }
 
-    /// A nudge on a transformed layer lands the ink where the box was dragged, in **canvas** points —
-    /// which is the assertion that catches a delta applied in the wrong space.
-    func testANudgeOnAScaledLayerMovesTheInkByTheCanvasDistanceDragged() throws {
+    /// A nudge moves previously scaled geometry by the dragged canvas distance.
+    func testANudgeOnScaledGeometryMovesTheInkByTheCanvasDistanceDragged() throws {
         let (manager, layerIndex, vector) = fixture()
-        vector.setTransform(CGAffineTransform(scaleX: 2, y: 2))
-        vector.addStroke(stroke(from: CGPoint(x: 4, y: 8), to: CGPoint(x: 12, y: 8), size: 2))
+        vector.addStroke(stroke(from: CGPoint(x: 8, y: 16), to: CGPoint(x: 24, y: 16), size: 4))
         let before = try inkBounds(vector)
         select(manager, layerIndex, loop(CGRect(x: 0, y: 0, width: 40, height: 40)))
         XCTAssertTrue(manager.beginVectorLassoMove())
@@ -845,7 +832,7 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertFalse(manager.beginVectorLassoMove())
         XCTAssertNil(manager.vectorFloat, "nothing lifted")
         XCTAssertEqual(vector.elements.count, before.count, "and nothing moved")
-        XCTAssertEqual(vector.transform, .identity, "and the whole cel emphatically did not move")
+        XCTAssertEqual(vector.elements, before, "and the whole cel emphatically did not move")
         XCTAssertNotNil(manager.selection, "the loop stays, ready to be redrawn")
     }
 
@@ -856,7 +843,7 @@ final class LassoMoveLogicTests: XCTestCase {
     ///
     /// That second half had to be checked rather than assumed. `moving(_:by:)` is a plain
     /// `path.copy(using:)`, which carries any affine, but the affine it is handed comes from
-    /// `canvasDelta(of:at:)` composing `baseTransform.inverted()` with `affine(from:pivot:)` — and
+    /// `canvasDelta(of:at:)` composing the mirror with `affine(from:pivot:)` — and
     /// `affine(from:pivot:)` builds translate·rotate·scale·translate(-pivot), so the pivot has to be
     /// the one the box's transform was derived about or the ants land beside the ink rather than on
     /// it. The assertion is the loop's own corner, scaled about the box centre.
@@ -1392,48 +1379,25 @@ final class LassoMoveLogicTests: XCTestCase {
     // the two decisions inside them: how a fixed-angle rotation composes, and what Reset costs in
     // undo steps.
 
-    /// **Eight presses of Rotate 45° put the piece back exactly where it started** — the same box
-    /// angle bit for bit, the same samples, and the same drawing after the bake.
-    ///
-    /// A test that checked *one* press would see none of what this is about, and neither would one
-    /// that checked eight on a straight layer only. Two separate roundings have to be handled, and
-    /// each is watched failing here by a layer rotation chosen to expose it:
-    ///
-    ///  * **on the straight layer**, the running sum of eight `π/4`s is exactly `2 * .pi`, and `2π`
-    ///    is not `0`. Watched failing with `truncatingRemainder` removed from
-    ///    `FixedAngleRotation.stepped`: *XCTAssertEqual failed: ("Optional(6.283185307179586)") is
-    ///    not equal to ("Optional(0.0)") — eight eighths is a whole turn*, followed by three moved
-    ///    samples and *Composites differ at (45, 28) channel A: got 0, expected 255* — a full turn
-    ///    is visible in the pixels, not only in the last bits;
-    ///  * **on the layer rotated to 1.1 rad**, the running sum lands *off* the eighth-turn grid, and
-    ///    the fold cannot save it. 1.1 is not a special number — a sweep of 200 000 lift angles found
-    ///    13% of the reachable range behaves this way — it is simply one this suite can name. Watched
-    ///    failing with the grid snap removed and the fold kept: *("Optional(1.1)") is not equal to
-    ///    ("Optional(1.100000000000001)")*.
-    ///
-    /// The samples are compared bit-exactly on the straight layer and to 1e-9 on the rotated one, for
-    /// `testAZeroDeltaNudgeChangesNoSampleAndNoPixelOnATransformedLayer`'s reason: a zero-delta map on
-    /// a transformed layer is a `base ∘ base⁻¹` round trip, which is exactly the identity only when
-    /// `base` is.
+    /// Eight fixed-angle presses preserve the lift's angle, samples and pixels, including initially rotated ink.
     func testEightPressesOfRotate45LandTheFloatExactlyWhereItStarted() throws {
         for layerRotation in [CGFloat(0), 1.1] {
             let (manager, layerIndex, vector) = fixture()
-            let layerTransform = CGAffineTransform(rotationAngle: layerRotation)
-            vector.setTransform(layerTransform)
             vector.addStroke(stroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 44, y: 30), size: 5))
             vector.addFill(VectorFillElement(path: CGPath(rect: CGRect(x: 24, y: 34, width: 10, height: 5),
                                                           transform: nil),
                                              color: CodableColor(red: 0, green: 0.5, blue: 1, alpha: 1),
                                              opacity: 1))
-            let pixelsBefore = try cgImage(vector)
-            let note = "layer at \(layerRotation) rad"
+            let note = "canonical ink initially at \(layerRotation) rad"
 
-            // The loop is canvas space and the geometry is local, so on the turned layer the two are
-            // different quadrilaterals — mapped as a *path*, never as a `CGRect`, whose `applying`
-            // answers with a bounding box.
-            var mapping = layerTransform
+            // Move sees the same initially placed shape as the independent selection path.
+            let initialPlacement = CGAffineTransform(translationX: 32, y: 32)
+                .rotated(by: layerRotation).translatedBy(x: -32, y: -32)
+            vector.elements = vector.elements.map { VectorCanvas.mapping($0, throughSimilarity: initialPlacement) }
+            let pixelsBefore = try cgImage(vector)
+            var selectionPlacement = initialPlacement
             select(manager, layerIndex, CGPath(rect: CGRect(x: 12, y: 12, width: 40, height: 34),
-                                               transform: &mapping))
+                                               transform: &selectionPlacement))
             XCTAssertTrue(manager.beginVectorLassoMove(), note)
             guard let liftRotation = manager.vectorFloat?.frame.transform.rotation else {
                 return XCTFail("no float — \(note)")
@@ -2251,14 +2215,10 @@ final class LassoMoveLogicTests: XCTestCase {
         }
         let mapped = try XCTUnwrap(VectorCanvas.mapping(.text(original), throughSimilarity: similarity).text)
         XCTAssertEqual(mapped.recipe.typography, expected)
-        let localCanvas = VectorCanvas(size: CGSize(width: 512, height: 512), elements: [], transform: similarity)
-        let shown = localCanvas.canvasText(fromLocal: original)
-        XCTAssertEqual(shown.recipe.typography, expected, "canvas/local conversion uses the same dimensions")
-        XCTAssertEqual(localCanvas.localText(fromCanvas: shown), original)
-        XCTAssertEqual(shown.recipe.typography.clamped.pointSize, 512)
-        XCTAssertEqual(shown.recipe.typography.clamped.tracking, -20)
-        XCTAssertEqual(shown.recipe.typography.clamped.lineSpacing, 80)
-        XCTAssertEqual(shown.recipe.typography.clamped.paragraphSpacing, 200)
+        XCTAssertEqual(mapped.recipe.typography.clamped.pointSize, 512)
+        XCTAssertEqual(mapped.recipe.typography.clamped.tracking, -20)
+        XCTAssertEqual(mapped.recipe.typography.clamped.lineSpacing, 80)
+        XCTAssertEqual(mapped.recipe.typography.clamped.paragraphSpacing, 200)
     }
 
     /// **Freeform contains Uniform on a text box too** — §5.17's ruling, checked on the kind that
@@ -2427,33 +2387,7 @@ final class LassoMoveLogicTests: XCTestCase {
 
     // MARK: - Move with no selection (stage 1 of TODO item (15))
 
-    /// **The reported bug, 2026-08-27, and the reason this whole path moved.**
-    ///
-    /// The owner, on their iPad: *"After I shrink the entire canvas and put in a line, the line does
-    /// not bake properly, and only the part of the line in a box around the original object gets
-    /// baked."*
-    ///
-    /// The mechanism, and it is entirely in `VectorCanvas`: `renderLocalContent` rasterizes the
-    /// display list into a context of exactly `size` at the **local** origin, and `render()` applies
-    /// `_transform` to that finished bitmap *afterwards* — so the clip happens in local space, before
-    /// the transform. `addStroke(canvasSpaceStroke:)` stores `canvasPoint · _transform⁻¹`. So on a
-    /// cel shrunk by *k* about the ink's centre *P*, the only canvas region a later stroke can
-    /// survive in is the canvas rect scaled by *k* about *P* — a box around the original object,
-    /// which is what the owner saw, and not the top-left quadrant a first reading predicts.
-    ///
-    /// **The `viaTheOldWholeLayerTransform` negative control was removed on purpose, not lost in the
-    /// clean-up.** Stage 1 of TODO item (12) kept it — it drove `VectorCanvas.setTransform` directly
-    /// to assert the loss, so the positive half could not rot into a vacuous pass — and stage 2/3
-    /// retired what it was a control *for*: no writer of `_transform` survives in the app, and the
-    /// stored field is baked on decode and written as identity, so the local-space clip is no longer
-    /// a state any document or any gesture can reach. A control that drives a mechanism nothing can
-    /// enter pins a promise this project has stopped making, and it would have been the one caller
-    /// keeping `setTransform` alive for stage 4.
-    ///
-    /// What replaces it is a **live** control, in the same method: `theShrinkHappened` asserts the
-    /// object's own ink really did contract to about 0.3x through the float. That is what the old
-    /// half was actually guarding — that the fixture did the shrink at all — and it says so against
-    /// the mechanism that ships rather than against the one that was deleted.
+    /// A real whole-cel shrink leaves later ink visible across the whole canvas.
     func testInkDrawnAfterAWholeCelShrinkIsNotClippedAway() throws {
         /// Points along the second stroke's own line, spread from one corner of the canvas to the
         /// other. Under the old mechanism only the middle one survives.
@@ -2464,7 +2398,7 @@ final class LassoMoveLogicTests: XCTestCase {
 
         // The control: the same line on a cel nothing has ever moved. Every point above is on it.
         let (_, _, untouched) = fixture()
-        untouched.addStroke(canvasSpaceStroke: theLine())
+        untouched.addStroke(theLine())
         for point in alongTheLine {
             XCTAssertTrue(try isOpaque(untouched, at: point),
                           "fixture precondition: \(point) is on the line on an untouched cel")
@@ -2477,8 +2411,6 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertTrue(manager.beginVectorWholeCelMove(), "Move with no selection lifts the whole cel")
         manager.nudgeVectorFloat(to: scaledBy(manager, 0.3))
         manager.commitVectorFloatIfNeeded()
-        XCTAssertTrue(viaTheFloat.transform.isIdentity,
-                      "the float moved geometry — nothing may have been written to the layer transform")
 
         // **The live control.** Without this the positive half below could pass on a fixture that
         // never shrank anything — which is the job the deleted `viaTheOldWholeLayerTransform` half
@@ -2490,7 +2422,7 @@ final class LassoMoveLogicTests: XCTestCase {
                           "the whole-cel Move must actually have contracted the ink, or the assertions "
                           + "below are about a cel nothing happened to")
 
-        viaTheFloat.addStroke(canvasSpaceStroke: theLine())
+        viaTheFloat.addStroke(theLine())
         for point in alongTheLine {
             XCTAssertTrue(try isOpaque(viaTheFloat, at: point),
                           "every sample of a line drawn after a whole-cel shrink must survive the render; \(point) did not")
@@ -2798,45 +2730,16 @@ final class LassoMoveLogicTests: XCTestCase {
     // it. LASSO_MOVE.md §5.19–21 and TODO item (20). The whole feature rests on one claim — the box
     // angle is chrome and never reaches the geometry — and the first test below is that claim.
 
-    /// **A non-zero box angle changes no sample and no pixel.** The highest-value test in this
-    /// feature, and the mirror of `testAZeroDeltaNudgeChangesNoSampleAndNoPixelOnATransformedLayer`:
-    /// that one pins the map at a zero *delta*, this one pins it against a term that must never be in
-    /// the map at all.
-    ///
-    /// The hazard it catches is a leak into the geometry, and a leak would be immediate and visible —
-    /// the lift invariant is `VectorCanvas.affine(from: frame.transform, pivot:) == baseTransform`, so
-    /// if `boxAngle` reached `affine(from:pivot:)`, `affine(from:aspect:pivot:)`, `axisScales`, or
-    /// `applyToVectorFloat`'s `localDelta`, the piece would jump the instant the knob was touched.
-    /// Run on a **transformed** layer for the reference test's reason: `base ∘ base⁻¹` is exactly the
-    /// identity only when `base` is, so a spurious rotation has somewhere to hide on a straight layer
-    /// and nowhere to hide here.
-    ///
-    /// **Three moments are checked, and the middle one is the one that earns its keep.** A leak could
-    /// enter at the turn itself, at a zero-delta nudge taken *after* the turn (which is what an
-    /// artist's next drag re-derives its map from), or at the bake.
-    ///
-    /// **Watched failing — and not hypothetically.** `87081de` shipped with two lines in
-    /// `applyToVectorFloat` folding `frame.boxAngle` into `localDelta`, left behind on disk by a
-    /// mutation-testing script and committed by another session before the script could restore it.
-    /// Against that binary this test went red at the **zero-nudge** assertion:
-    /// *("19.999999999994998") is not equal to ("28.483861775054198") +/- ("1e-09") — after the zero
-    /// nudge*, and on the **identity** layer transform at that, followed by
-    /// `testEightPressesOfRotate45StayBitExactOnAHandTurnedBox`. Nothing else in the suite noticed.
-    ///
-    /// **The moment it fired at is the finding.** `turnVectorFloatBox` writes one field and touches
-    /// no geometry, so the turn alone is silent *even when the map is poisoned*; it is the next
-    /// gesture — any gesture, including one that moves nothing — that re-derives the map and drags
-    /// the ink. A test that asserted only "the box turned and nothing moved" would have passed
-    /// against a build that jumps the artist's drawing on their very next touch.
+    /// Turning the handle box leaves ink unchanged, including the zero nudge on the next gesture.
     func testANonZeroBoxAngleChangesNoSampleAndNoPixel() throws {
         for transform in [CGAffineTransform.identity,
                           CGAffineTransform(translationX: 7, y: -3).scaledBy(x: 1.4, y: 1.4),
                           CGAffineTransform(rotationAngle: 0.4).concatenating(
                             CGAffineTransform(translationX: 6, y: 9))] {
             let (manager, layerIndex, vector) = fixture()
-            vector.setTransform(transform)
             vector.addStroke(stroke(from: CGPoint(x: 6, y: 22), to: CGPoint(x: 40, y: 22), size: 5))
             vector.addStroke(stroke(from: CGPoint(x: 6, y: 34), to: CGPoint(x: 40, y: 34), size: 5))
+            vector.elements = vector.elements.map { VectorCanvas.mapping($0, throughSimilarity: transform) }
             let localLoop = CGRect(x: 20, y: 4, width: 40, height: 50)
             var mapping = transform
             let canvasLoop = CGPath(rect: localLoop, transform: &mapping)
@@ -2906,31 +2809,20 @@ final class LassoMoveLogicTests: XCTestCase {
                        "a box turn is not a nudge — the next drag is still the one that carries the split")
     }
 
-    /// **Rotate 45° stays bit-exact on a box the artist has turned.** `FixedAngleRotation` steps from
-    /// `float.liftFrameTransform.rotation` and re-quantises onto the eighth-turn grid measured from
-    /// the lift (§5.15); `boxAngle` is not in that computation and must not become part of it, or the
-    /// 13% of lift angles that need the snap would come back a few ulps off after eight presses.
-    ///
-    /// The same fixture as `testEightPressesOfRotate45LandTheFloatExactlyWhereItStarted`, with a hand
-    /// turn added — including the 1.1 rad layer, which is one of the 13%.
-    ///
-    /// **Watched failing against the real defect `87081de` shipped** — `frame.boxAngle` folded into
-    /// `applyToVectorFloat`'s `localDelta` — which is the leak this test catches from the other side:
-    /// `rotateFloating` goes through that same map, so eight presses on a turned box no longer close
-    /// the loop and the samples come back moved. It went red together with
-    /// `testANonZeroBoxAngleChangesNoSampleAndNoPixel` and with nothing else in 1839 tests.
+    /// Eight fixed-angle presses stay exact after turning the handle box independently of the drawing.
     func testEightPressesOfRotate45StayBitExactOnAHandTurnedBox() throws {
         for layerRotation in [CGFloat(0), 1.1] {
             let (manager, layerIndex, vector) = fixture()
-            let layerTransform = CGAffineTransform(rotationAngle: layerRotation)
-            vector.setTransform(layerTransform)
             vector.addStroke(stroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 44, y: 30), size: 5))
-            let pixelsBefore = try cgImage(vector)
-            let note = "layer at \(layerRotation) rad"
+            let note = "canonical ink initially at \(layerRotation) rad"
 
-            var mapping = layerTransform
+            let initialPlacement = CGAffineTransform(translationX: 32, y: 32)
+                .rotated(by: layerRotation).translatedBy(x: -32, y: -32)
+            vector.elements = vector.elements.map { VectorCanvas.mapping($0, throughSimilarity: initialPlacement) }
+            let pixelsBefore = try cgImage(vector)
+            var selectionPlacement = initialPlacement
             select(manager, layerIndex, CGPath(rect: CGRect(x: 12, y: 12, width: 40, height: 34),
-                                               transform: &mapping))
+                                               transform: &selectionPlacement))
             XCTAssertTrue(manager.beginVectorLassoMove(), note)
             guard let liftRotation = manager.vectorFloat?.frame.transform.rotation else {
                 return XCTFail("no float — \(note)")
@@ -3164,14 +3056,14 @@ final class LassoMoveLogicTests: XCTestCase {
     /// **Three moments, and the middle one earns its keep**, exactly as in
     /// `testANonZeroBoxAngleChangesNoSampleAndNoPixel`: a leak could enter at the turn, at the
     /// zero-delta nudge an artist's next drag re-derives its map from, or at the bake. Run on a
-    /// **transformed** layer, because `base ∘ base⁻¹` is exactly the identity only when `base` is.
+    /// previously placed canonical geometry, including a rotation before the lift.
     func testTurningTheBoxAfterAStretchChangesNoSampleAndNoPixel() throws {
         for transform in [CGAffineTransform.identity,
                           CGAffineTransform(rotationAngle: 0.4).concatenating(
                             CGAffineTransform(translationX: 6, y: 9))] {
             let (manager, layerIndex, vector) = fixture()
-            vector.setTransform(transform)
             vector.addStroke(stroke(from: CGPoint(x: 8, y: 22), to: CGPoint(x: 44, y: 30), size: 5))
+            vector.elements = vector.elements.map { VectorCanvas.mapping($0, throughSimilarity: transform) }
             var mapping = transform
             let canvasLoop = CGPath(rect: CGRect(x: 4, y: 8, width: 56, height: 44),
                                     transform: &mapping)
@@ -3359,9 +3251,9 @@ final class LassoMoveLogicTests: XCTestCase {
                           CGAffineTransform(translationX: -3, y: 11).scaledBy(x: 1.7, y: 1.7)] {
             for kind in LiftKind.allCases {
                 let (manager, layerIndex, vector) = fixture()
-                vector.setTransform(transform)
                 vector.addStroke(stroke(from: CGPoint(x: 8, y: 14), to: CGPoint(x: 52, y: 41), size: 6))
                 vector.addStroke(stroke(from: CGPoint(x: 30, y: 6), to: CGPoint(x: 33, y: 55), size: 3))
+                vector.elements = vector.elements.map { VectorCanvas.mapping($0, throughSimilarity: transform) }
                 XCTAssertTrue(lift(kind, manager, layerIndex), "\(kind.rawValue) \(transform)")
                 guard let float = manager.vectorFloat,
                       let fitted = manager.fittedMoveBoxFrame else { return XCTFail("no float") }
@@ -3526,11 +3418,11 @@ final class LassoMoveLogicTests: XCTestCase {
                         CGAffineTransform(translationX: 6, y: 9)),
                       CGAffineTransform(translationX: -3, y: 11).scaledBy(x: 1.6, y: 1.6)] {
             let (manager, _, vector) = fixture()
-            vector.setTransform(layer)
             // A right triangle: asymmetric about both axes, so a wrong centre has nowhere to hide.
             vector.addStroke(stroke(from: CGPoint(x: 10, y: 10), to: CGPoint(x: 50, y: 10), size: 5))
             vector.addStroke(stroke(from: CGPoint(x: 50, y: 10), to: CGPoint(x: 10, y: 50), size: 5))
             vector.addStroke(stroke(from: CGPoint(x: 10, y: 50), to: CGPoint(x: 10, y: 10), size: 5))
+            vector.elements = vector.elements.map { VectorCanvas.mapping($0, throughSimilarity: layer) }
             XCTAssertTrue(manager.beginVectorWholeCelMove(), "layer \(layer)")
 
             func sweep(_ stage: String) {
@@ -3589,11 +3481,12 @@ final class LassoMoveLogicTests: XCTestCase {
     /// against `87081de`, and an offset folded into the map fails in exactly the same place.
     func testTheBoxCentreTravelsAsItRefitsAndTheGeometryAnchorDoesNot() throws {
         let (manager, _, vector) = fixture()
-        vector.setTransform(CGAffineTransform(rotationAngle: 0.3).concatenating(
-            CGAffineTransform(translationX: 5, y: -4)))
+        let initialPlacement = CGAffineTransform(rotationAngle: 0.3).concatenating(
+            CGAffineTransform(translationX: 5, y: -4))
         vector.addStroke(stroke(from: CGPoint(x: 10, y: 10), to: CGPoint(x: 50, y: 10), size: 4))
         vector.addStroke(stroke(from: CGPoint(x: 50, y: 10), to: CGPoint(x: 10, y: 50), size: 4))
         vector.addStroke(stroke(from: CGPoint(x: 10, y: 50), to: CGPoint(x: 10, y: 10), size: 4))
+        vector.elements = vector.elements.map { VectorCanvas.mapping($0, throughSimilarity: initialPlacement) }
         let pixelsBefore = try cgImage(vector)
         XCTAssertTrue(manager.beginVectorWholeCelMove())
         guard let float = manager.vectorFloat else { return XCTFail("no float") }
@@ -3737,7 +3630,7 @@ final class LassoMoveLogicTests: XCTestCase {
                                                              size: CGSize(width: 10, height: 6))))
 
         let path = loop(CGRect(x: 8, y: 8, width: 48, height: 48))
-        let caught = vector.elementIDs(insideLocalPath: vector.localPath(fromCanvas: path)
+        let caught = vector.elementIDs(insideLocalPath: path
                                                               .normalized(using: VectorCanvas.lassoFillRule))
 
         XCTAssertEqual(caught, Set(vector.elements.map(\.id)),
@@ -4650,7 +4543,7 @@ final class LassoMoveLogicTests: XCTestCase {
     /// preconditions applied exactly as `beginVectorLassoMove` applies them.
     private func split(_ vector: VectorCanvas, _ rect: CGRect, _ membership: LassoMembership)
         -> (elements: [VectorElement], insideIDs: Set<UUID>, mayDiverge: Bool)? {
-        vector.splitForLassoMove(insideLocalPath: vector.localPath(fromCanvas: loop(rect))
+        vector.splitForLassoMove(insideLocalPath: loop(rect)
                                                         .normalized(using: VectorCanvas.lassoFillRule),
                                  membership: membership)
     }
@@ -4891,7 +4784,7 @@ final class LassoMoveLogicTests: XCTestCase {
                                                              size: CGSize(width: 16, height: 10))))
         let text = vector.elements[2].id
         let rect = CGRect(x: 30, y: 2, width: 30, height: 60)
-        let local = vector.localPath(fromCanvas: loop(rect)).normalized(using: VectorCanvas.lassoFillRule)
+        let local = loop(rect).normalized(using: VectorCanvas.lassoFillRule)
 
         XCTAssertEqual(split(vector, rect, .touching)?.insideIDs,
                        vector.elementIDs(insideLocalPath: local, membership: .touching),
@@ -5164,8 +5057,6 @@ final class LassoMoveLogicTests: XCTestCase {
     private func inkInBoxUnits(_ vector: VectorCanvas, _ float: VectorFloat,
                                _ frame: ObjectTransformFrame) -> [(u: CGPoint, pad: CGPoint)] {
         let s = ObjectTransformFrame.axisScales(scale: frame.transform.scale, aspect: frame.aspect)
-        let toCanvas = vector.transform
-        let canvasScale = hypot(toCanvas.a, toCanvas.b)
         let r = -(frame.transform.rotation + frame.boxAngle)
         func boxLocal(_ p: CGPoint) -> CGPoint {
             let dx = p.x - frame.transform.position.x, dy = p.y - frame.transform.position.y
@@ -5202,8 +5093,8 @@ final class LassoMoveLogicTests: XCTestCase {
             case .image, .video, .stream:
                 XCTFail("this oracle does not model a placed rectangle")
             }
-            let pad = CGPoint(x: reach * canvasScale / s.x, y: reach * canvasScale / s.y)
-            result += points.map { (boxLocal($0.applying(toCanvas)), pad) }
+            let pad = CGPoint(x: reach / s.x, y: reach / s.y)
+            result += points.map { (boxLocal($0), pad) }
         }
         return result
     }

@@ -116,7 +116,7 @@ extension CanvasManager {
                         if video.id == firstVideo.id { anyDecodes = true }
                     }
                 }
-                cel.vector = VectorCanvas(size: canvas.size, elements: elements, transform: canvas.transform)
+                cel.vector = VectorCanvas(size: canvas.size, elements: elements)
                 cel.transformTracks = [:]; cel.pendingPoseBaselines = [:]
                 return .success(cel)
             }

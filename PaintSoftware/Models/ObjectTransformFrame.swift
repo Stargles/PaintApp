@@ -15,9 +15,7 @@ import Foundation
 /// the knob above the top edge turns it about the same centre.
 ///
 /// **The lasso move's floating piece borrows the same box**, and since stage 3a it can be *stretched*
-/// as well as scaled — see `aspect`. A whole-layer box never is, because `VectorCanvas.setTransform`
-/// reads its argument back as a similarity, and both defaults below are the unstretched ones for that
-/// reason.
+/// as well as scaled — see `aspect`. Its defaults describe the unstretched lift.
 ///
 /// **Since stage 3b the box can also be turned on its own** — see `boxAngle`, and the yellow knob off
 /// the bottom edge that writes it. That angle is chrome: it changes where the outline and the grips
@@ -150,8 +148,7 @@ struct ObjectTransformFrame: Equatable {
     /// deriving it, and nothing else writes it. A zero or negative value makes `axisScales` NaN, which
     /// `local(_:)` refuses rather than silently turning the box inside out.
     ///
-    /// Defaulted to 1 so every existing call site — the whole-layer Move box above all, whose
-    /// `VectorCanvas.setTransform` path can only carry a similarity — is untouched.
+    /// A fresh lift is unstretched.
     var aspect: CGFloat = 1
 
     /// **How far the artist has turned the handle *box* by hand, on top of `transform.rotation` —
@@ -173,7 +170,7 @@ struct ObjectTransformFrame: Equatable {
     /// stores.
     ///
     /// **It never reaches the geometry, and the lift invariant is what depends on that.**
-    /// `VectorFloat` holds `affine(from: frame.transform, pivot:) == baseTransform` at lift, so a box
+    /// `VectorFloat` holds `affine(from: frame.transform, pivot:) == .identity` at lift, so a box
     /// dragged back to the pose it lifted at produces the identity and the ink does not move. Every
     /// one of `VectorCanvas.affine(from:pivot:)`, `affine(from:aspect:pivot:)`, `axisScales`,
     /// `CanvasManager.applyToVectorFloat` and `LiveLayerTransform.viewTransform` is blind to this
@@ -687,9 +684,7 @@ struct ObjectTransformDrag: Equatable {
     /// **Latched at touch-down, like everything else on this type.** The Move bar's picker is live
     /// while a piece floats, so an artist can change it mid-drag; reading it per delta would change
     /// what the finger already on the screen means, and the piece would lurch on the frame the
-    /// segment changed. `false` for every caller that does not ask, which keeps the whole-layer Move
-    /// box on the uniform arm — `VectorCanvas.setTransform` can only carry a similarity, so a
-    /// stretched whole layer has nowhere to be stored.
+    /// segment changed. Callers opt into Freeform at touch-down.
     let isFreeform: Bool
 
     /// Whether a corner drag moves that corner **alone** — Distort — rather than scaling the box.

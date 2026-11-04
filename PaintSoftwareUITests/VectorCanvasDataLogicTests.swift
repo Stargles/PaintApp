@@ -223,7 +223,6 @@ final class VectorCanvasDataLogicTests: XCTestCase {
 
         XCTAssertEqual(kinds(canvas.elements), ["fill", "image", "erase"])
         XCTAssertFalse(canvas.isEmpty, "A cel that lost one element is not an empty cel")
-        XCTAssertTrue(canvas.transform.isIdentity)
     }
 
     // MARK: - Unknown kind vs corrupt known kind
@@ -405,9 +404,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
         let placed = try CanvasFixture.placedSource(solidImage(.green))
         let baked = try decoded.canvasSpaceElements(resolvingImages: { _ in placed },
                                                 resolvingVideos: { _ in nil })
-        let canvas = VectorCanvas(size: Self.canvasSize, elements: baked)
 
-        XCTAssertTrue(canvas.transform.isIdentity, "the cel itself must carry nothing")
         XCTAssertEqual(kinds(baked), ["fill", "image", "stroke", "erase"], "and nothing is lost to the bake")
 
         // The stroke's samples sat at (32, 32); +12/-7 in canvas space puts them at (44, 25).
@@ -420,10 +417,7 @@ final class VectorCanvasDataLogicTests: XCTestCase {
         XCTAssertEqual(image.transform.position.y, 25, accuracy: 1e-9)
         XCTAssertEqual(image.transform.scale, 1, accuracy: 1e-9, "a translation changes no size")
 
-        // Local geometry, un-baked, would have left the samples where the file put them. Stated so a
-        // future reader can see the assertion above is about the bake and not about the fixture.
-        let unbaked = VectorCanvas(size: Self.canvasSize, elements: baked, transform: decoded.affineTransform)
-        XCTAssertFalse(unbaked.transform.isIdentity, "control: this is the shape the load path no longer builds")
+
     }
 
     /// **Nothing writes the key any more**, so a build that predates stage 3 opening a file this one
@@ -442,22 +436,6 @@ final class VectorCanvasDataLogicTests: XCTestCase {
         XCTAssertEqual(kinds(round.elements), ["fill", "image", "stroke", "erase"])
     }
 
-    /// **A canvas handed to the payload still carrying a transform has it baked, not dropped.** Only
-    /// a test can build one now — no app path writes `_transform` — but "the encoder silently lost
-    /// geometry the canvas was holding" is exactly the failure this whole file exists about, so the
-    /// encode half asserts the same identity as the decode half.
-    func testEncodingBakesATransformTheCanvasWasStillCarrying() throws {
-        let canvas = VectorCanvas(size: Self.canvasSize, strokes: [stroke(1)],
-                                  transform: CGAffineTransform(translationX: 5, y: 9))
-        let payload = VectorCanvasData(from: canvas, imageFileNames: [:])
-
-        XCTAssertTrue(payload.affineTransform.isIdentity, "the payload records no transform")
-        let sample = try XCTUnwrap(payload.elements.compactMap {
-            if case .stroke(let s) = $0 { return s } else { return nil }
-        }.first?.samples.first)
-        XCTAssertEqual(sample.x, 37, accuracy: 1e-9, "the geometry carries it instead")
-        XCTAssertEqual(sample.y, 41, accuracy: 1e-9)
-    }
 
     /// **`resized(to:placing:)` bakes its shift, so `setCanvasPadding` stops being a producer of
     /// non-identity cel transforms** — the other half of stage 3, and the one that makes the claim
@@ -470,8 +448,6 @@ final class VectorCanvasDataLogicTests: XCTestCase {
         let grown = canvas.resized(to: CGSize(width: 128, height: 128),
                                    placing: CGRect(origin: CGPoint(x: 32, y: 32), size: Self.canvasSize))
 
-        XCTAssertTrue(grown.transform.isIdentity,
-                      "a padded cel must not carry a translation — that is what clipped later ink")
         XCTAssertEqual(grown.size, CGSize(width: 128, height: 128))
         XCTAssertEqual(kinds(grown.elements), ["fill", "stroke"], "z-order survives the map")
 

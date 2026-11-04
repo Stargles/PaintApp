@@ -620,7 +620,6 @@ final class PoseBakeLogicTests: XCTestCase {
                             frame: TextFrame(origin: CGPoint(x: 12, y: 10), size: CGSize(width: 12, height: 12),
                                              autoSize: false))
                         ink.restoreElements([element], changedInk: nil)
-                        ink.transform = CGAffineTransform(translationX: 1, y: 0)
                         let box = CGRect(origin: .zero, size: size)
                         let pose = projective
                             ? PoseQuad(box: box, corners: Quad(CGPoint(x: 8, y: 2), CGPoint(x: 58, y: 0),
@@ -641,7 +640,6 @@ final class PoseBakeLogicTests: XCTestCase {
                         manager.setSelectionMembership(.touching)
                         if copying { manager.beginDuplicate() } else { manager.moveSelectionToNewLayer() }
                         let transferred = try XCTUnwrap(manager.layers[2].cels.first?.vector)
-                        XCTAssertEqual(transferred.transform, ink.transform, "the existing canvas placement is carried once")
                         manager.commitVectorFloatIfNeeded()
                         manager.layers[1].isVisible = false
                         XCTAssertTrue(try compositeBytes(manager, atFrame: 4).elementsEqual(original),

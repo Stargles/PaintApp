@@ -94,11 +94,7 @@ i.e. the toggle's other half.
   too, where there is nothing to store it in.
 - ~~**The box-only rotate knob**~~ (3b) — **shipped, all three phases**, TODO item (20). §5.19 is why it exists rather than an automatic tilt, §5.20 is the one extra angle a stretch made about a hand-turned box has to store — `ObjectTransformFrame.stretchAxis`, which makes the map the general affine `R(ρ+φ)·S·R(−φ)` — §5.21 exempts a box-only turn from the undo stack, which is also the reason the recorded axis is not the live box angle, and §5.22 is phase 3 — the box's size and centre become a live function of the angle, so the hand-fit fits. Its colour is unsettled and small: this document said yellow, the owner said orange, and orange already means *distort corner* on a text box (`ADD_TEXT.md`).
 - ~~**Placed images holding a stretched shape**~~ (3c) — **shipped**, and it closed both refusals at once rather than only Freeform, because the field they each wanted was the same field. See the stage 3c section below.
-- **Freeform on the whole-layer box.** `VectorCanvas.setTransform` stores a `CGAffineTransform` but
-  `layerTransform(pivot:)` reads it back as a similarity, so a stretched whole layer would be silently
-  discarded at the gesture's end. Both defaults — `ObjectTransformFrame.aspect` and
-  `ObjectTransformDrag(freeform:)` — are the unstretched, uniform ones for that reason, and
-  `testTheWholeLayerBoxIsUnstretchedAndItsDragIsUniform` is what keeps them there.
+
 
 ### Placed images holding a stretched shape — shipped 2026-09-02 (stage 3c)
 
@@ -626,8 +622,7 @@ Three decisions fall out:
 evenOddFill}` (`VectorLayer.swift:494`); unlike `VectorImageElement` it carries no
 `LayerTransform`. So moving a fill means re-archiving a translated `CGPath`. That is fine — it is
 one `copy(using:)` and one `NSKeyedArchiver` round trip, done once at commit, not per frame — and it
-is the same thing `addFill(canvasSpacePath:)` already does when it maps a canvas-space path into
-local space (`VectorLayer.swift`).
+uses the same path archive that canonical `addFill(path:)` constructs (`VectorLayer.swift`).
 
 **Fills are therefore the *easy* half of this feature, not the hard half.** The brief guessed the
 opposite. Strokes need a parametric walk, a bisection, a dab lattice and an id policy; a fill needs
@@ -1517,7 +1512,7 @@ ink, and the first is the one the other two are consequences of.
     later. It also stops well short of stage 5's Distort, which is a homography and needs 8.
 
     **The shape this has to take**: the box angle is **chrome** and never enters the geometry map —
-    `VectorFloat`'s lift invariant `VectorCanvas.affine(from: frame.transform, pivot:) == baseTransform`
+    `VectorFloat`'s lift invariant `VectorCanvas.affine(from: frame.transform, pivot:) == .identity`
     depends on exactly that — while a *stretch* is what carries the axis it was made about. At lift both
     are zero and the map is the identity, so §5.17's "Freeform contains Uniform" survives one level down
     again.

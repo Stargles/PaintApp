@@ -471,9 +471,8 @@ extension CanvasManager {
     /// **undefined** on the self-intersecting path a lasso becomes the moment the artist loops back
     /// over their own line — and then pulled back per element through the poses the cel is shown
     /// under, with a Tap selection's loops answering for its tapped elements (`Selection.elements`).
-    static func lassoLoops(of selection: Selection, in vector: VectorCanvas,
-                           posedBy poses: [UUID: PoseMap]) -> LassoLoops {
-        let drawn = vector.localPath(fromCanvas: selection.path).normalized(using: VectorCanvas.lassoFillRule)
+    static func lassoLoops(of selection: Selection, posedBy poses: [UUID: PoseMap]) -> LassoLoops {
+        let drawn = selection.path.normalized(using: VectorCanvas.lassoFillRule)
         return lassoLoops(drawn, posedBy: poses, only: selection.objects?.elements)
     }
 
@@ -551,7 +550,7 @@ extension CanvasManager {
     /// So the enumeration below is: the cel, its stored ink (`vectorVersion`, plus the object identity
     /// of the canvas for `LayerContentVersion`'s reason — a version counter is monotonic only within
     /// one object's lifetime and a reopened project rebuilds every canvas with its counter at zero),
-    /// what is suppressed under a live float, the canvas's own carried transform, the canvas size, and
+    /// what is suppressed under a live float, the canvas size, and
     /// the resolved maps. Drop any one of them and a stale image is served; `TransformChannelLogicTests`
     /// pins the maps by mutation, which is §4.5's trap in its exact form.
     ///
@@ -586,7 +585,6 @@ extension CanvasManager {
         let suppressed = vector.suppressedElementIDs
         let elements = suppressed.isEmpty ? vector.elements
                                           : vector.elements.filter { !suppressed.contains($0.id) }
-        let carried = vector.transform
         // `documentVersion`: a posed stream cel must not mint a fresh identity — and with it a
         // fresh bake key — per live frame. The thunk below draws it without the stream, as every
         // render the document keeps does (`VectorCanvas.freeze`). See `VectorCanvas.documentVersion`.
@@ -597,7 +595,6 @@ extension CanvasManager {
             canvas: vector.residencyID,
             vectorVersion: version,
             suppressed: suppressed.map(\.uuidString).sorted(),
-            carried: [carried.a, carried.b, carried.c, carried.d, carried.tx, carried.ty],
             maps: Dictionary(uniqueKeysWithValues: mappings.map { ($0.0.id, $0.1.encoded) }),
             // **§4.5, reached from the transformation layer's door.** The container pose is an input
             // `render` reads and nothing else in this identity carries it: two frames of a cel with
@@ -611,8 +608,7 @@ extension CanvasManager {
         return DerivedCelContent(identity: AnyHashable(identity)) { quality in
             // Built inside the thunk, on whatever queue resolved it, from values nothing else can
             // reach — `VectorCanvas.Frozen.render`'s detached-canvas branch, which is the atomicity
-            // guarantee this seam is for. The carried transform rides along so a document written by
-            // a build that still stored one is posed rather than un-posed.
+            // guarantee this seam is for.
             //
             // **`posed` is inside the thunk and not beside the identity, which is the one place this
             // derivation differs in shape from interpolation's.** That one resolves its references
@@ -624,8 +620,7 @@ extension CanvasManager {
             // follows. `livePreview` asks on every pass, which is what makes the difference visible.
             VectorCanvas(size: canvasSize,
                          elements: Self.posed(elements.withoutReference, through: mappings,
-                                              inheriting: container),
-                         transform: carried).render(quality: quality)
+                                              inheriting: container)).render(quality: quality)
         }
     }
 }
@@ -641,7 +636,6 @@ private struct PosedCelIdentity: Hashable {
     let canvas: UUID
     let vectorVersion: Int
     let suppressed: [String]
-    let carried: [CGFloat]
     let maps: [String: [CGFloat]]
     /// §4.4's container pose — `PoseMap.encoded`, so six numbers for an affine and nine for a
     /// keystone, or nil. **An array rather than a second dictionary**, and

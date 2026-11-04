@@ -364,7 +364,7 @@ extension CanvasManager {
         ///   — a text object's by measuring the glyph outlines its recipe lays out — so a caller
         ///   passing a rectangle for one of those is supplying an answer the canvas already has. A
         ///   rectangle is still worth passing where the caller has one anyway —
-        ///   `addFill(canvasSpacePath:)` returns it — because it costs nothing and covers the arrival
+        ///   `addFill(path:)` returns it — because it costs nothing and covers the arrival
         ///   of an element the canvas has never seen.
         case addsAndRemoves(ink: CGRect?)
     }

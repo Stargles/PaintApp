@@ -603,9 +603,7 @@ final class ObjectTransformLogicTests: XCTestCase {
     /// a new grip turns itself on everywhere, the whole-layer box included. Freeform sidesteps it by
     /// adding no grip at all, and pays the same tax on the two defaults it *did* add: an
     /// `ObjectTransformFrame` built the way the whole-layer Move box builds one is unstretched, and a
-    /// drag built the way `CanvasView`'s whole-layer arm builds one is uniform. Both matter because
-    /// `VectorCanvas.setTransform` stores a similarity — a stretched whole layer has nowhere to go,
-    /// and would be silently discarded at the gesture's end.
+    /// drag that does not opt into Freeform is uniform.
     ///
     /// Watched failing with `freeform:`'s default flipped to `true`: *XCTAssertFalse failed — a drag
     /// that did not ask for Freeform does not get it*, and *("10.5") is not equal to ("1.0")* on the
@@ -1414,87 +1412,6 @@ final class ObjectTransformLogicTests: XCTestCase {
                                                         to: CGAffineTransform(translationX: 10, y: 10),
                                                         inBoundsOfSize: CGSize(width: 100, height: 100)),
                        .identity)
-    }
-
-    // MARK: - What a transform costs the model — the other half of (c)
-
-    private func inkedCanvas(size: CGSize = CGSize(width: 2048, height: 1024)) -> VectorCanvas {
-        var strokes: [VectorStroke] = []
-        for row in 0..<8 {
-            let y = CGFloat(60 + row * 110)
-            let samples = StrokeSamples(stride(from: CGFloat(80), through: size.width - 80, by: 20)
-                .map { VectorSample(x: $0, y: y, pressure: 1) }, channels: .pressureOnly)
-            strokes.append(VectorStroke(brush: Brush(name: "MoveProbe", tip: .round, size: 24),
-                                        color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
-                                        size: 24, opacity: 1, samples: samples))
-        }
-        return VectorCanvas(size: size, strokes: strokes)
-    }
-
-    private func probeStroke(from a: CGPoint, to b: CGPoint) -> VectorStroke {
-        VectorStroke(brush: Brush(name: "MoveProbe", tip: .round, size: 24),
-                     color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
-                     size: 24, opacity: 1,
-                     samples: [VectorSample(x: a.x, y: a.y, pressure: 1),
-                               VectorSample(x: b.x, y: b.y, pressure: 1)])
-    }
-
-    /// `setTransform` moves the layer's content in canvas space and leaves it exactly where it was
-    /// in the layer's own local space — so it must move `version` (the display really is stale) and
-    /// must not move `contentVersion`.
-    func testATransformIsStaleForTheDisplayAndNotForTheContent() {
-        let canvas = inkedCanvas()
-        let version = canvas.version, content = canvas.contentVersion
-
-        canvas.setTransform(CGAffineTransform(translationX: 40, y: 40))
-        XCTAssertGreaterThan(canvas.version, version, "the rendered picture moved")
-        XCTAssertEqual(canvas.contentVersion, content, "the layer's own geometry did not")
-
-        canvas.addStroke(probeStroke(from: CGPoint(x: 10, y: 10), to: CGPoint(x: 30, y: 30)))
-        XCTAssertGreaterThan(canvas.contentVersion, content, "an edit moves both")
-    }
-
-    /// The countable half of the (c) fix: a Move drag asked for `localContentBounds()` on every
-    /// delta, and every one of those answers was a canvas-sized rasterize plus a multi-megapixel
-    /// alpha scan of a value the transform cannot change.
-    ///
-    /// Asserted on a **count** rather than on wall-clock time, in
-    /// `testPreviewIsSubstantiallyCheaperThanFull`'s idiom — a millisecond taken on this Mac is the
-    /// least trustworthy number available (`PERFORMANCE.md` §6), and "did it rasterize" is a fact
-    /// that does not need one.
-    func testTheLocalContentBoundsMemoSurvivesATransform() {
-        let canvas = inkedCanvas()
-        let bounds = canvas.localContentBounds()
-        XCTAssertNotNil(bounds)
-        XCTAssertEqual(canvas.localContentBoundsRasterizations, 1, "the first answer has to rasterize")
-        _ = canvas.localContentBounds()
-        XCTAssertEqual(canvas.localContentBoundsRasterizations, 1, "and the second must not")
-
-        canvas.setTransform(CGAffineTransform(rotationAngle: 0.3).concatenating(
-            CGAffineTransform(translationX: 90, y: -20)))
-        let after = canvas.localContentBounds()
-        XCTAssertEqual(canvas.localContentBoundsRasterizations, 1,
-                       "the bounds are memoized on `contentVersion`, which a transform does not move")
-        XCTAssertEqual(after, bounds, "and they are the same bounds, because local space did not move")
-
-        // Sixty samples of a drag, which is what the pre-branch code charged sixty rasterizes for.
-        for step in 1...60 {
-            canvas.setTransform(CGAffineTransform(translationX: CGFloat(step), y: 0))
-            _ = canvas.localContentBounds()
-        }
-        XCTAssertEqual(canvas.localContentBoundsRasterizations, 1,
-                       "a whole drag must cost no rasterize at all")
-    }
-
-    func testAnEditDoesDropTheLocalContentBoundsMemo() {
-        let canvas = inkedCanvas()
-        let before = canvas.localContentBounds()
-        XCTAssertEqual(canvas.localContentBoundsRasterizations, 1)
-
-        canvas.addStroke(probeStroke(from: CGPoint(x: 1900, y: 980), to: CGPoint(x: 1960, y: 1000)))
-        let after = canvas.localContentBounds()
-        XCTAssertEqual(canvas.localContentBoundsRasterizations, 2, "an edit has to be re-measured")
-        XCTAssertNotEqual(after, before, "and the new ink is inside the new box")
     }
 
     // MARK: - Why the tap-away commit cannot read the release point

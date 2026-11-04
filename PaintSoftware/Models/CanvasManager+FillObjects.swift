@@ -85,7 +85,7 @@ extension CanvasManager {
                 let undoPoints = remainingUndo / Self.fillMendBytesPerPoint
                 let geometryPoints = geometryBytes / Self.fillMendBytesPerPoint
                 let work = FillMendWork(celID: cel.id, fill: fill, path: path,
-                                        transform: vector.transform, size: size, references: references,
+                                        size: size, references: references,
                                         neighbours: neighbours, threshold: threshold, reach: reach, paper: paper,
                                         maximumPointCount: min(undoPoints, geometryPoints),
                                         maximumPathDataBytes: remainingUndo, validity: validity)
@@ -175,11 +175,8 @@ extension CanvasManager {
     /// one window; only the archived replacement reaches the bounded atomic edit plan. Union and
     /// archiving stay here too, so fragmented geometry cannot block the main actor between yields.
     private static func prepareFillMend(_ work: FillMendWork) -> FillMendPatch {
-        let determinant = work.transform.a * work.transform.d - work.transform.b * work.transform.c
-        guard determinant.isFinite, abs(determinant) > .ulpOfOne else { return .unchanged }
-        var toCanvas = work.transform
         let rule: CGPathFillRule = work.fill.evenOddFill ? .evenOdd : .winding
-        guard let shown = work.path.normalized(using: rule).copy(using: &toCanvas) else { return .unchanged }
+        let shown = work.path.normalized(using: rule)
         // Peak mask production also holds source N, CPU path wall 4N, and the neighbour composite's
         // image/bytes/mask up to 9N. These die before the accepted mask is traced below.
         let price = MetalFillSession.bytesPerPixel(isLasso: true, twoReferenceColours: true) + 14
@@ -200,7 +197,7 @@ extension CanvasManager {
             // "no gaps", and the entire atomic plan is discarded by the caller on either refusal.
             return .exceedsBudget
         }
-        var toLocal = admittedWindow.transform.inverted().concatenating(work.transform.inverted())
+        var toLocal = admittedWindow.transform.inverted()
         guard let local = traced.copy(using: &toLocal) else { return .needsMoreMemory }
         let combined = work.path.normalized(using: rule).union(local, using: .winding)
         let updated = work.fill.reshaped(to: combined)
@@ -473,7 +470,6 @@ private struct FillMendWork: @unchecked Sendable {
     let celID: UUID
     let fill: VectorFillElement
     let path: CGPath
-    let transform: CGAffineTransform
     let size: CGSize
     let references: [(layer: Layer, cel: Cel)]
     let neighbours: [(layer: Layer, cel: Cel)]
@@ -507,7 +503,6 @@ private struct FillMendRead {
     let rasterVersion: Int
     let vectorID: UUID?
     let vectorVersion: Int?
-    let transform: CGAffineTransform?
     let bakedID: UUID?
 
     init(layerID: UUID, cel: Cel) {
@@ -519,7 +514,6 @@ private struct FillMendRead {
         rasterVersion = cel.raster.version
         vectorID = cel.vector?.residencyID
         vectorVersion = cel.vector?.version
-        transform = cel.vector?.transform
         bakedID = cel.bakedImage?.residencyID
     }
 
@@ -529,6 +523,6 @@ private struct FillMendRead {
         return cel.startFrame == startFrame && cel.frameCount == frameCount
             && cel.raster.residencyID == rasterID && cel.raster.version == rasterVersion
             && cel.vector?.residencyID == vectorID && cel.vector?.version == vectorVersion
-            && cel.vector?.transform == transform && cel.bakedImage?.residencyID == bakedID
+            && cel.bakedImage?.residencyID == bakedID
     }
 }

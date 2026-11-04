@@ -213,7 +213,6 @@ closed off explicitly: **the header and every buffer move together, in one opera
 | `Cel.fillImage` | `Cel.swift:48` | redraw at offset | **resample** — lossy |
 | `Cel.bakedImage` | `Cel.swift:51` | redraw at offset | **resample** — lossy |
 | `Cel.vector` elements | `VectorLayer.swift:244` | `mapping(_:throughSimilarity:)` per element, with the translation baked in | the same call with `k != 1` — **exact** |
-| `VectorCanvas._transform` | `VectorLayer.swift:1082` | **comes out identity in both arms.** `resized(to:placing:)` bakes it into the elements (TODO item (12) stage 3), so nothing in the app produces a non-identity cel transform | same |
 | `VectorCanvas.size` | `VectorLayer.swift:1045` | new size | new size |
 | `Cel.thumbnail` | `Cel.swift:128` | nil it; `startThumbnailBackfill()` | same |
 | `Cel.interpolation` lattices | `InterpolationRecipe.swift:109` → `Lattice.swift:40-45` | `restOrigin` + `vertices` translate | `restOrigin`, `vertices` through `M`; `restCellSize *= k`; `cols`/`rows`/`activeCells` untouched |
@@ -634,18 +633,13 @@ resizing the canvas changes the domain."*
 
 **The premise this rests on is not true of the current tree, and that is the load-bearing finding.**
 `ceil(log2(extent)) + 2` bounds a coordinate only if stored coordinates lie inside `[0, extent)`. They
-do not, for three independent reasons, none of them exotic:
+do not, for two independent reasons, none of them exotic:
 
-1. **Vector geometry is stored in layer-local space, not canvas space.** `addStroke(canvasSpaceStroke:)`
-   maps incoming samples through `_transform.inverted()` and divides `size` by the transform's scale
-   (`VectorLayer.swift`, `_transform`). A layer the artist has
-   scaled to 0.1× with the Move tool stores local coordinates **ten times the canvas extent**, by
-   construction and correctly.
-2. **Touches keep being delivered outside the view they began in.** Nothing clamps a sample to the
+1. **Touches keep being delivered outside the view they began in.** Nothing clamps a sample to the
    canvas rect; a drag that starts on paper and travels off it records the whole path.
-3. **A shrink already leaves geometry outside the canvas as the normal steady state.**
-   `setCanvasPadding` shrinking appends a *negative* translation and crops the raster tiers, but leaves
-   every vector element exactly where it was. Content outside `[0, extent)` is not an edge case in this
+2. **A shrink already leaves geometry outside the canvas as the normal steady state.**
+   `setCanvasPadding` shrinking bakes a *negative* placement into vector geometry and crops the raster
+   tiers, preserving vector geometry outside the new bounds. Content outside `[0, extent)` is not an edge case in this
    app; it is what a crop *is*.
 
 So the three options, with their costs:

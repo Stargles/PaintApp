@@ -1729,8 +1729,8 @@ enum RenderQuality {
     case preview
 }
 
-/// The vector content of one cel on a `.vector` layer: strokes + placed images, plus one overall
-/// affine transform applied to the whole set. A class because it's a persistent mutable buffer the
+/// The ordered vector content of one cel on a `.vector` layer, in canonical canvas coordinates.
+/// A class because it is a persistent mutable buffer the
 /// drawing surface stamps into; renders on demand to a canvas-native `UIImage` displayed with
 /// nearest-neighbor magnification, so it stays pixelated when zoomed even though the source is
 /// resolution-independent.
@@ -1739,7 +1739,7 @@ final class VectorCanvas {
     let residencyID = UUID()
     let size: CGSize
 
-    /// Guards `_elements`/`_transform` and `cachedImage`. Live drawing mutates this canvas on the main
+    /// Guards `_elements` and `cachedImage`. Live drawing mutates this canvas on the main
     /// thread, but `render()` is also reached from a background queue (the interactive fill's
     /// reference composite), which would otherwise race the array read.
     ///
@@ -1774,7 +1774,6 @@ final class VectorCanvas {
     /// The one z-ordered display list, drawn back to front. See `VectorElement` for why not three
     /// parallel arrays, and `renderLocalContent()` for how it is walked.
     private var _elements: [VectorElement]
-    private var _transform: CGAffineTransform
     /// Backing store for `suppressedElementIDs`/`editingElementID`; see there.
     private var _suppressedElementIDs: Set<UUID> = []
 
@@ -2025,13 +2024,6 @@ final class VectorCanvas {
         set { suppressedElementIDs = newValue.map { [$0] } ?? [] }
     }
 
-    /// Move/rotate/scale of the entire layer's content, applied at render time so it stays crisp.
-    /// Identity until the layer is transformed.
-    var transform: CGAffineTransform {
-        get { lock.lock(); defer { lock.unlock() }; return _transform }
-        set { lock.lock(); defer { lock.unlock() }; _transform = newValue }
-    }
-
     private(set) var version: Int = 0
 
     /// **`version` minus the live stream frames** — bumped by every invalidation `version` is, except
@@ -2049,13 +2041,7 @@ final class VectorCanvas {
     /// behaves differently for the documents that exist today.
     private(set) var documentVersion: Int = 0
 
-    /// Bumped by every change to `_elements` (and to `editingElementID`, which filters them), and
-    /// **deliberately not by `setTransform`**: an overall transform moves the layer's content in
-    /// canvas space and leaves it exactly where it was in the layer's own local space. Anything
-    /// derived from the *local* content can therefore be memoized across a transform, which is what
-    /// `localContentBounds()` does and what takes the two canvas-sized rasterizations out of a Move
-    /// drag's per-touch-move cost. `version` still moves on a transform, because the display really
-    /// is stale.
+    /// Bumped by changes to the display list and its suppression, excluding live stream pixels.
     private(set) var contentVersion: Int = 0
 
     private var cachedImage: UIImage?
@@ -2064,12 +2050,11 @@ final class VectorCanvas {
     /// picture of.**
     ///
     /// Non-nil exactly when `image` is the `.full` local-content render of
-    /// `_elements[0..<prefixCount]` at the identity transform with nothing suppressed. Every
+    /// `_elements[0..<prefixCount]` with nothing suppressed. Every
     /// invalidation that cannot promise that drops it (see `applyToIncrementalBase`), so its being
     /// present *is* the claim — there is no second flag to fall out of step with it.
     ///
-    /// **It costs no memory.** At the identity transform `walk`'s `final` *is* the content
-    /// image, so this and `cachedImage` are the same object; the only window in which this is held
+    /// **It costs no memory.** The walk and `cachedImage` share the same image object; the only window in which this is held
     /// alone is between an append and the render that consumes it, which is a bitmap the shipped
     /// path was about to allocate anyway. `hasCachedImage` counts it for exactly that reason —
     /// eviction must not read "no cache" off a cel holding 8 MB.
@@ -2085,11 +2070,10 @@ final class VectorCanvas {
     /// `incrementalBase`'s counterpart for the edits that are not appends — TODO (41). Where that
     /// one is "a picture of the first *k* elements, draw the rest on top", this one is "a picture of
     /// the *old* list, clear this rectangle and redraw what falls inside it". Non-nil exactly when
-    /// `image` is a `.full` local-content render at the identity transform with nothing suppressed,
+    /// `image` is a `.full` render with nothing suppressed,
     /// and `region` is the union of every rectangle declared damaged since it was taken.
     ///
-    /// It costs no memory for the same reason `incrementalBase` does not: at the identity transform
-    /// `walk`'s `final` *is* the content image, so this holds the object `cachedImage` was
+    /// It costs no memory for the same reason `incrementalBase` does not: it holds the object `cachedImage` was
     /// already holding, and only outlives it between the edit and the render that consumes it.
     private var regionBase: (image: UIImage, region: CGRect)?
 
@@ -2269,7 +2253,7 @@ final class VectorCanvas {
     /// How many canvas-sized rasterizations this canvas has actually performed — `render()` calls that
     /// missed both memos, plus every `renderIsolated(ids:)`, which is never memoized.
     ///
-    /// A test seam, in `localContentBoundsRasterizations`' idiom and for its reason: **the lasso
+    /// A countable test seam: **the lasso
     /// move's cost model is a claim about the design, not about the machine.** "Three renders for the
     /// whole move, however many times the artist nudges it" is countable; the milliseconds it takes
     /// are the laptop's business and would assert nothing about whether the latch is working.
@@ -2314,8 +2298,7 @@ final class VectorCanvas {
     /// `rasterizations`' counterpart, and the pair is the assertion `ThumbnailRenderLogicTests`
     /// actually makes: a thumbnail is a 480-point box over a document that may be 6000 points wide,
     /// so **the number that must not move is `rasterizations`**. A duration would say the same thing
-    /// on this machine and nothing at all on the owner's, which is `localContentBoundsRasterizations`'
-    /// argument reached through a different door.
+    /// on this machine and nothing at all on the owner's.
     private(set) var reducedRasterizations: Int = 0
 
     /// How many stream windows `drawStreamWindow` has drawn — the count a live stream is charged
@@ -2333,19 +2316,17 @@ final class VectorCanvas {
     private var cachedStreamFlag: (version: Int, value: Bool)?
     private var cachedIndexVersion: Int = -1
 
-    init(size: CGSize, elements: [VectorElement], transform: CGAffineTransform = .identity) {
+    init(size: CGSize, elements: [VectorElement]) {
         self.size = CGSize(width: max(size.width, 1), height: max(size.height, 1))
         self._elements = elements
-        self._transform = transform
     }
 
     /// Three-array convenience, kept because most construction sites (tests, the display-list-free
     /// load path) already say it this way. Builds fills, then images, then strokes.
     convenience init(size: CGSize, strokes: [VectorStroke] = [], fills: [VectorFillElement] = [],
-                     images: [VectorImageElement] = [], transform: CGAffineTransform = .identity) {
+                     images: [VectorImageElement] = []) {
         self.init(size: size,
-                  elements: fills.map { .fill($0) } + images.map { .image($0) } + strokes.map { .stroke($0) },
-                  transform: transform)
+                  elements: fills.map { .fill($0) } + images.map { .image($0) } + strokes.map { .stroke($0) })
     }
 
     static func empty(size: CGSize) -> VectorCanvas { VectorCanvas(size: size) }
@@ -2359,7 +2340,7 @@ final class VectorCanvas {
     func makeCopy() -> VectorCanvas {
         lock.lock()
         defer { lock.unlock() }
-        return VectorCanvas(size: size, elements: _elements, transform: _transform)
+        return VectorCanvas(size: size, elements: _elements)
     }
 
     /// A new canvas sized to `newSize` with this canvas's whole extent re-placed into `content` (a
@@ -2371,25 +2352,7 @@ final class VectorCanvas {
     /// whole contract is that one scalar `k` stands for both axis widths (a per-axis stretch has no
     /// correct `stroke.size`; CANVAS_RESIZE.md §3). Stage 1 only ever passes `k == 1`.
     ///
-    /// **The scale lands in the elements, never in `_transform`** — CANVAS_RESIZE.md §2's one-line
-    /// trap. `render()` rasterizes the display list at canvas size *first* and applies `_transform` to
-    /// that bitmap, so folding a scale into the transform is a bitmap magnify of the vector render
-    /// wearing a vector operation's name. Baking through `mapping` re-stamps the brush at the new
-    /// size on the next render, which is the entire reason the tier exists.
-    ///
-    /// **The shift is baked into the geometry and the new canvas is identity** — TODO item (12)
-    /// stage 3. It used to *append* the translation to `_transform` and hand back the same local
-    /// display list, which is where every non-identity transform in the owner's documents came from:
-    /// `setCanvasPadding` walks every cel of every layer, so one use of the slider left one on every
-    /// cel in the file, and each of those then clipped later canvas-space ink in local space (the
-    /// defect stage 1 closed for the Move box). Nothing writes `_transform` any more, so with this
-    /// line the app has no producer of a non-identity cel transform at all, which is what makes a
-    /// stored sample a canvas coordinate — the precondition TODO item (8) was blocked on.
-    ///
-    /// Still lossless, and for a stronger reason than before: a translation moves no sample onto a
-    /// different sub-pixel and re-stamps nothing, so `mapping`'s three floors cannot bind. The
-    /// composition with `_transform` is kept rather than assumed away — a canvas handed in with one
-    /// (a test, or a document decoded by a build older than stage 3) bakes both at once.
+    /// Placement is baked into each element so the next render stamps geometry at its new size.
     func resized(to newSize: CGSize, placing content: CGRect) -> VectorCanvas {
         lock.lock()
         defer { lock.unlock() }
@@ -2399,8 +2362,7 @@ final class VectorCanvas {
         // `.scaledBy` after `translationX:` means *scale first, then translate* — the order §2 pins,
         // and the other one reads identically and is wrong.
         let placement = CGAffineTransform(translationX: content.minX, y: content.minY).scaledBy(x: k, y: k)
-        let baked = _transform.concatenating(placement)
-        let moved = baked.isIdentity ? _elements : _elements.map { Self.mapping($0, throughSimilarity: baked) }
+        let moved = placement.isIdentity ? _elements : _elements.map { Self.mapping($0, throughSimilarity: placement) }
         return VectorCanvas(size: newSize, elements: moved)
     }
 
@@ -2564,9 +2526,8 @@ final class VectorCanvas {
     }
 
     /// Drops the memoized renders and moves the display's staleness key, **without** claiming the
-    /// layer's own content changed. `setTransform` and a stream frame arriving (`setStreamFrame`) are
-    /// the only callers and the only mutations for which that distinction is true. Caller must hold
-    /// `lock`.
+    /// stored geometry changed. A live stream frame reaches this directly; authored changes reach it
+    /// through `invalidate`. Caller must hold `lock`.
     ///
     /// `changesDocument` is false for exactly one caller — a stream frame arriving, which changes no
     /// picture the document keeps and so leaves `documentVersion` still; see that property.
@@ -2621,10 +2582,8 @@ final class VectorCanvas {
             regionBase = nil
         case .region(let rect):
             let rect = rect.standardized
-            // A base is only a base at the identity with nothing suppressed, for `appendableBase`'s
-            // two reasons: the overall transform is applied by resampling the finished content, and
-            // a suppressed element is not in the picture the base holds.
-            guard _transform.isIdentity, _suppressedElementIDs.isEmpty,
+            // A suppressed element is absent from the standing picture, so it cannot be a repair base.
+            guard _suppressedElementIDs.isEmpty,
                   !rect.isNull, !rect.isInfinite else { regionBase = nil; return }
             if let standing = regionBase {
                 regionBase = (standing.image, standing.region.union(rect))
@@ -2710,7 +2669,7 @@ final class VectorCanvas {
     /// is local and visible: `regionBase` first, `image = nil` second.
     ///
     /// The conditions are the native ones verbatim, for the reasons stated there: a base is only a
-    /// base at the identity transform with nothing suppressed, an append keeps the footprints and
+    /// base with nothing suppressed, an append keeps the footprints and
     /// drops the region base, and a `.region` that cannot be bounded drops it too.
     private func applyToReducedRender(_ damage: Damage) {
         guard var slot = reducedRender else { return }
@@ -2719,7 +2678,7 @@ final class VectorCanvas {
             slot.regionBase = nil
         case .region(let rect):
             let rect = rect.standardized
-            if !_transform.isIdentity || !_suppressedElementIDs.isEmpty
+            if !_suppressedElementIDs.isEmpty
                 || rect.isNull || rect.isInfinite {
                 slot.regionBase = nil
             } else if let standing = slot.regionBase {
@@ -3047,7 +3006,7 @@ final class VectorCanvas {
     ///
     /// * **A fill** is `cg.addPath(path); cg.fillPath()` and nothing else. Antialiasing is per-pixel
     ///   coverage *of the path*, so a pixel the path does not reach gets none: the ink is inside
-    ///   `boundingBoxOfPath`. The one point of slack is `addFill(canvasSpacePath:)`'s, for its
+    ///   `boundingBoxOfPath`. The one point of slack is `addFill(path:)`'s, for its
     ///   measured reason — the stored path is float32, so 20.3 comes back 20.299999237.
     /// * **A placed image and a video** are both `concatenate(placement)` then a draw confined to
     ///   `CGRect(-natural/2, natural/2)`, which is exactly the rectangle `quad(of:)` maps — the shared
@@ -3085,7 +3044,7 @@ final class VectorCanvas {
     ///
     /// Strokes answer nil, which is not a limitation but the rule: see `inkOfArrivals(in:standing:)`.
     fileprivate static func derivedFootprint(of element: VectorElement, lowestResolution: CGFloat) -> CGRect? {
-        // The float32/antialias slack `addFill(canvasSpacePath:)` measured, in canvas points.
+        // The float32/antialias slack `addFill(path:)` measured, in canvas points.
         let slack: CGFloat = 1
         switch element {
         case .stroke:
@@ -3338,51 +3297,8 @@ final class VectorCanvas {
         invalidate(Self.damage(ofInsertAt: index, into: _elements))
     }
 
-    /// Adds a stroke whose samples were captured in canvas space — a live drag, or a smart shape's
-    /// collapsed outline — mapping geometry and width into this canvas's local space (storage is
-    /// local-space; `render()` applies `transform` on top).
-    func addStroke(canvasSpaceStroke stroke: VectorStroke) {
-        lock.lock()
-        defer { lock.unlock() }
-        var mapped = stroke
-        mapped.samples = Self.localSamples(stroke.samples, through: _transform)
-        // Width is canvas-space too: a stroke at N points on a layer scaled by k must store N/k to
-        // come back out N points wide after render() rescales it.
-        let scale = Self.scale(of: _transform)
-        if scale > 0 { mapped.size = stroke.size / scale }
-        let index = Self.insertionIndex(forKind: .stroke, in: _elements)
-        _elements.insert(.stroke(mapped), at: index)
-        invalidate(Self.damage(ofInsertAt: index, into: _elements))
-    }
-
-    /// Uniform scale factor of the overall `transform` (the overlay only ever produces
-    /// translate·rotate·uniform-scale, so one number describes it).
-    var transformScale: CGFloat {
-        lock.lock()
-        defer { lock.unlock() }
-        return Self.scale(of: _transform)
-    }
-
-    // Static functions of the transform they're given, rather than methods reading `_transform`, so
-    // a locked method can call them without re-entering the lock.
-
-    private static func scale(of t: CGAffineTransform) -> CGFloat { hypot(t.a, t.b) }
-
-    /// Canvas-space geometry expressed in the layer's own space. **Channel-generic**: it is one
-    /// `transformed(by:)`, so every per-point channel rides through and the azimuth (BRUSH.md §2.7)
-    /// turns with the ink rather than staying pointed at the canvas.
-    private static func localSamples(_ samples: StrokeSamples, through t: CGAffineTransform) -> StrokeSamples {
-        guard !t.isIdentity else { return samples }
-        return samples.transformed(by: t.inverted())
-    }
-
-    private static func localPath(_ path: CGPath, through t: CGAffineTransform) -> CGPath {
-        guard !t.isIdentity else { return path }
-        var inverse = t.inverted()
-        return path.copy(using: &inverse) ?? path
-    }
-
-    func addImage(_ element: VectorImageElement) {
+    @discardableResult
+    func addImage(_ element: VectorImageElement) -> VectorImageElement {
         lock.lock()
         defer { lock.unlock() }
         // An image goes *below* the first stroke, so on a cel with any line art on it this is a
@@ -3391,36 +3307,7 @@ final class VectorCanvas {
         let index = Self.insertionIndex(forKind: .image, in: _elements)
         _elements.insert(.image(element), at: index)
         invalidate(Self.damage(ofInsertAt: index, into: _elements))
-    }
-
-    /// **A placed picture, given as the element it is in canvas space, written into this canvas's own
-    /// storage** — the one way a picture the artist put down gets onto a vector cel. The caller says
-    /// where it is shown and how big (and, under a pose, has already carried it into the layer's own
-    /// space: `CanvasManager.placedInLayerSpace`); this takes the last step in through the cel's own
-    /// `transform`, for the reason `addStroke(canvasSpaceStroke:)` and `addFill(canvasSpacePath:)` both
-    /// give: storage is local, `render()` applies `transform` on top, and a canvas-space value stored
-    /// unmapped would go through the transform twice. `transform.scale` gets the same correction a
-    /// stroke's `size` does — divided by the transform's own scale so it renders back out at the size
-    /// it was given — and both are read under the one lock acquisition that reads `_transform`.
-    ///
-    /// Inserted by kind (an image goes *below* the first stroke), so on a cel with any line art on it
-    /// this is a middle insert and declares `.everything`; it is an append on a cel that holds only
-    /// images and fills, which is what a placement onto a fresh layer is.
-    ///
-    /// Returns the element as actually stored, so the caller can bind it once outside its undo/redo
-    /// closures.
-    @discardableResult
-    func addImage(canvasSpaceElement element: VectorImageElement) -> VectorImageElement {
-        lock.lock()
-        defer { lock.unlock() }
-        var stored = element
-        let scale = Self.scale(of: _transform)
-        stored.transform.position = element.transform.position.applying(_transform.inverted())
-        stored.transform.scale = scale > 0 ? element.transform.scale / scale : element.transform.scale
-        let index = Self.insertionIndex(forKind: .image, in: _elements)
-        _elements.insert(.image(stored), at: index)
-        invalidate(Self.damage(ofInsertAt: index, into: _elements))
-        return stored
+        return element
     }
 
     /// Puts a fill **on top of everything already on this canvas** — appended to the end of the
@@ -3457,8 +3344,8 @@ final class VectorCanvas {
     /// `Kind`. A brand-new object goes on top of what is already there, which is what every editor
     /// does and what the artist just placed; text and strokes therefore stack chronologically.
     ///
-    /// Frames are in **local** space, like every other stored geometry on this canvas. A caller
-    /// holding canvas-space corners maps them with `localPoints(fromCanvas:)` first.
+    /// Frames use the same canonical coordinates as every other stored element. Input under an active
+    /// pose is pulled back by `CanvasManager.inLayerSpace` before insertion.
     func upsertText(_ element: VectorTextElement) {
         lock.lock()
         defer { lock.unlock() }
@@ -3536,65 +3423,15 @@ final class VectorCanvas {
         return true
     }
 
-    /// A text object captured in **canvas** space expressed in this canvas's local space, and back.
-    ///
-    /// Needed for the reason `addStroke(canvasSpaceStroke:)` and `addFill(canvasSpacePath:)` are: the
-    /// draft is measured where the finger is, storage is local, and `render()` applies `transform`
-    /// afterwards — so a frame stored unmapped would go through the layer's transform twice. Both
-    /// directions are `mappingText` with the transform or its inverse, so a round trip is exact.
-    ///
-    /// **The point size and the box travel with the corners.** A layer scaled by *k* stores a stroke
-    /// at `size / k` so it comes back out the width it was drawn; type is the same statement about a
-    /// different scalar, and leaving `pointSize` in canvas points would re-lay the glyphs out at the
-    /// wrong size inside a box that had been scaled.
-    ///
-    /// **Rotation used to be the one part this did not carry, and stage 4 closed it.** A rotated
-    /// layer transform gives the mapped frame a rotated quad, which stage 3's
-    /// `VectorCanvas.draw(text:…)` then drew through its bounding box; it now draws through the
-    /// frame's own affine map, so the mapped quad renders turned. What remains for stage 5 is the
-    /// case no affine map covers — a layer transform that is not a similarity, or a frame the artist
-    /// has warped into a non-parallelogram.
-    func localText(fromCanvas element: VectorTextElement) -> VectorTextElement {
-        lock.lock()
-        defer { lock.unlock() }
-        return Self.mappingText(element, through: _transform.isIdentity ? _transform : _transform.inverted())
-    }
-
-    func canvasText(fromLocal element: VectorTextElement) -> VectorTextElement {
-        lock.lock()
-        defer { lock.unlock() }
-        return Self.mappingText(element, through: _transform)
-    }
-
-    private static func mappingText(_ element: VectorTextElement,
-                                    through t: CGAffineTransform) -> VectorTextElement {
-        guard !t.isIdentity else { return element }
-        var mapped = element
-        mapped.frame.corners = element.frame.corners.map { $0.applying(t) }
-        let s = scale(of: t)
-        if s > 0, abs(s - 1) > 1e-9 {
-            mapped.frame.size = CGSize(width: element.frame.size.width * s,
-                                       height: element.frame.size.height * s)
-            mapped.recipe.typography = element.recipe.typography.scaled(by: s)
-        }
-        return mapped
-    }
-
-    /// What `addFill(canvasSpacePath:paint:...)` put on the canvas: the new element's id, and the
+    /// What `addFill(path:paint:...)` put on the canvas: the new element's id, and the
     /// rectangle that contains its ink.
     struct AddedFill {
         let id: UUID
         let ink: CGRect
     }
 
-    /// Adds a fill whose path was captured in **canvas** space — where the flood-fill mask, the lasso,
-    /// and every other on-screen path are measured — mapping it into this canvas's local space first,
-    /// or it would go through `transform` twice at render time.
-    ///
-    /// On top of everything already here, for the reasons `addFill(_:)` gives.
-    /// - Returns: **where the fill landed, in this canvas's own space** — the rectangle its undo step
-    ///   declares, and the one thing a caller in canvas space cannot work out for itself, since the
-    ///   mapping through `_transform` happens in here.
+    /// Builds a fill in canonical coordinates, on top of everything already here.
+    /// - Returns: its id and the rectangle its undo step declares as changed ink.
     ///
     ///   It is exact rather than an estimate, which is what separates a fill from a stroke: `draw
     ///   (fill:into:)` adds this very path and fills it, and a fill's antialiasing is per-pixel
@@ -3609,66 +3446,23 @@ final class VectorCanvas {
     ///   caller asked to fill (20.3 stores as 20.299999237). One point of slack covers that with room
     ///   to spare, and costs nothing: `repairClip` rounds the clip out to integral regardless.
     ///
-    /// **The paint's geometry is canvas space too.** A gradient's two points are brought into local
-    /// space through the same inverse as the path, or a gradient laid down on a layer Move has already
-    /// shifted would be placed one transform off its own shape.
     @discardableResult
-    func addFill(canvasSpacePath path: CGPath, paint: FillPaint, opacity: Double = 1.0, evenOddFill: Bool = false) -> AddedFill {
-        lock.lock()
-        defer { lock.unlock() }
-        let localPaint = _transform.isIdentity ? paint : paint.transformed(by: _transform.inverted())
-        let fill = VectorFillElement(path: Self.localPath(path, through: _transform), paint: localPaint,
+    func addFill(path: CGPath, paint: FillPaint, opacity: Double = 1.0, evenOddFill: Bool = false) -> AddedFill {
+        let fill = VectorFillElement(path: path, paint: paint,
                                      opacity: opacity, evenOddFill: evenOddFill)
-        _elements.append(.fill(fill))
-        invalidate(.appended(count: 1))
+        addFill(fill)
         guard let placed = fill.cgPath else { return AddedFill(id: fill.id, ink: .null) }
         return AddedFill(id: fill.id, ink: placed.boundingBoxOfPath.insetBy(dx: -1, dy: -1))
     }
 
-    /// `addFill(canvasSpacePath:paint:...)` with a flat colour, returning only where the fill landed —
+    /// `addFill(path:paint:...)` with a flat colour, returning only where the fill landed —
     /// what every caller that has no use for the new element's id asks for.
     @discardableResult
-    func addFill(canvasSpacePath path: CGPath, color: CodableColor, opacity: Double = 1.0, evenOddFill: Bool = false) -> CGRect {
-        addFill(canvasSpacePath: path, paint: .solid(color), opacity: opacity, evenOddFill: evenOddFill).ink
+    func addFill(path: CGPath, color: CodableColor, opacity: Double = 1.0, evenOddFill: Bool = false) -> CGRect {
+        addFill(path: path, paint: .solid(color), opacity: opacity, evenOddFill: evenOddFill).ink
     }
 
-    /// Maps a canvas-space path into this canvas's local (pre-`transform`) space — see
-    /// `addFill(canvasSpacePath:...)` for why every stored path must be in local space.
-    func localPath(fromCanvas path: CGPath) -> CGPath {
-        lock.lock()
-        defer { lock.unlock() }
-        return Self.localPath(path, through: _transform)
-    }
-
-    func setTransform(_ t: CGAffineTransform) {
-        lock.lock()
-        defer { lock.unlock() }
-        _transform = t
-        // `invalidateRenderOnly`, not `invalidate`: the display is stale, the local content is not.
-        // See `contentVersion`.
-        //
-        // `.everything` even so, and for a reason the content version does not capture: the memo is
-        // the *transformed* picture, and resampling a composite is not compositing two resampled
-        // halves. There is nothing here to append to.
-        invalidateRenderOnly(.everything)
-    }
-
-    /// The overall transform expressed as a `LayerTransform` (position/uniform-scale/rotation) about
-    /// `pivot`, a fixed point in the content's own local space (typically its bounding box's center),
-    /// so the Move tool's on-canvas box tracks the actual content. Assumes `transform` is
-    /// translate·rotate·uniform-scale.
-    func layerTransform(pivot: CGPoint) -> LayerTransform {
-        lock.lock()
-        defer { lock.unlock() }
-        let scale = Self.scale(of: _transform)
-        return LayerTransform(position: pivot.applying(_transform),
-                              scale: scale == 0 ? 1 : scale,
-                              rotation: atan2(_transform.b, _transform.a))
-    }
-
-    /// Inverse of `layerTransform(pivot:)`: builds the affine that maps content drawn at `pivot` so
-    /// its center lands at `t.position`, rotated/scaled about that center. `pivot` must be the same
-    /// fixed point used to derive `t` via `layerTransform(pivot:)`.
+    /// Places content around its fixed `pivot` at the Move box's position, scale and rotation.
     static func affine(from t: LayerTransform, pivot: CGPoint) -> CGAffineTransform {
         affine(from: t, aspect: 1, stretchAxis: 0, pivot: pivot)
     }
@@ -3713,84 +3507,14 @@ final class VectorCanvas {
         return linear.translatedBy(x: -pivot.x, y: -pivot.y)
     }
 
-    /// Bounding box of the layer's own content (strokes/fills/images) in its local, untransformed
-    /// coordinate space — i.e. where it sits before `transform` is applied. Nil if there's no
-    /// visible content. Used to size/pivot the Move tool's on-canvas box to the actual content
-    /// rather than the whole canvas.
-    ///
-    /// **Memoized on `contentVersion`, which is what makes it usable on a per-touch-move path.** The
-    /// answer costs a canvas-sized rasterize of every element plus a several-million-pixel alpha
-    /// scan, and the Move tool asked for it on every delta of a drag — once in
-    /// `CanvasView.Coordinator.objectTransformChanged` and again in `updateTransformOverlay` — to
-    /// recompute a value that a transform cannot change. Unlike the render memo this costs no
-    /// pixels to hold (one `CGRect?`), so it is invisible to `hasCachedImage` and to eviction, which
-    /// is correct rather than an oversight: there is nothing here to evict.
-    func localContentBounds() -> CGRect? {
-        // `rasterizeLock` for its own reason and in its own order (it, then `lock`): this is a
-        // canvas-sized walk plus an alpha scan, so it is the second thing `lock` must not be held
-        // across. The memo is checked again after the wait, because the thread ahead may have been
-        // answering the same question.
-        rasterizeLock.lock()
-        defer { rasterizeLock.unlock() }
-        lock.lock()
-        if cachedLocalContentBoundsVersion == contentVersion, let cached = cachedLocalContentBounds {
-            lock.unlock()
-            return cached
-        }
-        localContentBoundsRasterizations += 1
-        let contentVersionAtPlan = contentVersion
-        let visible = Self.visible(_elements, suppressing: _suppressedElementIDs)
-        let size = size
-        lock.unlock()
-
-        // `known` is deliberately not passed: with no clip the walk never reads it (both tests that
-        // consult it are guarded on the clip), so this is the same walk it always was.
-        // A refused bitmap is "no visible content" this once, memoized nowhere — the same answer an
-        // empty cel gives, and the Move box sizes to the canvas rather than to nothing.
-        guard let walked = Self.renderLocalContent(size: size, elements: visible) else { return nil }
-        let bounds = PixelOps.opaqueContentBounds(walked.image)
-
-        lock.lock()
-        defer { lock.unlock() }
-        // A fact about a walk that happened, recorded whether or not the memo is, exactly as
-        // `install` records it — see there.
-        lastRenderDabCount = walked.dabCount
-        // Same gate as `install`'s, for the same reason and in its cheapest form: this answer is a
-        // property of `contentVersion`, so memoizing it — or the footprints, which are a promise
-        // about the elements that were in the list — under a newer one would be a lie.
-        guard contentVersion == contentVersionAtPlan else { return bounds }
-        for (id, rect) in walked.measured { paintedBounds[id] = rect }
-        cachedLocalContentBounds = .some(bounds)
-        cachedLocalContentBoundsVersion = contentVersion
-        return bounds
-    }
-
-    /// The memo behind `localContentBounds()`. Doubly optional on purpose: the outer level is "has an
-    /// answer been computed", the inner is the answer itself, and an empty layer's legitimate `nil`
-    /// must not read as a cache miss and re-rasterize on every call.
-    private var cachedLocalContentBounds: CGRect??
-    private var cachedLocalContentBoundsVersion: Int = -1
-
-    /// How many times `localContentBounds()` has actually rasterized, as against resolving from the
-    /// memo above. The test seam `ObjectTransformLogicTests` reads, in `lastRenderDabCount`'s
-    /// idiom: whether the memo is live is a **countable** property, and asserting it in milliseconds
-    /// on this machine would be asserting on the machine. A counter of its own rather than
-    /// `lastRenderDabCount` because `render()` leaves that value standing on a cache hit rather than
-    /// zeroing it, so it cannot distinguish "rasterized again" from "did not".
-    private(set) var localContentBoundsRasterizations: Int = 0
-
     // MARK: - Erasing
     //
-    // The adapter layer between a gesture in canvas space and `VectorEraser`'s pure geometry: map
-    // into local space, ask the spatial index which strokes are candidates, delegate the "which spans
+    // The adapter between a canonical gesture and `VectorEraser`'s pure geometry: ask the spatial
+    // index which strokes are candidates, delegate the "which spans
     // go away" decision to `VectorEraser`/`StrokeGeometry`, splice survivors back at their z-position.
 
     /// Removes stroke geometry along an eraser gesture, according to `mode`. Returns true if anything
     /// changed.
-    ///
-    /// Eraser input is in **canvas** space; samples and brush diameter are mapped through the inverse
-    /// layer transform before meeting the stored, local-space geometry, or erasing a scaled-up layer
-    /// would cut a nib-sized hole where the user swept a wide one.
     ///
     /// Surviving pieces are spliced back in place, keeping their parent's z-position. A piece mints a
     /// fresh id, inherits its parent's `seed` and replays its parent's walk (`DabLattice`), so its
@@ -3799,20 +3523,17 @@ final class VectorCanvas {
     /// `.erase` strokes are skipped: cutting a span out of one would *restore* the ink beneath it.
     /// Mode1's retained punch keeps the pen-down `seed`; the geometry-only modes do not read it.
     @discardableResult
-    func erase(alongPath canvasSpaceSamples: StrokeSamples, brush: Brush, size: CGFloat,
+    func erase(alongPath samples: StrokeSamples, brush: Brush, size: CGFloat,
                opacity: Double = 1, mode: VectorEraserMode, seed: UInt64) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard !canvasSpaceSamples.isEmpty else { return false }
+        guard !samples.isEmpty else { return false }
         // Mode 1 can leave a punch over a fill or placed image, so unlike Modes 2/3 it has work to
         // do on a layer with no strokes at all.
         guard mode == .erase || _elements.contains(where: { $0.stroke != nil }) else { return false }
 
-        let localSamples = Self.localSamples(canvasSpaceSamples, through: _transform)
-        let scale = Self.scale(of: _transform)
-        let localSize = scale > 0 ? size / scale : size
-        guard let sweep = VectorEraser.Sweep(samples: localSamples, brush: brush,
-                                             size: localSize) else { return false }
+        guard let sweep = VectorEraser.Sweep(samples: samples, brush: brush,
+                                             size: size) else { return false }
 
         let changed: Bool
         // `.everything` unless Mode 1 says otherwise: Modes 2 and 3 both *replace* strokes with the
@@ -3820,8 +3541,8 @@ final class VectorCanvas {
         var damage: Damage = .everything
         switch mode {
         case .erase:
-            (changed, damage) = eraseHybrid(sweep: sweep, samples: localSamples, brush: brush,
-                                            size: localSize, opacity: opacity, seed: seed)
+            (changed, damage) = eraseHybrid(sweep: sweep, samples: samples, brush: brush,
+                                            size: size, opacity: opacity, seed: seed)
         case .cutPoints:
             (changed, damage) = cutAlongFootprint(sweep: sweep)
         case .cutToIntersection:
@@ -3831,7 +3552,7 @@ final class VectorCanvas {
             // `cutToIntersection(atCanvasPoint:…)`, since Mode 3 cuts on touch-down and re-resolves
             // per crossing. Kept — and routed through the *same* private resolve as the live path, so
             // it cannot drift into a second, differently-behaving Mode 3.
-            let resolved = cutToIntersection(sweep: sweep, near: localSamples[0].point,
+            let resolved = cutToIntersection(sweep: sweep, near: samples[0].point,
                                              suppressing: [])
             changed = resolved.outcome == .cut
             damage = resolved.damage
@@ -3872,13 +3593,11 @@ final class VectorCanvas {
         defer { lock.unlock() }
         guard _elements.contains(where: { $0.stroke != nil }) else { return (.missed, []) }
 
-        let localSamples = Self.localSamples(StrokeSamples(points: [canvasPoint]), through: _transform)
-        let scale = Self.scale(of: _transform)
-        let localSize = scale > 0 ? size / scale : size
+        let localSamples = StrokeSamples(points: [canvasPoint])
         // A one-sample sweep is the single dab stamped so far: `capsuleChain` yields one zero-length
         // capsule for it, so the footprint test below is the nib itself.
         guard let sweep = VectorEraser.Sweep(samples: localSamples, brush: brush,
-                                             size: localSize) else { return (.missed, []) }
+                                             size: size) else { return (.missed, []) }
 
         let resolved = cutToIntersection(sweep: sweep, near: localSamples[0].point, suppressing: suppressing)
         // A cut splices pieces in at the parent's z-position, which is a middle-of-list edit — and
@@ -4063,11 +3782,11 @@ final class VectorCanvas {
             .map { piece(of: stroke, samples: $0.samples, parameters: $0.parameters) }
     }
 
-    private static func canvasDamage(of elements: [VectorElement], transform: CGAffineTransform,
+    private static func canvasDamage(of elements: [VectorElement],
                                      size: CGSize) -> CGRect {
         let local = paintedBounds(of: elements)
         guard !local.isNull, !local.isEmpty else { return .null }
-        return local.applying(transform).integral
+        return local.integral
             .intersection(CGRect(origin: .zero, size: size))
     }
 
@@ -4135,13 +3854,10 @@ final class VectorCanvas {
     ///
     /// Read-only: no element changes and `version` does not move. Canvas-space input, exactly as
     /// `erase(alongPath:)` takes it.
-    func eraserTouchesInk(alongPath canvasSpaceSamples: StrokeSamples, brush: Brush, size: CGFloat) -> Bool {
+    func eraserTouchesInk(alongPath samples: StrokeSamples, brush: Brush, size: CGFloat) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        let localSamples = Self.localSamples(canvasSpaceSamples, through: _transform)
-        let scale = Self.scale(of: _transform)
-        let localSize = scale > 0 ? size / scale : size
-        guard let sweep = VectorEraser.Sweep(samples: localSamples, brush: brush, size: localSize) else { return false }
+        guard let sweep = VectorEraser.Sweep(samples: samples, brush: brush, size: size) else { return false }
         return inkTouched(by: sweep)
     }
 
@@ -4527,9 +4243,8 @@ final class VectorCanvas {
     /// than at the call site is what stops a caller inventing a fallback to moving the whole cel.
     ///
     /// `loop` is in this canvas's **local** space, and must already be normalized — see
-    /// `localPath(fromCanvas:)` for the first and `CGPath.normalized(using:)` for the second. Neither
-    /// is optional: stored geometry is local, so an unmapped canvas-space loop is correct on an
-    /// untransformed layer and silently wrong on every layer Move has already touched; and Core
+    /// the input pose pull-back for the first and `CGPath.normalized(using:)` for the second. Neither
+    /// is optional: a shown loop must be pulled back through the element's active pose; and Core
     /// Graphics leaves `intersection`/`subtracting` **undefined** for a non-simple path, which a raw
     /// lasso becomes the moment the artist loops back over their own line.
     ///
@@ -4705,7 +4420,7 @@ final class VectorCanvas {
     /// (`CanvasManager.recolorSelection`) is the first.
     ///
     /// `loop` carries `splitForLassoMove`'s two mandatory preconditions unchanged: local space
-    /// (`localPath(fromCanvas:)`) and normalized (`CGPath.normalized(using:)`). Same broad phase,
+    /// through its active pose and normalized (`CGPath.normalized(using:)`). Same broad phase,
     /// same `lassoFillRule`, same centre-line and centre-point rules — the whole point is that
     /// "what did the lasso catch" has one answer in this file, whatever the caller then does with it.
     ///
@@ -4787,11 +4502,6 @@ final class VectorCanvas {
     ///     everything wholly outside the canvas would be left behind. Off-canvas content is real
     ///     here — a stroke drawn past the edge, or content that a previous shrink put out there —
     ///     and abandoning it is exactly the artwork loss this whole change exists to end.
-    ///   * *`localContentBounds()`* is worse still: it is an alpha scan of `renderLocalContent`,
-    ///     which rasterizes into a context of exactly `size` at the local origin — so it can only
-    ///     ever report ink that is already inside the canvas rect. Deriving the moved set from it
-    ///     would exclude the very ink the clip is losing.
-    ///
     /// So the answer is the identity: the moved set is the whole display list, which is what "move
     /// the whole cel" means, and it is the one reading under which no element can be dropped.
     ///
@@ -4918,8 +4628,7 @@ final class VectorCanvas {
     /// dab *orientation* when the piece turns. Statistically identical, and invisible on a round dab.
     static func mapping(_ element: VectorElement, throughSimilarity t: CGAffineTransform) -> VectorElement {
         guard !t.isIdentity else { return element }
-        // The codebase's one answer to "how much did this scale by" — `VectorCanvas.scale(of:)`, which
-        // `addStroke` already uses to carry a canvas-space width into local space.
+        // Both axes of a similarity share this column length.
         let k = hypot(t.a, t.b)
         let theta = atan2(t.b, t.a)
         assert(abs(k - hypot(t.c, t.d)) <= 1e-6 * max(1, k)
@@ -5016,11 +4725,6 @@ final class VectorCanvas {
     private static func mapped(_ text: VectorTextElement, through t: CGAffineTransform,
                                uniformScale k: CGFloat) -> VectorTextElement {
         var text = text
-        // Stored **local**, despite `TextFrame.corners`' own doc saying canvas space — that
-        // comment is written from the authoring perspective, and `localText(fromCanvas:)` maps
-        // every incoming frame through `_transform.inverted()` before it is stored. Translating
-        // stored corners by a canvas-space delta on a transformed layer sends the text somewhere
-        // else entirely.
         text.frame.corners = text.frame.corners.map { $0.applying(t) }
         if k != 1 {
             text.frame.size = CGSize(width: text.frame.size.width * k,
@@ -5604,15 +5308,12 @@ final class VectorCanvas {
         var touched: [ClosedRange<CGFloat>] = []
     }
 
-    func cutPreviewElements(alongPath canvasSpaceSamples: StrokeSamples, brush: Brush, size: CGFloat,
+    func cutPreviewElements(alongPath samples: StrokeSamples, brush: Brush, size: CGFloat,
                             accumulating accumulated: inout [UUID: CutPreviewProgress]) -> EraserPreview? {
         lock.lock()
         defer { lock.unlock() }
-        guard !canvasSpaceSamples.isEmpty, _elements.contains(where: { $0.stroke != nil }) else { return nil }
-        let localSamples = Self.localSamples(canvasSpaceSamples, through: _transform)
-        let rawScale = Self.scale(of: _transform)
-        let scale = rawScale > 0 ? rawScale : 1
-        guard let sweep = VectorEraser.Sweep(samples: localSamples, brush: brush, size: size / scale) else {
+        guard !samples.isEmpty, _elements.contains(where: { $0.stroke != nil }) else { return nil }
+        guard let sweep = VectorEraser.Sweep(samples: samples, brush: brush, size: size) else {
             return nil
         }
         let candidates = Set(strokeIndex().segments(near: sweep.bounds).map(\.elementIndex))
@@ -5651,21 +5352,19 @@ final class VectorCanvas {
             let pieces = Self.cutPieces(of: stroke, cuts: progress.cuts, touched: progress.touched)
             result.append(contentsOf: pieces.map(VectorElement.stroke))
         }
-        let damage = sweep.bounds.insetBy(dx: -reach, dy: -reach).applying(_transform).integral
+        let damage = sweep.bounds.insetBy(dx: -reach, dy: -reach).integral
             .intersection(CGRect(origin: .zero, size: self.size))
         guard !damage.isNull, !damage.isEmpty else { return nil }
         return EraserPreview(elements: result, rewriting: changedIDs, damage: damage)
     }
 
-    func wholeStrokePreviewElements(alongPath canvasSpaceSamples: StrokeSamples, brush: Brush, size: CGFloat,
+    func wholeStrokePreviewElements(alongPath samples: StrokeSamples, brush: Brush, size: CGFloat,
                                     accumulating doomed: inout Set<UUID>) -> EraserPreview? {
         lock.lock()
         defer { lock.unlock() }
-        guard !canvasSpaceSamples.isEmpty, _elements.contains(where: { $0.stroke != nil }) else { return nil }
-        let localSamples = Self.localSamples(canvasSpaceSamples, through: _transform)
-        let scale = Self.scale(of: _transform)
-        guard let sweep = VectorEraser.Sweep(samples: localSamples, brush: brush,
-                                             size: scale > 0 ? size / scale : size) else { return nil }
+        guard !samples.isEmpty, _elements.contains(where: { $0.stroke != nil }) else { return nil }
+        guard let sweep = VectorEraser.Sweep(samples: samples, brush: brush,
+                                             size: size) else { return nil }
         let newlyDoomed = touchedStrokeIndices(by: sweep).reduce(into: [UUID]()) { ids, index in
             let element = _elements[index]
             if element.stroke?.composite == .paint, doomed.insert(element.id).inserted { ids.append(element.id) }
@@ -5674,7 +5373,7 @@ final class VectorCanvas {
         let rewriting = doomed
         let old = _elements.filter { rewriting.contains($0.id) }
         let result = _elements.filter { !doomed.contains($0.id) }
-        let damage = Self.canvasDamage(of: old, transform: _transform, size: self.size)
+        let damage = Self.canvasDamage(of: old, size: self.size)
         guard !damage.isNull, !damage.isEmpty else { return nil }
         return EraserPreview(elements: result, rewriting: rewriting, damage: damage)
     }
@@ -5876,25 +5575,15 @@ final class VectorCanvas {
     /// The topmost element `accepts` whose drawn shape covers the canvas-space `point` — the one
     /// question every tap above asks, answered by `VectorHitTest` against the stored or posed list.
     ///
-    /// **The point is mapped into local space first**, because that is where a `VectorCanvas` stores
-    /// its geometry: a canvas-space point tested against local geometry is off by the layer's
-    /// transform on a layer that has been moved.
     private func topmostElement(atCanvasPoint point: CGPoint, slop: CGFloat,
                                 posedBy poses: [UUID: PoseMap] = [:], accepting accepts: (VectorElement) -> Bool) -> VectorElement? {
         lock.lock()
         defer { lock.unlock() }
-        var point = point
-        var slop = slop
-        if !_transform.isIdentity {
-            point = point.applying(_transform.inverted())
-            let s = Self.scale(of: _transform)
-            if s > 0 { slop /= s }
-        }
         guard !poses.isEmpty else {
             return VectorHitTest.topmost(in: _elements, at: point, slop: slop, accepting: accepts)
         }
-        // The render poses local geometry before applying the carried transform. Hit those same
-        // quads, then return the stored object by identity so opening an edit cannot bake its pose.
+        // Hit the same shown quads the render poses, then return the stored identity so an edit
+        // cannot bake its pose.
         let shown = _elements.filter(accepts).map { Self.posed($0, by: poses[$0.id]) ?? $0 }
         guard let hit = VectorHitTest.topmost(in: shown, at: point, slop: slop) else { return nil }
         return _elements.first { $0.id == hit.id }
@@ -5904,9 +5593,7 @@ final class VectorCanvas {
 
     /// What an empty canvas renders to instead of a canvas-sized sheet of transparent pixels. Every
     /// `render()` caller draws the result into a rect it already knows (the canvas bounds, or a
-    /// texture's own size), so a 1×1 stretched over that rect is pixel-for-pixel the same nothing —
-    /// and `localContentBounds()`, the one caller that reads the image instead of drawing it, wants
-    /// nil for an empty canvas anyway.
+    /// texture's own size), so a 1×1 stretched over that rect is pixel-for-pixel the same nothing.
     private static let transparentPixel: UIImage = {
         UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1),
                                 format: PixelOps.transparentFormat()).image { _ in }
@@ -5914,7 +5601,7 @@ final class VectorCanvas {
 
     /// Rasterizes all content to a canvas-native `UIImage` (cached by `version`, one slot per
     /// quality). Strokes are stamped via `BrushStamper`; images drawn with their transforms; then the
-    /// whole thing is drawn through the overall `transform`.
+    /// content walk produces the image directly.
     ///
     /// `quality` changes only how a *stroke* is put down — see `RenderQuality`. The isolation rules
     /// that make an eraser correct are identical for both.
@@ -6080,7 +5767,6 @@ final class VectorCanvas {
         // which is the reason `Cel`'s two *class* tiers are the problem and its arrays are not.
         fileprivate let size: CGSize
         fileprivate let elements: [VectorElement]
-        fileprivate let transform: CGAffineTransform
         fileprivate let suppressed: Set<UUID>
         fileprivate var known: [UUID: CGRect] = [:]
 
@@ -6097,7 +5783,7 @@ final class VectorCanvas {
             var bounds = known
             for id in rewriting { bounds[id] = nil }
             return Frozen(source: nil, version: version, memoized: nil, size: size, elements: captured,
-                          transform: transform, suppressed: suppressed, known: bounds)
+                          suppressed: suppressed, known: bounds)
         }
 
         /// The pixels these frozen values render to, safe to call from any thread.
@@ -6153,7 +5839,6 @@ final class VectorCanvas {
             cg.saveGState()
             cg.translateBy(x: frameRect.minX, y: frameRect.minY)
             cg.scaleBy(x: frameRect.width / size.width, y: frameRect.height / size.height)
-            cg.concatenate(transform)
             let walked = VectorCanvas.drawLocalContent(into: cg,
                 elements: elements.filter { !suppressed.contains($0.id) },
                 quality: quality, clippedTo: cg.boundingBoxOfClipPath, known: known)
@@ -6167,9 +5852,9 @@ final class VectorCanvas {
         var fillReferenceImageBytes: Int {
             guard !elements.isEmpty else { return 0 }
             let pixels = size.width * size.height
-            guard pixels.isFinite, pixels > 0, pixels < CGFloat(Int.max / 8) else { return Int.max }
-            // A nonidentity overall image stage holds native content beside its transformed image.
-            return Int(pixels) * (transform.isIdentity ? 4 : 8)
+            guard pixels.isFinite, pixels > 0, pixels < CGFloat(Int.max / 4) else { return Int.max }
+            // One native RGBA image plane; sampled stages account for their own buffers.
+            return Int(pixels) * 4
         }
 
         func fillReferenceSnapshot(excludingElement: UUID?) -> Frozen {
@@ -6183,7 +5868,7 @@ final class VectorCanvas {
         /// same snapshot's actual native image before publishing any packet made from it.
         func stageFillReference(into support: inout VectorMendSupport.Reference.Builder?, nativeSize: CGSize,
                                 excludingElement: UUID?) {
-            let mapping: CGAffineTransform? = size == nativeSize && transform.isIdentity ? .identity : nil
+            let mapping: CGAffineTransform? = size == nativeSize ? .identity : nil
             do throws(VectorMendSupport.Failure) {
                 try support?.append(self, transform: mapping, excludingElement: excludingElement)
             }
@@ -6203,7 +5888,7 @@ final class VectorCanvas {
             var native = nativeContext && size.width > 0 && size.height > 0
                 && size.width.rounded() == size.width && size.height.rounded() == size.height
                 && frameRect.size == size && frameRect.minX.rounded() == frameRect.minX
-                && frameRect.minY.rounded() == frameRect.minY && transform.isIdentity
+                && frameRect.minY.rounded() == frameRect.minY
             if let sampling {
                 guard isCurrent(), nativeContext, sampling.sourceSize == snapshot.size,
                       sampling.destination == CGRect(x: 0, y: 0, width: width, height: height) else { return nil }
@@ -6243,7 +5928,7 @@ final class VectorCanvas {
         }
 
         func appendFillWalls(to strokes: inout [(path: CGPath, colour: UIColor)]) {
-            StrokeWallMask.appendWalls(elements: elements, suppressed: suppressed, transform: transform, to: &strokes)
+            StrokeWallMask.appendWalls(elements: elements, suppressed: suppressed, to: &strokes)
         }
 
         /// How many raster pixels per canvas point a buffer of `destination` points can show. Not
@@ -6268,7 +5953,7 @@ final class VectorCanvas {
         /// Built on demand rather than at freeze time so a mint over a hundred leaves allocates
         /// nothing: it is reached only by a resolve the artist has raced.
         private func detached() -> VectorCanvas {
-            let detached = VectorCanvas(size: size, elements: elements, transform: transform)
+            let detached = VectorCanvas(size: size, elements: elements)
             // Assigned rather than passed to the initialiser because it is transient state (see
             // `suppressedElementIDs`) and the setter is the one place that knows to invalidate; on a
             // canvas nobody has rendered yet that invalidation costs a counter.
@@ -6295,11 +5980,11 @@ final class VectorCanvas {
         guard holdsStreamLocked else {
             return Frozen(source: self, version: version,
                           memoized: quality == .full ? cachedImage : cachedPreviewImage,
-                          size: size, elements: _elements, transform: _transform,
+                          size: size, elements: _elements,
                           suppressed: _suppressedElementIDs, known: paintedBounds)
         }
         return Frozen(source: nil, version: version, memoized: nil,
-                      size: size, elements: _elements.withoutReference, transform: _transform,
+                      size: size, elements: _elements.withoutReference,
                       suppressed: _suppressedElementIDs, known: paintedBounds)
     }
 
@@ -6309,7 +5994,7 @@ final class VectorCanvas {
         lock.lock(); defer { lock.unlock() }
         let frozen = Frozen(source: holdsStreamLocked ? nil : self, version: version,
                             memoized: holdsStreamLocked ? nil : cachedImage, size: size, elements: _elements,
-                            transform: _transform, suppressed: _suppressedElementIDs, known: paintedBounds)
+                            suppressed: _suppressedElementIDs, known: paintedBounds)
         guard holdsStreamLocked else { return frozen }
         return frozen.replacingDisplayElements(_elements, rewriting: [],
             referenceIDs: Set(_elements.lazy.filter(\.isReference).map(\.id)))
@@ -6323,7 +6008,7 @@ final class VectorCanvas {
                        unsuppressing shownIDs: Set<UUID> = []) -> Frozen {
         lock.lock(); defer { lock.unlock() }
         let frozen = Frozen(source: nil, version: version, memoized: nil, size: size, elements: _elements,
-                            transform: _transform, suppressed: _suppressedElementIDs.subtracting(shownIDs),
+                            suppressed: _suppressedElementIDs.subtracting(shownIDs),
                             known: paintedBounds)
         return frozen.replacingDisplayElements(elements ?? _elements,
             rewriting: rewritten ?? (elements.map { Set($0.map(\.id)) } ?? []), referenceIDs: referenceIDs)
@@ -6337,12 +6022,11 @@ final class VectorCanvas {
         let quality: RenderQuality
         let size: CGSize
         /// **Raster pixels per canvas point**, 1 for every render that is not
-        /// `render(quality:resolution:)`'s. It reaches only the two `UIGraphicsImageRenderer` formats
+        /// `render(quality:resolution:)`'s. It reaches the `UIGraphicsImageRenderer` format
         /// the walk builds; nothing about the drawing itself is scaled, because the drawing is in
         /// points and the points do not move.
         let resolution: CGFloat
-        let transform: CGAffineTransform
-        /// The three fields the install has to find unchanged, alongside `version` — because the
+        /// The two fields the install has to find unchanged, alongside `version` — because the
         /// class's own design lets each of them move without bumping it (see `install`).
         let suppressed: Set<UUID>
         let elementCount: Int
@@ -6374,9 +6058,7 @@ final class VectorCanvas {
     /// What one rasterize produced and learned. The picture is the caller's answer whether or not the
     /// install below accepts it; everything else is for the install to write back.
     private struct RenderResult {
-        /// Post-transform — what `render` hands back, and what `install` memoizes. At the identity
-        /// it is the very object the content walk produced, which is what makes an incremental base
-        /// free; see `install`.
+        /// The content walk's image, returned and memoized without another canvas-sized pass.
         let image: UIImage
         let measured: [UUID: CGRect]
         let dabCount: Int
@@ -6412,10 +6094,7 @@ final class VectorCanvas {
         // An empty canvas is now the steady state of a freshly added layer, and it is reached
         // eagerly: `StrokeCanvasView.vectorCanvas`'s `didSet` renders on assignment. Without this,
         // every empty vector layer would retain 16.8 MB of transparent pixels at 2048², 64 MB at
-        // 4000², for nothing. `transform` deliberately isn't part of the test — an affine of nothing
-        // is still nothing. (It used to be reachable: `resized(to:offset:)` left empty canvases
-        // carrying a translation, which is exactly when a project has the most of them. It bakes
-        // now, so no canvas the app produces carries one at all.)
+        // 4000², for nothing.
         //
         // Nothing is memoized here on purpose: there is no allocation to amortize, and caching would
         // make `hasCachedImage` report a claim on memory that was never made, so eviction would
@@ -6446,7 +6125,6 @@ final class VectorCanvas {
             work = .full(visible: Self.visible(_elements, suppressing: _suppressedElementIDs))
         }
         return .walk(RenderPlan(quality: quality, size: size, resolution: resolution,
-                                transform: _transform,
                                 suppressed: _suppressedElementIDs, elementCount: _elements.count,
                                 version: version, known: paintedBounds, work: work))
     }
@@ -6529,26 +6207,7 @@ final class VectorCanvas {
             measured = content.measured
         }
 
-        // Apply the overall transform (identity → skip the extra pass). At a reduced resolution this
-        // resamples a picture that is already small, which is the point: the pass costs the raster it
-        // is filling and the content walk has already been paid at the same size.
-        let final: UIImage
-        if plan.transform.isIdentity {
-            final = content.image
-        } else {
-            final = UIGraphicsImageRenderer(size: plan.size,
-                                            format: PixelOps.transparentFormat(scale: resolution))
-                .image { ctx in
-                    ctx.cgContext.concatenate(plan.transform)
-                    content.image.draw(in: CGRect(origin: .zero, size: plan.size))
-                }
-            // The second canvas-sized bitmap of this walk, refused the same way — see `renderLocalContent`.
-            guard final.cgImage != nil else {
-                MemoryPressure.signal(.allocationRefused)
-                return nil
-            }
-        }
-        return RenderResult(image: final, measured: measured,
+        return RenderResult(image: content.image, measured: measured,
                             dabCount: content.dabCount, repairedRegion: repairedRegion,
                             repairs: repairs, repairsWidened: widened, repairsAbandoned: abandoned)
     }
@@ -6556,8 +6215,8 @@ final class VectorCanvas {
     /// Step 3 of a render: put the result in the caches — **only if the inputs the walk read are
     /// still the inputs**. O(1) plus the footprints the walk measured.
     ///
-    /// **The gate is `render(quality:ifStillAtVersion:)`'s, extended to the three fields that move
-    /// without moving `version`.** `elements` and `transform` have plain setters whose contract is
+    /// **The gate is `render(quality:ifStillAtVersion:)`'s, extended to the remaining fields that move
+    /// without moving `version`.** `elements` has a plain setter whose contract is
     /// "the caller follows with `bumpVersion()`", and until that call lands the version says nothing
     /// about the list; `suppressedElementIDs` does invalidate, but comparing it is one empty-set
     /// compare and makes the guard readable without chasing which setters bump what. Refusing costs
@@ -6587,17 +6246,13 @@ final class VectorCanvas {
         lastRenderDabCount = result.dabCount
         if !result.repairedRegion.isNull { lastRepairedRegion = result.repairedRegion }
         guard version == plan.version, _elements.count == plan.elementCount,
-              _transform == plan.transform, _suppressedElementIDs == plan.suppressed else { return }
+              _suppressedElementIDs == plan.suppressed else { return }
         for (id, rect) in result.measured { paintedBounds[id] = rect }
         switch plan.quality {
         case .full:
             cachedImage = result.image
-            // `image === content` exactly when the transform is the identity, which is the whole of
-            // why this costs nothing: the base and the memo are one object. Under a transform they
-            // would be two canvas-sized bitmaps, and holding a second one per moved cel to make a
-            // *moved* layer's appends incremental is not a trade this has been asked to make — so
-            // that case falls back, on purpose and with a test that says so.
-            if plan.transform.isIdentity, plan.suppressed.isEmpty {
+            // The base shares the memo's image; a suppressed list cannot seed ordinary appends.
+            if plan.suppressed.isEmpty {
                 incrementalBase = (result.image, plan.elementCount)
                 appendedSinceBase = 0
             } else {
@@ -6625,7 +6280,7 @@ final class VectorCanvas {
     private func installReduced(_ result: RenderResult, from plan: RenderPlan) {
         guard plan.quality == .full else { return }
         guard version == plan.version, _elements.count == plan.elementCount,
-              _transform == plan.transform, _suppressedElementIDs == plan.suppressed else { return }
+              _suppressedElementIDs == plan.suppressed else { return }
         // **Written from a reduced walk as well as a native one, and that is correct rather than
         // convenient**: `CGContextDabTarget.lastGroupBounds` is accumulated from the dabs' geometry
         // in *points*, before any clip or device transform is consulted, so a footprint measured at
@@ -6635,7 +6290,7 @@ final class VectorCanvas {
         var slot = reducedRender.flatMap { $0.resolution == plan.resolution ? $0 : nil }
             ?? ReducedRender(resolution: plan.resolution)
         slot.image = result.image
-        if plan.transform.isIdentity, plan.suppressed.isEmpty {
+        if plan.suppressed.isEmpty {
             // One object, exactly as the native trio holds one — see `install`'s note on why the
             // base and the memo being the same image is what makes it free.
             slot.incrementalBase = (result.image, plan.elementCount)
@@ -6711,23 +6366,18 @@ final class VectorCanvas {
     /// are the same operation — so there is no case to exclude, including a run of non-`.normal`
     /// strokes straddling the rectangle's edge.
     ///
-    /// The conditions are `appendableBase`'s own, for its reasons: `.full` only, because `.preview`
-    /// strokes paths rather than stamping dabs and has its own memo; the identity transform only,
-    /// because the overall transform is applied by resampling the finished content and a resample of
-    /// a repair is not a repair of a resample; and nothing suppressed, so the base is a picture of
-    /// the same elements this walk sees. `applyToRegionBase` tests the last two as well, when it
-    /// decides whether to *take* a base — the same deliberate doubling `appendableBase` documents.
+    /// As with append, only full-quality pictures with nothing suppressed are reusable bases.
     ///
     /// Caller must hold `lock`.
     /// **`native` picks which trio is asked, and everything below it is identical for both.** The
-    /// conditions are properties of the *display list and the transform*, not of the raster, so a
+    /// conditions are properties of the *display list*, not of the raster, so a
     /// reduced repair is legitimate exactly where a native one is — which is why this takes the slot
     /// rather than growing a second copy of the predicate. `slot` is nil for a native render and for
     /// a reduced one at a resolution nothing has drawn yet; both mean "no base".
     private func repairableBase(quality: RenderQuality, in slot: ReducedRender?,
                                 native: Bool) -> (image: UIImage, region: CGRect)? {
         guard let base = native ? regionBase : slot?.regionBase else { return nil }
-        guard quality == .full, _transform.isIdentity, _suppressedElementIDs.isEmpty,
+        guard quality == .full, _suppressedElementIDs.isEmpty,
               !base.region.isNull, !base.region.isEmpty else { return nil }
         guard let clip = Self.repairClip(base.region, in: size,
                                          resolution: native ? 1 : (slot?.resolution ?? 1)) else { return nil }
@@ -6776,18 +6426,9 @@ final class VectorCanvas {
     ///
     /// - `.full` only. `.preview` strokes one `CGPath` per stroke instead of stamping dabs
     ///   (`strokePolyline`), has its own memo, and is not on the pen-up path this exists for.
-    /// - **The identity transform only**, because `render()` applies the overall transform by
-    ///   *resampling the finished content bitmap* — and resampling a composite is not compositing
-    ///   two resampled halves. The base has to be the pre-transform content, and at the identity it
-    ///   already is.
     /// - **Nothing suppressed**, so `prefixCount` counts the same elements the base was drawn from.
     ///
-    /// **The transform and suppression tests are deliberately made twice** — here, and again where
-    /// `install` decides whether to *take* a base at all — and mutation testing says each alone
-    /// is sufficient: removing either one on its own changes no behaviour and fails no test. Removing
-    /// **both** fails `testAnAppendOntoATransformedLayerFallsBackToTheFullWalk`, which is what says
-    /// the pair is load-bearing. Keep both: this guard is what makes the method's own contract
-    /// readable without chasing where the base came from.
+    /// Suppression is also checked when `install` takes a base, keeping each owner's contract local.
     ///
     /// and then `appendPreservesTheWalk(after:)`, which is the interesting one.
     ///
@@ -6798,7 +6439,7 @@ final class VectorCanvas {
                                 native: Bool) -> (image: UIImage, prefixCount: Int)? {
         guard let base = native ? incrementalBase : slot?.incrementalBase,
               let appended = native ? appendedSinceBase : slot?.appendedSinceBase else { return nil }
-        guard quality == .full, _transform.isIdentity, _suppressedElementIDs.isEmpty,
+        guard quality == .full, _suppressedElementIDs.isEmpty,
               base.prefixCount < _elements.count,
               base.prefixCount + appended == _elements.count,
               appendPreservesTheWalk(after: base.prefixCount) else { return nil }
@@ -6923,7 +6564,7 @@ final class VectorCanvas {
         guard !isolated.isEmpty else { lock.unlock(); return nil }
         rasterizations += 1
         Self.countRasterization()
-        let size = size, transform = _transform
+        let size = size
         let contentVersionAtPlan = contentVersion
         lock.unlock()
 
@@ -6941,19 +6582,13 @@ final class VectorCanvas {
         }
         lock.unlock()
 
-        guard !transform.isIdentity else { return walked.image }
-        let bounds = CGRect(origin: .zero, size: size)
-        return UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { ctx in
-            ctx.cgContext.concatenate(transform)
-            walked.image.draw(in: bounds)
-        }
+        return walked.image
     }
 
     // MARK: - A live stream's window (STREAM.md §5.3, TODO (97))
 
     /// **The rectangle a live stream frame is presented in** — the element's footprint on this
-    /// canvas, integral and clamped to the canvas, in the canvas's own content space (before
-    /// `transform`, which the presenting view applies). Through `posedBy` when the Move box shows
+    /// canvas, integral and clamped to the canvas, in canonical canvas coordinates. Through `posedBy` when the Move box shows
     /// the element posed rather than where it is stored. Nil for an id that is not a stream on this
     /// canvas, or one whose rectangle is entirely off the canvas.
     func streamWindow(id: UUID, posedBy: PoseMap? = nil) -> CGRect? {
@@ -7021,8 +6656,7 @@ final class VectorCanvas {
     /// **The rectangle of this canvas that a held edit shows in place of the canvas's own picture**
     /// — where the display list `newValue` draws differently from the standing one, which is
     /// `restoreDamage`'s answer for the same swap, read without making the swap. The whole canvas
-    /// when the damage cannot be bounded (a derivation it has no footprint for) or when the canvas
-    /// carries a transform the region repair does not run under; empty when no pixel differs.
+    /// when the damage cannot be bounded (a derivation it has no footprint for); empty when no pixel differs.
     ///
     /// **Integral, and rounded out**, for `repairClip`'s measured reason: a clip that falls between
     /// pixels is antialiased, so the window's outermost row would be part-cleared and part-drawn.
@@ -7040,7 +6674,7 @@ final class VectorCanvas {
         let damage = restoreDamage(to: newValue, departed: change.departed, rewrites: change.rewrites,
                                    changedInk: nil)
         let whole = CGRect(origin: .zero, size: size)
-        guard _transform.isIdentity, case .region(let rect) = damage else { return whole }
+        guard case .region(let rect) = damage else { return whole }
         if rect.isNull { return .zero }
         return Self.repairClip(rect, in: size, resolution: 1)?.intersection(whole) ?? whole
     }
@@ -7064,7 +6698,6 @@ final class VectorCanvas {
                         rewriting rewritten: Set<UUID>) -> CGRect? {
         lock.lock()
         var known = paintedBounds
-        let transform = _transform
         let suppressed = _suppressedElementIDs
         lock.unlock()
         for id in rewritten { known[id] = nil }
@@ -7074,17 +6707,8 @@ final class VectorCanvas {
         cg.translateBy(x: -window.minX, y: -window.minY)
         cg.clip(to: window)
         cg.clear(window)
-        let walked: Walk?
-        if transform.isIdentity {
-            walked = Self.drawLocalContent(into: cg, elements: listed, quality: .full,
-                                      clippedTo: window, known: known)
-        } else {
-            // Through the canvas's own transform, as `render()` applies it — and unclipped, since the
-            // clip is in local space and the window is not.
-            cg.concatenate(transform)
-            walked = Self.drawLocalContent(into: cg, elements: listed, quality: .full,
-                                      clippedTo: nil, known: [:])
-        }
+        let walked = Self.drawLocalContent(into: cg, elements: listed, quality: .full,
+                                           clippedTo: window, known: known)
         cg.restoreGState()
         return walked == nil ? nil : window
     }
@@ -7106,8 +6730,7 @@ final class VectorCanvas {
         return window.isEmpty ? nil : window
     }
 
-    /// Step 1 of `render()`: the layer's own content stamped at native resolution, before the overall
-    /// `transform` is applied. Not cached — only called from `render()` and `localContentBounds()`.
+    /// The ordered content stamped at the requested raster resolution.
     /// Strokes stamp straight into this renderer's own context via `CGContextDabTarget` rather than a
     /// throwaway `RasterLayerTexture`, avoiding an extra canvas-sized `CGContext`+`CGImage` per
     /// invalidation.
@@ -7197,10 +6820,7 @@ final class VectorCanvas {
                                            over base: UIImage? = nil,
                                            clippedTo clip: CGRect? = nil,
                                            known knownBounds: [UUID: CGRect] = [:]) -> LocalContent? {
-        // `render()` has already returned by the time an empty canvas would reach here, so this
-        // guard is for `localContentBounds()`: it spares the Move tool a canvas-sized rasterize plus
-        // a several-million-pixel alpha scan to conclude what emptiness already said. Asked of the
-        // *filtered* list, so a cel whose only element is the one being edited says the same.
+        // The filtered list can be empty when its only element is held by an editor.
         guard !elements.isEmpty || base != nil else {
             return LocalContent(image: Self.transparentPixel, escaped: .null, measured: [:],
                                 dabCount: 0)
@@ -8037,29 +7657,15 @@ struct VectorCanvasData: Codable {
         self.transform = transform
     }
 
-    /// **Writes canvas-space geometry and no transform at all** — TODO item (12) stage 3.
-    ///
-    /// The advisory `transform` key is left out of `encode(to:)` rather than written as
-    /// `[1,0,0,1,0,0]`: a
-    /// missing key decodes to `[]`, which `affineTransform` has always answered `.identity` for, so
-    /// a build that predates this reads the baked geometry and applies nothing — the correct picture,
-    /// with no version gap in either direction and 48 bytes a cel less on disk.
-    ///
-    /// The bake here is a no-op for anything the app produces, since nothing writes `_transform` any
-    /// more (`setVectorTransform` went in stage 2, `resized(to:offset:)` bakes). It is kept because
-    /// `VectorCanvas.init(size:elements:transform:)` still accepts one, so "the payload dropped a
-    /// transform the canvas was carrying" would otherwise be a silent way to lose geometry.
+    /// Writes canonical geometry and omits the advisory file transform key. File normalization
+    /// belongs to `canvasSpaceElements`, before a runtime canvas is constructed.
     ///
     /// `streamFrameFileNames` is the save's own map of which stream elements it wrote a last-frame
     /// JPEG for (STREAM.md §5.6) — the file name lands in `StreamRef.lastFrameFileName`, and an
     /// element the save wrote nothing for keeps whatever name it was loaded with.
     init(from canvas: VectorCanvas, imageFileNames: [UUID: String],
          streamFrameFileNames: [UUID: String] = [:]) {
-        let carried = canvas.transform
-        let source = carried.isIdentity
-            ? canvas.elements
-            : canvas.elements.map { VectorCanvas.mapping($0, throughSimilarity: carried) }
-        elements = source.compactMap { element in
+        elements = canvas.elements.compactMap { element in
             switch element {
             case .stroke(let stroke): return .stroke(stroke)
             case .fill(let fill): return .fill(fill)
@@ -8163,22 +7769,9 @@ struct VectorCanvasData: Codable {
     /// same `compactMap` behaviour the load path had before, just kept here so ordering logic lives
     /// in one place.
     ///
-    /// **`affineTransform` is baked in here, which is the whole of TODO item (12) stage 3's decode
-    /// half, and it is on this accessor rather than in `ProjectStore` for two reasons.** It is the
-    /// one door every caller already goes through, so no construction site can forget it and hand a
-    /// `VectorCanvas` a transform it should not have; and it sits *after* the per-element `LossySlot`
-    /// decode, so a cel whose payload dropped an element bakes the survivors, which is the honest
-    /// thing to do and matches what re-encoding this type already does.
-    ///
-    /// It is exact: `mapping(_:throughSimilarity:)` measures 1.3e-13 pt over 264 similarity cases,
-    /// and the only two writers that ever produced a stored transform — the deleted
-    /// `setVectorTransform`, through `affine(from:pivot:)` with `aspect == 1`, and
-    /// `resized(to:offset:)`, a pure translation — could only produce a similarity. The **rendered**
-    /// result changes for a shrunk cel, and better: the bake is a native re-stamp where the stored
-    /// transform was a bitmap magnify of a display list already clipped in local space.
-    /// Documents are expendable (TODO.md, the owner 2026-08-27), so this is not migration machinery
-    /// that has to be kept working — it is twelve lines that open the owner's current file correctly,
-    /// and it costs nothing on a file this build wrote, where `transform` is absent.
+    /// Normalizes the advisory file affine into canonical elements once, before constructing a
+    /// runtime canvas. This boundary preserves accepted file geometry; current saves omit the key.
+    /// It follows per-element decoding, so the same ordered survivors are normalized together.
     ///
     /// **`resolvingVideos` has no default value, and that is on purpose.** A default of "resolve
     /// nothing" would compile at every existing call site and silently drop every video element that
