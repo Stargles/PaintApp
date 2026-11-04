@@ -1,7 +1,7 @@
 # Graph Report - PaintApp-s55-audit-joined-candidate  (2026-11-04)
 
 ## Corpus Check
-- 837 files · ~3,321,810 words
+- 837 files · ~3,321,806 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `57c85466`
+- Built from commit: `ba0fb1c5`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 

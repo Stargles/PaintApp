@@ -253,7 +253,7 @@ final class SelectionEditLogicTests: XCTestCase {
         manager.addVectorLayer(name: "Source ink")
         manager.addTransformLayer(name: "Repeat")
         manager.addTransformLayer(name: "Outer Move")
-        CanvasFixture.setCelLayout(manager, layerIndex: 0, [(start: 0, length: sourceOnly ? 3 : 24)])
+        manager.layers[0].cels[0].frameCount = sourceOnly ? 3 : 24
         CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 0, length: 24)])
         CanvasFixture.setCelLayout(manager, layerIndex: 2, [(start: 0, length: 24)])
         let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
