@@ -682,7 +682,7 @@ final class EffectParityLogicTests: XCTestCase {
         let tiny = Double.leastNonzeroMagnitude
         for gap in [tiny, 4 * tiny] {
             for descending in [false, true] {
-                let points: [CurvePoint] = [.init(x: 0, y: 0), .init(x: gap, y: 0.5), .init(x: 1, y: 1)]
+                let points: [CurvePoint] = [CurvePoint(x: 0, y: 0), .init(x: gap, y: 0.5), .init(x: 1, y: 1)]
                     .map { .init(x: $0.x, y: descending ? 1 - $0.y : $0.y) }
                 let decoded = try JSONDecoder().decode(Effect.Curves.self,
                     from: JSONEncoder().encode(Effect.Curves(points: points)))
@@ -706,7 +706,7 @@ final class EffectParityLogicTests: XCTestCase {
         XCTAssertEqual(internalSpan.value(at: 4 * tiny), 0.5625, accuracy: 1e-12,
                        "the internal tiny span keeps its left h*m=.5 after the later limiter")
         for descending in [false, true] {
-            let points: [CurvePoint] = [.init(x: 0, y: 0.5), .init(x: tiny, y: 0),
+            let points: [CurvePoint] = [CurvePoint(x: 0, y: 0.5), .init(x: tiny, y: 0),
                 .init(x: 10 * tiny, y: 0.1), .init(x: 11 * tiny, y: 0.5), .init(x: 1, y: 1)]
                 .map { .init(x: $0.x, y: descending ? 1 - $0.y : $0.y) }
             // The extremum has zero left tangent; the right tangent limits to3*secant, so y=.1*t³.
