@@ -6315,7 +6315,7 @@ final class VectorCanvas {
     /// request can proceed while a canvas-sized render walks. `planRender` and `installReduced`
     /// read and update the matching reduced slot under `lock`; the pixel walk stays outside it.
     /// Concurrent reduced requests may both prepare one picture before either installs. The
-    /// version, element-count, transform and suppression checks still fence installation.
+    /// version, element-count and suppression checks still fence installation.
     private func rasterize(quality: RenderQuality, requestedResolution: CGFloat = 1,
                            ifStillAtVersion required: Int? = nil) -> UIImage? {
         // **The one clamp: a request may only ask for *less*.** `RenderRequest.renderSize(fitting:within:)`'
