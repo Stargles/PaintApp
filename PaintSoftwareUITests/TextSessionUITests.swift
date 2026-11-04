@@ -469,4 +469,165 @@ final class TextSessionUITests: PaintUITestCase {
         XCTAssertEqual(drawn[2], 0, "the replacement leaves untouched exterior paper white")
         attachScreenshot(XCUIScreen.main, "text-selection-replaced-while-editing")
     }
+
+
+    /// The independently qualified writer uses the real font400 -> whole-cel Move2x route.
+    /// Opening its current package is a cold public workflow, with no app seed or stored geometry edits.
+    func testAColdScaledAutoSizedLabelClosesUnchangedAndStillAcceptsARealTextEdit() throws {
+        let requested = ProcessInfo.processInfo.environment["PAINTAPP_TEXT_AUTOSIZE_STAGE_UUID"]
+        try XCTSkipUnless(requested != nil, "Requires the actual Move/current-writer fixture and the external storage observer")
+        let nonce = try XCTUnwrap(UUID(uuidString: try XCTUnwrap(requested))).uuidString
+        let folderName = "Text Auto Size \(nonce)"
+        let title = "Auto Sized 800 \(nonce)"
+        let stage = try ExternalUIStage(nonce: nonce, directoryPrefix: "text-autosize-cold", context: folderName)
+        let app = XCUIApplication()
+        app.terminate()
+        try stage.announce("prepare")
+        let prepared = try stage.awaitMessage("prepared.ack")
+        XCTAssertEqual(prepared.data, Data("\(nonce)|prepared|\(folderName)\n".utf8),
+                       "PREMISE: the observer owns this nonce before the first app launch")
+        addTeardownBlock {
+            self.returnFromOwnedTextFolderToRoot(app, folderName: folderName)
+        }
+        app.launchArguments = []
+        app.launch()
+        let window = rotateDevice(app, to: .landscapeLeft)
+        XCTAssertEqual(window.size, CGSize(width: 1080, height: 810), "PREMISE: the artist's landscape window")
+        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 15))
+        app.buttons["gallery.newFolderButton"].tap()
+        let name = app.textFields["gallery.folderRenameField"]
+        XCTAssertTrue(name.waitForExistence(timeout: 10))
+        name.typeText("\(folderName)\n")
+        let folder = app.buttons["gallery.folderTile.\(folderName)"]
+        XCTAssertTrue(folder.waitForExistence(timeout: 10))
+        folder.tap()
+        app.terminate()
+        try stage.announce("ready-to-stage")
+        let staged = try stage.awaitMessage("staged.ack")
+        XCTAssertEqual(staged.data, Data("\(nonce)|staged|\(folderName)\n".utf8),
+                       "PREMISE: only the qualified actual-writer package was staged")
+        app.launch()
+        let tile = app.staticTexts.matching(NSPredicate(format: "label == %@", title)).firstMatch
+        XCTAssertTrue(tile.waitForExistence(timeout: 15), "PREMISE: the current package is reachable through Gallery")
+        tile.tap()
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 15))
+        closeLayerRail(app)
+        let host = canvas.frame
+        let transform = readTransform(app)
+        func viewport() throws -> [Double] {
+            let values = readTransform(app).split(separator: ",").compactMap { Double($0) }.filter(\.isFinite)
+            XCTAssertEqual(values.count, 4, "PREMISE: the viewport exposes four finite values")
+            return try XCTUnwrap(values.count == 4 ? values : nil)
+        }
+        let originalViewport = try viewport()
+        let paper = visiblePaperRect(app, in: canvas, canvasSize: CGSize(width: 1400, height: 1200))
+        let sample = paper.insetBy(dx: paper.width * 0.03, dy: paper.height * 0.02)
+        let columns = 240, rows = 120
+        func picture() throws -> [Bool] {
+            let probe = try settledProbe(canvas, window: sample)
+            var bits: [Bool] = []
+            bits.reserveCapacity(columns * rows)
+            for y in 0..<rows {
+                for x in 0..<columns {
+                    bits.append(probe(sample.minX + sample.width * (Double(x) + 0.5) / Double(columns),
+                                      sample.minY + sample.height * (Double(y) + 0.5) / Double(rows)))
+                }
+            }
+            return bits
+        }
+        let before = try picture()
+        let hits = before.indices.filter { before[$0] }
+        XCTAssertGreaterThan(hits.count, 40, "PREMISE: the cold-opened scaled label has real drawn letters")
+        let minX = try XCTUnwrap(hits.map { $0 % columns }.min())
+        let maxX = try XCTUnwrap(hits.map { $0 % columns }.max())
+        let minY = try XCTUnwrap(hits.map { $0 / columns }.min())
+        let maxY = try XCTUnwrap(hits.map { $0 / columns }.max())
+        let hull = CGRect(x: host.minX + (sample.minX + sample.width * Double(minX) / Double(columns)) * host.width,
+                          y: host.minY + (sample.minY + sample.height * Double(minY) / Double(rows)) * host.height,
+                          width: sample.width * Double(maxX - minX + 1) / Double(columns) * host.width,
+                          height: sample.height * Double(maxY - minY + 1) / Double(rows) * host.height)
+        assertBelowTheToolbar(app, canvas, dy: (hull.minY - 10 - host.minY) / host.height,
+                              "The measured scaled label and its selection margin")
+        assertAboveTheDock(app, canvas, dy: (hull.maxY + 10 - host.minY) / host.height,
+                           "The measured scaled label and its selection margin")
+        let undo = app.buttons["sideToolbar.undoButton"]
+        XCTAssertFalse(undo.isEnabled, "PREMISE: a cold-opened package has no prior document Undo")
+        attachScreenshot(XCUIScreen.main, "text-autosize-01-cold-actual-move800")
+        func editText() throws -> CGRect {
+            app.buttons["toolbar.selectButton"].tap()
+            let rectangle = app.buttons["selectPanel.mode.rectangle"]
+            XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
+            rectangle.tap()
+            dragInPoints(app, from: CGPoint(x: hull.minX - 10, y: hull.minY - 10),
+                         to: CGPoint(x: hull.maxX + 10, y: hull.maxY + 10))
+            let edit = app.buttons["selectPanel.editTextButton"]
+            XCTAssertTrue(edit.waitForExistence(timeout: 5), "Select offers Edit Text for the measured glyph")
+            edit.tap()
+            XCTAssertTrue(waitForTextState(app, "box", "editing"))
+            let editingViewport = try viewport()
+            XCTAssertEqual(canvas.frame, host, "Text follow leaves the measured host in place")
+            XCTAssertEqual(editingViewport[0], originalViewport[0], "Text follow changes no scale")
+            XCTAssertEqual(editingViewport[1], originalViewport[1], "Text follow changes no rotation")
+            // The panel follows a tall box by panning the whole canvas. Transport the independent
+            // pre-edit glyph by that measured pan, never by the box being tested or a warm-up edit.
+            return hull.offsetBy(dx: editingViewport[2] - originalViewport[2],
+                                 dy: editingViewport[3] - originalViewport[3])
+        }
+        _ = try editText()
+        attachScreenshot(XCUIScreen.main, "text-autosize-02-unchanged-editor")
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(waitForTextState(app, "none"))
+        waitForTheKeyboardToLeave(app)
+        XCTAssertEqual(canvas.frame, host, "closing the editor restores the same measured host")
+        // ViewportFollow.end gives its pan back when no artist navigation occurred. Compare the
+        // exact mask only after that existing closed-session contract, not through resampled pans.
+        XCTAssertEqual(readTransform(app), transform, "the ended, unnavigated text session gives its follow pan back")
+        XCTAssertTrue(try picture() == before, "closing unchanged scaled point text preserves the exact sampled glyph picture and hull")
+        XCTAssertFalse(undo.isEnabled, "opening and closing unchanged scaled point text adds no document Undo")
+        attachScreenshot(XCUIScreen.main, "text-autosize-03-closed-unchanged")
+        let editingHull = try editText()
+        let inside = CGPoint(x: editingHull.midX, y: editingHull.midY)
+        tap(app, at: inside)
+        typeIntoTextBox("w", app, at: inside)
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(waitForTextState(app, "none"))
+        waitForTheKeyboardToLeave(app)
+        XCTAssertEqual(readTransform(app), transform, "the real text edit returns to the measured viewport")
+        XCTAssertTrue(try picture() != before, "new words still change the actual drawn label")
+        XCTAssertTrue(undo.isEnabled, "the real edit creates a document Undo")
+        attachScreenshot(XCUIScreen.main, "text-autosize-04-real-edit-drawn")
+        undo.tap()
+        XCTAssertTrue(try picture() == before, "one Undo restores the original cold-opened glyph picture")
+        XCTAssertFalse(undo.isEnabled, "the real edit is exactly one step; unchanged editing left no hidden step")
+        attachScreenshot(XCUIScreen.main, "text-autosize-05-real-edit-undone")
+        returnFromOwnedTextFolderToRoot(app, folderName: folderName)
+        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 15))
+        app.terminate()
+        try stage.announce("restored-and-saved")
+        let verified = try stage.awaitMessage("verified.ack")
+        XCTAssertEqual(verified.data, Data("\(nonce)|verified|\(folderName)\n".utf8),
+                       "the observer verified raw800, original auto-size frame/identity and removed only the owned fixture")
+        try stage.announce("complete")
+    }
+    /// Only the authenticated stage's private folder is navigated; an abort must not leave its
+    /// app-wide Gallery path behind. Teardown adds no assertions that could mask the first failure.
+    private func returnFromOwnedTextFolderToRoot(_ app: XCUIApplication, folderName: String) {
+        guard app.state == .runningForeground else { return }
+        let gallery = app.buttons["gallery.newCanvasButton"]
+        if !gallery.exists {
+            let galleryButton = app.buttons["toolbar.galleryButton"]
+            guard galleryButton.exists && galleryButton.isEnabled && galleryButton.isHittable else { return }
+            galleryButton.tap()
+        }
+        guard gallery.waitForExistence(timeout: 15) else { return }
+        let breadcrumb = app.staticTexts["gallery.breadcrumbPath"]
+        let back = app.buttons["gallery.breadcrumbBack"]
+        guard app.state == .runningForeground,
+              breadcrumb.exists && breadcrumb.label == "Projects / \(folderName)",
+              back.exists && back.isEnabled && back.isHittable else { return }
+        back.tap()
+        _ = breadcrumb.waitForNonExistence(timeout: 5)
+    }
+
 }

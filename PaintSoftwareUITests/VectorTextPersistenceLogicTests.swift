@@ -327,6 +327,20 @@ final class VectorTextPersistenceLogicTests: XCTestCase {
         XCTAssertEqual(canvas.texts.first?.recipe.string, "after")
     }
 
+    func testCommittingTheIdenticalTextOnlyUnsuppressesItAndReportsNoListChange() {
+        let original = text("unchanged")
+        let canvas = VectorCanvas(size: Self.canvasSize, elements: [.text(original)])
+        canvas.editingElementID = original.id
+        let suppressedVersion = canvas.version
+        XCTAssertFalse(canvas.commitTextEdit(editingID: original.id, element: original))
+        XCTAssertEqual(canvas.elements.compactMap(\.text), [original])
+        XCTAssertNil(canvas.editingElementID)
+        XCTAssertEqual(canvas.version, suppressedVersion + 1, "the original returns through the existing one-invalidation owner")
+        let visibleVersion = canvas.version
+        XCTAssertFalse(canvas.commitTextEdit(editingID: original.id, element: original))
+        XCTAssertEqual(canvas.version, visibleVersion, "an already visible identical replacement needs no invalidation")
+    }
+
     /// Emptying the box deletes the object. Leaving an empty one behind would leave an invisible
     /// element the artist cannot select to get rid of.
     func testCommittingAnEmptiedBoxDeletesTheObject() {

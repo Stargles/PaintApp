@@ -134,6 +134,17 @@ struct Typography: Codable, Equatable {
         case pointSize, tracking, lineHeightMultiple, lineSpacing, paragraphSpacing, alignment
     }
 
+    /// The dimensional part of a text transform. Stored lengths stay unclamped so shrinking and
+    /// enlarging again recovers the authored values; the existing render boundary applies bounds.
+    func scaled(by factor: CGFloat) -> Typography {
+        var scaled = self
+        scaled.pointSize *= factor
+        scaled.tracking *= factor
+        scaled.lineSpacing *= factor
+        scaled.paragraphSpacing *= factor
+        return scaled
+    }
+
     /// Every scalar forced back inside its panel range. Applied at decode-adjacent boundaries
     /// rather than in the setters: a hand-edited or future-written document can carry anything, and
     /// a `lineHeightMultiple` of 0 makes CoreText lay every line on top of the last.

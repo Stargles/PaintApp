@@ -4676,10 +4676,10 @@ final class CanvasManager: ObservableObject {
     /// array positions before it commits (`shapeGestureLayerID`'s reasoning).
     var textGestureLayerID: UUID?
     var textGestureCelID: UUID?
-    /// The pose the session's layer is shown through (`inkPose`), read when the session binds — the
-    /// box is edited in canvas points, where the artist sees it, and is written into the layer
-    /// through this pose's inverse (TODO (124)).
-    var textGestureInkPose: PoseMap?
+    /// The pose this text is shown through, captured on opening: the element's complete group/cel/
+    /// container pose for a re-edit, or `inkPose` for a new ungrouped box. The carried vector transform
+    /// is applied after it for display and removed before its inverse when the edit lands.
+    var textGesturePose: PoseMap?
     /// The handle drag in flight, or nil. Holds the **whole starting quad and the anchor**, latched
     /// at touch-down, so a mid-drag pinch-zoom cannot move the reference frame under the gesture
     /// (`ADD_TEXT.md` §1, and `TextFrameDrag`'s own doc for the second half of the argument).

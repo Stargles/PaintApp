@@ -2183,6 +2183,84 @@ final class LassoMoveLogicTests: XCTestCase {
                       "and the frame says so, which is what keeps its grips and its regrow honest")
     }
 
+    /// Move's uniform part carries every length in canvas points. The independently authored
+    /// target uses the same final font, so this does not assume that system fonts scale linearly.
+    func testVectorMoveScalesTextSpacingAndDrawsTheIndependentlyAuthoredTarget() throws {
+        let manager = CanvasManager()
+        manager.brushLibraryOverride = CanvasFixture.isolatedBrushLibrary()
+        let size = CGSize(width: 1400, height: 1000)
+        manager.canvasSize = size
+        manager.addVectorLayer()
+        let vector = try XCTUnwrap(manager.layers[0].cels[0].vector)
+        var recipe = TextRecipe(string: "one two three four five\nsix seven")
+        recipe.typography = Typography(pointSize: 48, tracking: 10, lineHeightMultiple: 1.2,
+                                       lineSpacing: 12, paragraphSpacing: 20, alignment: .left)
+        var targetRecipe = recipe
+        targetRecipe.typography = Typography(pointSize: 96, tracking: 20, lineHeightMultiple: 1.2,
+                                             lineSpacing: 24, paragraphSpacing: 40, alignment: .left)
+        var retainedSpacing = targetRecipe
+        retainedSpacing.typography.tracking = 10
+        retainedSpacing.typography.lineSpacing = 12
+        retainedSpacing.typography.paragraphSpacing = 20
+        func breaks(_ recipe: TextRecipe, _ width: CGFloat) -> [NSRange] {
+            layout(of: recipe, boxWidth: width).lines.map(\.range)
+        }
+        // A bounded search using the actual font's layout, never a guessed glyph advance.
+        let width = try XCTUnwrap((160...480).map(CGFloat.init).first { width in
+            let target = breaks(targetRecipe, width * 2)
+            return target.count > 2 && target == breaks(recipe, width)
+                && target != breaks(retainedSpacing, width * 2)
+        }, "PREMISE: an ordinary box exposes the retained-tracking wrap defect on this font")
+        let original = VectorTextElement(recipe: recipe,
+            frame: TextFrame(origin: CGPoint(x: 450, y: 300),
+                             size: CGSize(width: width, height: 360), autoSize: false))
+        vector.upsertText(original)
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        manager.nudgeVectorFloat(to: scaledBy(manager, 2))
+        XCTAssertTrue(manager.commitVectorFloatIfNeeded())
+        let moved = try XCTUnwrap(vector.elements.compactMap(\.text).first)
+        XCTAssertEqual(moved.recipe.typography, targetRecipe.typography)
+        XCTAssertEqual(breaks(moved.recipe, moved.frame.size.width), breaks(recipe, width),
+                       "the same words stay on the same lines")
+        let target = try XCTUnwrap(TextLayout.render(recipe: targetRecipe, frame: moved.frame, canvasSize: size)?.cgImage)
+        let wrong = try XCTUnwrap(TextLayout.render(recipe: retainedSpacing, frame: moved.frame, canvasSize: size)?.cgImage)
+        let drawn = try XCTUnwrap(vector.render()?.cgImage)
+        let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(drawn))
+        XCTAssertTrue(bytes.enumerated().contains { $0.offset % 4 == 3 && $0.element > 200 },
+                      "PREMISE: this compares real drawn letters, not two empty buffers")
+        XCTAssertEqual(bytes, CanvasFixture.rgbaBytes(target), "Move draws the target-size spacing")
+        XCTAssertNotEqual(bytes, CanvasFixture.rgbaBytes(wrong), "retaining the old spacing visibly differs")
+    }
+
+    func testTextMappingsScaleAllLengthsWithoutClampingOrScalingDimensionlessStyle() throws {
+        var recipe = TextRecipe(string: "spacing")
+        recipe.typography = Typography(pointSize: 400, tracking: -18, lineHeightMultiple: 1.5,
+                                       lineSpacing: 60, paragraphSpacing: 150, alignment: .center)
+        let original = VectorTextElement(recipe: recipe,
+            frame: TextFrame(origin: CGPoint(x: 20, y: 30), size: CGSize(width: 80, height: 60), autoSize: false))
+        var expected = recipe.typography
+        expected.pointSize = 800; expected.tracking = -36
+        expected.lineSpacing = 120; expected.paragraphSpacing = 300
+        let similarity = CGAffineTransform(scaleX: 2, y: 2)
+        let stretch = CGAffineTransform(scaleX: 4, y: 1) // the same area-root uniform part
+        for transform in [similarity, stretch] {
+            let mapped = try XCTUnwrap(VectorCanvas.mapping(.text(original), throughStretch: transform).text)
+            XCTAssertEqual(mapped.recipe.typography, expected)
+            let back = try XCTUnwrap(VectorCanvas.mapping(.text(mapped), throughStretch: transform.inverted()).text)
+            XCTAssertEqual(back, original, "raw lengths survive a drag beyond the existing render bounds and back")
+        }
+        let mapped = try XCTUnwrap(VectorCanvas.mapping(.text(original), throughSimilarity: similarity).text)
+        XCTAssertEqual(mapped.recipe.typography, expected)
+        let localCanvas = VectorCanvas(size: CGSize(width: 512, height: 512), elements: [], transform: similarity)
+        let shown = localCanvas.canvasText(fromLocal: original)
+        XCTAssertEqual(shown.recipe.typography, expected, "canvas/local conversion uses the same dimensions")
+        XCTAssertEqual(localCanvas.localText(fromCanvas: shown), original)
+        XCTAssertEqual(shown.recipe.typography.clamped.pointSize, 512)
+        XCTAssertEqual(shown.recipe.typography.clamped.tracking, -20)
+        XCTAssertEqual(shown.recipe.typography.clamped.lineSpacing, 80)
+        XCTAssertEqual(shown.recipe.typography.clamped.paragraphSpacing, 200)
+    }
+
     /// **Freeform contains Uniform on a text box too** — §5.17's ruling, checked on the kind that
     /// reached Freeform a day after it was made.
     ///

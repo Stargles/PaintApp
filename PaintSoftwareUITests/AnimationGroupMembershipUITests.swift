@@ -315,6 +315,114 @@ final class AnimationGroupMembershipUITests: PaintUITestCase {
             """, farBefore.minX, farAfter.minX))
     }
 
+    /// Cold public route: make real text, animate that subset, select it where it is drawn, edit,
+    /// then scrub back. The group readout and screenshot ink must both survive the edit.
+    func testEditingGroupedTextKeepsItsDrawnPositionAndAnimationMembership() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 512, height: 512),
+                                      orientationBeforeCreatingCanvas: .landscapeLeft))
+        closeLayerRail(app)
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        _ = writeWords("Group", app, canvas)
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(waitForTextState(app, "none"))
+        waitForTheKeyboardToLeave(app)
+        let paper = paperRect(in: canvas)
+        // The bystander makes the text a subset, so Move mints an animation group, not a cel move.
+        setBrushSize(app, normalized: 0.35)
+        dragOnCanvas(app, from: onHost(paper, 0.10, 0.18), to: onHost(paper, 0.17, 0.26))
+        let textWindow = CGRect(x: 0.27, y: 0.08, width: 0.71, height: 0.40)
+        let rest = try XCTUnwrap(inkBox(try settledProbe(canvas, timeout: 8), paper, textWindow),
+                                 "PREMISE: real text is drawn clear of the bystander")
+        let bystanderWindow = CGRect(x: 0.03, y: 0.10, width: 0.23, height: 0.25)
+        let bystander = try XCTUnwrap(inkBox(try settledProbe(canvas, timeout: 8), paper, bystanderWindow),
+                                     "PREMISE: independent ungrouped ink is drawn beside the label")
+        XCTAssertGreaterThan(rest.width, 0.12, "the text box is wide enough to translate between its grips")
+        XCTAssertGreaterThan(rest.height * paper.height * canvas.frame.height, 50, "the box also clears the top/bottom grips")
+        attachScreenshot(canvas, "grouped-text-1-original-at-rest")
+        markKeyframe(app, onCelAt: 0.04)
+        scrub(app, toCelFraction: 0.95)
+        selectRectangle(app, paper, from: (rest.minX - 0.04, rest.minY - 0.035),
+                        to: (rest.maxX + 0.04, rest.maxY + 0.04))
+        moveSelection(app, paper, from: (rest.midX, rest.midY), by: (-0.22, 0))
+        markKeyframe(app, onCelAt: 0.95)
+        clearTheCanvasOfChrome(app)
+        let farBefore = try XCTUnwrap(inkBox(try settledProbe(canvas, timeout: 8), paper, textWindow))
+        XCTAssertLessThan(farBefore.minX, rest.minX - 0.10, "PREMISE: the group visibly carries the label")
+        let bystanderAtFar = try XCTUnwrap(inkBox(try settledProbe(canvas, timeout: 8), paper, bystanderWindow))
+        XCTAssertEqual(bystanderAtFar.minX, bystander.minX, accuracy: 0.025, "PREMISE: the partial Move leaves the ungrouped bystander in place")
+        XCTAssertEqual(bystanderAtFar.minY, bystander.minY, accuracy: 0.025, "PREMISE: this is a group Move, not a whole-cel movement")
+        attachScreenshot(canvas, "grouped-text-2-created-group-at-far-key")
+        // The first group Move leaves its current geometry baked and its current key identity.
+        // Edit at the other key, where the group must carry this independent drawn expectation.
+        scrub(app, toCelFraction: 0.04)
+        XCTAssertEqual(readFrameLabel(app)?.current, 1, "PREMISE: the nonidentity Edit frame is the first frame")
+        let editBefore = try XCTUnwrap(inkBox(try settledProbe(canvas, timeout: 8), paper, textWindow))
+        XCTAssertGreaterThan(editBefore.minX, farBefore.minX + 0.10,
+                             "PREMISE: Edit is reached where the group carries the label away from its stored far-key geometry")
+        let beforeEditHost = canvas.frame
+        let beforeEditViewport = readTransform(app).split(separator: ",").compactMap { Double($0) }.filter(\.isFinite)
+        XCTAssertEqual(beforeEditViewport.count, 4, "PREMISE: the pre-edit viewport exposes four finite values")
+        guard beforeEditViewport.count == 4 else { return }
+        let drawnBeforeEdit = CGRect(
+            x: beforeEditHost.minX + (paper.minX + editBefore.minX * paper.width) * beforeEditHost.width,
+            y: beforeEditHost.minY + (paper.minY + editBefore.minY * paper.height) * beforeEditHost.height,
+            width: editBefore.width * paper.width * beforeEditHost.width,
+            height: editBefore.height * paper.height * beforeEditHost.height)
+        attachScreenshot(canvas, "grouped-text-3-nonidentity-group-before-edit")
+        selectRectangle(app, paper, from: (editBefore.minX - 0.04, editBefore.minY - 0.035),
+                        to: (editBefore.maxX + 0.04, editBefore.maxY + 0.04))
+        app.buttons["timeline.graphEditorButton"].tap()
+        let readout = app.staticTexts["selectPanel.animationGroupReadout"]
+        XCTAssertTrue(readout.waitForExistence(timeout: 5))
+        XCTAssertEqual(readout.value as? String, "Group 1")
+        let edit = app.buttons["selectPanel.editTextButton"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        XCTAssertEqual(readFrameLabel(app)?.current, 1, "PREMISE: Edit Text opens at that same nonidentity group frame")
+        edit.tap()
+        XCTAssertTrue(waitForTextState(app, "box", "editing"))
+        let values = readField(app, "textbox:").split(separator: ",").compactMap { Double($0) }
+        XCTAssertEqual(values.count, 4, "the actual overlay exposes its drawn box")
+        guard values.count == 4 else { return }
+        let host = canvas.frame
+        let editingViewport = readTransform(app).split(separator: ",").compactMap { Double($0) }.filter(\.isFinite)
+        XCTAssertEqual(editingViewport.count, 4, "PREMISE: the editing viewport exposes four finite values")
+        guard editingViewport.count == 4 else { return }
+        XCTAssertEqual(editingViewport[0], beforeEditViewport[0], "The Text follow pans without changing scale")
+        XCTAssertEqual(editingViewport[1], beforeEditViewport[1], "The Text follow pans without changing rotation")
+        XCTAssertEqual(host, beforeEditHost, "The Text panel leaves the canvas host in place")
+        let overlay = CGRect(x: host.minX + CGFloat(values[0]) * host.width, y: host.minY + CGFloat(values[1]) * host.height,
+                             width: CGFloat(values[2]) * host.width, height: CGFloat(values[3]) * host.height)
+        // The Text panel can pan the whole canvas clear of itself. Move the independently captured
+        // pre-edit ink by that global pan; the current box and its own glyphs are not the expectation.
+        let drawn = drawnBeforeEdit.offsetBy(dx: CGFloat(editingViewport[2] - beforeEditViewport[2]),
+                                             dy: CGFloat(editingViewport[3] - beforeEditViewport[3]))
+        attachScreenshot(XCUIScreen.main, "grouped-text-4-editor-over-the-drawn-label")
+        XCTAssertTrue(overlay.insetBy(dx: -3, dy: -3).contains(drawn),
+                      "Edit Text's box covers the label where the group draws it, not at rest")
+        let caret = CGPoint(x: overlay.maxX - 0.12 * overlay.width, y: overlay.midY)
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: caret.x, dy: caret.y)).tap()
+        typeIntoTextBox("o", app, at: caret)
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(waitForTextState(app, "none"))
+        waitForTheKeyboardToLeave(app)
+        let editedAtEdit = try XCTUnwrap(inkBox(try settledProbe(canvas, timeout: 8), paper, textWindow))
+        XCTAssertEqual(editedAtEdit.minX, editBefore.minX, accuracy: 0.025, "typing keeps the label's shown anchor")
+        XCTAssertGreaterThan(editedAtEdit.width, editBefore.width + 0.005, "the inserted letter is visibly drawn")
+        attachScreenshot(canvas, "grouped-text-5-edited-label-still-in-place")
+        selectRectangle(app, paper, from: (editedAtEdit.minX - 0.04, editedAtEdit.minY - 0.035),
+                        to: (editedAtEdit.maxX + 0.04, editedAtEdit.maxY + 0.04))
+        XCTAssertTrue(readout.waitForExistence(timeout: 5))
+        XCTAssertEqual(readout.value as? String, "Group 1", "editing words preserves the existing group")
+        clearTheCanvasOfChrome(app)
+        scrub(app, toCelFraction: 0.95)
+        let atOtherFrame = try XCTUnwrap(inkBox(try settledProbe(canvas, timeout: 8), paper, textWindow))
+        XCTAssertLessThan(atOtherFrame.minX, editedAtEdit.minX - 0.10, "the edited label still follows its animated group")
+        XCTAssertEqual(atOtherFrame.width, editedAtEdit.width, accuracy: 0.025, "scrubbing carries the edited letters intact")
+        attachScreenshot(canvas, "grouped-text-6-edited-label-follows-the-other-key")
+    }
+
     // MARK: - The channel list's rename menu
 
     /// A brand-new document taken to the graph editor's channel list with one animation group in it: two

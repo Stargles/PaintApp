@@ -1,5 +1,52 @@
 import XCTest
 
+/// Test-runner messages for explicitly staged storage UI tests. The external observer owns all
+/// app-container changes; only nonce-bound requests and observations live in the runner sandbox.
+struct ExternalUIStage {
+    let nonce: String
+    private let context: String?
+    private let directory: URL
+
+    init(nonce: String, directoryPrefix: String, context: String? = nil) throws {
+        self.nonce = nonce
+        self.context = context
+        let files = FileManager.default
+        directory = try XCTUnwrap(files.urls(for: .documentDirectory, in: .userDomainMask).first)
+            .appendingPathComponent("\(directoryPrefix)-\(nonce)", isDirectory: true)
+        XCTAssertFalse(files.fileExists(atPath: directory.path), "PREMISE: no stale runner acknowledgements")
+        try files.createDirectory(at: directory, withIntermediateDirectories: false)
+    }
+
+    private func payload(for phase: String) -> Data {
+        Data("\(nonce)|\(phase)\(context.map { "|" + $0 } ?? "")\n".utf8)
+    }
+
+    func announce(_ phase: String) throws {
+        let url = directory.appendingPathComponent("\(phase).txt")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "PREMISE: each runner phase is published once")
+        try payload(for: phase).write(to: url, options: .atomic)
+    }
+
+    func awaitMessage(_ name: String, app: XCUIApplication? = nil) throws -> (data: Data?, foreground: Bool) {
+        let url = directory.appendingPathComponent(name)
+        let deadline = Date().addingTimeInterval(30)
+        var foreground = true
+        while Date() < deadline {
+            if let app { foreground = foreground && app.state == .runningForeground }
+            if FileManager.default.fileExists(atPath: url.path) {
+                return (try Data(contentsOf: url), foreground)
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        return (nil, foreground)
+    }
+
+    func awaitAcknowledgement(_ phase: String, app: XCUIApplication) throws -> (arrived: Bool, foreground: Bool) {
+        let result = try awaitMessage("\(phase).ack", app: app)
+        return (result.data == payload(for: phase), result.foreground)
+    }
+}
+
 /// Shared setup and helpers for the XCUITest suites. Split out of the original
 /// single PaintSoftwareUITests class so the ~60 UI tests live in several classes:
 /// XCTest parallelises by class, so one class meant one worker and no speedup.
@@ -569,17 +616,18 @@ class PaintUITestCase: XCTestCase {
         return Double((top - host.minY) / host.height)
     }
 
-    /// The part of the paper no chrome covers: `paperRect`, cut off where the timeline panel (and a
-    /// docked card, if one is up) begins. In host fractions, like `paperRect`.
+    /// The part of the paper no chrome covers: `paperRect`, between the measured toolbar's bottom
+    /// and the timeline panel (or a docked card). In host fractions, like `paperRect`.
     ///
     /// **This is where a touch or a probe goes; `paperRect` is where the document is.** Choose where to put
     /// ink and where to tap from this, measured *after* the chrome the test will stand up is up; convert
     /// between host and canvas coordinates against `paperRect`, whose extent they are in.
     func visiblePaperRect(_ app: XCUIApplication, in canvas: XCUIElement,
                           canvasSize: CGSize = CGSize(width: 2048, height: 2048)) -> CGRect {
-        var paper = paperRect(in: canvas, canvasSize: canvasSize)
-        paper.size.height = max(0, min(paper.maxY, CGFloat(dockTop(app, canvas))) - paper.minY)
-        return paper
+        let paper = paperRect(in: canvas, canvasSize: canvasSize)
+        let top = min(paper.maxY, max(paper.minY, CGFloat(toolbarBottom(app, canvas))))
+        let bottom = min(paper.maxY, CGFloat(dockTop(app, canvas)))
+        return CGRect(x: paper.minX, y: top, width: paper.width, height: max(0, bottom - top))
     }
 
     /// A point in the host above whatever stands over its lower part, `x` of the way across and `y` of

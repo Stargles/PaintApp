@@ -212,6 +212,340 @@ final class InkPoseLogicTests: XCTestCase {
         assertSame(onScreen.frame.corners.first, tap, "the box is not shown at the tap")
     }
 
+    private func groupedTextFixture(
+        carried: CGAffineTransform = CGAffineTransform(rotationAngle: -0.1)
+            .concatenating(CGAffineTransform(translationX: 5, y: 8))
+    ) throws -> (manager: CanvasManager, vector: VectorCanvas,
+                 original: VectorTextElement, shownCorners: [CGPoint],
+                 shownThrough: CGAffineTransform) {
+        let container = CGAffineTransform(translationX: -8, y: 12)
+        let fx = layerUnderMove(container)
+        let group = AnimationGroup(displayName: "Label", tagColor: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        fx.manager.animationGroups = [group]
+        let groupMap = CGAffineTransform(scaleX: 2, y: 0.5)
+            .concatenating(CGAffineTransform(rotationAngle: 0.3))
+            .concatenating(CGAffineTransform(translationX: 75, y: 25))
+        let celMap = CGAffineTransform(translationX: 9, y: -4)
+        var recipe = TextRecipe(string: "Hi")
+        recipe.typography = Typography(pointSize: 24, tracking: 3, lineSpacing: 4, paragraphSpacing: 6)
+        let original = VectorTextElement(recipe: recipe,
+            frame: TextFrame(origin: CGPoint(x: 20, y: 30), size: CGSize(width: 58, height: 44), autoSize: false),
+            motionGroupID: UUID(), animationGroupID: group.id)
+        let vector = VectorCanvas(size: Self.size, elements: [.text(original)], transform: carried)
+        fx.manager.layers[0].cels[0].vector = vector
+        fx.manager.layers[0].cels[0].transformTracks = [
+            TransformChannelID.group(group.id).id: CanvasFixture.poseTrack([(0, PoseQuad(box: Self.box, mappedBy: groupMap))]),
+            TransformChannelID.cel.id: CanvasFixture.poseTrack([(0, PoseQuad(box: Self.box, mappedBy: celMap))])
+        ]
+        fx.manager.history.removeAll()
+        let corners = original.frame.corners.map {
+            $0.applying(groupMap).applying(celMap).applying(container).applying(carried)
+        }
+        return (fx.manager, vector, original, corners,
+                groupMap.concatenating(celMap).concatenating(container).concatenating(carried))
+    }
+
+    func testGroupedTextHitAndEditorUseTheCompleteDrawnQuadBeforeTheCarriedTransform() throws {
+        let fx = try groupedTextFixture()
+        let manager = fx.manager
+        let image = try XCTUnwrap(manager.posedCelContent(for: manager.layers[0].cels[0], atFrame: 0,
+            inheriting: manager.containerPose(ofLayerAt: 0, atFrame: 0))?.render(.full))
+        let ink = try XCTUnwrap(PixelOps.opaqueContentBounds(image), "PREMISE: the posed text draws real letters")
+        let expectedBox = try XCTUnwrap(Quad(fx.shownCorners)).boundingBox
+        XCTAssertTrue(expectedBox.insetBy(dx: -2, dy: -2).contains(ink), "drawn ink lies in the actual posed quad")
+        XCTAssertGreaterThan(ink.minX, fx.original.frame.boundingBox.maxX,
+                             "PREMISE: the drawn label is clear of its stored box")
+        let tap = CGPoint(x: fx.shownCorners.map(\.x).reduce(0, +) / 4,
+                          y: fx.shownCorners.map(\.y).reduce(0, +) / 4)
+        manager.selectedTool = .text
+        manager.beginTextSession(at: tap)
+        XCTAssertEqual(manager.textEditingElementID, fx.original.id, "the text tool reopens the shown label")
+        for (actual, expected) in zip(manager.textFrame.corners, fx.shownCorners) {
+            assertSame(actual, expected, "the editor follows group, cel, container, then carried transform")
+        }
+        XCTAssertNotEqual(manager.textFrame.corners,
+                          TextFrame.uprightCorners(origin: expectedBox.origin, size: expectedBox.size),
+                          "the rotated/nonuniform quad must not become its axis-aligned bounds")
+        manager.cancelInteractiveText()
+        XCTAssertEqual(fx.vector.elements.compactMap(\.text), [fx.original])
+        XCTAssertNil(fx.vector.editingElementID)
+        XCTAssertFalse(manager.history.canUndo)
+    }
+
+    func testMovingAndDistortingTheGroupedTextEditorPullsBackItsWholeEditedQuad() throws {
+        let fx = try groupedTextFixture()
+        let manager = fx.manager
+        XCTAssertTrue(manager.beginEditingText(elementID: fx.original.id))
+        var expectedShown = fx.shownCorners.map { CGPoint(x: $0.x + 15, y: $0.y - 8) }
+        manager.beginTextFrameDrag()
+        manager.dragTextFrame(toOrigin: expectedShown[0])
+        manager.endTextFrameDrag()
+        expectedShown[2] = CGPoint(x: expectedShown[2].x + 8, y: expectedShown[2].y + 5)
+        manager.textCornerMode = .distort
+        manager.beginTextHandleDrag(.bottomRight)
+        manager.dragTextHandle(to: expectedShown[2])
+        manager.endTextHandleDrag()
+        for (actual, expected) in zip(manager.textFrame.corners, expectedShown) {
+            assertSame(actual, expected, "the existing move band and corner grip authored this quad")
+        }
+        XCTAssertTrue(manager.commitInteractiveText())
+        let stored = try XCTUnwrap(fx.vector.elements.first?.text)
+        for (actual, expected) in zip(stored.frame.corners, expectedShown.map({ $0.applying(fx.shownThrough.inverted()) })) {
+            assertSame(actual, expected, "landing undoes carried, container, cel and group in reverse order")
+        }
+        XCTAssertEqual(stored.motionGroupID, fx.original.motionGroupID)
+        XCTAssertEqual(stored.animationGroupID, fx.original.animationGroupID)
+        let posed = try XCTUnwrap(manager.celPoseMaps(fx.vector.elements, layerID: manager.layers[0].id,
+            celID: manager.layers[0].cels[0].id, atFrame: 0)[stored.id])
+        let shown = fx.vector.canvasText(fromLocal: try XCTUnwrap(VectorCanvas.mapping(.text(stored), through: posed)?.text))
+        for (actual, expected) in zip(shown.frame.corners, expectedShown) {
+            assertSame(actual, expected, "the committed drawing round-trips to the edited quad")
+        }
+        let image = try XCTUnwrap(manager.posedCelContent(for: manager.layers[0].cels[0], atFrame: 0,
+            inheriting: manager.containerPose(ofLayerAt: 0, atFrame: 0))?.render(.full))
+        let ink = try XCTUnwrap(PixelOps.opaqueContentBounds(image), "the committed distorted text is really drawn")
+        XCTAssertTrue(try XCTUnwrap(Quad(expectedShown)).boundingBox.insetBy(dx: -2, dy: -2).contains(ink))
+        manager.undo()
+        XCTAssertEqual(fx.vector.elements.compactMap(\.text), [fx.original])
+        XCTAssertFalse(manager.history.canUndo)
+    }
+
+    func testGroupedTextNoOpEditUndoRedoAndCurrentPackageKeepIdentityAndPose() throws {
+        let fx = try groupedTextFixture(carried: .identity)
+        let manager = fx.manager
+        XCTAssertTrue(fx.vector.transform.isIdentity,
+                      "PREMISE: current editor geometry is canonical before the current-package roundtrip")
+        XCTAssertTrue(manager.beginEditingText(elementID: fx.original.id))
+        XCTAssertTrue(manager.commitInteractiveText())
+        XCTAssertEqual(fx.vector.elements.compactMap(\.text), [fx.original], "a no-op is the exact original, without inverse-rounding drift")
+        XCTAssertNil(fx.vector.editingElementID, "a no-op still clears the original's suppression")
+        XCTAssertFalse(manager.history.canUndo, "opening and closing a label creates no history step")
+        XCTAssertTrue(manager.beginEditingText(elementID: fx.original.id))
+        manager.updateTextString("Ho")
+        XCTAssertTrue(manager.commitInteractiveText())
+        let edited = try XCTUnwrap(fx.vector.elements.first?.text)
+        XCTAssertEqual(edited.id, fx.original.id)
+        XCTAssertEqual(edited.motionGroupID, fx.original.motionGroupID)
+        XCTAssertEqual(edited.animationGroupID, fx.original.animationGroupID)
+        XCTAssertEqual(edited.recipe.string, "Ho")
+        for (actual, expected) in zip(edited.frame.corners, fx.original.frame.corners) {
+            assertSame(actual, expected, "editing words pulls the full quad back, not its bounds")
+        }
+        XCTAssertTrue(manager.history.canUndo)
+        manager.undo()
+        XCTAssertEqual(fx.vector.elements.compactMap(\.text), [fx.original])
+        XCTAssertFalse(manager.history.canUndo, "one text edit is one step")
+        manager.redo()
+        XCTAssertEqual(fx.vector.elements.first?.text, edited)
+
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("grouped-text-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("label.paintproj", isDirectory: true)
+        let saved = expectation(description: "current grouped-text package saved")
+        ProjectStore.save(manager, to: url) { savedURL in
+            XCTAssertEqual(savedURL, url, "the current writer completed the isolated package")
+            saved.fulfill()
+        }
+        wait(for: [saved], timeout: 30)
+        let loaded = try XCTUnwrap(ProjectStore.load(from: url))
+        let reloaded = try XCTUnwrap(loaded.layers[0].cels[0].vector?.elements.first?.text)
+        XCTAssertEqual(reloaded, edited)
+        XCTAssertEqual(loaded.animationGroups, manager.animationGroups)
+        XCTAssertEqual(loaded.layers[0].cels[0].transformTracks, manager.layers[0].cels[0].transformTracks)
+        let before = try XCTUnwrap(manager.posedCelContent(for: manager.layers[0].cels[0], atFrame: 0,
+            inheriting: manager.containerPose(ofLayerAt: 0, atFrame: 0))?.render(.full)?.cgImage)
+        let after = try XCTUnwrap(loaded.posedCelContent(for: loaded.layers[0].cels[0], atFrame: 0,
+            inheriting: loaded.containerPose(ofLayerAt: 0, atFrame: 0))?.render(.full)?.cgImage)
+        let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(before))
+        XCTAssertTrue(pixels.enumerated().contains { $0.offset % 4 == 3 && $0.element > 200 })
+        XCTAssertEqual(pixels, CanvasFixture.rgbaBytes(after), "the edited label stays drawn in the same group pose after a current save/load")
+    }
+
+    func testAnAutoSizedTextNoOpKeepsItsExactFrameAndTheLastFocusedDraftStillLands() throws {
+        let manager = CanvasManager()
+        manager.brushLibraryOverride = CanvasFixture.isolatedBrushLibrary()
+        manager.canvasSize = Self.size
+        manager.addVectorLayer()
+        manager.beginTextSession(at: CGPoint(x: 20, y: 30))
+        manager.textRecipe.typography = Typography(pointSize: 24, tracking: 3, lineSpacing: 4, paragraphSpacing: 6)
+        manager.updateTextString("Hi")
+        XCTAssertTrue(manager.commitInteractiveText())
+        let vector = try XCTUnwrap(manager.layers[0].cels[0].vector)
+        let original = try XCTUnwrap(vector.elements.first?.text)
+        XCTAssertTrue(original.frame.autoSize, "PREMISE: this is current authored point text")
+        let before = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage)))
+        XCTAssertTrue(before.enumerated().contains { $0.offset % 4 == 3 && $0.element > 200 },
+                      "PREMISE: the original label has real drawn letters")
+        manager.history.removeAll()
+
+        XCTAssertTrue(manager.beginEditingText(elementID: original.id))
+        XCTAssertTrue(manager.commitInteractiveText())
+        XCTAssertEqual(vector.elements.first?.text, original,
+                       "an untouched auto-sized label retains exact corners, mode, sizing bit and typography")
+        XCTAssertNil(vector.editingElementID, "the unchanged label returns through the existing suppression owner")
+        XCTAssertFalse(manager.history.canUndo, "opening and closing auto-sized text creates no edit")
+        XCTAssertEqual(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage)), before,
+                       "the unchanged auto-sized label draws exactly the same picture")
+
+        XCTAssertTrue(manager.beginEditingText(elementID: original.id))
+        manager.textIsFocused = true
+        manager.textDraftReader = { "Hi there" }
+        XCTAssertTrue(manager.commitInteractiveText())
+        let edited = try XCTUnwrap(vector.elements.first?.text)
+        XCTAssertEqual(edited.recipe.string, "Hi there", "the final focused draft is read before deciding whether anything changed")
+        XCTAssertEqual(edited.recipe.typography, original.recipe.typography)
+        let expectedSize = TextLayout.autoSize(for: edited.recipe, font: TextLayout.resolvedFont(for: edited.recipe).font)
+        XCTAssertEqual(edited.frame, original.frame.resized(to: expectedSize), "a real text edit still measures and grows the box")
+        XCTAssertGreaterThan(edited.frame.size.width, original.frame.size.width)
+        XCTAssertTrue(manager.history.canUndo, "the actual new words produce one text edit")
+        XCTAssertNotEqual(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage)), before,
+                          "the final focused words are really drawn")
+        manager.undo()
+        XCTAssertEqual(vector.elements.first?.text, original)
+        XCTAssertFalse(manager.history.canUndo, "the real text change is one history step")
+    }
+
+    func testAnAutoSizedLabelScaledPastTheFontBoundDoesNotResizeWhenMerelyReopened() throws {
+        let manager = CanvasManager()
+        manager.brushLibraryOverride = CanvasFixture.isolatedBrushLibrary()
+        manager.canvasSize = CGSize(width: 1400, height: 1200)
+        manager.addVectorLayer()
+        manager.beginTextSession(at: CGPoint(x: 500, y: 300))
+        manager.textRecipe.typography = Typography(pointSize: 400, tracking: 3, lineSpacing: 4, paragraphSpacing: 6)
+        manager.updateTextString("Hi")
+        XCTAssertTrue(manager.commitInteractiveText())
+        let vector = try XCTUnwrap(manager.layers[0].cels[0].vector)
+        XCTAssertTrue(manager.beginVectorWholeCelMove())
+        var transform = try XCTUnwrap(manager.vectorFloat?.frame.transform)
+        transform.scale *= 2
+        manager.nudgeVectorFloat(to: transform)
+        XCTAssertTrue(manager.commitVectorFloatIfNeeded())
+        let original = try XCTUnwrap(vector.elements.first?.text)
+        XCTAssertEqual(original.recipe.typography.pointSize, 800, "PREMISE: actual Move retains raw scaled typography")
+        XCTAssertTrue(original.frame.autoSize, "PREMISE: scaling point text does not turn it into a hand-sized box")
+        XCTAssertEqual(original.frame.mode, .affine)
+        let recomputed = TextLayout.autoSize(for: original.recipe, font: TextLayout.resolvedFont(for: original.recipe).font)
+        XCTAssertNotEqual(recomputed, original.frame.size, "PREMISE: remeasuring at the render font bound would change the authored box")
+        let before = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage)))
+        XCTAssertTrue(before.enumerated().contains { $0.offset % 4 == 3 && $0.element > 200 },
+                      "PREMISE: the scaled label remains a real drawn picture")
+        manager.history.removeAll()
+
+        XCTAssertTrue(manager.beginEditingText(elementID: original.id))
+        XCTAssertTrue(manager.commitInteractiveText())
+        XCTAssertEqual(vector.elements.first?.text, original,
+                       "merely reopening scaled point text preserves exact geometry, mode, auto-size and raw typography")
+        XCTAssertNil(vector.editingElementID)
+        XCTAssertFalse(manager.history.canUndo, "a render clamp is not an artist's text edit")
+        XCTAssertEqual(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage)), before,
+                       "closing unchanged scaled text preserves its drawn picture")
+
+        // The staged public witness consumes this actual Move/current-writer output. An ordinary
+        // logic pass proves the assertions above, but cannot qualify an export it did not request.
+        guard let requested = ProcessInfo.processInfo.environment["PAINTAPP_TEXT_AUTOSIZE_STAGE_UUID"] else { return }
+        let nonce = try XCTUnwrap(UUID(uuidString: requested), "PREMISE: a fresh writer-stage UUID").uuidString
+        let files = FileManager.default
+        let root = try XCTUnwrap(files.urls(for: .documentDirectory, in: .userDomainMask).first)
+            .appendingPathComponent("text-autosize-writer-\(nonce)", isDirectory: true)
+        XCTAssertFalse(files.fileExists(atPath: root.path), "PREMISE: the retained writer fixture is fresh")
+        try files.createDirectory(at: root, withIntermediateDirectories: false)
+        let priorRoot = ProjectBackupManager.rootDirectoryOverride
+        ProjectBackupManager.rootDirectoryOverride = root
+        PackageRenameGate.resetForTesting()
+        defer {
+            ProjectBackupManager.rootDirectoryOverride = priorRoot
+            PackageRenameGate.resetForTesting()
+        }
+        manager.projectName = "Auto Sized 800 \(nonce)"
+        let package = root.appendingPathComponent("\(manager.projectName).paintproj", isDirectory: true)
+        let saved = expectation(description: "current writer retains the actual scaled point text")
+        var savedURL: URL?
+        ProjectStore.save(manager, to: package) { savedURL = $0; saved.fulfill() }
+        wait(for: [saved], timeout: 30)
+        XCTAssertEqual(savedURL?.standardizedFileURL, package.standardizedFileURL)
+        let loaded = try XCTUnwrap(ProjectStore.load(from: try XCTUnwrap(savedURL)))
+        let reopened = try XCTUnwrap(loaded.layers[0].cels[0].vector)
+        XCTAssertEqual(reopened.elements.first?.text, original,
+                       "the current package retains the actual Move's raw800, auto-size frame and identity")
+        XCTAssertEqual(CanvasFixture.rgbaBytes(try XCTUnwrap(reopened.render()?.cgImage)), before,
+                       "the current package reopens the actual scaled label's picture")
+    }
+
+    func testAProjectivelyShownAutoSizedTextNoOpRestoresItsExactStoredModeAndTypography() throws {
+        let fx = try groupedTextFixture()
+        let manager = fx.manager
+        var original = fx.original
+        original.frame.autoSize = true
+        fx.vector.upsertText(original)
+        let groupID = try XCTUnwrap(original.animationGroupID)
+        let groupMap = Homography(a: 1, b: 0, c: 25, d: 0, e: 1, f: 10, g: 0.002, h: 0, i: 1)
+        let groupPose = try XCTUnwrap(PoseQuad(box: Self.box, mappedThrough: groupMap))
+        manager.layers[0].cels[0].transformTracks[TransformChannelID.group(groupID).id] = CanvasFixture.poseTrack([(0, groupPose)])
+        let inherited = manager.containerPose(ofLayerAt: 0, atFrame: 0)
+        let before = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(manager.posedCelContent(
+            for: manager.layers[0].cels[0], atFrame: 0, inheriting: inherited)?.render(.full)?.cgImage)))
+        XCTAssertTrue(before.enumerated().contains { $0.offset % 4 == 3 && $0.element > 200 },
+                      "PREMISE: the fully posed projective label draws real letters")
+        manager.history.removeAll()
+
+        XCTAssertTrue(manager.beginEditingText(elementID: original.id))
+        XCTAssertEqual(manager.textFrame.mode, .projective, "PREMISE: the shown draft uses the complete projective pose")
+        XCTAssertFalse(manager.textFrame.autoSize, "PREMISE: the projective display mapping changes the draft's sizing bit")
+        for (actual, stored) in zip(manager.textFrame.corners, original.frame.corners) {
+            let grouped = try XCTUnwrap(groupMap.map(stored))
+            let expected = grouped.applying(CGAffineTransform(translationX: 9, y: -4))
+                .applying(CGAffineTransform(translationX: -8, y: 12)).applying(fx.vector.transform)
+            assertSame(actual, expected, "projective group, cel, container and carried pose compose in render order")
+        }
+        XCTAssertTrue(manager.commitInteractiveText())
+        XCTAssertEqual(fx.vector.elements.first?.text, original,
+                       "a display-only projective mode and sizing bit never replace the untouched stored original")
+        XCTAssertEqual(fx.vector.elements.first?.text?.frame.mode, .affine)
+        XCTAssertEqual(fx.vector.elements.first?.text?.frame.autoSize, true)
+        XCTAssertEqual(fx.vector.elements.first?.text?.recipe.typography, original.recipe.typography)
+        XCTAssertNil(fx.vector.editingElementID)
+        XCTAssertFalse(manager.history.canUndo)
+        let after = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(manager.posedCelContent(
+            for: manager.layers[0].cels[0], atFrame: 0, inheriting: inherited)?.render(.full)?.cgImage)))
+        XCTAssertEqual(after, before, "an unchanged projectively posed label retains the complete drawn picture")
+    }
+
+    func testAProjectivelyPosedTextEditRefusesAnUnmappableQuadWithoutReplacingTheOriginal() throws {
+        let manager = CanvasManager()
+        manager.brushLibraryOverride = CanvasFixture.isolatedBrushLibrary()
+        manager.canvasSize = Self.size
+        manager.addVectorLayer()
+        let group = AnimationGroup(displayName: "Perspective", tagColor: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        manager.animationGroups = [group]
+        let vector = try XCTUnwrap(manager.layers[0].cels[0].vector)
+        let original = VectorTextElement(recipe: TextRecipe(string: "Hi"),
+            frame: TextFrame(origin: CGPoint(x: 20, y: 30), size: CGSize(width: 70, height: 60), autoSize: false),
+            motionGroupID: UUID(), animationGroupID: group.id)
+        vector.upsertText(original)
+        let map = Homography(a: 1, b: 0, c: 0, d: 0, e: 1, f: 0, g: 0.005, h: 0, i: 1)
+        let pose = try XCTUnwrap(PoseQuad(box: Self.box, mappedThrough: map))
+        manager.layers[0].cels[0].transformTracks[TransformChannelID.group(group.id).id] = CanvasFixture.poseTrack([(0, pose)])
+        manager.history.removeAll()
+        XCTAssertTrue(manager.beginEditingText(elementID: original.id))
+        let shown = try XCTUnwrap(VectorCanvas.mapping(.text(original), through: PoseMap(map))?.text)
+        for (actual, expected) in zip(manager.textFrame.corners, shown.frame.corners) {
+            assertSame(actual, expected, "the projective overlay is the drawn quad")
+        }
+        // A normal translation of the editor box can reach the inverse's vanishing line. The box
+        // itself is valid on screen; it has no storable pre-image. Refuse rather than save bounds.
+        let shift = 200 - manager.textFrame.corners[0].x
+        manager.textFrame.corners = manager.textFrame.corners.map { CGPoint(x: $0.x + shift, y: $0.y) }
+        XCTAssertNotNil(manager.textFrame.homography, "PREMISE: this is a valid edited screen quad")
+        XCTAssertFalse(manager.commitInteractiveText())
+        XCTAssertTrue(manager.textGestureActive, "a refusal keeps the editable draft")
+        XCTAssertEqual(vector.elements.compactMap(\.text), [original])
+        XCTAssertFalse(manager.history.canUndo)
+        manager.cancelInteractiveText()
+        XCTAssertNil(vector.editingElementID)
+        XCTAssertEqual(vector.elements.compactMap(\.text), [original])
+    }
+
     /// **A loop drawn round the ink where it is shown** catches it: the container pose reaches the
     /// per-element pull-back the lasso, the Move box and every nudge all read.
     func testALassoRoundTheShownInkPullsBackOntoTheStoredInk() throws {

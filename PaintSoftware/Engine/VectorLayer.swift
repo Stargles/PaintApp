@@ -3488,8 +3488,8 @@ final class VectorCanvas {
     /// each costing a fresh canvas-sized flatten and an LRU eviction.
     ///
     /// `element == nil` deletes the object the session opened — the artist emptied the box. Returns
-    /// whether the display list actually changed, so a session that placed a box and typed nothing
-    /// registers no undo step.
+    /// whether the display list actually changed, so an unchanged re-edit or an empty new box
+    /// registers no undo step; both still finish through the same suppression owner.
     @discardableResult
     func commitTextEdit(editingID: UUID?, element: VectorTextElement?) -> Bool {
         lock.lock()
@@ -3497,8 +3497,10 @@ final class VectorCanvas {
         var listChanged = false
         var appended = false
         if let element {
-            appended = upsertTextLocked(element)
-            listChanged = true
+            if _elements.first(where: { $0.id == element.id })?.text != element {
+                appended = upsertTextLocked(element)
+                listChanged = true
+            }
         } else if let editingID, removeTextLocked(id: editingID) {
             listChanged = true
         }
@@ -3573,7 +3575,7 @@ final class VectorCanvas {
         if s > 0, abs(s - 1) > 1e-9 {
             mapped.frame.size = CGSize(width: element.frame.size.width * s,
                                        height: element.frame.size.height * s)
-            mapped.recipe.typography.pointSize = element.recipe.typography.pointSize * s
+            mapped.recipe.typography = element.recipe.typography.scaled(by: s)
         }
         return mapped
     }
@@ -4993,7 +4995,7 @@ final class VectorCanvas {
     /// wherever the two overlap. Shared for `drawn(_:through:widthScale:)`'s reason: the half the two
     /// agree about must not be able to drift.
     ///
-    /// **`corners` follow `t` whole; `size` and the point size follow only its *uniform* part.** For a
+    /// **`corners` follow `t` whole; `size` and all typography lengths follow its *uniform* part.** For a
     /// similarity those are one statement, and the invariant `TextFrame.Basis` documents —
     /// `basis.width == size.width` — comes through untouched. For a stretch they are two, and the
     /// difference between them is exactly the residual aspect: the layout box is scaled uniformly, so
@@ -5023,9 +5025,9 @@ final class VectorCanvas {
         if k != 1 {
             text.frame.size = CGSize(width: text.frame.size.width * k,
                                      height: text.frame.size.height * k)
-            // Stored unclamped; `Typography.pointSizeRange` (8...512) is applied at render, so a
-            // piece shrunk past the floor and dragged back comes back at full size.
-            text.recipe.typography.pointSize *= k
+            // Stored unclamped; the existing typography bounds are applied at render, so a
+            // piece shrunk past a floor and dragged back recovers its authored spacing too.
+            text.recipe.typography = text.recipe.typography.scaled(by: k)
         }
         return text
     }
@@ -5866,18 +5868,19 @@ final class VectorCanvas {
     ///
     /// `slop` widens the target by a fingertip, measured to the quad's edges rather than to a
     /// rectangle's, so a rotated box is no harder to hit than an upright one.
-    func topmostText(atCanvasPoint point: CGPoint, slop: CGFloat = VectorHitTest.fingertip) -> VectorTextElement? {
-        topmostElement(atCanvasPoint: point, slop: slop) { $0.text != nil }?.text
+    func topmostText(atCanvasPoint point: CGPoint, slop: CGFloat = VectorHitTest.fingertip,
+                     posedBy poses: [UUID: PoseMap] = [:]) -> VectorTextElement? {
+        topmostElement(atCanvasPoint: point, slop: slop, posedBy: poses) { $0.text != nil }?.text
     }
 
     /// The topmost element `accepts` whose drawn shape covers the canvas-space `point` — the one
-    /// question every tap above asks, answered by `VectorHitTest` against the stored list.
+    /// question every tap above asks, answered by `VectorHitTest` against the stored or posed list.
     ///
     /// **The point is mapped into local space first**, because that is where a `VectorCanvas` stores
     /// its geometry: a canvas-space point tested against local geometry is off by the layer's
     /// transform on a layer that has been moved.
     private func topmostElement(atCanvasPoint point: CGPoint, slop: CGFloat,
-                                accepting accepts: (VectorElement) -> Bool) -> VectorElement? {
+                                posedBy poses: [UUID: PoseMap] = [:], accepting accepts: (VectorElement) -> Bool) -> VectorElement? {
         lock.lock()
         defer { lock.unlock() }
         var point = point
@@ -5887,7 +5890,14 @@ final class VectorCanvas {
             let s = Self.scale(of: _transform)
             if s > 0 { slop /= s }
         }
-        return VectorHitTest.topmost(in: _elements, at: point, slop: slop, accepting: accepts)
+        guard !poses.isEmpty else {
+            return VectorHitTest.topmost(in: _elements, at: point, slop: slop, accepting: accepts)
+        }
+        // The render poses local geometry before applying the carried transform. Hit those same
+        // quads, then return the stored object by identity so opening an edit cannot bake its pose.
+        let shown = _elements.filter(accepts).map { Self.posed($0, by: poses[$0.id]) ?? $0 }
+        guard let hit = VectorHitTest.topmost(in: shown, at: point, slop: slop) else { return nil }
+        return _elements.first { $0.id == hit.id }
     }
 
     // MARK: - Rendering

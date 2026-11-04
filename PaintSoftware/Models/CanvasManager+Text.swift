@@ -85,19 +85,20 @@ extension CanvasManager {
 
         let layerID = layers[layerIndex].id
         let celID = layers[layerIndex].cels[celIndex].id
-        bindTextSession(toLayer: layerID, cel: celID)
-
         // **The whole point of stage 3**: on a vector layer the object is still there, so a tap on it
         // reopens the same object rather than dropping a second one on top. `topmostText` hits the
-        // *box*, not the glyphs — tapping the hole in an "O" is tapping the text — and it hits it
-        // where it is stored, so the tap is taken into the layer's own space first.
+        // *box*, not the glyphs — tapping the hole in an "O" is tapping the text. The same per-element
+        // maps the render uses carry grouped text to its drawn position before the hit test.
         if layers[layerIndex].kind == .vector,
-           let vectorCanvas = layers[layerIndex].cels[celIndex].vector,
-           let existing = vectorCanvas.topmostText(
-               atCanvasPoint: Self.layerSpacePoint(canvasPoint, shownThrough: textGestureInkPose)) {
-            reopenText(existing, in: vectorCanvas, layerID: layerID, celID: celID)
-            return
+           let vectorCanvas = layers[layerIndex].cels[celIndex].vector {
+            let poses = celPoseMaps(vectorCanvas.elements, layerID: layerID, celID: celID, atFrame: currentFrame)
+            if let existing = vectorCanvas.topmostText(atCanvasPoint: canvasPoint, posedBy: poses) {
+                _ = reopenText(existing, in: vectorCanvas, layerID: layerID, celID: celID,
+                               shownThrough: poses[existing.id])
+                return
+            }
         }
+        bindTextSession(toLayer: layerID, cel: celID, shownThrough: inkPose(forLayerID: layerID))
 
         // The recipe carries over from the previous session — font, size, tracking, colour. An
         // artist labelling six things in a row sets the type once, which is what every other tool in
@@ -137,18 +138,15 @@ extension CanvasManager {
         else { return false }
         let layerID = layers[currentLayerIndex].id
         let celID = layers[currentLayerIndex].cels[celIndex].id
-        bindTextSession(toLayer: layerID, cel: celID)
-        reopenText(existing, in: vectorCanvas, layerID: layerID, celID: celID)
-        return true
+        let pose = celPoseMaps([.text(existing)], layerID: layerID, celID: celID, atFrame: currentFrame)[existing.id]
+        return reopenText(existing, in: vectorCanvas, layerID: layerID, celID: celID, shownThrough: pose)
     }
 
-    /// The cel a session is about to run on, with no object chosen yet and no handle held — the four
-    /// assignments both ways in (`beginTextSession(at:)` and `beginEditingText(elementID:)`) start by
-    /// making.
-    private func bindTextSession(toLayer layerID: UUID, cel celID: UUID) {
+    /// Bind the chosen cel and its already-resolved session pose, with no object or handle held.
+    private func bindTextSession(toLayer layerID: UUID, cel celID: UUID, shownThrough pose: PoseMap?) {
         textGestureLayerID = layerID
         textGestureCelID = celID
-        textGestureInkPose = inkPose(forLayerID: layerID)
+        textGesturePose = pose
         textEditingElementID = nil
         textHandleDrag = nil
     }
@@ -157,10 +155,11 @@ extension CanvasManager {
     /// never lifted out of the array** — `ADD_TEXT.md` §1/§2, and the assignment to `editingElementID`
     /// is the session's **first and only** invalidation until it commits.
     private func reopenText(_ existing: VectorTextElement, in vectorCanvas: VectorCanvas,
-                            layerID: UUID, celID: UUID) {
-        // Shown where the canvas shows it: the stored box through the layer's pose.
-        let stored = vectorCanvas.canvasText(fromLocal: existing)
-        let draft = textGestureInkPose.flatMap { VectorCanvas.mapping(.text(stored), through: $0)?.text } ?? stored
+                            layerID: UUID, celID: UUID, shownThrough pose: PoseMap?) -> Bool {
+        guard let draft = shownText(existing, in: vectorCanvas, through: pose) else {
+            raise(.drawingSourceUnavailable); return false
+        }
+        bindTextSession(toLayer: layerID, cel: celID, shownThrough: pose)
         textRecipe = draft.recipe
         textFrame = draft.frame
         textEditingElementID = existing.id
@@ -171,6 +170,20 @@ extension CanvasManager {
         textIsFocused = false
         celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         refreshUndoRedoState()
+        return true
+    }
+
+    /// A text element shown exactly in render order: its group/cel/container pose in local space,
+    /// then the vector canvas's carried transform. Refuse an unrepresentable quad before suppressing.
+    private func shownText(_ text: VectorTextElement, in vectorCanvas: VectorCanvas,
+                           through pose: PoseMap?) -> VectorTextElement? {
+        let posed: VectorTextElement
+        if let pose {
+            guard let mapped = VectorCanvas.mapping(.text(text), through: pose)?.text else { return nil }
+            posed = mapped
+        } else { posed = text }
+        let shown = vectorCanvas.canvasText(fromLocal: posed)
+        return shown.frame.homography == nil ? nil : shown
     }
 
     /// The string changed — the overlay's `textViewDidChange`, coalesced to one call per frame by
@@ -365,13 +378,13 @@ extension CanvasManager {
     }
 
     /// What a text session was when it ended: the layer and cel it was placed on, the object a
-    /// re-edit reopened (nil for a new box), the pose the layer was shown through when the box was
-    /// placed, and the draft — read after the keyboard dropped, so the last keystrokes are in it.
+    /// re-edit reopened (nil for a new box), the captured pose that showed that text, and the draft —
+    /// read after the keyboard dropped, so the last keystrokes are in it.
     private struct EndedTextSession {
         let layerID: UUID?
         let celID: UUID?
         let editingID: UUID?
-        let inkPose: PoseMap?
+        let pose: PoseMap?
         let recipe: TextRecipe
         let frame: TextFrame
     }
@@ -387,11 +400,11 @@ extension CanvasManager {
         textIsFocused = false
         textHandleDrag = nil
         let ended = EndedTextSession(layerID: textGestureLayerID, celID: textGestureCelID,
-                                     editingID: textEditingElementID, inkPose: textGestureInkPose,
+                                     editingID: textEditingElementID, pose: textGesturePose,
                                      recipe: textRecipe, frame: textFrame)
         textGestureLayerID = nil
         textGestureCelID = nil
-        textGestureInkPose = nil
+        textGesturePose = nil
         textEditingElementID = nil
         defer {
             objectWillChange.send()
@@ -430,37 +443,62 @@ extension CanvasManager {
         guard textGestureActive else { return {} }
         var recipe = textRecipe
         if textIsFocused, let current = textDraftReader?() { recipe.string = current }
-        let frame = textFrame.autoSize
-            ? textFrame.resized(to: TextLayout.autoSize(for: recipe, font: TextLayout.resolvedFont(for: recipe).font))
-            : textFrame
         let ended = EndedTextSession(layerID: textGestureLayerID, celID: textGestureCelID,
-            editingID: textEditingElementID, inkPose: textGestureInkPose, recipe: recipe, frame: frame)
+            editingID: textEditingElementID, pose: textGesturePose, recipe: recipe, frame: textFrame)
         guard let layerID = ended.layerID, let celID = ended.celID,
               let layerIndex = layers.firstIndex(where: { $0.id == layerID }),
               let celIndex = layers[layerIndex].cels.firstIndex(where: { $0.id == celID }),
               let canvasSize else { raise(.drawingSourceUnavailable); return nil }
-        let shown = VectorTextElement(id: ended.editingID ?? UUID(), recipe: ended.recipe, frame: ended.frame)
-        guard let drawn = Self.inLayerSpace(.text(shown), shownThrough: ended.inkPose)?.text else {
+        var cel = staging[celID] ?? layers[layerIndex].cels[celIndex]
+        let before = cel.vector?.elements ?? []
+        let original = ended.editingID.flatMap { id in before.lazy.compactMap(\.text).first { $0.id == id } }
+        guard layers[layerIndex].kind != .vector || ended.editingID == nil || original != nil else {
             raise(.drawingSourceUnavailable); return nil
         }
-        var cel = staging[celID] ?? layers[layerIndex].cels[celIndex]
+        let unchanged: VectorTextElement?
+        if layers[layerIndex].kind == .vector, let original, let vector = cel.vector,
+           let prior = shownText(original, in: vector, through: ended.pose),
+           ended.recipe == prior.recipe, ended.frame == prior.frame {
+            // Compare the untouched draft before measuring it: a render font bound or a display
+            // pose is not an edit to the stored layout, mode or auto-size bit.
+            unchanged = original
+        } else { unchanged = nil }
+        let frame = ended.frame.autoSize && unchanged == nil
+            ? ended.frame.resized(to: TextLayout.autoSize(
+                for: ended.recipe, font: TextLayout.resolvedFont(for: ended.recipe).font))
+            : ended.frame
         let bake: () -> Void
         if layers[layerIndex].kind == .vector {
-            let before = cel.vector?.elements ?? []
             let prepared = cel.vector?.makeCopy() ?? .empty(size: cel.raster.size)
-            let isBlank = drawn.recipe.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            let element = isBlank ? nil : prepared.localText(fromCanvas: drawn)
+            // Copy the existing element whole. Recipe and frame are the only editable fields;
+            // identity and both group memberships belong to the original object.
+            var shown = original ?? VectorTextElement(recipe: ended.recipe, frame: frame)
+            shown.recipe = ended.recipe
+            shown.frame = frame
+            let isBlank = shown.recipe.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let element: VectorTextElement?
+            if isBlank {
+                element = nil
+            } else if let unchanged {
+                element = unchanged
+            } else {
+                let local = prepared.localText(fromCanvas: shown)
+                guard let pulled = Self.inLayerSpace(.text(local), shownThrough: ended.pose)?.text,
+                      pulled.frame.homography != nil else { raise(.drawingSourceUnavailable); return nil }
+                element = pulled
+            }
             let changed = prepared.commitTextEdit(editingID: ended.editingID, element: element)
             let elements = prepared.elements
             cel.vector = prepared
             staging[celID] = cel
             bake = { [weak self] in
-                guard changed, let self,
+                guard let self,
                       let layer = self.layers.firstIndex(where: { $0.id == layerID }),
                       let at = self.layers[layer].cels.firstIndex(where: { $0.id == celID }) else { return }
                 if self.layers[layer].cels[at].vector == nil { self.layers[layer].cels[at].vector = .empty(size: canvasSize) }
                 guard let vector = self.layers[layer].cels[at].vector else { return }
                 vector.commitTextEdit(editingID: ended.editingID, element: element)
+                guard changed else { return }
                 self.registerVectorElementsUndo(vectorCanvas: vector, oldElements: before,
                     newElements: elements, layerID: layerID, celID: celID,
                     label: ended.editingID == nil ? .addText : .editText,
@@ -468,9 +506,14 @@ extension CanvasManager {
                         ?? .addsAndRemoves(ink: nil))
                 self.scheduleThumbnailRegen(layerID: layerID, celID: celID)
             }
-        } else if drawn.recipe.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            bake = {}
         } else {
+            let shown = VectorTextElement(recipe: ended.recipe, frame: frame)
+            guard let drawn = Self.inLayerSpace(.text(shown), shownThrough: ended.pose)?.text else {
+                raise(.drawingSourceUnavailable); return nil
+            }
+            if drawn.recipe.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return { [weak self] in self?.endTextSession { _ in } }
+            }
             guard let glyphs = TextLayout.render(recipe: drawn.recipe, frame: drawn.frame, canvasSize: canvasSize),
                   let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else {
                 raise(.drawingSourceUnavailable); return nil
