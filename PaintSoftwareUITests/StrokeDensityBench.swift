@@ -294,7 +294,6 @@ final class StrokeDensityBench: XCTestCase {
             ("dabsAfterAppend", "\(append.dabs)"),
             ("dabsAfterErase", "\(erase.dabs)"),
             ("dabsAfterUndo", "\(undo.dabs)"),
-            ("dabsAfterTransform", "\(transform.dabs)"),
             ("dabsAfterEvict", "\(evict.dabs)"),
         ])
     }
