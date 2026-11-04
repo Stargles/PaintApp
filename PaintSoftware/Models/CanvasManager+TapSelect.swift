@@ -82,7 +82,7 @@ extension CanvasManager {
             }
             let shown = shownElements(layerIndex: cel.layerIndex, displayed: cel.displayed)
             if let hit = VectorHitTest.topmost(in: shown.filter { held.contains($0.id) }, at: point) {
-                selectTapped(.subtract, (cel.layerIndex, cel.displayed.index, hit))
+                selectTapped(.subtract, (cel.layerIndex, cel.displayed, hit))
             }
             return nil
         }
@@ -94,11 +94,11 @@ extension CanvasManager {
     /// selection as it stood before the tap.
     @discardableResult
     private func selectTapped(_ rule: TapComposition,
-                              _ tapped: (layerIndex: Int, celIndex: Int, shown: VectorElement)) -> Bool {
+                              _ tapped: (layerIndex: Int, displayed: DisplayedCel, shown: VectorElement)) -> Bool {
         let layer = layers[tapped.layerIndex]
         let held: Set<UUID>
         if let objects = selection?.objects, objects.layerID == layer.id,
-           objects.celID == layer.cels[tapped.celIndex].id {
+           objects.celID == layer.cels[tapped.displayed.index].id {
             held = objects.elements
         } else {
             held = []
@@ -107,7 +107,7 @@ extension CanvasManager {
         // (`handleActiveContextChanged`), so the other order would lose the one just made.
         selectLayer(tapped.layerIndex)
         let made = tappedSelection(rule.result(of: tapped.shown.id, onto: held),
-                                   layerIndex: tapped.layerIndex, celIndex: tapped.celIndex)
+                                   layerIndex: tapped.layerIndex, displayed: tapped.displayed)
         replaceSelection(with: made, label: rule.historyLabel(composedOnto: held))
         return made != nil
     }
@@ -116,10 +116,10 @@ extension CanvasManager {
     /// the one builder every tap rule ends in. Each object is asked as it is *shown*, so the outline is
     /// where the artist sees it. Nil when none of them has an outline to hold (an eraser mark has none,
     /// and an id whose object has since gone has nothing) or the union is off the paper.
-    private func tappedSelection(_ ids: Set<UUID>, layerIndex: Int, celIndex: Int) -> Selection? {
+    private func tappedSelection(_ ids: Set<UUID>, layerIndex: Int, displayed: DisplayedCel) -> Selection? {
         guard let canvasSize else { return nil }
         let rule = VectorCanvas.lassoFillRule
-        let outlined = shownElements(layerIndex: layerIndex, celIndex: celIndex)
+        let outlined = shownElements(layerIndex: layerIndex, displayed: displayed)
             .filter { ids.contains($0.id) }
             .compactMap { element in VectorHitTest.outline(of: element).map { (element.id, $0.normalized(using: rule)) } }
         guard let first = outlined.first else { return nil }
@@ -128,7 +128,7 @@ extension CanvasManager {
         guard !bounds.isNull else { return nil }
         let layer = layers[layerIndex]
         return Selection(path: union, bounds: bounds,
-                         objects: SelectedObjects(layerID: layer.id, celID: layer.cels[celIndex].id,
+                         objects: SelectedObjects(layerID: layer.id, celID: layer.cels[displayed.index].id,
                                                   elements: Set(outlined.map(\.0))))
     }
 
@@ -160,13 +160,13 @@ extension CanvasManager {
     /// puts on top; a layer a switch or a folder hides is not asked, and neither is an in-between,
     /// whose drawing is derived rather than stored.
     private func topmostObject(at point: CGPoint)
-        -> (layerIndex: Int, celIndex: Int, shown: VectorElement)? {
+        -> (layerIndex: Int, displayed: DisplayedCel, shown: VectorElement)? {
         let walk = renderTreeAndPoses(atFrame: currentFrame)
         for cel in visibleStoredVectorCels(in: walk.tree, shownAt: walk.frames) {
             guard let shown = displayedCel(inLayer: cel.layerIndex, atFrame: currentFrame, in: walk) else { continue }
             if let hit = VectorHitTest.topmost(in: shownElements(layerIndex: cel.layerIndex, displayed: shown),
                                                at: point) {
-                return (cel.layerIndex, cel.celIndex, hit)
+                return (cel.layerIndex, shown, hit)
             }
         }
         return nil
