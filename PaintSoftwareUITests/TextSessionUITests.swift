@@ -555,15 +555,13 @@ final class TextSessionUITests: PaintUITestCase {
         XCTAssertFalse(undo.isEnabled, "PREMISE: a cold-opened package has no prior document Undo")
         attachScreenshot(XCUIScreen.main, "text-autosize-01-cold-actual-move800")
         func editText() throws -> CGRect {
-            app.buttons["toolbar.selectButton"].tap()
-            let rectangle = app.buttons["selectPanel.mode.rectangle"]
-            XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
-            rectangle.tap()
-            dragInPoints(app, from: CGPoint(x: hull.minX - 10, y: hull.minY - 10),
-                         to: CGPoint(x: hull.maxX + 10, y: hull.maxY + 10))
-            let edit = app.buttons["selectPanel.editTextButton"]
-            XCTAssertTrue(edit.waitForExistence(timeout: 5), "Select offers Edit Text for the measured glyph")
-            edit.tap()
+            app.buttons["toolbar.addButton"].tap()
+            let addText = app.buttons["add.addTextRow"]
+            XCTAssertTrue(addText.waitForExistence(timeout: 5), "Add offers the existing Text tool")
+            addText.tap()
+            XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5),
+                          "The Text panel is up before reopening the measured glyph")
+            tap(app, at: CGPoint(x: hull.minX + 10, y: hull.minY + 10))
             XCTAssertTrue(waitForTextState(app, "box", "editing"))
             let editingViewport = try viewport()
             XCTAssertEqual(canvas.frame, host, "Text follow leaves the measured host in place")
