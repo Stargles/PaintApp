@@ -854,8 +854,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         func composite(_ vector: VectorCanvas,
                        overlay: CelContentPicture.RenderedWindow? = nil) throws -> UIImage {
             var display = PixelOps.CelDisplay()
-            display.vector = vector.freezeDisplay(quality: .full,
-                referenceIDs: Set(vector.streams.filter(\.rendersInPlace).map(\.id)))
+            display.vector = vector.freezeDisplay(referenceIDs: Set(vector.streams.filter(\.rendersInPlace).map(\.id)))
             if let overlay {
                 display.drawOverlays = { cg, content in
                     overlay.draw(into: cg, content: content, canvasSize: size)
@@ -902,7 +901,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                 let references = Set(source.streams.filter(\.rendersInPlace).map(\.id))
                 let sourceElements = source.elements
                 let displayInk = CelContentPicture.Ink.ordinary(
-                    source: source.freezeDisplay(quality: .full, referenceIDs: references),
+                    source: source.freezeDisplay(referenceIDs: references),
                     elements: sourceElements, rewriting: [])
                 let backdrop = CelContentPicture(size: size, window: CGRect(origin: .zero, size: size),
                     backing: nil, patch: nil, ink: displayInk)
@@ -989,8 +988,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         func composite(_ vector: VectorCanvas,
                        overlay: CelContentPicture.RenderedWindow? = nil) throws -> UIImage {
             var display = PixelOps.CelDisplay()
-            display.vector = vector.freezeDisplay(quality: .full,
-                referenceIDs: Set(vector.streams.filter(\.rendersInPlace).map(\.id)))
+            display.vector = vector.freezeDisplay(referenceIDs: Set(vector.streams.filter(\.rendersInPlace).map(\.id)))
             if let overlay {
                 display.drawOverlays = { cg, content in
                     overlay.draw(into: cg, content: content, canvasSize: size)
@@ -1030,7 +1028,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                     let references = Set(source.streams.filter(\.rendersInPlace).map(\.id))
                     let sourceElements = source.elements
                     let displayInk = CelContentPicture.Ink.ordinary(
-                        source: source.freezeDisplay(quality: .full, referenceIDs: references),
+                        source: source.freezeDisplay(referenceIDs: references),
                         elements: sourceElements, rewriting: [])
                     let scratch = StrokeScratch(canvasSize: size, role: .replacing,
                         celContent: StrokeScratch.CelContent(backing: nil, ink: displayInk, placement: .identity))
@@ -1173,7 +1171,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         _ = try XCTUnwrap(source.render(), "PREMISE: an ordinary displayed cel has its real base memo")
         let baseRasterizations = source.rasterizations
         let original = source.elements
-        let frozen = source.freezeDisplay(quality: .full, referenceIDs: [reference.id])
+        let frozen = source.freezeDisplay(referenceIDs: [reference.id])
         let scratch = StrokeScratch(canvasSize: size, role: .replacing,
             celContent: StrokeScratch.CelContent(backing: nil,
                 ink: .ordinary(source: frozen, elements: original, rewriting: []), placement: .identity))
@@ -1212,8 +1210,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                               "Separated cuts keep the presentation local to their measured damage")
 
             let committed = VectorCanvas(size: size, elements: source.elements)
-            let expected = try XCTUnwrap(committed.freezeDisplay(quality: .full,
-                referenceIDs: [reference.id]).render(quality: .full))
+            let expected = try XCTUnwrap(committed.freezeDisplay(referenceIDs: [reference.id]).render(quality: .full))
             let crop = try XCTUnwrap(expected.cgImage?.cropping(to: shown.window))
             let expectedWindow = UIImage(cgImage: crop, scale: expected.scale, orientation: .up)
             let parity = try XCTUnwrap(RasterVectorParity.report(raster: expectedWindow,
@@ -1223,8 +1220,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
 
         XCTAssertEqual(source.strokes.count, 0, "PREMISE: all three per-sample cuts committed")
         let finalCanvas = VectorCanvas(size: size, elements: source.elements)
-        let finalDisplay = try XCTUnwrap(finalCanvas.freezeDisplay(quality: .full,
-            referenceIDs: [reference.id]).render(quality: .full))
+        let finalDisplay = try XCTUnwrap(finalCanvas.freezeDisplay(referenceIDs: [reference.id]).render(quality: .full))
         let finalBytes = try XCTUnwrap(RasterVectorParity.premultipliedBytes(of: finalDisplay, size: size))
         let referenceOffset = (64 * Int(size.width) + 64) * 4
         XCTAssertGreaterThan(finalBytes[referenceOffset], 220,
@@ -1433,7 +1429,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let canvas = VectorCanvas(size: size, elements: [.stroke(victim)])
         let original = canvas.elements
         _ = canvas.render()
-        let frozen = canvas.freezeDisplay(quality: .full, referenceIDs: [])
+        let frozen = canvas.freezeDisplay(referenceIDs: [])
         let backing = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { context in
             UIColor.red.setFill()
             context.fill(CGRect(x: 32, y: 92, width: 56, height: 16))

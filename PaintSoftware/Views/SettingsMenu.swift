@@ -166,18 +166,19 @@ struct SettingsMenu: View {
     /// zero rather than disappearing, for the reason "Add Text" states: a hidden row is a feature with
     /// no signpost, and an artist who has never turned the toggle on would never learn what undoes it.
     private var bakePrecisionRow: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let count = canvasManager.preciseStrokeCount
+        return VStack(alignment: .leading, spacing: 0) {
             Button {
                 canvasManager.bakePreciseStrokes()
             } label: {
                 row(icon: "square.grid.3x3",
-                    title: "Bake Precise Strokes (\(canvasManager.preciseStrokeCount))",
-                    enabled: canvasManager.preciseStrokeCount > 0)
+                    title: "Bake Precise Strokes (\(count))",
+                    enabled: count > 0)
             }
-            .disabled(canvasManager.preciseStrokeCount == 0)
+            .disabled(count == 0)
             .accessibilityIdentifier("settings.bakePrecisionRow")
 
-            Text(canvasManager.preciseStrokeCount == 0
+            Text(count == 0
                  ? "Nothing to bake — no stroke here is stored at full precision."
                  : "Snaps them back to the normal storage grid, which is smaller on disk. "
                    + "Shrinking and regrowing them after a save will lose a little accuracy again.")

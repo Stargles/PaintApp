@@ -349,12 +349,8 @@ final class StrokeScratch: DabTarget {
 
     // MARK: - Selection clip
 
-    /// Drops everything this stroke put outside `path` (canvas space), restoring what was there
-    /// before — the window-space form of what the raster commit used to do with a canvas-sized
-    /// `PixelOps.maskedComposite`.
-    ///
-    /// The raster window holds only this stroke's ink or removal coverage, so clipping clears its
-    /// outside portion rather than restoring any backdrop.
+    /// Clears this stroke's window pixels outside `path` (canvas space). The window holds only
+    /// this stroke's ink or removal coverage, so its clipped commit preserves the backdrop.
     func clip(to path: CGPath) {
         guard let window, !windowRect.isNull else { return }
         let current: UIImage

@@ -1859,9 +1859,7 @@ final class BrushEngineLogicTests: XCTestCase {
     }
 
     /// The selection clip, in the window instead of across the canvas: what the stroke put outside
-    /// the path is dropped before the commit, so undo/redo only ever sees the clipped result. This
-    /// used to be a canvas-sized `PixelOps.maskedComposite` against a canvas-sized pre-stroke
-    /// snapshot — two more whole canvases per clipped stroke than the clip needs.
+    /// the path is dropped before the commit, so undo/redo only ever sees the clipped result.
     func testTheSelectionClipDropsWhatTheStrokePutOutsideThePath() throws {
         let size = CGSize(width: 256, height: 256)
         let raster = RasterLayerTexture(size: size)

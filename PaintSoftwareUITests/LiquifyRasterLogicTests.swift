@@ -791,7 +791,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
         changed.color = CodableColor(red: 1, green: 0, blue: 0, alpha: 1)
         replacement[0] = .stroke(changed)
         let window = CGRect(x: 0, y: 8, width: 240, height: 16)
-        let frozen = canvas.freezeDisplay(quality: .full, referenceIDs: [], replacing: replacement, rewriting: [target.id])
+        let frozen = canvas.freezeDisplay(referenceIDs: [], replacing: replacement, rewriting: [target.id])
         var work: Int?, oneStrokeWork: Int?
         let actual = UIGraphicsImageRenderer(size: window.size, format: PixelOps.transparentFormat()).image { ctx in
             work = frozen.draw(into: ctx.cgContext, frameRect: CGRect(x: 0, y: -window.minY, width: 256, height: 256), quality: .full)

@@ -108,7 +108,7 @@ extension CanvasManager {
             guard let clip, let path = clip.copy(using: &toWindow) else {
                 return FillPreview(image: image, rect: window.rect)
             }
-            return FillPreview(image: PixelOps.maskedComposite(base: nil, overlay: image, insidePath: path),
+            return FillPreview(image: PixelOps.maskedComposite(overlay: image, insidePath: path),
                                rect: window.rect)
         }
     }

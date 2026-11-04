@@ -2400,7 +2400,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                 let elements = vectorCanvas.elements
                 let references = Set(elements.compactMap { $0.stream }.filter(\.rendersInPlace).map(\.id))
                 let displayInk: CelContentPicture.Ink = shown.map(CelContentPicture.Ink.rendered)
-                    ?? .ordinary(source: vectorCanvas.freezeDisplay(quality: .full, referenceIDs: references),
+                    ?? .ordinary(source: vectorCanvas.freezeDisplay(referenceIDs: references),
                                  elements: elements, rewriting: [])
                 let backdrop = CelContentPicture(size: vectorCanvas.size,
                     window: CGRect(origin: .zero, size: vectorCanvas.size), backing: nil,
@@ -2608,7 +2608,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         // downstream knows a gap was there. `StrokeGeometry.splitRuns` produces the separate inside
         // runs instead, each committed as its own stroke/erase/local-edit below. See its doc comment
         // for the sample-granularity-vs-pixel-exact trade-off against the raster path's
-        // `PixelOps.maskedComposite`.
+        // `StrokeScratch.clip(to:)`.
         // `replacingSamples` puts the gesture's own channel set back on each clipped run — the split
         // hands back `VectorSample`s, which carry every channel, and the *set* is this gesture's.
         let sampleRuns: [StrokeSamples]

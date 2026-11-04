@@ -92,7 +92,7 @@ struct LiveCelContentEdit {
         if let procedure { return procedure.contentPicture(elements) }
         let shown = picture()
         let references = Set(shown.elements.compactMap { $0.stream }.filter(\.rendersInPlace).map(\.id))
-        let frozen = vectorCanvas?.freezeDisplay(quality: .full, referenceIDs: references,
+        let frozen = vectorCanvas?.freezeDisplay(referenceIDs: references,
                                                 replacing: shown.elements, rewriting: shown.rewriting)
         guard let size = vectorCanvas?.size ?? pixelSnapshot?.size else { return nil }
         return CelContentPicture(size: size, window: window, backing: pixelSnapshot, patch: nil,

@@ -3056,7 +3056,7 @@ final class VectorCanvas {
     ///   placeholder's border is stroked at `max(2/scale, 0.5)` local units about a line inset
     ///   `1/scale`, so when the floor bites (`scale > 4`) its outer edge stands `0.25 - 1/scale < 0.25`
     ///   local units proud of the rect. A decoded frame and a placed image stand none.
-    /// * **A text object whose box clips is bounded by the box.** `draw(text:into:quality:)` has
+    /// * **A text object whose box clips is bounded by the box.** `draw(text:into:)` has
     ///   three arms — an affine concatenate, a warp, and a translated bounding-box draw — and all
     ///   three pass `clip: !frame.autoSize` down to `TextLayout.draw`, which turns it into a
     ///   `CGContext.clip` on the box. A hard clip is a proof: with it the ink is inside the box quad,
@@ -3079,7 +3079,7 @@ final class VectorCanvas {
     ///
     /// **A `.null` answer is a real answer and not a refusal**: an element the walk's own guards make
     /// draw nothing paints nowhere, so it contributes nothing to a union. The empty-string and
-    /// zero-box tests below are `draw(text:into:quality:)`'s own, spelled the same way round — and a
+    /// zero-box tests below are `draw(text:into:)`'s own, spelled the same way round — and a
     /// text object whose every line has empty image bounds (a string of spaces) is the same case
     /// one level down.
     ///
@@ -4212,9 +4212,9 @@ final class VectorCanvas {
     /// Garbage collection: a retained `.erase` element is dropped once nothing *beneath it* (not
     /// anywhere — elements added after the punch were never affected by it) in the display list still
     /// reaches its bounding box. Caller must hold `lock`. Run on commit rather than per frame, since a
-    /// stale punch renders as an invisible hole in nothing in the meantime. Each element's box is
-    /// derived once and tested against the accumulated list — `O(n)` rather than `O(p · n)` for `p`
-    /// punches.
+    /// stale punch renders as an invisible hole in nothing in the meantime. Each content box is
+    /// derived once; each punch may scan every preceding box, so `p` punches and `n` content boxes
+    /// require up to `O(p · n)` box-intersection checks.
     private func collectResidueGarbage() -> Bool {
         guard _elements.contains(where: { $0.stroke?.composite == .erase }) else { return false }
         let reach = maxPaintReach()
@@ -6307,7 +6307,7 @@ final class VectorCanvas {
 
     /// The live display's explicit exception to reference-free freezing. Each stream frame is
     /// captured by value, so a decoder tick cannot change a recipe already drawing off-main.
-    func freezeDisplay(quality: RenderQuality, referenceIDs: Set<UUID>,
+    func freezeDisplay(referenceIDs: Set<UUID>,
                        replacing elements: [VectorElement]? = nil,
                        rewriting rewritten: Set<UUID>? = nil,
                        unsuppressing shownIDs: Set<UUID> = []) -> Frozen {
@@ -6646,18 +6646,11 @@ final class VectorCanvas {
     /// the old single lock had for free and the one thing this change could quietly have thrown away
     /// — see `rasterizeLock`.
     ///
-    /// **A reduced-resolution render does not queue behind it, and the reason is the same property
-    /// read backwards.** The lock buys one thing: sharing a rasterize through the memo. A reduced
-    /// render reads no memo and writes none (`install` refuses it), so there is nothing for it to
-    /// share and nothing for anyone to share with it — the wait would be pure cost. And it is
-    /// precisely the cost the owner reported: the debounced thumbnail flush runs on the **main
-    /// thread** 400 ms after an undo, which is 400 ms into the background canvas-sized render that
-    /// same undo started, so queueing here would make a 480-point picture wait out a 36-megapixel one.
-    /// That is `VectorCanvas.lock`'s own defect (PERFORMANCE.md §11.11b) one lock along.
-    ///
-    /// It is safe by the split rather than by argument: `planRender` and `install` each take `lock`,
-    /// and `walk` between them is `static` and reads only its plan. Two concurrent reduced walks
-    /// duplicate work that was never going to be shared; nothing they touch is shared state.
+    /// Reduced-resolution work does not take the native rasterize lock, so a thumbnail or onion
+    /// request can proceed while a canvas-sized render walks. `planRender` and `installReduced`
+    /// read and update the matching reduced slot under `lock`; the pixel walk stays outside it.
+    /// Concurrent reduced requests may both prepare one picture before either installs. The
+    /// version, element-count, transform and suppression checks still fence installation.
     private func rasterize(quality: RenderQuality, requestedResolution: CGFloat = 1,
                            ifStillAtVersion required: Int? = nil) -> UIImage? {
         // **The one clamp: a request may only ask for *less*.** `RenderRequest.renderSize(fitting:within:)`'
@@ -7218,10 +7211,9 @@ final class VectorCanvas {
             // this is a copy rather than a composite. `renderLocalContent` is the only place that
             // has to be true and `IncrementalAppendLogicTests` is where it is checked byte for byte.
             //
-            // **The 1:1 is why a base and a reduced `resolution` never arrive together**: a
-            // canvas-sized base drawn into a reduced context is a resample rather than a copy, and it
-            // is the very resample `render(quality:resolution:)` exists to stop paying. `planRender`
-            // offers no base at all below native, so this is nil there by construction.
+            // `planRender` supplies a base only from the matching resolution: the native trio
+            // or the reduced slot. The base therefore shares this context's pixel grid and copies
+            // without resampling at either resolution.
             base?.draw(at: .zero)
             if let clip {
                 // The clip goes on before anything else so it governs the clear, the walk and every
@@ -7312,7 +7304,7 @@ final class VectorCanvas {
             case .text(let element):
                 // Ends a paint run exactly as a fill or an image does (rule 1 above): a stroke
                 // before it and a stroke after it must not blend against each other through it.
-                Self.draw(text: element, into: cg, quality: quality)
+                Self.draw(text: element, into: cg)
                 index += 1
             case .stroke(let stroke) where stroke.composite == .erase:
                 // Never inside a transparency layer — see rule 3 on `renderLocalContent`.
@@ -7438,13 +7430,6 @@ final class VectorCanvas {
     /// `UITextView` draws no glyphs at all for exactly this reason. Adding a second rasterizer here
     /// would put TextKit on screen and CoreText in the artwork; there is one, and this is it.
     ///
-    /// `quality` is accepted and deliberately ignored. `.preview` exists because a *stroke* costs
-    /// hundreds of dabs and can be approximated by one stroked path; a CoreText pass into a text-box
-    /// path is well under a millisecond (§4 rule 3) and has no cheaper form that is still text, so
-    /// both tiers draw the same glyphs. The parameter is in the signature so that a future tier which
-    /// *does* want a cheaper text — a grey bar while scrubbing, say — has somewhere to go, and so the
-    /// reader is told the omission was decided rather than overlooked.
-    ///
     /// **Stage 4 draws through `TextFrame.affineTransform`**, so a rotated or independently-scaled
     /// box flattens turned rather than through its bounding box — one concatenated matrix, no
     /// bitmap, no resampling, and byte-identical to stage 3 for an upright frame because there that
@@ -7473,8 +7458,7 @@ final class VectorCanvas {
     /// an over-budget composite is declined *silently* and drops the whole upload cache
     /// process-wide. That is a trade the owner should make, not one to slip in beside a bug fix.
     /// [BUGS.md](BUGS.md) carries it.
-    private static func draw(text element: VectorTextElement, into cg: CGContext, quality: RenderQuality) {
-        _ = quality
+    private static func draw(text element: VectorTextElement, into cg: CGContext) {
         let frame = element.frame
         let box = frame.boundingBox
         guard !element.recipe.string.isEmpty, box.width > 0, box.height > 0 else { return }

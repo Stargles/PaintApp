@@ -444,7 +444,7 @@ enum TextLayout {
     ///
     /// **Internal rather than private, and that is the whole of stage 3's rasterizer story.**
     /// `render` (the raster bake), `renderBox` (the live overlay's bitmap) and
-    /// `VectorCanvas.draw(text:into:quality:)` (the vector flatten) are three destinations for one
+    /// `VectorCanvas.draw(text:into:)` (the vector flatten) are three destinations for one
     /// set of glyphs, and every one of them arrives here. `ADD_TEXT.md` §2's closing warning is that
     /// a shared *transform* does not make two rasterizers agree; sharing the rasterizer is what does,
     /// and a vector path that laid its own text out would be the second one this design exists to
@@ -625,7 +625,7 @@ enum TextMeasure {
     static let glyphRasterOvershoot: CGFloat = 2
 
     /// **Where the element's glyph outlines lie in canvas space** — `CTLineGetImageBounds` on every
-    /// line of the *same* `CTFrame` `VectorCanvas.draw(text:into:quality:)` draws, flipped the way
+    /// line of the *same* `CTFrame` `VectorCanvas.draw(text:into:)` draws, flipped the way
     /// `TextLayout.draw` flips, and carried through the same map that arm concatenates. `.null` when
     /// the element paints nowhere: an empty string, a collapsed box, a string of nothing but spaces.
     ///
@@ -652,7 +652,7 @@ enum TextMeasure {
         let recipe = element.recipe
         let frame = element.frame
         let box = frame.boundingBox
-        // `draw(text:into:quality:)`'s own guard, spelled the same way round.
+        // `draw(text:into:)`'s own guard, spelled the same way round.
         guard !recipe.string.isEmpty, box.width > 0, box.height > 0 else { return .null }
         let font = library.resolve(recipe.font, size: recipe.typography.clamped.pointSize).font
 

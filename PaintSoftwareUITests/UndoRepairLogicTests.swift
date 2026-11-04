@@ -732,7 +732,7 @@ final class UndoRepairLogicTests: XCTestCase {
     }
 
     /// **A text object whose box clips is bounded by the box, and that is a proof rather than an
-    /// estimate.** All three arms of `draw(text:into:quality:)` pass `clip: !frame.autoSize` down to
+    /// estimate.** All three arms of `draw(text:into:)` pass `clip: !frame.autoSize` down to
     /// `TextLayout.draw`, which turns it into a `CGContext.clip` on the layout box — so with the bit
     /// clear, no glyph can put a pixel outside the box quad whatever the font does.
     func testUndoingAndRedoingASizedTextObjectIsBoundedByTheBoxThatClipsIt() throws {

@@ -133,7 +133,7 @@ struct SideToolbar: View {
             // is no clear spot level with it.
             preview: SizePreviewRequest(sliderID: sizeID, tool: tool, side: .above)
         )
-        Button(action: resetSettings) {
+        Button(action: resetStrokeSettings) {
             Image(systemName: "arrow.counterclockwise")
                 .font(.footnote)
                 .foregroundColor(.white)
@@ -287,18 +287,10 @@ struct SideToolbar: View {
         }
     }
 
-    private func resetSettings() {
-        if isFillMode {
-            fillSettings.gapClosing = FillSettings.defaultGapClosing
-            // Both Edge Overlaps, because the slider shows only the active mode's and a reset that
-            // left the other one where the artist dragged it is a reset the artist cannot see.
-            fillSettings.bucketEdgeOverlap = FillSettings.defaultBucketEdgeOverlap
-            fillSettings.lassoEdgeOverlap = CanvasManager.fillExpandRange.upperBound
-        } else {
-            let defaults = ToolProfiles()[railTool]
-            canvasManager.toolProfiles[railTool].size = defaults.size
-            canvasManager.toolProfiles[railTool].opacity = defaults.opacity
-        }
+    private func resetStrokeSettings() {
+        let defaults = ToolProfiles()[railTool]
+        canvasManager.toolProfiles[railTool].size = defaults.size
+        canvasManager.toolProfiles[railTool].opacity = defaults.opacity
     }
 }
 

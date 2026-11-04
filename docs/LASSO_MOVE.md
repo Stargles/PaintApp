@@ -425,7 +425,7 @@ The four cases the owner will hit, and what falls out with no branch:
 (`StrokeGeometry.swift:925-927`): a segment that crosses the boundary *twice* between two stored
 samples — a thin concave spur of the loop clipping a coarsely-sampled stroke — is missed, because
 one bisection assumes one sign change. The raster path is pixel-exact via
-`PixelOps.maskedComposite`; vector geometry has no per-pixel mask to composite against. This is
+`StrokeScratch.clip(to:)`; vector geometry has no per-pixel mask to composite against. This is
 already the accepted trade-off for drawing inside a selection on a vector layer, and adopting the
 same primitive means the two agree rather than disagreeing in a new way.
 

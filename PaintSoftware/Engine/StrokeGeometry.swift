@@ -1035,7 +1035,7 @@ enum StrokeGeometry {
     /// the boundary once — true in the common case, since samples are already spaced at
     /// `BrushStamper`'s recording spacing. A segment that clips a thin sliver of a concave selection
     /// twice between two samples is not caught; that is the trade-off against the raster path's
-    /// pixel-exact `PixelOps.maskedComposite`, accepted because vector geometry has no per-pixel mask
+    /// pixel-exact `StrokeScratch.clip(to:)`, accepted because vector geometry has no per-pixel mask
     /// to composite against.
     ///
     /// Runs of a single sample are kept, same as `splitStroke`: a lone dab inside the selection is

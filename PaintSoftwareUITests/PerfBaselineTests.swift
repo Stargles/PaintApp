@@ -1148,7 +1148,7 @@ final class PerfBaselineTests: XCTestCase {
         _ = canvas.render() // Prime measured footprints, just as the visible base is warm at touch-down.
         let fullDabCount = canvas.lastRenderDabCount
         let rasterizationsBeforePreview = canvas.rasterizations
-        let source = canvas.freezeDisplay(quality: .full, referenceIDs: [])
+        let source = canvas.freezeDisplay(referenceIDs: [])
         let scratch = StrokeScratch(canvasSize: size, role: .replacing,
             celContent: StrokeScratch.CelContent(backing: nil,
                 ink: .ordinary(source: source, elements: elements, rewriting: []), placement: .identity))
@@ -1196,7 +1196,7 @@ final class PerfBaselineTests: XCTestCase {
         // Frozen.draw exposes the number of dabs actually replayed under this same final window.
         // Unchanged strokes retain their measured bounds and are skipped outside the clip.
         let final = try XCTUnwrap(finalPreview)
-        let frozenPreview = canvas.freezeDisplay(quality: .full, referenceIDs: [],
+        let frozenPreview = canvas.freezeDisplay(referenceIDs: [],
             replacing: final.elements, rewriting: final.rewriting)
         var windowDabs = -1
         let boundedDraw = RasterSource.render(size: shown.window.size) { context in

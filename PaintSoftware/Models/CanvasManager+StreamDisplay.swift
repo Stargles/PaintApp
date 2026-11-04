@@ -44,7 +44,7 @@ extension CanvasManager {
             let id = layers[entry.layerIndex].id
             if values[id]?.vector == nil {
                 var value = values[id] ?? PixelOps.CelDisplay()
-                value.vector = entry.vector.freezeDisplay(quality: .full, referenceIDs: entry.ids)
+                value.vector = entry.vector.freezeDisplay(referenceIDs: entry.ids)
                 values[id] = value
             }
             for elementID in entry.ids {

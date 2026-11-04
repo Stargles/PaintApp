@@ -2372,7 +2372,7 @@ struct CanvasView: UIViewRepresentable {
                     if let new = CanvasManager.localBounds(of: after) { bounds = bounds.union(new.applying(vector.transform)) }
                     let refs = Set(vector.streams.filter(\.rendersInPlace).map(\.id))
                     var value = values[part.layerID] ?? PixelOps.CelDisplay()
-                    value.vector = vector.freezeDisplay(quality: .full, referenceIDs: refs,
+                    value.vector = vector.freezeDisplay(referenceIDs: refs,
                         replacing: elements, unsuppressing: part.insideIDs)
                     values[part.layerID] = value
                 }
@@ -2398,7 +2398,7 @@ struct CanvasView: UIViewRepresentable {
                 let id = canvasManager.layers[entry.layerIndex].id
                 if values[id]?.vector == nil {
                     var value = values[id] ?? PixelOps.CelDisplay()
-                    value.vector = entry.vector.freezeDisplay(quality: .full, referenceIDs: entry.ids)
+                    value.vector = entry.vector.freezeDisplay(referenceIDs: entry.ids)
                     values[id] = value
                 }
             }

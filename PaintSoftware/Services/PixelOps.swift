@@ -736,17 +736,12 @@ enum PixelOps {
         }
     }
 
-    /// Composites `overlay` over `base` (or over transparent if `base` is nil), but only inside
-    /// `path` — pixels outside stay exactly as `base` was. Used to keep a brush/eraser stroke or a
-    /// flood-fill result from touching pixels outside the active selection when outside interaction
-    /// is denied (see `CanvasManager.allowsPaintingOutsideSelection`): `overlay` is the tentative
-    /// result, `base` the pre-edit content, so anything drawn outside `path` is discarded rather than
-    /// applied.
-    static func maskedComposite(base: UIImage?, overlay: UIImage, insidePath path: CGPath) -> UIImage {
+    /// Clips a fill's window picture to the active selection, leaving outside pixels transparent.
+    /// The picture and path share the fill window's working coordinates.
+    static func maskedComposite(overlay: UIImage, insidePath path: CGPath) -> UIImage {
         let bounds = CGRect(origin: .zero, size: overlay.size)
         let renderer = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat())
         return renderer.image { ctx in
-            base?.draw(in: bounds)
             ctx.cgContext.saveGState()
             ctx.cgContext.addPath(path)
             ctx.cgContext.clip()
