@@ -147,12 +147,45 @@ final class ProjectFolderLogicTests: XCTestCase {
         writeProject(named: "Rough", in: scene)
         writeProject(named: "Clean", in: shot)
 
-        let trashed = ProjectStore.deleteFolder(at: scene)
+        let trashed = try ProjectStore.deleteFolder(at: scene)
 
         XCTAssertEqual(trashed, 2, "both projects were accounted for")
         XCTAssertFalse(FileManager.default.fileExists(atPath: scene.path), "the folder is gone")
         XCTAssertEqual(Set(ProjectBackupManager.listTrash().map(\.displayName)), ["Rough", "Clean"],
                        "and both projects are in Recently Deleted, restorable, rather than destroyed")
+    }
+
+    func testDeletingAFolderKeepsUnknownContentsAndReportsTheProjectsActuallyTrashed() throws {
+        let scene = try ProjectStore.createFolder(named: "Scene with an attachment", in: ProjectStore.projectsDirectory)
+        let project = writeProject(named: "Rough", in: scene)
+        let manifest = try Data(contentsOf: project.appendingPathComponent("manifest.json"))
+        let attachment = scene.appendingPathComponent(".unrecognized-artwork")
+        let original = Data("An attachment the package census does not own".utf8)
+        try original.write(to: attachment)
+        let outside = root.appendingPathComponent("outside-folder", isDirectory: true)
+        let outsideChild = outside.appendingPathComponent("empty-but-not-owned", isDirectory: true)
+        try FileManager.default.createDirectory(at: outsideChild, withIntermediateDirectories: true)
+        let link = scene.appendingPathComponent(".linked-folder")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside)
+
+        var refusal: Error?
+        do { _ = try ProjectStore.deleteFolder(at: scene) }
+        catch { refusal = error }
+
+        XCTAssertNotNil(refusal, "A folder containing an unowned attachment must report that it remains")
+        XCTAssertTrue(refusal?.localizedDescription.contains("Moved 1 project to Recently Deleted") == true,
+                      "The refusal reports the one project that really reached Recently Deleted")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: attachment.path),
+                      "Removing empty folder shells cannot recursively destroy an unknown attachment")
+        guard FileManager.default.fileExists(atPath: attachment.path) else { return }
+        XCTAssertEqual(try Data(contentsOf: attachment), original)
+        XCTAssertTrue(ProjectBackupManager.isDirectory(outsideChild),
+                      "Empty-shell cleanup must not follow a hidden link into another folder")
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: link.path), outside.path)
+        let moved = try XCTUnwrap(ProjectBackupManager.listTrash().first { $0.displayName == "Rough" })
+        XCTAssertEqual(try Data(contentsOf: moved.url.appendingPathComponent("manifest.json")), manifest,
+                       "A successful move stays complete even when the folder shell cannot be removed")
+        XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: moved.url))
     }
 
     /// The count the delete confirmation shows is the recursive one, so an artist deleting a
@@ -452,7 +485,7 @@ final class ProjectFolderLogicTests: XCTestCase {
     func testAMissingOriginFolderPutsTheProjectAtTheTopOfTheTreeAndSaysSo() throws {
         let scene = try ProjectStore.createFolder(named: "Scene 9", in: ProjectStore.projectsDirectory)
         writeProject(named: "Rough", in: scene)
-        XCTAssertEqual(ProjectStore.deleteFolder(at: scene), 1, "PREMISE: the folder's project was trashed")
+        XCTAssertEqual(try ProjectStore.deleteFolder(at: scene), 1, "PREMISE: the folder's project was trashed")
         XCTAssertFalse(ProjectBackupManager.isDirectory(scene), "PREMISE: and the folder itself is gone")
 
         let entry = try XCTUnwrap(ProjectBackupManager.listTrash().first)

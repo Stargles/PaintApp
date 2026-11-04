@@ -550,6 +550,58 @@ final class BackupManagerLogicTests: XCTestCase {
 
     // MARK: - Size cap
 
+    func testSizeCapProtectsAValidOlderSlotWhenTheNewerSlotIsDamagedAndLatestIsMissing() throws {
+        let url = makeProject(name: "Only valid version")
+        let id = try XCTUnwrap(ProjectBackupManager.manifestID(at: url))
+        let dir = ProjectBackupManager.backupsDirectory(projectID: id)
+        let valid = dir.appendingPathComponent("auto-20260101-120000.paintproj")
+        let damaged = dir.appendingPathComponent("auto-20260102-120000.paintproj")
+        XCTAssertTrue(ProjectBackupManager.cloneItem(at: url, to: valid))
+        XCTAssertTrue(ProjectBackupManager.cloneItem(at: url, to: damaged))
+        corruptManifest(of: damaged)
+        XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: valid), "PREMISE: the older slot is restorable")
+        XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: damaged), "PREMISE: the newer slot is damaged")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ProjectBackupManager.latestSnapshotURL(directory: dir).path))
+        let oldCap = ProjectBackupManager.maxTotalBackupBytes
+        defer { ProjectBackupManager.maxTotalBackupBytes = oldCap }
+        ProjectBackupManager.maxTotalBackupBytes = 0
+
+        ProjectBackupManager.pruneToSizeCap()
+
+        XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: valid),
+                      "An unreadable newer slot cannot replace the last usable restore point")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: damaged.path),
+                       "The cap still removes other slots when one proven restore point is protected")
+        XCTAssertGreaterThan(ProjectBackupManager.directorySize(dir), 0, "The cap goes soft for the protected version")
+    }
+
+    func testSizeCapPreservesUncertainSlotsWhenNoRestorePointCanBeProved() throws {
+        let url = makeProject(name: "Uncertain versions")
+        let id = try XCTUnwrap(ProjectBackupManager.manifestID(at: url))
+        let dir = ProjectBackupManager.backupsDirectory(projectID: id)
+        let slots = ["auto-20260101-120000.paintproj", "auto-20260102-120000.paintproj"].map {
+            dir.appendingPathComponent($0)
+        }
+        for slot in slots {
+            XCTAssertTrue(ProjectBackupManager.cloneItem(at: url, to: slot))
+            corruptManifest(of: slot)
+            XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: slot), "PREMISE: neither slot can be proved usable")
+        }
+        let original = try slots.map { try Data(contentsOf: $0.appendingPathComponent("manifest.json")) }
+        let oldCap = ProjectBackupManager.maxTotalBackupBytes
+        defer { ProjectBackupManager.maxTotalBackupBytes = oldCap }
+        ProjectBackupManager.maxTotalBackupBytes = 0
+
+        ProjectBackupManager.pruneToSizeCap()
+
+        for (slot, bytes) in zip(slots, original) {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: slot.path),
+                          "No proven fallback means uncertain backup data must survive the soft cap")
+            guard FileManager.default.fileExists(atPath: slot.path) else { continue }
+            XCTAssertEqual(try Data(contentsOf: slot.appendingPathComponent("manifest.json")), bytes)
+        }
+    }
+
     func testSizeCapPrunesOldestButKeepsLatestAndOneRestorePoint() {
         let id = UUID()
         let url = makeProject(name: "Cap", id: id, rasterBytes: 400)

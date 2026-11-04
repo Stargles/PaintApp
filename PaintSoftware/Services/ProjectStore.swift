@@ -176,19 +176,36 @@ enum ProjectStore {
 
     /// **Deleting a folder trashes the projects in it one by one, then removes the empty shell.**
     ///
-    /// Not `removeItem` on the folder, which would be the obvious implementation and would destroy
-    /// artwork outright — the one thing this app's storage layer has never done. Every package inside
-    /// goes to Trash under its own name, so all of it is listed in Recently Deleted and restorable for
-    /// seven days by machinery that already exists. Returns how many projects were trashed, which is
-    /// the number the confirmation warned about.
+    /// A refused move leaves its original package and folder available. Successful moves stay in
+    /// Recently Deleted even if another move or the empty-shell removal refuses; the error reports
+    /// how many projects actually moved. Unknown leftovers are preserved by kernel-only empty removal.
     @discardableResult
-    static func deleteFolder(at url: URL) -> Int {
-        let packages = ProjectBackupManager.allProjectPackages(in: url)
-        for package in packages { _ = ProjectBackupManager.moveToTrash(package, tag: "deleted") }
-        // Whatever is left is folders and staging husks — no artwork, because the walk above found
-        // every `.paintproj` beneath this point.
-        try? FileManager.default.removeItem(at: url)
-        return packages.count
+    static func deleteFolder(at url: URL) throws -> Int {
+        try serializingPackageMutation {
+            let packages: [URL]
+            do { packages = try ProjectBackupManager.projectPackages(in: url) }
+            catch {
+                throw FolderError.failed("The folder could not be checked completely. No projects were moved.")
+            }
+            var moved = 0, refused = 0
+            for package in packages {
+                if ProjectBackupManager.moveToTrash(package, tag: "deleted") != nil { moved += 1 }
+                else { refused += 1 }
+            }
+            let summary = "Moved \(moved) project\(moved == 1 ? "" : "s") to Recently Deleted."
+            guard refused == 0 else {
+                throw FolderError.failed(summary + " \(refused) project\(refused == 1 ? "" : "s") could not be moved. The folder was kept.")
+            }
+            ProjectBackupManager.pruneEmptyFolders(under: url)
+            let removed = url.withUnsafeFileSystemRepresentation { path -> Int32 in
+                guard let path else { return -1 }
+                return rmdir(path)
+            }
+            guard removed == 0 else {
+                throw FolderError.failed(summary + " The folder still contains other items or could not be removed.")
+            }
+            return moved
+        }
     }
 
     /// Moves a project into another folder of the tree, keeping its name unless that name is taken.

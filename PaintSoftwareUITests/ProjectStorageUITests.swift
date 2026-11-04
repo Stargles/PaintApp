@@ -456,6 +456,136 @@ final class ProjectStorageUITests: PaintUITestCase {
         XCTAssertEqual(marker.strokes, 1)
     }
 
+    /// Selected only: the external coordinator blocks this private simulator's Trash, then restores
+    /// the exact original directory in finally even if this UI method fails before acknowledging it.
+    func testARefusedFolderDeleteKeepsItsTileAndReopensTheDrawnProjectAfterAColdLaunch() throws {
+        let requested = ProcessInfo.processInfo.environment["PAINTAPP_FOLDER_TRASH_COLD_UI"]
+        try XCTSkipUnless(requested != nil, "Requires the explicit external private-simulator Trash contract")
+        let nonce = try XCTUnwrap(UUID(uuidString: try XCTUnwrap(requested)),
+                                  "PREMISE: the coordinator supplies a fresh UUID").uuidString
+        let folderName = "Trash Safety \(nonce)"
+        let projectName = "Kept Drawing \(nonce)"
+        let files = FileManager.default
+        let messages = try XCTUnwrap(files.urls(for: .documentDirectory, in: .userDomainMask).first)
+            .appendingPathComponent("folder-trash-cold-\(nonce)", isDirectory: true)
+        XCTAssertFalse(files.fileExists(atPath: messages.path), "PREMISE: no stale runner messages")
+        try files.createDirectory(at: messages, withIntermediateDirectories: false)
+        func announce(_ phase: String) throws {
+            let path = messages.appendingPathComponent("\(phase).txt")
+            XCTAssertFalse(files.fileExists(atPath: path.path), "PREMISE: each phase is published once")
+            try Data("\(nonce)|\(phase)|\(folderName)\n".utf8).write(to: path, options: .atomic)
+        }
+        func awaitAcknowledgement(_ phase: String) throws -> Bool {
+            let path = messages.appendingPathComponent("\(phase).ack")
+            let expected = Data("\(nonce)|\(phase)|\(folderName)\n".utf8)
+            let deadline = Date().addingTimeInterval(30)
+            while Date() < deadline {
+                if files.fileExists(atPath: path.path) { return try Data(contentsOf: path) == expected }
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+            return false
+        }
+        try announce("prepare")
+        XCTAssertTrue(try awaitAcknowledgement("prepared"),
+                      "PREMISE: the coordinator preserved original private Trash before the first app launch")
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetEditorPreferences", "-resetBrushLibrary"]
+        app.launch()
+        let window = rotateDevice(app, to: .landscapeLeft)
+        XCTAssertGreaterThan(window.width, window.height, "PREMISE: create and reopen the drawing in landscape")
+        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 15))
+        makeFolder(app, named: folderName)
+        let folder = app.buttons["gallery.folderTile.\(folderName)"]
+        XCTAssertTrue(folder.waitForExistence(timeout: 10))
+        folder.tap()
+        XCTAssertEqual(app.staticTexts["gallery.breadcrumbPath"].label, "Projects / \(folderName)")
+        XCTAssertTrue(openNewCanvas(app), "PREMISE: the ordinary New Canvas route creates the drawing in this folder")
+        let title = app.textFields["timeline.projectNameField"]
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        title.tap()
+        title.typeText("\(projectName)\n")
+        waitForTheKeyboardToLeave(app)
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+        let paper = paperRect(in: canvas)
+        let row = rowAboveTheDock(canvas)
+        let from = CGVector(dx: onHost(paper, 0.3, 0.5).dx, dy: row)
+        let to = CGVector(dx: onHost(paper, 0.7, 0.5).dx, dy: row)
+        let core = CGVector(dx: onHost(paper, 0.5, 0.5).dx, dy: row)
+        let bare = CGVector(dx: core.dx, dy: row + 0.12)
+        let visible = visiblePaperRect(app, in: canvas)
+        for point in [core, bare] {
+            XCTAssertTrue(visible.contains(CGPoint(x: point.dx, y: point.dy)), "PREMISE: both probes are on exposed paper")
+            assertBelowTheToolbar(app, canvas, dy: point.dy, "The folder safety artwork probes")
+            assertAboveTheDock(app, canvas, dy: point.dy, "The folder safety artwork probes")
+        }
+        XCTAssertTrue(waitUntil(canvas, core, isWhitish), "PREMISE: the drawing starts blank")
+        drawLine(on: canvas, from: from, to: to)
+        XCTAssertTrue(waitUntil(canvas, core, isInk), "PREMISE: the one stroke actually draws")
+        XCTAssertTrue(waitUntil(canvas, bare, isWhitish), "PREMISE: separate paper remains blank")
+        attachScreenshot(XCUIScreen.main, "folder-trash-01-original-drawing-landscape")
+        returnToGallery(app)
+        XCTAssertTrue(app.buttons["gallery.tileMenu.\(projectName)"].waitForExistence(timeout: 15),
+                      "PREMISE: Gallery saved the uniquely named drawing inside its folder")
+        app.buttons["gallery.breadcrumbBack"].tap()
+        XCTAssertTrue(folder.waitForExistence(timeout: 10))
+
+        app.terminate()
+        try announce("ready")
+        XCTAssertTrue(try awaitAcknowledgement("obstructed"),
+                      "PREMISE: the coordinator verified the drawing and blocked only private Trash")
+        app.launchArguments = []
+        app.launch()
+        let obstructedWindow = rotateDevice(app, to: .landscapeLeft)
+        XCTAssertGreaterThan(obstructedWindow.width, obstructedWindow.height)
+        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 15))
+        XCTAssertTrue(folder.waitForExistence(timeout: 10), "PREMISE: the cold gallery still lists the owned folder")
+        app.buttons["gallery.folderMenu.\(folderName)"].tap()
+        let delete = app.buttons["Delete"]
+        XCTAssertTrue(delete.waitForExistence(timeout: 10))
+        delete.tap()
+        let confirm = app.alerts.buttons["Delete"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10))
+        confirm.tap()
+        let refusal = app.alerts["Couldn’t Delete Folder"]
+        XCTAssertTrue(refusal.waitForExistence(timeout: 10), "The public folder Delete reports the refused Trash move")
+        XCTAssertTrue(refusal.staticTexts[
+            "Moved 0 projects to Recently Deleted. 1 project could not be moved. The folder was kept."].exists,
+                      "The artist sees the actual zero successful moves and knows the folder was kept")
+        attachScreenshot(XCUIScreen.main, "folder-trash-02-refused-delete-keeps-folder-landscape")
+        refusal.buttons["OK"].tap()
+        XCTAssertTrue(folder.waitForExistence(timeout: 10), "The refused Delete keeps the folder tile reachable")
+        folder.tap()
+        XCTAssertTrue(app.buttons["gallery.tileMenu.\(projectName)"].waitForExistence(timeout: 10),
+                      "The refused drawing remains listed inside its original folder")
+        app.terminate()
+        try announce("failure-seen")
+        XCTAssertTrue(try awaitAcknowledgement("unblocked"),
+                      "PREMISE: the unchanged source was checked and private Trash made writable for the cold reopen")
+
+        app.launchArguments = []
+        app.launch()
+        let reopened = rotateDevice(app, to: .landscapeLeft)
+        XCTAssertGreaterThan(reopened.width, reopened.height)
+        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 15))
+        XCTAssertEqual(app.staticTexts["gallery.breadcrumbPath"].label, "Projects / \(folderName)")
+        let tile = app.staticTexts.matching(NSPredicate(format: "label == %@", projectName)).firstMatch
+        XCTAssertTrue(tile.waitForExistence(timeout: 10), "The preserved project remains reachable after a cold launch")
+        tile.tap()
+        XCTAssertTrue(canvas.waitForExistence(timeout: 15))
+        XCTAssertEqual(app.textFields["timeline.projectNameField"].value as? String, projectName)
+        let reopenedPaper = visiblePaperRect(app, in: canvas)
+        for point in [core, bare] {
+            XCTAssertTrue(reopenedPaper.contains(CGPoint(x: point.dx, y: point.dy)), "PREMISE: reopened probes remain on exposed paper")
+            assertBelowTheToolbar(app, canvas, dy: point.dy, "The cold reopened safety artwork probes")
+            assertAboveTheDock(app, canvas, dy: point.dy, "The cold reopened safety artwork probes")
+        }
+        XCTAssertTrue(waitUntil(canvas, core, isInk), "The original stroke is drawn after the refused delete and cold reopen")
+        XCTAssertTrue(waitUntil(canvas, bare, isWhitish), "Cold reopen preserves the separate untouched paper")
+        attachScreenshot(XCUIScreen.main, "folder-trash-03-cold-reopened-drawing-landscape")
+        try announce("reopened")
+    }
+
     // MARK: - Helpers
 
     /// Deletes a project through its tile menu, confirming the alert. Both call sites are in the same

@@ -708,10 +708,10 @@ nonisolated enum ProjectBackupManager {
         pruneEmptyFolders(under: trashDirectory)
     }
 
-    private static func pruneEmptyFolders(under directory: URL) {
-        guard let items = try? FileManager.default.contentsOfDirectory(
-                at: directory, includingPropertiesForKeys: nil) else { return }
-        for item in items where item.pathExtension != "paintproj" && isDirectory(item) {
+    static func pruneEmptyFolders(under directory: URL) {
+        guard let items = try? ProjectFileTree.children(of: directory) else { return }
+        for item in items where item.pathExtension != "paintproj"
+            && (try? ProjectFileTree.entry(at: item)) == .directory {
             pruneEmptyFolders(under: item)
             _ = item.withUnsafeFileSystemRepresentation { path -> Int32 in
                 guard let path else { return -1 }
@@ -754,7 +754,7 @@ nonisolated enum ProjectBackupManager {
         try Set(projectPackages(in: directory).map { try projectID(at: $0) })
     }
 
-    private static func projectPackages(in directory: URL) throws -> [URL] {
+    static func projectPackages(in directory: URL) throws -> [URL] {
         var packages: [URL] = []
         for item in try ProjectFileTree.children(of: directory) where !item.lastPathComponent.hasPrefix(".") {
             let entry = try ProjectFileTree.entry(at: item)
@@ -816,18 +816,22 @@ nonisolated enum ProjectBackupManager {
         }
         candidates.sort { $0.date < $1.date } // oldest first
 
-        var remainingPerDir: [URL: Int] = [:]
-        for c in candidates where c.backupDir != nil {
-            remainingPerDir[c.backupDir!, default: 0] += 1
-        }
+        var checkedDirectories: Set<URL> = []
+        var protectedRestorePoints: Set<URL> = []
         for c in candidates {
             guard total > maxTotalBackupBytes else { break }
             if let dir = c.backupDir {
-                let left = remainingPerDir[dir] ?? 0
-                let hasLatest = fm.fileExists(atPath: latestSnapshotURL(directory: dir).path)
-                // Keep at least one slot when there's no `latest` to fall back on.
-                if left <= 1 && !hasLatest { continue }
-                remainingPerDir[dir] = left - 1
+                if checkedDirectories.insert(dir).inserted,
+                   !validateProjectForRestore(at: latestSnapshotURL(directory: dir)) {
+                    let slots = candidates.reversed().filter { $0.backupDir == dir }
+                    if let usable = slots.first(where: { validateProjectForRestore(at: $0.url) }) {
+                        protectedRestorePoints.insert(usable.url)
+                    } else {
+                        // No proven fallback: uncertain data cannot make another deletion safe.
+                        protectedRestorePoints.formUnion(slots.map(\.url))
+                    }
+                }
+                if protectedRestorePoints.contains(c.url) { continue }
             }
             if (try? fm.removeItem(at: c.url)) != nil {
                 total = total > c.size ? total - c.size : 0

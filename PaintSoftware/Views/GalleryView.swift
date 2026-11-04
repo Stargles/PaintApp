@@ -254,7 +254,10 @@ struct GalleryView: View {
         )) {
             Button("Delete", role: .destructive) {
                 if let folder = folderPendingDeletion {
-                    ProjectStore.deleteFolder(at: folder.url)
+                    do { try ProjectStore.deleteFolder(at: folder.url) }
+                    catch {
+                        folderProblem = FolderProblem(title: "Couldn’t Delete Folder", message: error.localizedDescription)
+                    }
                     refresh()
                 }
                 folderPendingDeletion = nil

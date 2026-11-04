@@ -1886,6 +1886,139 @@ final class ProjectSaveLogicTests: XCTestCase {
                       "a bundled tip is in the binary already: \(bundled ?? [])")
     }
 
+    private func savedSafetyDrawing(named name: String, in directory: URL) throws -> (url: URL, pixels: [UInt8]) {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let raster = manager.layers[0].cels[0].raster
+        raster.beginStroke()
+        raster.stampCircle(at: CGPoint(x: 20, y: 24), radius: 5, color: .red, alpha: 1, hardness: 1)
+        raster.stampCircle(at: CGPoint(x: 44, y: 38), radius: 5, color: .blue, alpha: 1, hardness: 1)
+        raster.endStroke()
+        let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(raster.renderToUIImage().get().cgImage)))
+        let red = (24 * 64 + 20) * 4, blue = (38 * 64 + 44) * 4
+        XCTAssertGreaterThan(pixels[red], 200, "PREMISE: the current writer receives actual red artwork")
+        XCTAssertGreaterThan(pixels[blue + 2], 200, "PREMISE: it also receives a separate blue mark")
+        XCTAssertGreaterThan(pixels[red + 3], 200)
+        XCTAssertGreaterThan(pixels[blue + 3], 200)
+        let url = ProjectStore.createNewProjectURL(name: name, in: directory)
+        saveAndWait(manager, to: url)
+        XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: url), "PREMISE: the actual saved package is restorable")
+        XCTAssertEqual(try safetyDrawingPixels(at: url), pixels, "PREMISE: the current writer/reader retains every drawn byte")
+        return (url, pixels)
+    }
+
+    private func safetyDrawingPixels(at url: URL) throws -> [UInt8] {
+        let loaded = try XCTUnwrap(ProjectStore.load(from: url), "The complete saved drawing must still open")
+        let raster = loaded.layers[0].cels[0].raster
+        return try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(raster.renderToUIImage().get().cgImage)))
+    }
+
+    func testFolderDeletionKeepsTheDrawnPackageWhenTrashIsBlocked() throws {
+        let fm = FileManager.default
+        let scene = try ProjectStore.createFolder(named: "Protected scene", in: ProjectStore.projectsDirectory)
+        let nested = try ProjectStore.createFolder(named: "Nested shot", in: scene)
+        let drawing = try savedSafetyDrawing(named: "Keep this drawing", in: nested)
+        let original = root.appendingPathComponent("expected-blocked-trash.paintproj")
+        XCTAssertTrue(ProjectBackupManager.cloneItem(at: drawing.url, to: original))
+        let trash = ProjectBackupManager.trashDirectory
+        XCTAssertTrue(ProjectBackupManager.listTrash().isEmpty, "PREMISE: the private Trash has no artwork")
+        try fm.removeItem(at: trash)
+        let blocker = Data("This regular file blocks the private fixture's Trash directory".utf8)
+        try blocker.write(to: trash)
+        defer { try? fm.removeItem(at: trash) }
+        XCTAssertNil(ProjectBackupManager.moveToTrash(drawing.url, tag: "deleted"),
+                     "PREMISE: the actual Trash move refuses while the source remains readable")
+        XCTAssertTrue(try ProjectFileTree.matches(source: drawing.url, destination: original))
+
+        var refusal: Error?
+        do { _ = try ProjectStore.deleteFolder(at: scene) }
+        catch { refusal = error }
+
+        XCTAssertNotNil(refusal, "A failed Trash move must be reported instead of claiming the folder was deleted")
+        XCTAssertTrue(fm.fileExists(atPath: drawing.url.path),
+                      "The original package must not be recursively deleted after its move refuses")
+        guard fm.fileExists(atPath: drawing.url.path) else { return }
+        XCTAssertTrue(try ProjectFileTree.matches(source: drawing.url, destination: original),
+                      "Every original package file and directory survives the refused deletion")
+        XCTAssertEqual(try safetyDrawingPixels(at: drawing.url), drawing.pixels)
+        XCTAssertEqual(try Data(contentsOf: trash), blocker, "The refused operation does not replace the blocking entry")
+        XCTAssertTrue(ProjectBackupManager.isDirectory(nested), "The original nested folder remains reachable")
+    }
+
+    func testFolderDeletionKeepsARefusedPackageAndItsSuccessfulTrashMove() throws {
+        let fm = FileManager.default
+        let scene = try ProjectStore.createFolder(named: "Partly moved scene", in: ProjectStore.projectsDirectory)
+        let nested = try ProjectStore.createFolder(named: "Nested shot", in: scene)
+        let moved = try savedSafetyDrawing(named: "Moved drawing", in: scene)
+        let refused = try savedSafetyDrawing(named: "Refused drawing", in: nested)
+        let longBase = String(repeating: "z", count: 230)
+        let longURL = nested.appendingPathComponent(longBase + ".paintproj")
+        try fm.moveItem(at: refused.url, to: longURL)
+        XCTAssertLessThanOrEqual(longURL.lastPathComponent.utf8.count, 255, "PREMISE: the source component fits the filesystem")
+        XCTAssertGreaterThan((longBase + "__deleted__20260101-120000.paintproj").utf8.count, 255,
+                             "PREMISE: the existing Trash name cannot fit for this one package")
+        let original = root.appendingPathComponent("expected-partial-trash.paintproj")
+        XCTAssertTrue(ProjectBackupManager.cloneItem(at: longURL, to: original))
+        XCTAssertNil(ProjectBackupManager.moveToTrash(longURL, tag: "deleted"), "PREMISE: this package's Trash move refuses")
+        XCTAssertTrue(try ProjectFileTree.matches(source: longURL, destination: original))
+
+        var refusal: Error?
+        do { _ = try ProjectStore.deleteFolder(at: scene) }
+        catch { refusal = error }
+
+        XCTAssertNotNil(refusal, "A partial move must expose its refusal")
+        XCTAssertTrue(refusal?.localizedDescription.contains("Moved 1 project to Recently Deleted") == true,
+                      "The partial-result message accounts for the actual successful move")
+        let trashed = ProjectBackupManager.listTrash()
+        XCTAssertEqual(trashed.count, 1, "Only the project whose move really succeeded is in Recently Deleted")
+        let landed = try XCTUnwrap(trashed.first { $0.displayName == "Moved drawing" })
+        XCTAssertEqual(try safetyDrawingPixels(at: landed.url), moved.pixels,
+                       "The successful move remains a complete drawn restore point")
+        XCTAssertTrue(fm.fileExists(atPath: longURL.path), "The refused package stays in its original folder")
+        guard fm.fileExists(atPath: longURL.path) else { return }
+        XCTAssertTrue(try ProjectFileTree.matches(source: longURL, destination: original))
+        XCTAssertEqual(try safetyDrawingPixels(at: longURL), refused.pixels)
+        XCTAssertTrue(ProjectBackupManager.isDirectory(scene), "A partial move leaves its source folder available")
+    }
+
+    func testSizeCapKeepsTheLastValidBackupAndRestoresItsActualDrawingWhenLatestIsDamaged() throws {
+        let fm = FileManager.default
+        let drawing = try savedSafetyDrawing(named: "Last valid drawn version", in: ProjectStore.projectsDirectory)
+        let id = try XCTUnwrap(ProjectBackupManager.manifestID(at: drawing.url))
+        let dir = ProjectBackupManager.backupsDirectory(projectID: id)
+        let latest = ProjectBackupManager.latestSnapshotURL(directory: dir)
+        let automatic = dir.appendingPathComponent("auto-20260101-120000.paintproj")
+        XCTAssertTrue(ProjectBackupManager.cloneItem(at: drawing.url, to: automatic))
+        let original = root.appendingPathComponent("expected-last-valid.paintproj")
+        XCTAssertTrue(ProjectBackupManager.cloneItem(at: automatic, to: original))
+        let latestDamage = Data("The newest backup is damaged".utf8)
+        try latestDamage.write(to: latest.appendingPathComponent("manifest.json"))
+        XCTAssertFalse(ProjectBackupManager.validateProjectForRestore(at: latest), "PREMISE: Latest cannot restore this scene")
+        XCTAssertTrue(ProjectBackupManager.validateProjectForRestore(at: automatic), "PREMISE: the automatic slot is the sole valid backup")
+        let oldCap = ProjectBackupManager.maxTotalBackupBytes
+        defer { ProjectBackupManager.maxTotalBackupBytes = oldCap }
+        ProjectBackupManager.maxTotalBackupBytes = 0
+
+        ProjectBackupManager.pruneToSizeCap()
+
+        let kept = ProjectBackupManager.validateProjectForRestore(at: automatic)
+        XCTAssertTrue(kept, "The cap must keep the last usable backup even though a damaged Latest directory exists")
+        guard kept else { return }
+        XCTAssertTrue(try ProjectFileTree.matches(source: automatic, destination: original))
+        XCTAssertEqual(try Data(contentsOf: latest.appendingPathComponent("manifest.json")), latestDamage,
+                       "The policy still never deletes or rewrites Latest")
+        XCTAssertGreaterThan(ProjectBackupManager.directorySize(dir), ProjectBackupManager.maxTotalBackupBytes,
+                             "The existing cap deliberately goes soft to preserve recovery")
+        let liveDamage = Data("The live drawing now needs that backup".utf8)
+        try liveDamage.write(to: drawing.url.appendingPathComponent("manifest.json"))
+        XCTAssertTrue(ProjectBackupManager.restoreNewestValidBackup(forProjectAt: drawing.url),
+                      "The actual recovery owner must still find and install the protected version")
+        XCTAssertEqual(try safetyDrawingPixels(at: drawing.url), drawing.pixels)
+        let displaced = try XCTUnwrap(ProjectBackupManager.listTrash().first { $0.id.contains("__corrupt__") })
+        XCTAssertEqual(try Data(contentsOf: displaced.url.appendingPathComponent("manifest.json")), liveDamage,
+                       "Recovery preserves the displaced damaged original")
+        XCTAssertTrue(fm.fileExists(atPath: automatic.path), "Restoring a backup does not consume it")
+    }
+
     func testAnUnrepresentableCelSpanRefusesTheRealPackageAndUsesExistingBackupRecovery() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         let raster = manager.layers[0].cels[0].raster
