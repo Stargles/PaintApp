@@ -62,17 +62,8 @@ enum TimelineGraphBand {
     static let backgroundWhite: CGFloat = 1
     static let backgroundAlpha: CGFloat = 0.06
 
-    /// **How a channel that is not an animation is told apart from one that is** — `Channel.isAnimated`.
-    ///
-    /// A dash and a dimming, both, and neither is decoration. The dash is the distinction the doc on
-    /// `channels(effect:tracks:)` used to say could not be made — *"a flat line with no way to tell it
-    /// from one the artist authored"* — and it is the one property a flat line still has room for,
-    /// having no shape to carry it. The dimming puts it behind the animations in the same band, which
-    /// is the right order of attention: it is a curve in force, not one being animated.
-    ///
-    /// Its key dots are drawn **hollow** for the same reason and in the same colour, so the channel is
-    /// still identifiable by hue and its keys are still visibly keys — they are what a tap has to be
-    /// able to reach to remove, and what makes the state a door rather than a wall.
+    /// Curves with one key or a constant value remain editable in the band. Dashes, dimming and
+    /// hollow key dots distinguish them from animations while preserving the channel's hue.
     static let flatDash: [CGFloat] = [4, 3]
     static let flatAlpha: CGFloat = 0.5
 
@@ -147,23 +138,8 @@ enum TimelineGraphBand {
         /// and it is distinct per channel by construction — every curve in one band comes from one
         /// layer, hence from one effect, hence from one table.
         let descriptorIndex: Int
-        /// **Whether this curve is an *animation*, or merely a curve in force** —
-        /// `AnimationCurve.isAnimated`: two or more keys whose values are not all equal.
-        ///
-        /// **Both kinds are drawn, and they are drawn differently** — KEYFRAMES.md §11.4's "one thing
-        /// found and left", settled 2026-08-30. A channel that is not an animation is drawn as a
-        /// **dashed, dimmed** line (`flatDash`, `flatAlpha`) with hollow key dots. The objection this
-        /// answers is the one `channels(effect:tracks:)`' doc used to make against drawing such a
-        /// channel at all — *"a flat line in the band with no way to tell it from one the artist
-        /// authored"* — and the answer is the dash: there is now a way to tell, so the two states are
-        /// **distinguished** rather than merged.
-        ///
-        /// What that objection did not weigh is the state it leaves behind. Tapping away a channel's
-        /// second-to-last key drops it below the predicate, and with only animations drawn the whole
-        /// curve left the band **mid-gesture** — under the finger that was editing it. One press of
-        /// Undo brought it back, but nothing on screen said so, and the band was then the one surface
-        /// that could not put it back: a channel the band does not draw is a channel no tap in the
-        /// band can add a key to.
+        /// Two or more keys with differing values. Constant curves remain visible and editable,
+        /// drawn dashed and dimmed with hollow key dots (KEYFRAMES.md §11.4).
         let isAnimated: Bool
         /// **Where each of this channel's keys may be dragged to, in the band's own absolute frames** —
         /// keyed by the key's *current* frame, and empty for a grade, which has no such bound.
@@ -293,23 +269,10 @@ enum TimelineGraphBand {
         return max(max(contentEndFrame, 0), lastKey.map { $0 + 1 } ?? 0)
     }
 
-    /// **Every channel the band lists: each of the target's effect parameters that carries a curve at
-    /// all**, in `Effect.parameters` order, each tagged with whether that curve is an *animation*.
-    ///
-    /// This is `CanvasManager.curvedEffectChannelIDs`' membership — the **loose** predicate — with the
-    /// strict one carried on the value rather than applied to it. `channels(effect:tracks:)` below is
-    /// this filtered, so there is one walk and one place the two predicates are stated against each
-    /// other; splitting them into two functions is what would let them drift.
-    ///
-    /// **A target with no grade contributes nothing**, which is `keyframeFrames(of:)`'s asymmetry read
-    /// the same way: a layer that is not in effect form grades nothing, so tracks left on it by a
-    /// kind change are storage rather than animation and must not draw a curve for a value the
-    /// canvas is not showing.
-    ///
-    /// One walk of `Effect.parameters` — which rebuilds up to thirty-three closures per call — and
-    /// the descriptor comes back with the curve rather than being looked up again per id, which the
-    /// obvious spelling (`listedAnimationChannelIDs` then `first(where:)` per id) would make a
-    /// linear scan over a rebuilt table per channel.
+    /// Scalar effect parameters carrying nonempty curves, in descriptor order. Membership matches
+    /// `curvedEffectChannelIDs`; each value also carries the stricter animation predicate. Resolving
+    /// the descriptor with its curve avoids rebuilding and searching the parameter table per id.
+    /// A target without a grade contributes no effect curves.
     static func allChannels(effect: Effect?, tracks: [String: AnimationCurve]) -> [Channel] {
         guard let effect, !tracks.isEmpty else { return [] }
         return effect.parameters.enumerated().compactMap { index, parameter in
@@ -326,34 +289,6 @@ enum TimelineGraphBand {
                            descriptorIndex: index,
                            isAnimated: curve.isAnimated)
         }
-    }
-
-    /// **The target's *animations*, by the strict predicate** — `AnimationCurve.isAnimated`, two or
-    /// more keys not all holding the same value.
-    ///
-    /// **This is the same walk `CanvasManager.channelIDs` makes and it must stay so.** Both filter
-    /// `Effect.parameters` by `isScalarAnimatable` and then by the curve predicate; the ids this
-    /// returns are pinned equal to `listedAnimationChannelIDs(of:)` in
-    /// `TimelineGraphBandLogicTests`, because two implementations of one invariant is the defect
-    /// §2.28 was written about.
-    ///
-    /// **It is no longer "what the band draws", and that is 2026-08-30's change.** The band draws
-    /// `allChannels` and dashes the ones this refuses — see `Channel.isAnimated` for why, and for the
-    /// objection that used to be recorded here. What this still answers is the model's own question,
-    /// *is this channel an animation*, which is what the pin above is about and what the channel
-    /// list's rows are labelled by.
-    ///
-    /// **And that change left it with no caller in the app**, which is worth writing down rather than
-    /// acting on at the end of a pass. `graphBandContent`, `graphChannelGroups` and `setGraphChannels`
-    /// all take `allChannels` now, so the only callers are the two logic tests that pin this against
-    /// `listedAnimationChannelIDs(of:)`. The invariant does not need it — `allChannels` carries both
-    /// answers and both are pinned, membership against `curvedEffectChannelIDs` and the flag against
-    /// `listedAnimationChannelIDs` — so a future session may delete this and let the tests spell the
-    /// filter. It is kept for now because the alternative is deleting production code on a worker's
-    /// own judgement immediately after the run that verified it, and because the name is the clearest
-    /// statement in the tree of what the model means by "an animation".
-    static func channels(effect: Effect?, tracks: [String: AnimationCurve]) -> [Channel] {
-        allChannels(effect: effect, tracks: tracks).filter(\.isAnimated)
     }
 
     // MARK: - The target's own scalars — TODO (21)'s second channel kind
@@ -522,10 +457,7 @@ enum TimelineGraphBand {
     /// degenerate falls through to the keys for the same reason a nil one does — an axis of zero
     /// height maps every value onto one line.
     ///
-    /// A key extent that is itself flat is widened by half a unit either side. That case cannot
-    /// arise from `channels(effect:tracks:)`, whose predicate is precisely that the values are *not*
-    /// all equal, but this function is total and a caller with one key must get an axis rather than
-    /// a division by zero.
+    /// A flat key extent is widened by half a unit on each side so constant curves have a usable axis.
     static func range(uiRange: ClosedRange<Double>?, keyValues: [Double]) -> ClosedRange<Double> {
         if let uiRange, uiRange.upperBound > uiRange.lowerBound { return uiRange }
         guard let low = keyValues.min(), let high = keyValues.max() else { return 0...1 }

@@ -45,8 +45,9 @@ final class TimelineGraphBandLogicTests: XCTestCase {
     /// The model's own answer: the channels that are animations.
     private func channels(_ manager: CanvasManager) -> [TimelineGraphBand.Channel] {
         let target = target(manager)
-        return TimelineGraphBand.channels(effect: manager.storedEffect(of: target),
-                                          tracks: manager.keyframeState(of: target).tracks)
+        return TimelineGraphBand.allChannels(effect: manager.storedEffect(of: target),
+                                             tracks: manager.keyframeState(of: target).tracks)
+            .filter(\.isAnimated)
     }
 
     /// What the band lists: every channel carrying a curve, each flagged with whether it is one.
@@ -58,17 +59,8 @@ final class TimelineGraphBandLogicTests: XCTestCase {
 
     // MARK: - Which channels the band draws
 
-    /// **`channels(effect:tracks:)` and `listedAnimationChannelIDs` are the same list, and they have
-    /// to stay so.** Two implementations of one invariant is the defect §2.28 was written about — the
-    /// two device reports of 2026-08-29 were a keyframe union computed twice and diverging — so this
-    /// pins the ids against the model's own accessor rather than against a literal.
-    ///
-    /// **The second half of the fixture is not decoration, and it was missing until 2026-08-30.** With
-    /// both channels animated, a `channels` that did not filter *at all* returns the same array as one
-    /// that does, so every assertion here was true of an implementation with the predicate deleted —
-    /// mutating `.filter(\.isAnimated)` away left this green and was caught only by a neighbour. It is
-    /// the fixture-with-one-candidate defect this repo has now found four times, in its fourth
-    /// costume: **a filter is unpinned until its fixture holds something the filter must reject.**
+    /// The listing's animation flags agree with the model's animation IDs. The second fixture
+    /// includes a constant curve so dropping the filter cannot satisfy every membership assertion.
     func testTheBandDrawsExactlyTheChannelsTheModelCallsAnimations() {
         let manager = gradedManager()
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
@@ -164,9 +156,9 @@ final class TimelineGraphBandLogicTests: XCTestCase {
         let manager = gradedManager()
         manager.setEffectParameterTrack(layerIndex: gradeIndex, parameterID: brightnessID,
                                         to: linear([(0, 1.0), (10, 2.0)]))
-        XCTAssertEqual(TimelineGraphBand.channels(effect: nil,
-                                                  tracks: manager.keyframeState(of: target(manager)).tracks)
-                        .map(\.parameterID),
+        XCTAssertEqual(TimelineGraphBand.allChannels(effect: nil,
+                                                     tracks: manager.keyframeState(of: target(manager)).tracks)
+                        .filter(\.isAnimated).map(\.parameterID),
                        [])
     }
 

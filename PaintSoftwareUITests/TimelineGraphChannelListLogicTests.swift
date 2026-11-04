@@ -56,8 +56,9 @@ final class TimelineGraphChannelListLogicTests: XCTestCase {
 
     private func channels(_ manager: CanvasManager) -> [TimelineGraphBand.Channel] {
         let target = target(manager)
-        return TimelineGraphBand.channels(effect: manager.storedEffect(of: target),
-                                          tracks: manager.keyframeState(of: target).tracks)
+        return TimelineGraphBand.allChannels(effect: manager.storedEffect(of: target),
+                                             tracks: manager.keyframeState(of: target).tracks)
+            .filter(\.isAnimated)
     }
 
     private func key(_ manager: CanvasManager) -> TimelineLayoutKey {

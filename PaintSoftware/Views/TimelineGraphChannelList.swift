@@ -426,9 +426,8 @@ extension CanvasManager {
 
     /// **The rows the channel list shows for the band that is open**, or nil when it is closed.
     ///
-    /// The band's own membership, unfiltered — `graphBandContent` is the filtered half, and the two
-    /// walk `Effect.parameters` from the same `TimelineGraphBand.channels(effect:tracks:)` call so
-    /// they cannot disagree about what a channel is. This one is read only while the popup is up.
+    /// Uses the same `graphBandListing(of:)` membership as the band, before its hidden-channel filter.
+    /// This list is resolved only while the popup is open.
     var graphChannelGroups: [TimelineGraphChannelList.Group]? {
         guard let target = graphBandExpansion?.target else { return nil }
         let channels = graphBandListing(of: target)
