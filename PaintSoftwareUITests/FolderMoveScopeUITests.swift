@@ -58,6 +58,56 @@ final class FolderMoveScopeUITests: PaintUITestCase {
 
     private func frameNow(_ app: XCUIApplication) -> Int? { readFrameLabel(app)?.current }
 
+    func testFolderMoveBoxStaysOpenWhenTheArtistStepsToTheNextFrame() throws {
+        for allFrames in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments += ["-resetGallery", "-uiTestSeedPlainAnimation"]
+            XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+            XCTAssertEqual(app.windows.firstMatch.frame.size, CGSize(width: 1080, height: 810))
+            let canvas = app.otherElements["canvas.host"]
+            XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+            openLayerPanel(app)
+            addFolderFromAddMenu(app)
+            dragRow(layerCell(app, layerIndex: 1), onto: folderCell(app, named: "Folder 1"), dropDY: 0.5)
+            dragRow(layerCell(app, layerIndex: 0), onto: folderCell(app, named: "Folder 1"), dropDY: 0.5)
+            XCTAssertEqual((0..<3).filter { rowFolder(app, layerIndex: $0) == "Folder 1" }.count, 2)
+            raiseTheFoldersMoveBox(app)
+            let scope = app.segmentedControls["moveBar.folderScopePicker"]
+            if allFrames { scope.buttons["All Frames"].tap() }
+            closeLayerRail(app)
+            let paper = paperRect(in: canvas)
+            let box = try XCTUnwrap(settledMoveBox(app))
+            dragAcross(canvas, from: CGVector(dx: box.midX, dy: box.midY), paperDX: 0.1, paper: paper)
+            app.buttons["timeline.stepForwardButton"].tap()
+            XCTAssertEqual(frameNow(app), 2)
+            let boxStayedOpen = app.buttons["moveBar.doneButton"].exists
+            XCTAssertTrue(boxStayedOpen, "stepping keeps the folder's Move bar open")
+            let incomingBox = settledMoveBox(app)
+            XCTAssertNotNil(incomingBox, "the incoming drawings have a visible Move box")
+            guard boxStayedOpen, incomingBox != nil else { return }
+            XCTAssertTrue(scope.buttons[allFrames ? "All Frames" : "This Cel"].isSelected, "the accepted scope survives the step")
+            attachScreenshot(XCUIScreen.main, "folder-step-standing-box-\(allFrames ? "all" : "this")-owner-landscape")
+            app.buttons["moveBar.doneButton"].tap()
+            let window = CGRect(x: paper.minX, y: paper.minY + paper.height * 0.12,
+                                width: paper.width, height: paper.height * 0.66)
+            var probe = try settledProbe(canvas, window: window)
+            let incoming = try XCTUnwrap(extent(probe, paper, row: row(layer: 0, frame: 1)))
+            XCTAssertEqual(incoming.start, allFrames ? 0.23 : 0.13, accuracy: 0.04,
+                           "only All Frames carries the next drawing with the first drag")
+            XCTAssertEqual(try XCTUnwrap(extent(probe, paper, row: row(layer: 2, frame: 1))).start, 0.13, accuracy: 0.04,
+                           "the outside layer stays in place")
+            app.buttons["sideToolbar.undoButton"].tap()
+            probe = try settledProbe(canvas, window: window)
+            XCTAssertEqual(try XCTUnwrap(extent(probe, paper, row: row(layer: 0, frame: 1))).start, 0.13, accuracy: 0.04,
+                           "one Undo reverses the accepted nudge without a navigation step")
+            app.buttons["sideToolbar.redoButton"].tap()
+            probe = try settledProbe(canvas, window: window)
+            XCTAssertEqual(try XCTUnwrap(extent(probe, paper, row: row(layer: 0, frame: 1))).start, incoming.start, accuracy: 0.03)
+            attachScreenshot(XCUIScreen.main, "folder-step-drawing-restored-\(allFrames ? "all" : "this")-owner-landscape")
+            app.terminate()
+        }
+    }
+
     /// **This Cel leaves the other frame alone; All Frames, chosen on the bar under the standing box,
     /// carries it.** Two drags on frame 1 of the folder holding layers 1 and 2 (the third layer is
     /// outside it): the first under the default scope, the second after tapping All Frames. Frame 2 is

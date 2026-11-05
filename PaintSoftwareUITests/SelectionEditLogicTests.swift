@@ -1251,6 +1251,492 @@ final class SelectionEditLogicTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testRepeatedRasterDuplicateUsesShownPixelsButLandsIndependentlyAtThePressedFrame() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for nested in [false, true] {
+            for sourceOnly in [false, true] {
+                let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
+                let manager = f.manager
+                manager.layers[0].kind = .raster
+                manager.layers[0].cels[0].vector = nil
+                var dormant = try XCTUnwrap(manager.layers[0].cels[0].transformTracks[TransformChannelID.cel.id])
+                dormant.setCurve(AnimationCurve(keys: [.init(frame: 2, value: 12)]), for: .y)
+                manager.layers[0].cels[0].transformTracks[TransformChannelID.cel.id] = dormant
+                // A Move below Repeat is read at source2 and escaped by the root copy;
+                // the outer Move above Repeat remains at document14 on both destinations.
+                manager.currentLayerIndex = 0
+                manager.addTransformLayer(name: "Source-time Move")
+                CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 0, length: 24)])
+                let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+                manager.layers[1].transform = LayerPose(pose: PoseQuad(restingIn: box),
+                    track: CanvasFixture.poseTrack([
+                        (2, PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 0, y: 4))),
+                        (14, PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 0, y: 24)))
+                    ], interpolation: .linear))
+                manager.currentLayerIndex = 0
+                // Pure raster backing never displays its dormant cel/group channels.
+                if nested {
+                    let folder = try XCTUnwrap(manager.addFolder(name: "Repeated source"))
+                    manager.layers[0].parentFolderID = folder
+                    manager.layers[1].parentFolderID = folder
+                    manager.layers[2].parentFolderID = folder
+                }
+                CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 0,
+                    CanvasFixture.solidImage(.blue, rect: CGRect(x: 10, y: 20, width: 10, height: 8)))
+                if sourceOnly {
+                    XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: 14, frameCount: 1))
+                    CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 14,
+                        CanvasFixture.solidImage(.red, rect: CGRect(x: 40, y: 20, width: 10, height: 8)))
+                }
+                let sourceID = manager.layers[0].id
+                let celID = manager.layers[0].cels[0].id
+                let sourceIDs = manager.layers[0].cels.map(\.id)
+                let duration = manager.layers[0].cels[0].frameCount
+                let original = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+                let source = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)))
+                let layerIDs = manager.layers.map(\.id)
+                manager.history.removeAll()
+                manager.beginDuplicate()
+                XCTAssertNotNil(manager.floatingPiece, "the shown source can be copied even when raw frame14 is different")
+                guard let piece = manager.floatingPiece else { return }
+                XCTAssertEqual(piece.sourceLayerID, sourceID)
+                XCTAssertEqual(piece.sourceCelID, celID)
+                XCTAssertEqual(piece.landingPose?.affine?.ty, 8,
+                               "the retained destination parent is removed once; the escaped source-time Move stays baked")
+                let target = manager.layers[manager.currentLayerIndex]
+                XCTAssertNil(target.parentFolderID, "raster Duplicate remains an independent root copy")
+                if let folder = manager.layers[0].parentFolderID {
+                    XCTAssertEqual(manager.descendantLayerIndices(ofFolder: folder), [0, 1, 2],
+                                   "the independent copy never splits its source folder's contiguous span")
+                }
+                XCTAssertEqual(target.cels.map(\.startFrame), [14], "the copy starts at the pressed document frame")
+                XCTAssertEqual(target.cels.map(\.frameCount), [duration], "the source duration is retained")
+                let walk = manager.renderTreeAndPoses(atFrame: 14)
+                XCTAssertEqual(manager.displayedCel(inLayer: manager.currentLayerIndex, atFrame: 14, in: walk)?.frame, 14,
+                               "the independent destination escapes Repeat's source-time scope")
+                var moved = piece.transform
+                moved.position.x += 8
+                manager.updateFloatingPose(transform: moved, distortQuad: nil)
+                XCTAssertTrue(manager.commitFloatingPieceIfNeeded())
+                XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 13, y: 36)), [0, 0, 255, 255], "source ink remains")
+                XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 25, y: 36)), [0, 0, 255, 255], "the copied shown ink survives Done at frame14")
+                XCTAssertEqual(manager.layers[0].cels.map(\.id), sourceIDs)
+                XCTAssertEqual(try CanvasFixture.rgbaBytes(try XCTUnwrap(manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)), source)
+                XCTAssertEqual(manager.history.undoStack.count, 1, "raster copy and its landing remain one insertion Undo")
+                let final = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+                manager.currentFrame = 2
+                XCTAssertNil(manager.activeCelIndex(inLayer: manager.currentLayerIndex, atFrame: 2), "the independent copy does not occupy its source frame")
+                XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 25, y: 16))[3], 0)
+                manager.currentFrame = 14
+                manager.undo()
+                XCTAssertEqual(manager.layers.map(\.id), layerIDs)
+                XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), original)
+                manager.redo()
+                XCTAssertTrue(manager.layers.contains { $0.id == target.id && $0.parentFolderID == nil && $0.cels[0].startFrame == 14 })
+                XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), final)
+            }
+        }
+    }
+
+    /// Finite, byte-defined input: no colour-space conversion is part of these contribution tests.
+    private func duplicateContributionPatch(_ rgba: [UInt8], x: Range<Int>, y: Range<Int>) throws -> UIImage {
+        var bytes = [UInt8](repeating: 0, count: 64 * 64 * 4)
+        for row in y {
+            for column in x {
+                let offset = (row * 64 + column) * 4
+                bytes.replaceSubrange(offset..<(offset + 4), with: rgba)
+            }
+        }
+        let image = try XCTUnwrap(CoreGraphicsCompositor.makeImage(fromPremultiplied: bytes, width: 64, height: 64))
+        return UIImage(cgImage: image, scale: 1, orientation: .up)
+    }
+
+    @MainActor
+    func testRasterDuplicateBakesTheEscapedValueGradeAndKeepsRetainedGradeAndMoveOnce() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for retainedGrade in [false, true] {
+            for outerMove in [false, true] {
+                let manager = CanvasFixture.manager(layerCount: 1)
+                let size = CanvasFixture.canvasSize
+                manager.layers[0].cels[0].frameCount = 3
+                manager.layers[0].cels[0].raster = try CanvasFixture.rasterTexture(
+                    duplicateContributionPatch([128, 128, 128, 255], x: 10..<20, y: 20..<28), size: size, strokeCount: 1)
+                manager.addValueLayer(effect: .brightnessContrast(.init(brightness: 0.5, contrast: 1)), name: "Escaped grade")
+                CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 0, length: 24)])
+                manager.addTransformLayer(name: "Repeat graded source")
+                CanvasFixture.setCelLayout(manager, layerIndex: 2, [(start: 0, length: 24)])
+                let box = CGRect(origin: .zero, size: size)
+                manager.layers[2].transform = LayerPose(pose: PoseQuad(restingIn: box), mode: .repeat, repeatPeriod: 12)
+                if outerMove {
+                    manager.addTransformLayer(name: "Retained Move")
+                    manager.layers[manager.currentLayerIndex].transform = LayerPose(
+                        pose: PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 0, y: 8)))
+                }
+                if retainedGrade {
+                    manager.addValueLayer(effect: .brightnessContrast(.init(brightness: 0.5, contrast: 1)), name: "Retained grade")
+                }
+                manager.currentLayerIndex = 0
+                manager.currentFrame = 14
+                let dy: CGFloat = outerMove ? 8 : 0
+                let bounds = CGRect(x: 6, y: 16 + dy, width: 20, height: 16)
+                manager.selection = Selection(path: loop(bounds), bounds: bounds)
+                manager.history.removeAll()
+                let originalIDs = manager.layers.map(\.id)
+                let sourceIDs = manager.layers[0].cels.map(\.id)
+                let original = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+                let source = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)))
+                let expected: [UInt8] = retainedGrade ? [32, 32, 32, 255] : [64, 64, 64, 255]
+                XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 13, y: 24 + dy)), expected,
+                               "PREMISE: the source really shows the escaped grade and optional retained grade")
+                XCTAssertNil(manager.activeCelIndex(inLayer: 0, atFrame: 14), "PREMISE: the shown source is reached only through Repeat")
+                manager.beginDuplicate()
+                XCTAssertNotNil(manager.floatingPiece, "the graded shown source is admitted")
+                guard let piece = manager.floatingPiece else { return }
+                let targetID = manager.layers[manager.currentLayerIndex].id
+                var moved = piece.transform
+                moved.position.x += 12
+                manager.updateFloatingPose(transform: moved, distortQuad: nil)
+                XCTAssertTrue(manager.commitFloatingPieceIfNeeded(), "Done lands the admitted contribution")
+                XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 25, y: 24 + dy)), expected,
+                               "the copy keeps the escaped grade and applies each retained grade/pose only once")
+                XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 13, y: 24 + dy)), expected, "the displayed source is untouched")
+                XCTAssertEqual(manager.layers[0].cels.map(\.id), sourceIDs)
+                XCTAssertEqual(try CanvasFixture.rgbaBytes(try XCTUnwrap(manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)), source,
+                               "the source's ungraded raster bytes are unchanged")
+                XCTAssertEqual(manager.layers[manager.currentLayerIndex].cels.map(\.startFrame), [14])
+                XCTAssertEqual(manager.layers[manager.currentLayerIndex].cels.map(\.frameCount), [3])
+                XCTAssertEqual(manager.currentFrame, 14)
+                XCTAssertEqual(manager.history.undoStack.count, 1, "the contribution and its landing remain one insertion Undo")
+                let after = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+                manager.undo()
+                XCTAssertEqual(manager.layers.map(\.id), originalIDs, "one Undo removes only the new copy")
+                XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), original, "Undo restores the exact graded source picture")
+                manager.redo()
+                XCTAssertTrue(manager.layers.contains { $0.id == targetID && $0.parentFolderID == nil && $0.cels[0].startFrame == 14 })
+                XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), after, "Redo restores the exact graded copied picture")
+            }
+        }
+    }
+
+    @MainActor
+    func testRasterDuplicateBakesEscapedFolderOpacityEffectAndMaskWithoutCopyingItsSibling() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let size = CanvasFixture.canvasSize
+        manager.layers[0].cels[0].frameCount = 3
+        manager.layers[0].cels[0].raster = try CanvasFixture.rasterTexture(
+            duplicateContributionPatch([128, 128, 128, 255], x: 10..<20, y: 20..<28), size: size, strokeCount: 1)
+        manager.addLayer(name: "Other drawing in the same folder")
+        manager.layers[1].cels[0].frameCount = 3
+        manager.layers[1].cels[0].raster = try CanvasFixture.rasterTexture(
+            duplicateContributionPatch([255, 0, 0, 255], x: 14..<20, y: 12..<16), size: size, strokeCount: 1)
+        manager.addTransformLayer(name: "Repeat folder drawings")
+        CanvasFixture.setCelLayout(manager, layerIndex: 2, [(start: 0, length: 24)])
+        let box = CGRect(origin: .zero, size: size)
+        manager.layers[2].transform = LayerPose(pose: PoseQuad(restingIn: box), mode: .repeat, repeatPeriod: 12)
+        manager.addLayer(name: "Hidden external mask")
+        manager.layers[3].cels[0].frameCount = 24
+        manager.layers[3].cels[0].raster = try CanvasFixture.rasterTexture(
+            duplicateContributionPatch([255, 255, 255, 255], x: 14..<20, y: 10..<32), size: size, strokeCount: 1)
+        let maskID = manager.layers[3].id
+        manager.layers[3].isVisible = false
+        manager.addTransformLayer(name: "Retained outer Move")
+        manager.layers[4].transform = LayerPose(pose: PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 0, y: 8)))
+        let effectFolder = try XCTUnwrap(manager.addFolder(name: "Escaped effect"))
+        for index in 0..<3 { manager.layers[index].parentFolderID = effectFolder }
+        let effectIndex = try XCTUnwrap(manager.folders.firstIndex { $0.id == effectFolder })
+        manager.folders[effectIndex].effect = .brightnessContrast(.init(brightness: 0.5, contrast: 1))
+        let folder = try XCTUnwrap(manager.addFolder(name: "Escaped opacity and mask"))
+        let folderIndex = try XCTUnwrap(manager.folders.firstIndex { $0.id == folder })
+        manager.folders[effectIndex].parentFolderID = folder
+        manager.folders[folderIndex].opacity = 0.5
+        let mask = AlphaMask(sources: [.layer(maskID)])
+        manager.folders[folderIndex].alphaMask = mask
+        manager.currentLayerIndex = 0
+        manager.currentFrame = 14
+        let bounds = CGRect(x: 6, y: 18, width: 20, height: 22)
+        manager.selection = Selection(path: loop(bounds), bounds: bounds)
+        manager.history.removeAll()
+        let originalIDs = manager.layers.map(\.id)
+        let original = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+        let source = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)))
+        let expected: [UInt8] = [32, 32, 32, 128]
+        XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 16, y: 32)), expected,
+                       "PREMISE: the shown source includes its folder effect and opacity")
+        XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 12, y: 32))[3], 0, "PREMISE: the hidden external source clips the folder")
+        XCTAssertGreaterThan(try memoPixel(manager, at: CGPoint(x: 16, y: 22))[0], 0,
+                             "PREMISE: another painted sibling really lies inside the selected rectangle")
+        manager.beginDuplicate()
+        XCTAssertNotNil(manager.floatingPiece, "the masked shown source is admitted")
+        guard let piece = manager.floatingPiece else { return }
+        var moved = piece.transform
+        moved.position.x += 12
+        manager.updateFloatingPose(transform: moved, distortQuad: nil)
+        XCTAssertTrue(manager.commitFloatingPieceIfNeeded())
+        XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 28, y: 32)), expected,
+                       "the independent copy keeps the escaped folder effect and opacity")
+        XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 24, y: 32))[3], 0,
+                       "the escaped mask moves with the copy instead of revealing previously clipped source pixels")
+        XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 28, y: 22))[3], 0,
+                       "the copy contains only the selected source contribution, never its painted sibling")
+        XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 16, y: 32)), expected)
+        XCTAssertEqual(try CanvasFixture.rgbaBytes(try XCTUnwrap(manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)), source)
+        XCTAssertEqual(manager.folders[folderIndex].opacity, 0.5)
+        XCTAssertEqual(manager.folders[folderIndex].alphaMask, mask)
+        XCTAssertEqual(manager.history.undoStack.count, 1)
+        let after = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+        manager.undo()
+        XCTAssertEqual(manager.layers.map(\.id), originalIDs)
+        XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), original, "Undo restores both original folder drawings exactly")
+        manager.redo()
+        XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), after, "Redo restores the exact masked independent copy")
+    }
+
+    @MainActor
+    func testRasterDuplicateKeepsHiddenSourceAdmissionWithoutTurningOnHiddenGrades() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for hideLayer in [false, true] {
+            for gradeVisible in [false, true] {
+                let manager = CanvasFixture.manager(layerCount: 1)
+                let size = CanvasFixture.canvasSize
+                manager.layers[0].cels[0].frameCount = 3
+                manager.layers[0].cels[0].raster = try CanvasFixture.rasterTexture(
+                    duplicateContributionPatch([128, 128, 128, 255], x: 10..<20, y: 20..<28), size: size, strokeCount: 1)
+                let sourceRaster = manager.layers[0].cels[0].raster
+                manager.addValueLayer(effect: .brightnessContrast(.init(brightness: 0.5, contrast: 1)), name: "Grade with its own eye")
+                CanvasFixture.setCelLayout(manager, layerIndex: 1, [(start: 0, length: 24)])
+                manager.layers[1].isVisible = gradeVisible
+                manager.addTransformLayer(name: "Repeat hidden source")
+                CanvasFixture.setCelLayout(manager, layerIndex: 2, [(start: 0, length: 24)])
+                let box = CGRect(origin: .zero, size: size)
+                manager.layers[2].transform = LayerPose(pose: PoseQuad(restingIn: box), mode: .repeat, repeatPeriod: 12)
+                let folder = try XCTUnwrap(manager.addFolder(name: "Hidden source scope"))
+                for index in 0..<3 { manager.layers[index].parentFolderID = folder }
+                let folderIndex = try XCTUnwrap(manager.folders.firstIndex { $0.id == folder })
+                manager.layers[0].isVisible = !hideLayer
+                manager.folders[folderIndex].isVisible = hideLayer
+                manager.currentLayerIndex = 0
+                manager.currentFrame = 14
+                let bounds = CGRect(x: 6, y: 16, width: 20, height: 16)
+                manager.selection = Selection(path: loop(bounds), bounds: bounds)
+                manager.history.removeAll()
+                let ids = manager.layers.map(\.id)
+                let before = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+                XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 13, y: 24))[3], 0,
+                               "PREMISE: either the source layer or its containing folder is hidden")
+                manager.beginDuplicate()
+                XCTAssertNotNil(manager.floatingPiece, "Duplicate still admits the selected hidden source")
+                guard let piece = manager.floatingPiece else { return }
+                var moved = piece.transform
+                moved.position.x += 12
+                manager.updateFloatingPose(transform: moved, distortQuad: nil)
+                XCTAssertTrue(manager.commitFloatingPieceIfNeeded())
+                let expected: [UInt8] = gradeVisible ? [64, 64, 64, 255] : [128, 128, 128, 255]
+                XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 25, y: 24)), expected,
+                               "the admitted copy reads hidden ink but respects the escaped grade's own eye")
+                XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 13, y: 24))[3], 0, "the original source remains hidden")
+                XCTAssertEqual(manager.layers[0].isVisible, !hideLayer)
+                XCTAssertEqual(manager.folders[folderIndex].isVisible, hideLayer)
+                XCTAssertEqual(manager.layers[1].isVisible, gradeVisible)
+                XCTAssertTrue(manager.layers[0].cels[0].raster === sourceRaster)
+                XCTAssertEqual(manager.history.undoStack.count, 1)
+                let after = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+                manager.undo()
+                XCTAssertEqual(manager.layers.map(\.id), ids)
+                XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), before, "Undo restores the hidden-source picture exactly")
+                manager.redo()
+                XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), after, "Redo restores the admitted copy exactly")
+            }
+        }
+    }
+
+    @MainActor
+    func testNonRasterDuplicateKeepsItsTierReadInsteadOfCopyingAValueSheet() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for value in [false, true] {
+            let manager = CanvasFixture.manager(layerCount: 0)
+            if value { manager.addValueLayer(color: PaletteColor(hex: "FF0000"), name: "Value sheet") }
+            else { manager.addTransformLayer(name: "Transform without pixel tiers") }
+            let sourceKind = manager.layers[0].kind
+            manager.currentFrame = 4
+            let bounds = CGRect(x: 8, y: 8, width: 20, height: 20)
+            manager.selection = Selection(path: loop(bounds), bounds: bounds)
+            manager.history.removeAll()
+            let ids = manager.layers.map(\.id)
+            let before = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+            manager.beginDuplicate()
+            XCTAssertNotNil(manager.floatingPiece, "the existing nonvector tier-copy admission remains available")
+            guard manager.floatingPiece != nil else { return }
+            XCTAssertTrue(manager.commitFloatingPieceIfNeeded())
+            let copied = try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[manager.currentLayerIndex].cels[0],
+                                                       canvasSize: CanvasFixture.canvasSize, memoize: false)?.cgImage)
+            let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(copied))
+            XCTAssertTrue(stride(from: 3, to: bytes.count, by: 4).allSatisfy { bytes[$0] == 0 },
+                          "Value and transform sources keep their empty pixel-tier copy; no solid-sheet capture is added")
+            XCTAssertEqual(manager.layers[0].kind, sourceKind)
+            XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), before)
+            XCTAssertEqual(manager.history.undoStack.count, 1)
+            manager.undo()
+            XCTAssertEqual(manager.layers.map(\.id), ids)
+            XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), before)
+            manager.redo()
+            XCTAssertEqual(manager.layers.count, ids.count + 1)
+            XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), before)
+        }
+    }
+
+    @MainActor
+    func testRasterDuplicateKeepsHigherPassThroughGradesButStopsThemAtAnIsolatedFolder() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for nested in [false, true] {
+            for isolated in [false, true] {
+                let manager = CanvasFixture.manager(layerCount: 1)
+                let size = CanvasFixture.canvasSize
+                manager.layers[0].cels[0].frameCount = 3
+                manager.layers[0].cels[0].raster = try CanvasFixture.rasterTexture(
+                    duplicateContributionPatch([128, 128, 128, 255], x: 10..<20, y: 20..<28), size: size, strokeCount: 1)
+                manager.addLayer(name: "Other paint in the higher folder")
+                manager.layers[1].cels[0].frameCount = 3
+                manager.layers[1].cels[0].raster = try CanvasFixture.rasterTexture(
+                    duplicateContributionPatch([0, 0, 255, 255], x: 40..<50, y: 20..<28), size: size, strokeCount: 1)
+                manager.addValueLayer(effect: .brightnessContrast(.init(brightness: 0.5, contrast: 1)), name: "Higher folder grade")
+                CanvasFixture.setCelLayout(manager, layerIndex: 2, [(start: 0, length: 24)])
+                manager.addTransformLayer(name: "Repeat source and upper folder")
+                CanvasFixture.setCelLayout(manager, layerIndex: 3, [(start: 0, length: 24)])
+                let box = CGRect(origin: .zero, size: size)
+                manager.layers[3].transform = LayerPose(pose: PoseQuad(restingIn: box), mode: .repeat, repeatPeriod: 12)
+                let folder = try XCTUnwrap(manager.addFolder(name: "Higher grade scope"))
+                for index in 1...2 { manager.layers[index].parentFolderID = folder }
+                let folderIndex = try XCTUnwrap(manager.folders.firstIndex { $0.id == folder })
+                manager.folders[folderIndex].isIsolated = isolated
+                if nested {
+                    let outer = try XCTUnwrap(manager.addFolder(name: "Higher pass-through wrapper"))
+                    let outerIndex = try XCTUnwrap(manager.folders.firstIndex { $0.id == outer })
+                    manager.folders[outerIndex].isIsolated = false
+                    manager.folders[folderIndex].parentFolderID = outer
+                }
+                manager.currentLayerIndex = 0
+                manager.currentFrame = 14
+                let bounds = CGRect(x: 6, y: 16, width: 48, height: 16)
+                manager.selection = Selection(path: loop(bounds), bounds: bounds)
+                manager.history.removeAll()
+                let ids = manager.layers.map(\.id)
+                let sourceIDs = manager.layers[0].cels.map(\.id)
+                let source = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)))
+                let before = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+                let expected: [UInt8] = isolated ? [128, 128, 128, 255] : [64, 64, 64, 255]
+                XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 13, y: 24)), expected,
+                               "PREMISE: only the pass-through folder grades the raster outside it")
+                XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 44, y: 24)), [0, 0, 128, 255],
+                               "PREMISE: the higher folder also contains its own distinct painted sibling")
+                manager.beginDuplicate()
+                XCTAssertNotNil(manager.floatingPiece, "the outside raster contribution is admitted")
+                guard let piece = manager.floatingPiece else { return }
+                var moved = piece.transform
+                moved.position.x += 12
+                manager.updateFloatingPose(transform: moved, distortQuad: nil)
+                XCTAssertTrue(manager.commitFloatingPieceIfNeeded())
+                XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 25, y: 24)), expected,
+                               "the copy keeps outer-backdrop grades through pass-through wrappers and stops at isolation")
+                XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 56, y: 24))[3], 0,
+                               "higher-folder paint is never copied with its grading contribution")
+                XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 13, y: 24)), expected)
+                XCTAssertEqual(try memoPixel(manager, at: CGPoint(x: 44, y: 24)), [0, 0, 128, 255])
+                XCTAssertEqual(manager.layers[0].cels.map(\.id), sourceIDs)
+                XCTAssertEqual(try CanvasFixture.rgbaBytes(try XCTUnwrap(manager.layers[0].cels[0].raster.renderToUIImage().get().cgImage)), source)
+                XCTAssertEqual(manager.folders[folderIndex].isIsolated, isolated)
+                XCTAssertEqual(manager.history.undoStack.count, 1)
+                let after = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+                manager.undo()
+                XCTAssertEqual(manager.layers.map(\.id), ids)
+                XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), before, "Undo restores the original outer-backdrop picture exactly")
+                manager.redo()
+                XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), after, "Redo restores the copied outer-backdrop contribution exactly")
+            }
+        }
+    }
+
+    @MainActor
+    func testRepeatedLinkedFillClearAndCutKeepTheGeneratedPictureLinkAndClipboard() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        let pasteboard = UIPasteboard.general
+        let savedItems = pasteboard.items
+        defer { pasteboard.items = savedItems; Compositor.backend = previous }
+        for sourceOnly in [false, true] {
+            for action in ["Fill", "Clear", "Cut"] {
+                let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
+                let manager = f.manager
+                let size = CanvasFixture.canvasSize
+                let references = [24, 25].map { start -> Cel in
+                    let cel = Cel(id: UUID(), startFrame: start, frameCount: 1,
+                                  raster: .empty(size: size), vector: .empty(size: size))
+                    cel.vector?.addFill(path: loop(CGRect(x: 10, y: 20, width: 10, height: 8)),
+                                        color: colour(0, 0, 1))
+                    return cel
+                }
+                manager.layers[0].cels.append(contentsOf: references)
+                manager.layers[0].cels[0].interpolation = InterpolationRecipe(
+                    references: references.map { InterpolationReference(layerID: manager.layers[0].id, celID: $0.id) },
+                    t: 0.5)
+                if sourceOnly {
+                    XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: 14, frameCount: 1))
+                }
+                manager.brushColor = colour(0, 1, 0)
+                manager.history.removeAll()
+                let before = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+                let generatedPixel = try memoPixel(manager, at: CGPoint(x: 13, y: 32))
+                XCTAssertTrue(generatedPixel[2] > 0 && generatedPixel[0] == 0 && generatedPixel[1] == 0
+                              && generatedPixel[2] == generatedPixel[3],
+                              "a real generated blue picture is shown through the document-time parent")
+                let ids = manager.layers[0].cels.map(\.id)
+                let ink = try manager.layers[0].cels.compactMap(\.vector).map(selectionInk)
+                let recipe = try JSONEncoder().encode(manager.layers[0].cels[0].interpolation)
+                pasteboard.string = "keep clipboard on refused linked edit"
+                switch action {
+                case "Fill": manager.fillSelection()
+                case "Clear": manager.clearSelectionPixels()
+                default: XCTAssertFalse(manager.cutSelectionToPasteboard(), "Cut refuses the same linked write as Clear")
+                }
+                XCTAssertEqual(manager.notice?.kind, .cannotEditDerivedSelection,
+                               "the artist is told to choose a hand-drawn frame")
+                XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), before,
+                               "refusing \(action) leaves the generated drawing exact")
+                XCTAssertEqual(try JSONEncoder().encode(manager.layers[0].cels[0].interpolation), recipe,
+                               "the generated link and all its settings survive")
+                XCTAssertEqual(try manager.layers[0].cels.compactMap(\.vector).map(selectionInk), ink,
+                               "no hidden source drawing is rewritten")
+                XCTAssertEqual(manager.layers[0].cels.map(\.id), ids)
+                XCTAssertEqual(manager.history.undoStack.count, 0, "refusal adds no Undo step")
+                XCTAssertEqual(manager.currentFrame, 14)
+                XCTAssertNotNil(manager.selection, "the artist can choose another action on the same loop")
+                XCTAssertEqual(pasteboard.string, "keep clipboard on refused linked edit",
+                               "Cut does not publish a clipboard result before write admission")
+                let copiedPicture = manager.copySelectionToPasteboard()
+                XCTAssertTrue(copiedPicture, "Copy may copy the generated picture without changing its link")
+                XCTAssertNotNil(pasteboard.image?.cgImage, "Copy publishes an actual clipboard picture")
+                guard copiedPicture, let copied = pasteboard.image?.cgImage else { return }
+                XCTAssertEqual(try CanvasFixture.rgbaBytes(copied),
+                               try clipboardCropBytes(memoPicture(manager), rect: try XCTUnwrap(manager.selection).bounds))
+                XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), before)
+                XCTAssertEqual(manager.history.undoStack.count, 0)
+            }
+        }
+    }
+
     /// Independent integer crop of compositor bytes, not the UIKit crop used by Copy.
     private func clipboardCropBytes(_ image: CGImage, rect: CGRect) throws -> [UInt8] {
         let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(image))

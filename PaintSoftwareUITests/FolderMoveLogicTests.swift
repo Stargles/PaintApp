@@ -319,6 +319,87 @@ final class FolderMoveLogicTests: XCTestCase {
     }
 
     @MainActor
+    func testFolderMoveKeepsItsAcceptedIdentityAcrossRepeatedFrameStepsAndEachNudgeUndoesOnce() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        defer { Compositor.backend = previous }
+        for scope in [FolderMoveScope.thisCel, .allFrames] {
+            for active in 0..<3 {
+                let f = try frames()
+                let manager = f.manager
+                manager.addTransformLayer(name: "Repeat folder frames")
+                let repeatLayer = manager.currentLayerIndex
+                CanvasFixture.setCelLayout(manager, layerIndex: repeatLayer, [(start: 0, length: 12)])
+                let box = CGRect(origin: .zero, size: CanvasFixture.canvasSize)
+                manager.layers[repeatLayer].transform = LayerPose(pose: PoseQuad(restingIn: box), mode: .repeat, repeatPeriod: 3)
+                manager.currentFrame = 7
+                manager.currentLayerIndex = [f.fx.outside, f.a, f.b][active]
+                let brushLayer = manager.currentLayerIndex
+                manager.history.removeAll()
+                manager.setFolderMoveScope(scope)
+                XCTAssertTrue(manager.beginVectorFolderMove(f.fx.folder))
+                try nudge(manager, byX: 6)
+                manager.moveBoxLifted()
+                let afterFirst = Dictionary(uniqueKeysWithValues: f.all.map { ($0, xs(f, $0)) })
+                manager.selectFolderRow(f.fx.folder)
+                manager.currentFrame = 8
+                XCTAssertNotNil(manager.vectorFloat, "a frame step keeps the folder Move box open")
+                guard let incoming = manager.vectorFloat else { return }
+                XCTAssertEqual(incoming.folder, FolderLift(folderID: f.fx.folder, scope: scope))
+                XCTAssertEqual(manager.currentLayerIndex, brushLayer, "folder identity does not borrow the brush's layer")
+                let shown = Set(incoming.parts.filter(\.isShown).map(\.celID))
+                XCTAssertEqual(shown, Set([manager.layers[f.a].cels[1].id, manager.layers[f.b].cels[0].id]),
+                               "the standing box carries the incoming drawings, including a held cel")
+                XCTAssertTrue(incoming.parts.filter(\.isShown).allSatisfy { $0.displayed?.frame == 2 })
+                XCTAssertTrue(manager.layers[f.a].cels[0].vector!.suppressedElementIDs.isEmpty,
+                              "the outgoing drawing is no longer suppressed")
+                try nudge(manager, byX: 4)
+                manager.commitVectorFloatIfNeeded()
+                XCTAssertEqual(manager.history.undoStack.count, 2, "frame navigation adds no step between the two nudges")
+                XCTAssertEqual(xs(f, "a0"), [CGFloat(12), 32, 52].map { $0 + (scope == .allFrames ? 10 : 6) })
+                XCTAssertEqual(xs(f, "a1"), [CGFloat(12), 32, 52].map { $0 + (scope == .allFrames ? 10 : 4) })
+                XCTAssertEqual(xs(f, "b0"), [22, 42, 62], "the held drawing takes each accepted nudge once")
+                XCTAssertEqual(xs(fx: f.fx, layer: f.fx.outside), [12, 32, 52])
+                let picture = try XCTUnwrap(manager.makeRenderRequest(atFrame: 8, includeBackground: false).flatMap(Compositor.composite))
+                let after = try XCTUnwrap(CanvasFixture.rgbaBytes(picture))
+                XCTAssertEqual(after[(16 * picture.width + 12) * 4 + 3], 0, "incoming ink left its old edge")
+                XCTAssertGreaterThan(after[(16 * picture.width + 56) * 4 + 3], 200, "incoming ink follows the second drag")
+                XCTAssertGreaterThan(after[(52 * picture.width + 12) * 4 + 3], 200, "outside ink is still drawn in place")
+                let final = Dictionary(uniqueKeysWithValues: f.all.map { ($0, xs(f, $0)) })
+                manager.undo()
+                for name in f.all { XCTAssertEqual(xs(f, name), afterFirst[name]) }
+                manager.redo()
+                for name in f.all { XCTAssertEqual(xs(f, name), final[name]) }
+                XCTAssertEqual(try CanvasFixture.rgbaBytes(try XCTUnwrap(manager.makeRenderRequest(atFrame: 8, includeBackground: false).flatMap(Compositor.composite))), after)
+            }
+        }
+    }
+
+    func testFolderFrameStepWaitsForTheHeldPointerAndAnExplicitLayerPickPutsTheBoxDown() throws {
+        let f = try frames()
+        let manager = f.manager
+        XCTAssertTrue(manager.beginVectorFolderMove(f.fx.folder))
+        manager.moveBoxTouched()
+        manager.currentFrame = 2
+        XCTAssertEqual(manager.currentFrame, 0, "an owed pointer nudge keeps its accepted frame")
+        XCTAssertNotNil(manager.vectorFloat)
+        try nudge(manager, byX: 3)
+        manager.moveBoxLifted()
+        manager.currentFrame = 2
+        XCTAssertEqual(manager.currentFrame, 2)
+        XCTAssertEqual(manager.vectorFloat?.folder?.folderID, f.fx.folder)
+        manager.selectFolderRow(f.fx.folder)
+        XCTAssertNotNil(manager.vectorFloat, "a graph-band folder pick is not a Move target change")
+        manager.selectLayer(manager.currentLayerIndex)
+        XCTAssertNil(manager.vectorFloat, "an explicit layer pick settles even when the brush index is unchanged")
+        XCTAssertTrue(f.all.allSatisfy { name in
+            let at = f.cels[name]!
+            return manager.layers[at.layer].cels[at.cel].vector!.suppressedElementIDs.isEmpty
+        })
+        XCTAssertEqual(manager.history.undoStack.count, 1)
+    }
+
+    @MainActor
     func testRepeatedFolderAllFramesShowsSourcePartsButKeepsNonshownNearestFrameAndNoKeyContract() throws {
         let previous = Compositor.backend
         Compositor.backend = .coreGraphics

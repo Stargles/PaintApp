@@ -740,6 +740,10 @@ extension CanvasManager {
     /// held frame, a grade, a channel or a flat colour under the finger (TODO (179)). **Only that live
     /// picture passes it**:
     /// the baker never does, so a bake is always the document's.
+    ///
+    /// `resolvedWalk` lets an edit use the exact displayed context it already accepted. A
+    /// selected-source projection can require its hidden leaf without changing visibility in the
+    /// document or forcing an escaped grade on. Masks still resolve from the complete walk.
     @MainActor
     func makeFrameRecipe(atFrame frame: Int,
                          quality: RenderQuality = .full,
@@ -747,10 +751,12 @@ extension CanvasManager {
                          sizing: RenderSizing = .native,
                          holding held: HeldEdit? = nil,
                          liveDisplay: [UUID: PixelOps.CelDisplay] = [:],
-                         preparing cels: [UUID: Cel] = [:]) -> FrameRecipe? {
+                         preparing cels: [UUID: Cel] = [:],
+                         resolving resolvedWalk: RenderWalk? = nil,
+                         including requiredLayerIndices: Set<Int> = []) -> FrameRecipe? {
         guard let canvasSize, canvasSize.width > 0, canvasSize.height > 0 else { return nil }
 
-        let walk = renderTreeAndPoses(atFrame: frame, holding: held)
+        let walk = resolvedWalk ?? renderTreeAndPoses(atFrame: frame, holding: held)
         let (poses, frames) = (walk.poses, walk.frames)
         var tree = walk.tree
         let renderSize: CGSize
@@ -777,7 +783,7 @@ extension CanvasManager {
         return FrameRecipe(
             tree: tree,
             leaves: leafSnapshots(atFrame: frame, quality: quality, poses: poses, frames: frames,
-                                  alsoIncluding: maskedLayerIndices(in: maskStacks), holding: held,
+                                  alsoIncluding: maskedLayerIndices(in: maskStacks).union(requiredLayerIndices), holding: held,
                                   liveDisplay: liveDisplay, celOverrides: cels),
             maskStacks: maskStacks,
             frame: frame,
@@ -1379,7 +1385,7 @@ extension CanvasManager {
     private func leafSnapshots(atFrame frame: Int, quality: RenderQuality,
                                poses: [Int: PoseMap] = [:],
                                frames: [Int: Int] = [:],
-                               alsoIncluding maskSourceLayers: Set<Int> = [],
+                               alsoIncluding includedLayerIndices: Set<Int> = [],
                                holding held: HeldEdit? = nil,
                                liveDisplay: [UUID: PixelOps.CelDisplay] = [:],
                                celOverrides: [UUID: Cel] = [:]) -> [LeafSnapshot?] {
@@ -1436,7 +1442,7 @@ extension CanvasManager {
             // What stays shared is the pair above it: no block at this frame, or hidden and not
             // wanted for its alpha, means the leaf contributes nothing of *either* sort, and nil for
             // both is exactly right.
-            guard layer.isVisible || maskSourceLayers.contains(index),
+            guard layer.isVisible || includedLayerIndices.contains(index),
                   let celIndex = activeCelIndex(inLayer: index, atFrame: leafFrame)
             else { continue }
             let cel = celOverrides[layer.cels[celIndex].id] ?? layer.cels[celIndex]

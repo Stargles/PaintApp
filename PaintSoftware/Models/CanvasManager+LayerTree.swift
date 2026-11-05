@@ -369,6 +369,40 @@ extension CanvasManager {
         }
     }
 
+    /// An independent raster selection copy sits above its source's root entry and every root
+    /// Repeat above that entry. It therefore keeps document time without splitting a folder span.
+    /// The same placement names the complete root entries escaped by that copy, so its source
+    /// projection and its destination cannot choose different boundaries. Source time/pose still
+    /// come from RenderWalk; this owner does no remap or rendering.
+    func independentRasterCopyPlacement(above sourceIndex: Int) -> (index: Int, escapedRootIDs: Set<UUID>) {
+        let root = containerEntries(inContainer: nil)
+        var index = layers.count
+        for entry in root {
+            switch entry {
+            case .layer(let layerIndex) where layerIndex == sourceIndex:
+                index = insertionIndex(above: .layer(layers[layerIndex].id))
+            case .folder(let folder) where descendantLayerIndices(ofFolder: folder.id).contains(sourceIndex):
+                index = insertionIndex(above: .folder(folder.id))
+            default: continue
+            }
+            break
+        }
+        for case .layer(let layerIndex) in root
+            where layerIndex >= index && layers[layerIndex].transform?.repeats == true {
+            index = max(index, insertionIndex(above: .layer(layers[layerIndex].id)))
+        }
+        let escapedRootIDs = Set(root.compactMap { entry -> UUID? in
+            switch entry {
+            case .layer(let layerIndex):
+                return layerIndex < index ? layers[layerIndex].id : nil
+            case .folder(let folder):
+                guard let span = descendantSpan(ofFolder: folder.id), span.upperBound < index else { return nil }
+                return folder.id
+            }
+        })
+        return (index, escapedRootIDs)
+    }
+
     /// Pulls an insertion point into the range `container` allows, so a drop can never interleave
     /// one folder's layers with something that isn't in it (the contiguity invariant).
     private func clampInsertion(_ index: Int, into container: UUID?) -> Int {

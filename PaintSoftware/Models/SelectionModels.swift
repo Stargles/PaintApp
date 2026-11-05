@@ -840,7 +840,7 @@ extension CanvasManager {
     /// its objects live on. A held drawing keeps its Move box through a scrub: accepted movement
     /// lands at its old shown time, then the same IDs are prepared for the incoming time.
     @discardableResult
-    func handleActiveContextChanged() -> Bool {
+    func handleActiveContextChanged(fromFrame previousFrame: Int? = nil) -> Bool {
         // A still-adjustable fill or shape can't follow the user to another cel — bake both here so
         // they land as committed steps on the global history, against the cel they were drawn on,
         // before the active context moves off it.
@@ -863,16 +863,29 @@ extension CanvasManager {
         // here would keep its ids suppressed on a cel the artist has walked away from — artwork in
         // the document that renders nowhere.
         if let float = vectorFloat {
-            let part = float.parts[0]
-            let targetCelID = float.folder == nil ? shownCelID : activeCelID
-            if !(part.layerID == activeLayerID && part.celID == targetCelID) {
-                commitVectorFloatIfNeeded()
-            } else if float.folder == nil, let accepted = part.displayed, let incoming,
-                      (accepted.frame != incoming.frame
-                        || (accepted.inheritedPose ?? .identity) != (incoming.inheritedPose ?? .identity)) {
-                // A pointer still owes its old-context nudge. The overlay delivers that before
-                // moveBoxLifted asks this same transition owner again.
-                if !moveBoxIsTouched { retargetVectorFloat(to: incoming) }
+            if let folder = float.folder {
+                if let previousFrame, previousFrame != currentFrame {
+                    // A folder owns its ID/scope, not the brush layer or one child's cel. Finish
+                    // an owed pointer nudge at its accepted frame before allowing navigation.
+                    guard !moveBoxIsTouched else { return false }
+                    guard commitVectorFloatIfNeeded() else { return false }
+                    if let walk { _ = liftVectorFolderMove(folder, in: walk) }
+                } else {
+                    // Layer/structure navigation puts the folder down; graph-band picks never
+                    // enter this owner. A frame step above reuses the same folder preparer.
+                    guard commitVectorFloatIfNeeded() else { return false }
+                }
+            } else {
+                let part = float.parts[0]
+                if !(part.layerID == activeLayerID && part.celID == shownCelID) {
+                    commitVectorFloatIfNeeded()
+                } else if let accepted = part.displayed, let incoming,
+                          (accepted.frame != incoming.frame
+                            || (accepted.inheritedPose ?? .identity) != (incoming.inheritedPose ?? .identity)) {
+                    // The overlay delivers a held pointer's old-context nudge before its lift
+                    // asks this same transition owner again.
+                    if !moveBoxIsTouched { retargetVectorFloat(to: incoming) }
+                }
             }
         }
         let selectionCelID: UUID?
@@ -1400,8 +1413,9 @@ extension CanvasManager {
     static let clearPixel: UIImage = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1))
         .image { _ in }
 
-    /// Copies the current selection onto a brand-new layer above the current one, immediately
-    /// entering the same interactive move/resize/rotate state as `beginMove()`. The source layer is
+    /// Copies the current selection onto a new layer, immediately entering the same interactive
+    /// move/resize/rotate state as `beginMove()`. A raster copy escapes Repeat at the root; a vector
+    /// copy keeps the source's parent and span. The source layer is
     /// left untouched — this is a copy, not a cut.
     ///
     /// **A vector layer takes the vector arm and never falls through to the raster one** — TODO item
@@ -1426,12 +1440,31 @@ extension CanvasManager {
         guard commitAllInteractiveState() else { return }
 
         let sourceLayerIndex = currentLayerIndex
-        guard let celIndex = activeCelIndex(inLayer: sourceLayerIndex, atFrame: currentFrame) else { return }
-        let cel = layers[sourceLayerIndex].cels[celIndex]
-        // The copy is taken from what the canvas shows — the loop was drawn round that picture, which
-        // under a transformation layer is the cel carried through its pose (`beginMove`).
-        guard let shown = PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
-                                       pose: inkPose(forLayerID: layers[sourceLayerIndex].id)) else { return }
+        let sourceWalk = renderTreeAndPoses(atFrame: currentFrame)
+        guard let displayed = displayedCel(actedOnBy: selection, in: sourceWalk) else { return }
+        let cel = layers[sourceLayerIndex].cels[displayed.index]
+        guard Cel.checkedEndFrame(startFrame: currentFrame, frameCount: cel.frameCount) != nil else { return }
+        let placement = independentRasterCopyPlacement(above: sourceLayerIndex)
+        let shown: UIImage
+        if layers[sourceLayerIndex].kind == .raster {
+            let escaped = sourceWalk.tree.filter { placement.escapedRootIDs.contains($0.id) }
+            guard let contribution = escaped.copyContribution(ofLeaf: sourceLayerIndex),
+                  let recipe = makeFrameRecipe(atFrame: currentFrame, includeBackground: false,
+                                               resolving: sourceWalk, including: [sourceLayerIndex]),
+                  let image = FrameRecipe(tree: contribution, leaves: recipe.leaves,
+                                          maskStacks: recipe.maskStacks, frame: recipe.frame,
+                                          canvasSize: recipe.canvasSize, background: nil,
+                                          quality: recipe.quality).composite()
+            else { raise(.drawingSourceUnavailable); return }
+            // The selected drawing alone, through the scope this independent root copy escapes.
+            // Retained effects stay live; mask dependencies are read, never copied as siblings.
+            shown = UIImage(cgImage: image, scale: 1, orientation: .up)
+        } else {
+            let derived = celContentProvider(atFrame: displayed.frame).content(for: cel, inheriting: displayed.inheritedPose)
+            guard let tiers = PixelOps.rasterize(cel: cel, canvasSize: canvasSize,
+                                               derived: derived, pose: displayed.inheritedPose) else { return }
+            shown = tiers
+        }
         let bounds = selection.bounds.intersection(CGRect(origin: .zero, size: canvasSize))
         guard bounds.width > 0, bounds.height > 0 else { return }
 
@@ -1443,15 +1476,17 @@ extension CanvasManager {
 
         let sourceLayerID = layers[sourceLayerIndex].id
         let sourceCelID = cel.id
-        // TODO (108): the new layer's cel spans exactly the source cel it was lifted from — not
-        // `newLayerBlockLength`'s whole-scene span, which is right for a genuinely new layer with
-        // nothing to match but wrong here, where there is a source cel to match.
-        let newCel = Cel(id: UUID(), startFrame: cel.startFrame, frameCount: cel.frameCount,
+        // The independent copy starts where the artist pressed Duplicate and keeps the shown
+        // source cel's duration. Its root destination escapes the source folder and root Repeat
+        // scope; other poses/effects above that destination keep their normal layering.
+        let newCel = Cel(id: UUID(), startFrame: currentFrame, frameCount: cel.frameCount,
                          raster: .empty(size: canvasSize))
         let newLayer = Layer(id: UUID(), name: defaultLayerName(for: .raster), opacity: 1.0, isVisible: true, cels: [newCel])
-        let insertIndex = sourceLayerIndex + 1
+        let insertIndex = placement.index
         layers.insert(newLayer, at: insertIndex)
-        currentLayerIndex = insertIndex // triggers handleActiveContextChanged, but floatingPiece is still nil here
+        currentLayerIndex = insertIndex
+        let destinationWalk = renderTreeAndPoses(atFrame: currentFrame)
+        let destination = displayedCel(inLayer: insertIndex, atFrame: currentFrame, in: destinationWalk)
 
         self.selection = nil
         let duplicateLift = FloatingTransform(position: CGPoint(x: bounds.midX, y: bounds.midY),
@@ -1464,8 +1499,9 @@ extension CanvasManager {
             remainderPreview: nil,
             transform: duplicateLift, liftTransform: duplicateLift,
             mode: transformMode,
-            // The copy lands on the new layer, which is shown through its own pose (`inkPose`).
-            landingPose: inkPose(forLayerID: newLayer.id)
+            // Pull back through the destination parent once; escaped source poses stay baked
+            // in the copied pixels and retained destination poses are not applied twice.
+            landingPose: destination?.inheritedPose
         )
     }
 
@@ -2118,7 +2154,9 @@ extension CanvasManager {
     func copySelectionToPasteboard() -> Bool {
         let requested = selection
         guard commitAllInteractiveState(), let selection = requested else { return false }
-        return copiedSelectionToPasteboard(selection) != nil
+        guard let copied = preparedSelectionCopy(selection) else { return false }
+        UIPasteboard.general.image = copied.image
+        return true
     }
 
     @MainActor
@@ -2126,14 +2164,15 @@ extension CanvasManager {
     func cutSelectionToPasteboard() -> Bool {
         let requested = selection
         guard commitAllInteractiveState(), let selection = requested,
-              let copied = copiedSelectionToPasteboard(selection) else { return false }
+              let copied = preparedSelectionCopy(selection) else { return false }
         // Clipboard preparation and Clear share one shown target. Validate its captured identities
         // before the artwork write, without resolving the target at a second time.
         guard layers.indices.contains(currentLayerIndex),
               layers[currentLayerIndex].id == copied.layerID,
               layers[currentLayerIndex].cels.indices.contains(copied.shown.index),
               layers[currentLayerIndex].cels[copied.shown.index].id == copied.celID else { return false }
-        clearSelectionPixels(selection, at: copied.shown)
+        guard clearSelectionPixels(selection, at: copied.shown) else { return false }
+        UIPasteboard.general.image = copied.image
         return true
     }
 
@@ -2141,8 +2180,8 @@ extension CanvasManager {
     /// Native ink derives through cel/group and container poses; raster backing follows only its
     /// container, exactly as the normal frozen leaf does. A failed picture/crop never admits a Cut.
     @MainActor
-    private func copiedSelectionToPasteboard(_ selection: Selection)
-        -> (shown: DisplayedCel, layerID: UUID, celID: UUID)? {
+    private func preparedSelectionCopy(_ selection: Selection)
+        -> (shown: DisplayedCel, layerID: UUID, celID: UUID, image: UIImage)? {
         guard let canvasSize else { return nil }
         let walk = renderTreeAndPoses(atFrame: currentFrame)
         guard let shown = displayedCel(actedOnBy: selection, in: walk) else { return nil }
@@ -2153,11 +2192,22 @@ extension CanvasManager {
                                                 derived: derived, pose: shown.inheritedPose),
               let cropped = PixelOps.copiedSubimage(of: flattened, in: selection.path.boundingBoxOfPath)
         else { return nil }
-        UIPasteboard.general.image = cropped
-        return (shown, layerID, cel.id)
+        return (shown, layerID, cel.id, cropped)
     }
 
     // MARK: Fill / Clear (one-shot pixel edits on the current selection)
+
+    /// The shared write admission for Fill, Clear and Cut's Clear half. A generated picture keeps
+    /// its recipe; Copy is a read and deliberately does not pass through this gate.
+    private func admitSelectionContentWrite(at shown: DisplayedCel) -> Bool {
+        guard layers.indices.contains(currentLayerIndex),
+              layers[currentLayerIndex].cels.indices.contains(shown.index) else { return false }
+        guard layers[currentLayerIndex].cels[shown.index].interpolation == nil else {
+            raise(.cannotEditDerivedSelection)
+            return false
+        }
+        return true
+    }
 
     func fillSelection() {
         let requested = selection
@@ -2167,7 +2217,8 @@ extension CanvasManager {
         guard commitAllInteractiveState() else { return }
         let walk = renderTreeAndPoses(atFrame: currentFrame)
         guard let selection = requested,
-              let shown = displayedCel(actedOnBy: selection, in: walk) else { return }
+              let shown = displayedCel(actedOnBy: selection, in: walk),
+              admitSelectionContentWrite(at: shown) else { return }
         // The same add path the fill tool and Add → Rectangle take, so "Fill" means one thing
         // whichever door it arrives from: a vector layer gets an element on top of everything
         // (LASSO_FILL.md §2a's *"cover everything"*), a raster layer gets pixels.
@@ -2241,9 +2292,8 @@ extension CanvasManager {
     /// the loop is not caught, so its ink can survive inside the cleared region — and that is the
     /// owner's settled ruling of 2026-08-21 rather than something for this function to second-guess.
     ///
-    /// **No `activeCelIsInBetween` guard**, deliberately: [BUGS.md](BUGS.md) carries that hole for
-    /// this function and `fillSelection` together, and changing when either refuses is a behaviour
-    /// change nobody has put to the owner.
+    /// A linked in-between refuses through the same shown-target admission as Fill and Cut;
+    /// its hand-drawn source must be chosen explicitly. Whole-cel Clear remains a separate command.
     func clearSelectionPixels() {
         let requested = selection
         // `commitAllInteractiveState`, not `beginCanvasEdit`: a selection now outlives a Move lift
@@ -2256,9 +2306,11 @@ extension CanvasManager {
         clearSelectionPixels(selection, at: shown)
     }
 
-    /// The settled Clear body, shared with a Cut whose clipboard result already admitted this target.
-    private func clearSelectionPixels(_ selection: Selection, at shown: DisplayedCel) {
-        guard let canvasSize else { return }
+    /// The settled Clear body. A Cut publishes its prepared clipboard image only after this write
+    /// succeeds; a refused linked target or failed raster read leaves the clipboard untouched.
+    @discardableResult
+    private func clearSelectionPixels(_ selection: Selection, at shown: DisplayedCel) -> Bool {
+        guard admitSelectionContentWrite(at: shown), let canvasSize else { return false }
         let celIndex = shown.index
         let cel = layers[currentLayerIndex].cels[celIndex]
         let isVector = layers[currentLayerIndex].kind == .vector
@@ -2283,7 +2335,7 @@ extension CanvasManager {
                 // a loop full of ink is the artist's own choice doing it, and a Clear that deletes
                 // nothing and says nothing reads as a broken button (§5.24). Bare paper stays silent.
                 noteALassoThatCaughtNothing(vector: vectorCanvas, loops: loops)
-                return
+                return true
             }
             // **Filtered, in the order the split produced.** Both halves of a cut stroke replace their
             // parent *at the parent's index*, outside first, so dropping the inside ids leaves every
@@ -2315,17 +2367,18 @@ extension CanvasManager {
             // deleted them; a loop is a region and outlives what it cleared.
             if !selection.isRegion { self.selection = nil }
         } else {
-            guard let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else { return }
+            guard let base = PixelOps.rasterize(cel: cel, canvasSize: canvasSize) else { return false }
             guard case .success(let source) = PixelOps.clear(base: base,
                 path: Self.layerSpacePath(selection.path, shownThrough:
                     inkPose(ofLayerAt: currentLayerIndex, showing: shown.frame, inheriting: shown.inheritedPose)),
-                using: cel.raster.residency) else { raise(.drawingSourceUnavailable); return }
+                using: cel.raster.residency) else { raise(.drawingSourceUnavailable); return false }
             let raster = preparedRasterTexture(source: source, likeExisting: cel.raster)
             registerUndoableCelChange(layerID: layers[currentLayerIndex].id, celID: cel.id,
                                        oldRaster: cel.raster, oldBaked: cel.bakedImage,
                                        newRaster: raster,
                                        newBaked: nil, label: .clearSelection)
         }
+        return true
     }
 
     // MARK: Colour, Size and Opacity on a selection

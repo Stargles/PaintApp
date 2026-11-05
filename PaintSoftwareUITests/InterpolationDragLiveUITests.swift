@@ -38,6 +38,43 @@ final class InterpolationDragLiveUITests: PaintUITestCase {
         return (app, canvas, paperRect(in: canvas))
     }
 
+    func testSelectionFillAndClearKeepTheLinkedPictureAndTellTheArtistToChooseAHandDrawnFrame() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetGallery", "-uiTestSeedGuidedIntervals"]
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        XCTAssertEqual(app.windows.firstMatch.frame.size, CGSize(width: 1080, height: 810))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.sliders["interpolate.tSlider"].waitForExistence(timeout: 10), "a linked generated in-between is open")
+        app.buttons["timeline.onionSkinToggle"].tap()
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangle = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
+        rectangle.tap()
+        let paper = paperRect(in: canvas)
+        canvas.coordinate(withNormalizedOffset: onHost(paper, 0.1, 0.12)).press(forDuration: 0.1,
+            thenDragTo: canvas.coordinate(withNormalizedOffset: onHost(paper, 0.96, 0.72)))
+        let patch = paperPatch(canvas, paper, x: 0.22...0.93, y: 0.24...0.64)
+        func picture() -> [[UInt8]] {
+            readScreenNow(patch).map { $0.map { [$0.r, $0.g, $0.b, $0.a] } ?? [] }
+        }
+        let before = picture()
+        XCTAssertTrue(before.allSatisfy { $0.count == 4 }, "every picture probe is on screen")
+        XCTAssertGreaterThan(inked(readScreenNow(patch)), 0, "the loop contains the generated drawing")
+        for action in ["fill", "clear"] {
+            app.buttons["selectPanel.\(action)Button"].tap()
+            let notice = app.staticTexts["canvasNotice"]
+            XCTAssertTrue(notice.waitForExistence(timeout: 5), "the refused action explains what to do")
+            XCTAssertEqual(notice.label, "This frame is a linked in-between — choose a hand-drawn frame to change the selected drawing.")
+            XCTAssertEqual(picture(), before, "\(action) leaves the actual generated picture exact")
+            XCTAssertTrue(app.buttons["selectPanel.deselectButton"].isEnabled, "the same selection remains available")
+            attachScreenshot(XCUIScreen.main, "linked-selection-\(action)-refused-owner-landscape")
+        }
+        app.buttons["timeline.interpolateButton"].tap()
+        XCTAssertTrue(app.sliders["interpolate.tSlider"].waitForExistence(timeout: 5), "the generated link still exposes its Timing control")
+        attachScreenshot(XCUIScreen.main, "linked-selection-link-preserved-owner-landscape")
+    }
+
     /// **The Timing slider, dragged to its end and held: the in-between is drawn at the held `t` under the
     /// finger, with no pass a tick, and the lift is one step.** At `t` 1 the second interval's L stands on
     /// its last keyframe, whose red arm is at 0.9 of the paper — blank while `t` is 0.5. What the artist

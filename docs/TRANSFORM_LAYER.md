@@ -476,10 +476,43 @@ still owing its nudge completes before that replacement. The old drawn picture s
 hole and isolated ink are ready. Folder All Frames remains its separate geometry-only contract, with
 nonshown cels read at their nearest frame and no keys written.
 
-This does not complete the Repeat caller audit. Raster Duplicate, the remaining raw placement and channel-list navigation,
-panel-thumbnail and onion routes are mandatory follow-ups rather than approved time exceptions; the
-folder transition's existing active-layer guard and Fill/Clear's deferred derived-write hole remain
-separate recorded issues. The ghost blocks are `TimelineRepeatGhostBand`: one dashed
+**Selection Fill/Clear keep a generated link.** On a linked in-between they refuse with a visible
+notice asking for a hand-drawn frame. Cut shares that write admission and publishes its prepared
+clipboard picture only after Clear succeeds; Copy remains a read of the displayed picture. Whole-cel
+Clear keeps its separate timeline-command contract.
+
+**A folder Move follows frame steps under its accepted folder ID and scope**, even when the brush
+is on a layer outside the folder. The outgoing float settles once, then the existing folder preparer
+measures the incoming shown cels from that same render walk. A held pointer first finishes its
+accepted nudge; a frame write while it is held is refused and rolled back. An explicit layer pick
+puts the box down, including a re-pick of the brush's current layer; a graph-band folder pick does
+not. An incoming gap has no measurable box and a shown generated cel keeps the existing refusal.
+All Frames retains its nearest-frame, geometry-only, no-key contract for nonshown cels.
+
+**Raster selection Duplicate is an independent root copy at the document frame where it was
+pressed**, with the displayed source cel's duration and one insertion Undo. The source is read from
+the shared shown context. The root insertion sits above the source's complete root entry and any
+root Repeat above it, preserving folder contiguity and escaping remapped time. The selected
+source contribution is projected through its escaped ancestor wrappers and higher grades,
+including grades inside higher pass-through nodes. The original `needsOwnBuffer` decision stops
+that projection at a higher buffered/isolated scope; pruning paint never changes the scope being
+asked about. Higher projected wrappers retain their real eye state. The contribution is then
+composited by the existing FrameRecipe/Compositor/mask owners. Source/folder opacity,
+effects and masks in that escaped scope become part of the independent picture; other painted
+siblings are excluded, and complete original mask-source stacks remain dependencies. This is the
+existing per-drawing contribution meaning, not a final whole-canvas capture. Root effects retained
+above the destination remain live once. Source-side poses that are escaped are baked into the
+picture once; the new destination's inherited pose is removed at landing so retained poses above
+it are not applied twice. Hidden selected ink and its enclosing wrappers are read transiently for
+Duplicate without changing document eyes; grading leaves retain their own eye state. This
+projection is raster-only: other nonvector kinds keep their existing tier-copy admission. A relocated duration that cannot form
+a valid cel span refuses before insertion. Vector Duplicate keeps its existing same-parent,
+source-span contract; this ruling does not reparent it.
+
+These owner rulings have source implementations and tests prepared on November 4; current native
+qualification and public screenshot review remain pending. Remaining raw placement/channel-list
+navigation, panel-thumbnail and onion routes still require their recorded audit. The ghost blocks
+are `TimelineRepeatGhostBand`: one dashed
 outline over a dark wash per run of one source drawing, computed structurally
 (`repeatGhostSegments`, the layout key cannot afford a walk per frame) and pinned against the walk on
 a nested fixture.

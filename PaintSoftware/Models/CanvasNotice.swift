@@ -111,6 +111,9 @@ struct CanvasNotice: Identifiable, Equatable {
         /// The fix is to move to one of the drawn cels either side, which is a decision the artist
         /// makes at the timeline rather than a button this banner could press.
         case cannotMoveDerivedFrame
+        /// Fill, selection Clear or Cut was asked to rewrite a linked generated picture. The
+        /// recipe stays linked; the artist chooses a hand-drawn frame in the timeline instead.
+        case cannotEditDerivedSelection
         /// **A live Colour, Size, Opacity or gradient edit has no picture to show on this frame** —
         /// TODO (173). The edit's window draws the cel's ink in the layer's own space, shown through
         /// the one pose the layer carries; where an animation group's pose moves part of the cel
@@ -392,6 +395,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .nothingWhollyInside: return "Nothing is completely inside the loop — try Cut or Touching, or draw a wider loop."
         case .nothingToSubtractFrom: return "There is no selection to subtract from — switch to Add, or draw a selection first."
         case .nothingTappedToSubtractFrom: return "No tapped objects are selected to subtract from — switch to Add, or tap an object first."
+        case .cannotEditDerivedSelection: return "This frame is a linked in-between — choose a hand-drawn frame to change the selected drawing."
         case .cannotMoveDerivedFrame: return "This frame is an in-between — move the drawing on one of the keyframes either side."
         case .editShownOnRelease: return "A pose moves part of this drawing, so the change shows when you let go."
         // **Each now names the second way out as well**, and that is TODO (21)'s membership editing
@@ -520,7 +524,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .nothingTappedToSubtractFrom: return nil
         // Nor this one, and for the same reason once more: the fix is to scrub to a drawn cel, which
         // is a move on the timeline the artist can already see.
-        case .cannotMoveDerivedFrame: return nil
+        case .cannotEditDerivedSelection, .cannotMoveDerivedFrame: return nil
         // Nor this one: nothing is wrong, and the change lands on its own.
         case .editShownOnRelease: return nil
         // Nor this one. "Select the rest of the group" is a loop only the artist can draw, and the
@@ -606,6 +610,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .nothingWhollyInside: return "nothingWhollyInside"
         case .nothingToSubtractFrom: return "nothingToSubtractFrom"
         case .nothingTappedToSubtractFrom: return "nothingTappedToSubtractFrom"
+        case .cannotEditDerivedSelection: return "cannotEditDerivedSelection"
         case .cannotMoveDerivedFrame: return "cannotMoveDerivedFrame"
         case .editShownOnRelease: return "editShownOnRelease"
         case .onlyPartOfAnAnimationGroup: return "onlyPartOfAnAnimationGroup"

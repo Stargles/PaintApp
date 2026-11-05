@@ -868,6 +868,64 @@ final class TransformLayerModesUITests: PaintUITestCase {
         attachScreenshot(XCUIScreen.main, "repeat-duplicate-source-copy-restored")
     }
 
+    func testRasterDuplicateOnARepeatedFrameStaysThereAfterDoneAndOneUndoRemovesOnlyItsCopy() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        XCTAssertEqual(app.windows.firstMatch.frame.size, CGSize(width: 1080, height: 810))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        guard let (_, total) = threeDrawingsUnderARepeatOfThree(app, canvas: canvas) else { return }
+        tapBornLayer(app, blockStartingAt: 2, frame: 4)
+        openLayerPanel(app)
+        XCTAssertTrue(tapWhenHittable(app.staticTexts["layerPanel.row.0"], "the source drawing's layer options"))
+        let rasterize = app.buttons["layerOptions.rasterize"]
+        XCTAssertTrue(rasterize.waitForExistence(timeout: 5))
+        rasterize.tap()
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.isVector, false, "the public Rasterize command made the source raster")
+        closeRail(app)
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangle = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
+        rectangle.tap()
+        guard let paper = currentPaper(canvas, "repeated raster band before Duplicate") else { return }
+        dragOnCanvas(app, from: hostPoint(paper.paper, u: 0.30, v: 0.08),
+                     to: hostPoint(paper.paper, u: 0.50, v: 0.65))
+        app.buttons["selectPanel.duplicateButton"].tap()
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5))
+        let destination = app.otherElements["timeline.cel.2.0"]
+        XCTAssertTrue(destination.waitForExistence(timeout: 5), "the independent root copy is above the root Repeat")
+        XCTAssertEqual(destination.value as? String, "4,1", "the copy starts where Duplicate was pressed and keeps the one-frame source duration")
+        guard let movingPaper = currentPaper(canvas, "raster Duplicate box") else { return }
+        let box = try XCTUnwrap(settledMoveBox(app))
+        let delta = CGFloat(0.15 * (movingPaper.paper.maxX - movingPaper.paper.minX))
+        dragOnCanvas(app, from: CGVector(dx: box.midX, dy: box.midY),
+                     to: CGVector(dx: box.midX + delta, dy: box.midY))
+        app.buttons["moveBar.doneButton"].tap()
+        XCTAssertEqual(readFrameLabel(app)?.current, 5)
+        guard let donePaper = currentPaper(canvas, "raster Duplicate after Done") else { return }
+        func window(_ left: Double, _ right: Double) -> CGRect {
+            let a = hostPoint(donePaper.paper, u: left, v: 0.15)
+            let b = hostPoint(donePaper.paper, u: right, v: 0.45)
+            return CGRect(x: a.dx, y: a.dy, width: b.dx - a.dx, height: b.dy - a.dy)
+        }
+        let original = window(0.34, 0.46), copied = window(0.50, 0.60)
+        XCTAssertTrue(try repeatedInkPicture(canvas, in: original).contains(true), "the source drawing stays on the glass")
+        XCTAssertTrue(try repeatedInkPicture(canvas, in: copied).contains(true), "the independent raster copy survives Done on frame five")
+        attachScreenshot(XCUIScreen.main, "raster-repeat-duplicate-current-frame-owner-landscape")
+        scrub(app, toFrame: 1, total: total)
+        XCTAssertTrue(try repeatedInkPicture(canvas, in: original).contains(true), "the source frame remains unchanged")
+        XCTAssertFalse(try repeatedInkPicture(canvas, in: copied).contains(true), "the independent copy was not placed on its source frame")
+        scrub(app, toFrame: 4, total: total)
+        app.buttons["sideToolbar.undoButton"].tap()
+        XCTAssertFalse(destination.exists, "one Undo removes the raster copy and its landing")
+        XCTAssertTrue(try repeatedInkPicture(canvas, in: original).contains(true))
+        XCTAssertFalse(try repeatedInkPicture(canvas, in: copied).contains(true))
+        app.buttons["sideToolbar.redoButton"].tap()
+        XCTAssertEqual(destination.value as? String, "4,1")
+        XCTAssertTrue(try repeatedInkPicture(canvas, in: copied).contains(true), "Redo restores the visible current-frame copy")
+        attachScreenshot(XCUIScreen.main, "raster-repeat-duplicate-restored-owner-landscape")
+    }
+
     @MainActor
     func testRepeatedCutPastesTheSourceInkAndEachArtworkUndoReversesOneAction() throws {
         let pasteboard = UIPasteboard.general

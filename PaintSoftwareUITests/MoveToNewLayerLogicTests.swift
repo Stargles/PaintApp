@@ -218,7 +218,7 @@ final class MoveToNewLayerLogicTests: XCTestCase {
         XCTAssertTrue(manager.layers.contains { $0.id == duplicateID && $0.parentFolderID == nil })
     }
 
-    // MARK: - TODO (108): the new layer's cel matches the source cel it was lifted from
+    // MARK: - Source spans for vector transfers; pressed-frame duration for raster Duplicate
 
     /// **The owner's own example**: a source cel spanning frames 3–5 in a 12-frame scene — the new
     /// layer gets one cel at 3–5, not a cel spanning the whole scene (`newLayerBlockLength`'s old
@@ -297,8 +297,8 @@ final class MoveToNewLayerLogicTests: XCTestCase {
         XCTAssertEqual(added.cels[0].frameCount, 3, "lasts exactly as long as the source cel — frames 3–5")
     }
 
-    /// The raster arm's twin.
-    func testDuplicateOnARasterLayerAlsoSpansExactlyTheSourceCel() throws {
+    /// Raster Duplicate keeps that duration, starting at the frame where it was pressed.
+    func testRasterDuplicateStartsAtThePressedFrameAndKeepsTheSourceDuration() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         let size = CanvasFixture.canvasSize
         manager.layers[0].cels[0].raster = try CanvasFixture.rasterTexture(
@@ -315,9 +315,26 @@ final class MoveToNewLayerLogicTests: XCTestCase {
 
         let added = manager.layers[1]
         XCTAssertEqual(added.cels.count, 1, "one cel, and nothing elsewhere")
-        XCTAssertEqual(added.cels[0].startFrame, 3, "starts where the source cel started")
-        XCTAssertEqual(added.cels[0].frameCount, 3, "lasts exactly as long as the source cel — frames 3–5")
+        XCTAssertEqual(added.cels[0].startFrame, 4, "the independent copy starts where Duplicate was pressed")
+        XCTAssertEqual(added.cels[0].frameCount, 3, "keeps the source duration, now frames 4–6")
     }
+    func testRasterDuplicateRefusesAnUnrepresentableDestinationSpanBeforePublishingItsLayer() throws {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        manager.layers[0].cels[0].frameCount = Int.max
+        manager.layers[0].cels[0].raster = try CanvasFixture.rasterTexture(
+            CanvasFixture.solidImage(.red, rect: aroundLeft), size: CanvasFixture.canvasSize, strokeCount: 1)
+        manager.currentFrame = Int.max - 1
+        select(manager, aroundLeft)
+        let ids = manager.layers.map(\.id), steps = manager.history.undoStack.count
+        let raster = manager.layers[0].cels[0].raster
+        manager.beginDuplicate()
+        XCTAssertEqual(manager.layers.map(\.id), ids, "the pressed-frame span must fit before insertion")
+        XCTAssertTrue(manager.layers[0].cels[0].raster === raster)
+        XCTAssertNil(manager.floatingPiece)
+        XCTAssertEqual(manager.selection?.bounds, aroundLeft)
+        XCTAssertEqual(manager.history.undoStack.count, steps)
+    }
+
     /// Unsupported placed geometry and a below-bound composed inverse are separate refusals. Each
     /// runs through the actual command with healthy selection premises and the same state oracles.
     func testSelectionTransfersRefuseAnUnsupportedLocalPoseBeforePublishingAnyElement() throws {

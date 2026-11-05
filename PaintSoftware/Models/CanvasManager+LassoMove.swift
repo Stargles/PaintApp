@@ -254,8 +254,8 @@ struct VectorFloat {
     /// a folder's All Frames Move the cels on other frames as well** (TODO (135)), each a part with
     /// `isShown` false. The parts on the glass come first, so `parts[0]` is always one. Never empty.
     /// `parts[0]` identifies the shown cel. `handleActiveContextChanged` uses its stable IDs for the
-    /// terminal target guard; an ordinary held-cel Move prepares the same IDs when its shown time
-    /// changes, while a folder retains its separate active-layer guard.
+    /// terminal target guard for an ordinary Move and prepares those IDs when its shown time changes.
+    /// A folder owns its FolderLift ID/scope and prepares the incoming drawings on a frame step.
     var parts: [VectorFloatPart]
 
     /// The centre of the lifted content's local bounding box — the fixed point the box's transform is
@@ -896,9 +896,17 @@ extension CanvasManager {
     @discardableResult
     func beginVectorFolderMove(_ folderID: UUID) -> Bool {
         guard commitAllInteractiveState() else { return false }
+        return liftVectorFolderMove(FolderLift(folderID: folderID, scope: folderMoveScope),
+                                    in: renderTreeAndPoses(atFrame: currentFrame))
+    }
+
+    /// The folder's one preparer, shared by opening Move, changing scope and stepping frames.
+    /// Its accepted ID/scope do not depend on the layer the brush happens to target.
+    @discardableResult
+    func liftVectorFolderMove(_ lift: FolderLift, in walk: RenderWalk) -> Bool {
+        let folderID = lift.folderID
+        let scope = lift.scope
         guard folders.contains(where: { $0.id == folderID }) else { return false }
-        let scope = folderMoveScope
-        let walk = renderTreeAndPoses(atFrame: currentFrame)
         var shown: [VectorFloatPart] = []
         var elsewhere: [VectorFloatPart] = []
         var posedByShownPart: [[VectorElement]] = []
@@ -961,7 +969,7 @@ extension CanvasManager {
         }
         vectorFloat = Self.float(parts: shown + elsewhere, ink: ink, bounds: bounds,
                                  selectionBeforeLift: nil,
-                                 folder: FolderLift(folderID: folderID, scope: scope))
+                                 folder: lift)
         for part in shown {
             celContentChangedOutsideStroke(layerID: part.layerID, celID: part.celID)
         }

@@ -429,9 +429,11 @@ final class RasterResidencyLogicTests: XCTestCase {
         XCTAssertEqual(owner.usage.workingBytes, pictureBytes * 2)
         XCTAssertEqual(owner.usage.admittedBytes, pictureBytes * 5)
         XCTAssertEqual(try pixel(XCTUnwrap(pictures[2].image().get().cgImage)), [255, 0, 0, 255])
+        withExtendedLifetime(workspace) {}
         workspace = nil
         XCTAssertEqual(owner.usage.workingBytes, 0)
         XCTAssertEqual(owner.usage.reservedCheckpointBytes, pictureBytes * 2)
+        withExtendedLifetime(pictures) {}
     }
 
     func testWritingACheckpointedBufferMustReadmitItsWorkspaceBeforeChangingPixels() throws {

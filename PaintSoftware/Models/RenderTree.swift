@@ -877,7 +877,7 @@ extension Array where Element == RenderNode {
                     visit(span.upperBound)
                 }
                 for index in 0..<count {
-                    if let part = node.half(inputs: slots[index]) { out[index].append(part) }
+                    if let part = node.half(inputs: slots[index], visibility: node.isVisible) { out[index].append(part) }
                 }
             }
         }
@@ -926,6 +926,36 @@ extension Array where Element == RenderNode {
         }
     }
 
+    /// The selected drawing's contribution through this scope: its own leaf, its enclosing
+    /// wrappers and the higher grades acting on it, including grades inside higher pass-through
+    /// nodes. Other paint is not part of the drawing.
+    ///
+    /// This is the same projection seam as a band cut, with the node's operator and every original
+    /// input slot retained by `half`. An unrelated slot is empty, not moved to another position.
+    /// Mask stacks remain the recipe's full source stacks, so a clip may still read outside this
+    /// projection. Only the selected leaf and its enclosing wrappers are made visible: Duplicate
+    /// already admits hidden source ink, while a grading leaf keeps its own eye state.
+    func copyContribution(ofLeaf layerIndex: Int) -> [RenderNode]? {
+        var result: [RenderNode]?
+        for node in self {
+            if result != nil {
+                if let grade = node.copyBackdropGrade { result?.append(grade) }
+                continue
+            }
+            switch node.content {
+            case .leaf(let index):
+                if index == layerIndex { result = [node.ignoringVisibility] }
+            case .node(_, let inputs):
+                let projected = inputs.map { $0.copyContribution(ofLeaf: layerIndex) }
+                guard projected.contains(where: { $0 != nil }) else { continue }
+                if let part = node.half(inputs: projected.map { $0 ?? [] }, visibility: true) {
+                    result = [part]
+                }
+            }
+        }
+        return result
+    }
+
     /// The tree pruned to everything strictly below, and strictly above, one leaf in evaluation
     /// order — `cut(around:)` with one run of one leaf, the stroke's sandwich. Nil when `layerIndex`
     /// is not a leaf anywhere in this tree.
@@ -936,15 +966,30 @@ extension Array where Element == RenderNode {
 
 extension RenderNode {
 
+    /// Grades this higher entry can apply to an already-drawn outer backdrop. The original node's
+    /// buffer decision is authoritative: pruning its paint must not turn an isolated/buffered
+    /// scope into a pass-through one. Higher wrappers keep their real eyes; only the selected-source
+    /// path in `copyContribution` reads hidden ink through visible projected wrappers.
+    fileprivate var copyBackdropGrade: RenderNode? {
+        switch content {
+        case .leaf:
+            return effect != nil ? self : nil
+        case .node(_, let inputs):
+            guard !needsOwnBuffer else { return nil }
+            return half(inputs: inputs.map { $0.compactMap(\.copyBackdropGrade) }, visibility: isVisible)
+        }
+    }
+
     /// This node with its inputs replaced by one band of a cut, or nil if that band holds nothing
-    /// at all — see `cut(around:)`, which is the only caller and carries the reasoning.
+    /// at all. Band cuts retain the node's visibility; the selected-source copy projection reads
+    /// its accepted hidden ink through visible wrappers without changing document visibility.
     ///
     /// "Nothing at all" is every slot being empty, not the band being leafless: a band that still
     /// contains an empty folder contains something the derivation put there deliberately.
-    fileprivate func half(inputs: [[RenderNode]]) -> RenderNode? {
+    fileprivate func half(inputs: [[RenderNode]], visibility: Bool) -> RenderNode? {
         guard case .node(let op, _) = content, inputs.contains(where: { !$0.isEmpty }) else { return nil }
         return RenderNode(id: id, content: .node(op: op, inputs: inputs),
-                          opacity: opacity, isVisible: isVisible,
+                          opacity: opacity, isVisible: visibility,
                           blendMode: blendMode, isIsolated: isIsolated, masks: masks, effect: effect)
     }
 }

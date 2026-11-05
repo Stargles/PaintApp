@@ -309,6 +309,13 @@ has a vector arm.
 | a folder's Move (TODO (71), 2026-09-17) | `CanvasManager.beginVectorFolderMove` from `FolderOptionsPanel`'s Move row: every vector layer in the folder, at any depth, lifted whole into **one** `VectorFloat` — one `VectorFloatPart` per layer, one box measured over all of them — so the drag, the knobs, Mirror, Reset, the bake and the per-nudge undo step are this menu's own, and what it writes is geometry. The folder's own container pose, which this row used to raise, is deleted whole |
 | which cels a folder's Move carries (TODO (135), 2026-10-02) | `CanvasManager.folderMoveScope`, chosen by the **This Cel / All Frames** picker on the bar under a folder's box (`setFolderMoveScope`; session-lived beside Keep Stroke Width, default This Cel). Under All Frames every other cel of every vector layer in the folder joins the same float as a `VectorFloatPart` with `isShown == false`: it takes each nudge's map in the same loop and the same undo step, and is **not** suppressed, drawn in the preview or measured into the box, so the preview stays the current frame's picture. A cel is one part however many frames it spans; a derived in-between is not a part; transformation, value and effect layers hold no ink. **Every cel is lifted at the frame of it nearest the playhead** (the playhead itself for the cel it is on), which is where its pose channels and the transformation layers above it are read, so the move lands exactly on that frame and as the pose's image of it on the cel's others. **All Frames writes no pose keys**, on any cel: a key is a pose at one frame, and `commitPoseFromFloat` reads the scope the float was lifted under. Changing the scope under a standing box bakes what has moved, as Done does, and lifts the folder again |
 
+A standing folder Move keeps its accepted folder ID/scope through a frame step. Its outgoing
+nudge settles once, then `liftVectorFolderMove` prepares the incoming shown cels from the shared
+walk; the brush's layer and the graph-band folder pick do not identify this box. A held pointer
+refuses frame navigation until its nudge is delivered. A deliberate layer pick puts the box down,
+even when the numeric brush index is unchanged. Existing empty/derived-frame lift admission and
+All Frames' nearest-frame/no-key policy remain in force.
+
 The Select-menu suppression is presentation only, and that is what keeps it out of the touch
 arbitration: `CanvasTouchInputs.panel` is fed the same `activePanel` it always was, so
 `CanvasTouchOwner`'s answer is unchanged in every state — and the selection overlay was already
@@ -338,8 +345,8 @@ with the source's inside removed, as one undo step; the vector arm floats the mo
 layer as Duplicate floats its copy. Starting a selection over is the Deselect tab or a tap on the
 Select icon itself (TODO (94)), which now clears the loop as it puts the panel away.
 
-Selection Duplicate and To New Layer prepare the selected stored elements through the source
-cel/group channels at the current frame before creating the new cel. They share the existing
+Vector selection Duplicate and To New Layer prepare the selected stored elements through the source
+cel/group channels at the shown source frame before creating the new cel. They share the existing
 persistent pose bake, so textured rest-space walks survive JSON; the same parent/container and
 VectorCanvas placement still act once. The new cel keeps element IDs and document group membership,
 with no copied source tracks or baselines. After normal earlier-tool settlement, unsupported
@@ -348,6 +355,25 @@ or layer insertion. Both use one transfer reversal and
 price actual before/after source and prepared destination lists through VectorUndoCost. They are
 standalone Select-panel commands; an already-open structure/interpolation/gesture owner is refused
 before any pending tool is settled, rather than losing the payload price in a shallow snapshot.
+
+Raster selection Duplicate instead keeps its independent root destination. It starts the copied
+cel at the pressed document frame and preserves the shown source cel's duration. It inserts above
+the source's complete root entry and root Repeat scope. Its raster source picture uses the shared
+context and the existing tree projection/FrameRecipe compositor to retain only escaped grades,
+source/ancestor opacity and masks. Higher pass-through nodes contribute their grades recursively
+under their original `needsOwnBuffer` decision and real eyes; buffered higher scopes stop that
+outer-backdrop reach. Unrelated paint is excluded. Original mask stacks supply external
+and hidden mask dependencies. Retained root effects remain live once, and the picture lands through
+the new destination's inherited pose. The copy can still read selected hidden ink through transiently
+visible source/wrapper nodes, without turning on a hidden grade or changing any stored eye. Other
+nonvector kinds keep their existing tier read; vector transfer remains its own owner. Done and the raster copy's
+single insertion Undo retain that independent placement; source cels stay untouched. A relocated
+span must pass the existing checked cel-end admission before any layer is inserted.
+
+Selection Fill/Clear and Cut's Clear half refuse a linked generated in-between, keep its recipe,
+and visibly ask for a hand-drawn frame. Copy still copies the shown picture. Cut prepares that
+picture first and publishes it only after the Clear write succeeds, so a refusal preserves both the
+clipboard and artwork. Whole-cel Clear in the timeline remains a separate command.
 
 **Select ▸ Tap (TODO (147), 2026-10-02) is a fourth way to make the same `Selection`, naming objects
 instead of a region.** The path is the union of the objects' own outlines (`VectorHitTest.outline(of:)`, a

@@ -1718,7 +1718,7 @@ final class CanvasManager: ObservableObject {
     @Published var currentFrame: Int = 0 {
         didSet {
             if oldValue != currentFrame {
-                guard handleActiveContextChanged() else { currentFrame = oldValue; return }
+                guard handleActiveContextChanged(fromFrame: oldValue) else { currentFrame = oldValue; return }
                 // **After `handleActiveContextChanged`, which is what settles anything the outgoing
                 // frame was still holding** — and before the SwiftUI pass, which is the whole point:
                 // see `onTimingStrokeFrameAdvanced`. Guarded on the flag rather than on `isRecording`
@@ -3194,11 +3194,9 @@ final class CanvasManager: ObservableObject {
     /// three times. A new layer that did not span the scene would be undrawable at frames the rest of
     /// the document has.
     ///
-    /// **`SelectionModels`' duplicate/move-to-new-layer and `CanvasManager+LassoMove`'s vector twins do
-    /// not read this any more** — TODO (108). Those four each lift a *source* cel onto a new layer, and
-    /// a source cel to match is exactly the case this accessor's own doc used to lump in with "nothing
-    /// to match": they now span the source cel's own `startFrame`/`frameCount` instead, and keep this
-    /// as their fallback only for the case a source cel could not be resolved at all.
+    /// Selection transfers have a source duration to preserve instead. Vector Duplicate and To
+    /// New Layer keep the source span; independent raster Duplicate starts that duration at the
+    /// pressed document frame. None falls back to inventing a whole-scene span for a missing source.
     var newLayerBlockLength: Int {
         max(contentEndFrame, layers.isEmpty ? Self.defaultNewSceneFrameCount : 1)
     }
@@ -4405,6 +4403,8 @@ final class CanvasManager: ObservableObject {
     /// property already guards against by hand.
     func selectLayer(_ index: Int) {
         guard layers.indices.contains(index) else { return }
+        // A deliberate layer pick changes the Move target even when the brush index is unchanged.
+        if vectorFloat?.folder != nil, !commitAllInteractiveState() { return }
         if selectedFolderID != nil { selectedFolderID = nil }
         currentLayerIndex = index
     }
