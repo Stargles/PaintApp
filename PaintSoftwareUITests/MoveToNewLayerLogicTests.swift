@@ -166,6 +166,7 @@ final class MoveToNewLayerLogicTests: XCTestCase {
     }
 
 
+    @MainActor
     func testSelectionTransferCapacityUsesEachActualDestinationAndPreservesRefusedInk() throws {
         for copying in [false, true] {
             let (manager, source, vector, _, _) = vectorFixture()
@@ -276,6 +277,7 @@ final class MoveToNewLayerLogicTests: XCTestCase {
     // MARK: - Duplicate had the identical defect
 
     /// **Duplicate shared `moveSelectionToNewLayer`'s bug and got the same fix** — both arms.
+    @MainActor
     func testDuplicateOnAVectorLayerAlsoSpansExactlyTheSourceCel() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.addVectorLayer()
@@ -298,6 +300,7 @@ final class MoveToNewLayerLogicTests: XCTestCase {
     }
 
     /// Raster Duplicate keeps that duration, starting at the frame where it was pressed.
+    @MainActor
     func testRasterDuplicateStartsAtThePressedFrameAndKeepsTheSourceDuration() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         let size = CanvasFixture.canvasSize
@@ -318,6 +321,7 @@ final class MoveToNewLayerLogicTests: XCTestCase {
         XCTAssertEqual(added.cels[0].startFrame, 4, "the independent copy starts where Duplicate was pressed")
         XCTAssertEqual(added.cels[0].frameCount, 3, "keeps the source duration, now frames 4–6")
     }
+    @MainActor
     func testRasterDuplicateRefusesAnUnrepresentableDestinationSpanBeforePublishingItsLayer() throws {
         let manager = CanvasFixture.manager(layerCount: 1)
         manager.layers[0].cels[0].frameCount = Int.max
@@ -337,6 +341,7 @@ final class MoveToNewLayerLogicTests: XCTestCase {
 
     /// Unsupported placed geometry and a below-bound composed inverse are separate refusals. Each
     /// runs through the actual command with healthy selection premises and the same state oracles.
+    @MainActor
     func testSelectionTransfersRefuseAnUnsupportedLocalPoseBeforePublishingAnyElement() throws {
         for copying in [true, false] {
           for belowInverseBound in [false, true] {
@@ -395,6 +400,7 @@ final class MoveToNewLayerLogicTests: XCTestCase {
 
     /// These public commands have no enclosing production owner. Their explicit refusal is before
     /// tool settlement, so unsupported capture cannot swallow either payload price or pending ink.
+    @MainActor
     func testSelectionTransfersLeaveAnOpenOwnerAndItsPendingShapeUntouched() throws {
         for copying in [true, false] {
             for owner in 0..<3 {

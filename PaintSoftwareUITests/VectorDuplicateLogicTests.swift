@@ -64,6 +64,7 @@ final class VectorDuplicateLogicTests: XCTestCase {
     ///
     /// Red before the fix on both counts — the inserted layer was `.raster` and its cel's `vector`
     /// was nil, the stroke having been flattened into a bitmap.
+    @MainActor
     func testDuplicatingALassoedVectorSelectionProducesAVectorLayerHoldingTheGeometry() {
         let (manager, layerIndex, vector) = fixture()
         let drawn = stroke(from: CGPoint(x: 20, y: 32), to: CGPoint(x: 44, y: 32))
@@ -89,6 +90,7 @@ final class VectorDuplicateLogicTests: XCTestCase {
     /// from. The vector arm builds its copy out of `splitForLassoMove`'s return value and never
     /// assigns it back, which is the whole of how it differs from Move — this is the assertion that
     /// says so.
+    @MainActor
     func testDuplicateLeavesTheSourceLayerUntouched() {
         let (manager, layerIndex, vector) = fixture()
         let drawn = stroke(from: CGPoint(x: 20, y: 32), to: CGPoint(x: 44, y: 32))
@@ -107,6 +109,7 @@ final class VectorDuplicateLogicTests: XCTestCase {
     /// **Only what the loop caught travels.** The failure this catches is the lazy fix — copying the
     /// whole cel onto the new layer, which passes every "is it vector" reading above and is a
     /// different feature. Two strokes at opposite ends of the canvas, a loop around one.
+    @MainActor
     func testDuplicateCopiesOnlyWhatTheLoopCaught() {
         let (manager, layerIndex, vector) = fixture()
         let wanted = stroke(from: CGPoint(x: 8, y: 8), to: CGPoint(x: 16, y: 16))
@@ -134,6 +137,7 @@ final class VectorDuplicateLogicTests: XCTestCase {
     /// The raster arm lifts its copy into a floating piece so the artist can place it; the vector arm
     /// owes the same thing, or the copy lands exactly on top of the original and the button reads as
     /// having done nothing. The box is the ordinary vector float, on the *new* layer.
+    @MainActor
     func testTheDuplicateArrivesHeldInTheMoveBoxOnTheNewLayer() {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 20, y: 32), to: CGPoint(x: 44, y: 32)))
@@ -154,6 +158,7 @@ final class VectorDuplicateLogicTests: XCTestCase {
     /// Settling the box has to leave the copy on the layer. A float suppresses its ids out of the
     /// layer's own render, so a duplicate whose suppression is never cleared is a new layer that is in
     /// the saved document and draws nothing — a copy the artist cannot see and cannot get back.
+    @MainActor
     func testCommittingTheDuplicateLeavesTheCopyVisible() {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 20, y: 32), to: CGPoint(x: 44, y: 32)))
@@ -174,6 +179,7 @@ final class VectorDuplicateLogicTests: XCTestCase {
     /// **A duplicate can be taken back.** Two presses, and the second one is the layer: the first is
     /// the lift itself, which `undo()` un-happens rather than steps back from (`vectorFloat?.nudges
     /// == 0`), and the layer insertion is the step underneath it.
+    @MainActor
     func testUndoingADuplicateRemovesTheCopiedLayer() {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 20, y: 32), to: CGPoint(x: 44, y: 32)))
@@ -194,6 +200,7 @@ final class VectorDuplicateLogicTests: XCTestCase {
     /// **Enclosed** a stroke that pokes out of the loop stays put, so a loop that only covers part of
     /// the drawing catches nothing and Duplicate does nothing — rather than quietly falling through to
     /// the raster arm and rasterizing the layer, which is the failure this test is really about.
+    @MainActor
     func testEnclosedCatchingNothingDuplicatesNothingRatherThanRasterizing() {
         let (manager, layerIndex, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 4, y: 32), to: CGPoint(x: 60, y: 32)))

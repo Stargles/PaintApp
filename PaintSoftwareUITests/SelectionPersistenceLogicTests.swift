@@ -355,6 +355,7 @@ final class SelectionPersistenceLogicTests: XCTestCase {
 
     /// Decision: Duplicate consumes the selection the same way Move does — it copies the selected
     /// region into a new floating piece on a new layer.
+    @MainActor
     func testBeginDuplicateClearsSelectionAfterLiftingIt() {
         let manager = CanvasFixture.manager()
         manager.finishSelection(path: rectSelectionPath())

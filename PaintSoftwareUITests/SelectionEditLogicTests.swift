@@ -1695,7 +1695,7 @@ final class SelectionEditLogicTests: XCTestCase {
                 if sourceOnly {
                     XCTAssertTrue(manager.addCel(layerIndex: 0, startFrame: 14, frameCount: 1))
                 }
-                manager.brushColor = colour(0, 1, 0)
+                manager.brushColor = colour(0, 1, 0).color
                 manager.history.removeAll()
                 let before = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
                 let generatedPixel = try memoPixel(manager, at: CGPoint(x: 13, y: 32))

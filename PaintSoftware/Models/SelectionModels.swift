@@ -1429,6 +1429,7 @@ extension CanvasManager {
     /// and falling through on any of those would rasterize the artist's drawing at exactly the
     /// moments they are least expecting it. A refusal on a vector layer is a Duplicate that did
     /// nothing, which is `beginVectorLassoMove`'s own rule for the same loop.
+    @MainActor
     func beginDuplicate() {
         if activeLayerKind == .vector {
             beginVectorLassoDuplicate()
