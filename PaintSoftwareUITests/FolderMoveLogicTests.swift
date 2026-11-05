@@ -1,5 +1,6 @@
 import XCTest
 import CoreGraphics
+import Combine
 
 /// **A folder's Move is the Move tool over everything inside it** — TODO (71), the owner:
 /// *"Currently there is a transform move in layer folders that makes the folder function as a
@@ -380,13 +381,49 @@ final class FolderMoveLogicTests: XCTestCase {
         let manager = f.manager
         XCTAssertTrue(manager.beginVectorFolderMove(f.fx.folder))
         manager.moveBoxTouched()
+        let celIDs = manager.layers.map { $0.cels.map(\.id) }
+        let sourceOwners = try f.all.map { name in
+            let at = f.cels[name]!
+            return try XCTUnwrap(manager.layers[at.layer].cels[at.cel].vector)
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let sourceInk = try sourceOwners.map { try encoder.encode(VectorCanvasData(from: $0, imageFileNames: [:])) }
+        let suppression = sourceOwners.map(\.suppressedElementIDs)
+        let liftedIDs = manager.vectorFloat?.parts.map(\.celID)
+        var publications = 0
+        let watch = manager.objectWillChange.sink { _ in publications += 1 }
+        defer { watch.cancel() }
+        var timingFrames: [Int] = []
+        manager.timingStrokeIsLive = true
+        manager.onTimingStrokeFrameAdvanced = { [weak manager] in
+            if let manager { timingFrames.append(manager.currentFrame) }
+        }
+        defer { manager.timingStrokeIsLive = false; manager.onTimingStrokeFrameAdvanced = nil }
         manager.currentFrame = 2
         XCTAssertEqual(manager.currentFrame, 0, "an owed pointer nudge keeps its accepted frame")
         XCTAssertNotNil(manager.vectorFloat)
+        manager.currentFrame = 4
+        manager.currentFrame = 1
+        XCTAssertEqual(manager.currentFrame, 0, "each refused step keeps the accepted frame")
+        XCTAssertEqual(publications, 0, "a refused frame is never published, even transiently")
+        XCTAssertTrue(timingFrames.isEmpty, "a refused frame cannot advance a timing stroke")
+        XCTAssertEqual(manager.layers.map { $0.cels.map(\.id) }, celIDs)
+        let remainingOwners = try f.all.map { name in
+            let at = f.cels[name]!
+            return try XCTUnwrap(manager.layers[at.layer].cels[at.cel].vector)
+        }
+        XCTAssertTrue(zip(remainingOwners, sourceOwners).allSatisfy { pair in pair.0 === pair.1 }, "refusal keeps the same source owners")
+        XCTAssertEqual(try remainingOwners.map { try encoder.encode(VectorCanvasData(from: $0, imageFileNames: [:])) }, sourceInk)
+        XCTAssertEqual(remainingOwners.map(\.suppressedElementIDs), suppression, "refusal leaves the accepted source suppression exact")
+        XCTAssertEqual(manager.vectorFloat?.parts.map(\.celID), liftedIDs, "refusal keeps the accepted Move parts")
+        XCTAssertEqual(manager.history.undoStack.count, 0, "refused navigation adds no artwork step")
+        watch.cancel()
         try nudge(manager, byX: 3)
         manager.moveBoxLifted()
         manager.currentFrame = 2
         XCTAssertEqual(manager.currentFrame, 2)
+        XCTAssertEqual(timingFrames, [2], "an admitted frame advances timing once, after the accepted frame is stored")
         XCTAssertEqual(manager.vectorFloat?.folder?.folderID, f.fx.folder)
         manager.selectFolderRow(f.fx.folder)
         XCTAssertNotNil(manager.vectorFloat, "a graph-band folder pick is not a Move target change")

@@ -1697,7 +1697,8 @@ final class SelectionEditLogicTests: XCTestCase {
                 }
                 manager.brushColor = colour(0, 1, 0).color
                 manager.history.removeAll()
-                let before = try XCTUnwrap(CanvasFixture.rgbaBytes(memoPicture(manager)))
+                let beforeImage = try memoPicture(manager)
+                let before = try XCTUnwrap(CanvasFixture.rgbaBytes(beforeImage))
                 let generatedPixel = try memoPixel(manager, at: CGPoint(x: 13, y: 32))
                 XCTAssertTrue(generatedPixel[2] > 0 && generatedPixel[0] == 0 && generatedPixel[1] == 0
                               && generatedPixel[2] == generatedPixel[3],
@@ -1706,6 +1707,15 @@ final class SelectionEditLogicTests: XCTestCase {
                 let ink = try manager.layers[0].cels.compactMap(\.vector).map(selectionInk)
                 let recipe = try JSONEncoder().encode(manager.layers[0].cels[0].interpolation)
                 pasteboard.string = "keep clipboard on refused linked edit"
+                let beforeFrame = manager.currentFrame, beforeLayer = manager.currentLayerIndex
+                let beforeWalk = manager.renderTreeAndPoses(atFrame: beforeFrame)
+                let beforeShown = manager.displayedCel(inLayer: beforeLayer, atFrame: beforeFrame, in: beforeWalk)
+                let beforeShownID = beforeShown.map { manager.layers[beforeLayer].cels[$0.index].id.uuidString }
+                let beforeRawID = manager.activeCelID(inLayer: beforeLayer, atFrame: beforeFrame)?.uuidString
+                let beforeSelection = manager.selection.map {
+                    ["x": Double($0.bounds.minX), "y": Double($0.bounds.minY),
+                     "width": Double($0.bounds.width), "height": Double($0.bounds.height)]
+                }
                 switch action {
                 case "Fill": manager.fillSelection()
                 case "Clear": manager.clearSelectionPixels()
@@ -1713,10 +1723,83 @@ final class SelectionEditLogicTests: XCTestCase {
                 }
                 XCTAssertEqual(manager.notice?.kind, .cannotEditDerivedSelection,
                                "the artist is told to choose a hand-drawn frame")
-                XCTAssertEqual(try CanvasFixture.rgbaBytes(memoPicture(manager)), before,
+                let afterImage = try memoPicture(manager)
+                let afterRGBA = CanvasFixture.rgbaBytes(afterImage)
+                XCTAssertEqual(afterRGBA, before,
                                "refusing \(action) leaves the generated drawing exact")
-                XCTAssertEqual(try JSONEncoder().encode(manager.layers[0].cels[0].interpolation), recipe,
+                let afterRecipe = try JSONEncoder().encode(manager.layers[0].cels[0].interpolation)
+                XCTAssertEqual(afterRecipe, recipe,
                                "the generated link and all its settings survive")
+                let beforeObject = try JSONSerialization.jsonObject(with: recipe, options: .fragmentsAllowed)
+                let afterObject = try JSONSerialization.jsonObject(with: afterRecipe, options: .fragmentsAllowed)
+                let beforeCanonical = try JSONSerialization.data(withJSONObject: beforeObject,
+                    options: [.sortedKeys, .fragmentsAllowed])
+                let afterCanonical = try JSONSerialization.data(withJSONObject: afterObject,
+                    options: [.sortedKeys, .fragmentsAllowed])
+                let afterWalk = manager.renderTreeAndPoses(atFrame: manager.currentFrame)
+                let afterShown = manager.displayedCel(inLayer: manager.currentLayerIndex,
+                    atFrame: manager.currentFrame, in: afterWalk)
+                let afterSelection = manager.selection.map {
+                    ["x": Double($0.bounds.minX), "y": Double($0.bounds.minY),
+                     "width": Double($0.bounds.width), "height": Double($0.bounds.height)]
+                }
+                var diagnostic: [String: Any] = [
+                    "sourceOnly": sourceOnly, "action": action,
+                    "beforeFrame": beforeFrame, "afterFrame": manager.currentFrame,
+                    "beforeLayerIndex": beforeLayer, "afterLayerIndex": manager.currentLayerIndex,
+                    "beforeDisplayedFrame": beforeShown.map { $0.frame as Any } ?? NSNull(),
+                    "afterDisplayedFrame": afterShown.map { $0.frame as Any } ?? NSNull(),
+                    "beforeDisplayedCelIndex": beforeShown.map { $0.index as Any } ?? NSNull(),
+                    "afterDisplayedCelIndex": afterShown.map { $0.index as Any } ?? NSNull(),
+                    "beforeDisplayedCelID": beforeShownID.map { $0 as Any } ?? NSNull(),
+                    "afterDisplayedCelID": afterShown.map { manager.layers[manager.currentLayerIndex].cels[$0.index].id.uuidString as Any } ?? NSNull(),
+                    "beforeRawCelID": beforeRawID.map { $0 as Any } ?? NSNull(),
+                    "afterRawCelID": manager.activeCelID(inLayer: manager.currentLayerIndex, atFrame: manager.currentFrame).map { $0.uuidString as Any } ?? NSNull(),
+                    "beforeSelection": beforeSelection.map { $0 as Any } ?? NSNull(),
+                    "afterSelection": afterSelection.map { $0 as Any } ?? NSNull(),
+                    "beforeCelIDs": ids.map(\.uuidString),
+                    "afterCelIDs": manager.layers[0].cels.map { $0.id.uuidString },
+                    "recipeBeforeRawBase64": recipe.base64EncodedString(),
+                    "recipeAfterRawBase64": afterRecipe.base64EncodedString(),
+                    "recipeBeforeBytes": recipe.count, "recipeAfterBytes": afterRecipe.count,
+                    "recipeBeforeDecoded": beforeObject, "recipeAfterDecoded": afterObject,
+                    "recipeBeforeCanonicalBase64": beforeCanonical.base64EncodedString(),
+                    "recipeAfterCanonicalBase64": afterCanonical.base64EncodedString(),
+                    "rawRecipeEqual": recipe == afterRecipe,
+                    "canonicalRecipeEqual": beforeCanonical == afterCanonical,
+                    "originalGeneratedPixelOperand": generatedPixel,
+                    "historyCountAfterAction": manager.history.undoStack.count,
+                    "sourceLayerID": manager.layers[0].id.uuidString
+                ]
+                diagnostic["celsAfterAction"] = manager.layers[0].cels.map {
+                    ["id": $0.id.uuidString, "startFrame": $0.startFrame,
+                     "frameCount": $0.frameCount, "hasInterpolation": $0.interpolation != nil] as [String: Any]
+                }
+                let buffers: [(String, [UInt8]?, CGImage)] = [("before", before, beforeImage), ("after", afterRGBA, afterImage)]
+                for (phase, bytes, image) in buffers {
+                    diagnostic[phase + "Dimensions"] = [image.width, image.height]
+                    if let bytes {
+                        diagnostic[phase + "BufferSamples"] = [24, 32].map { y -> [String: Any] in
+                            let offset = (y * image.width + 13) * 4
+                            return ["x": 13, "y": y, "rgba": Array(bytes[offset..<(offset + 4)])]
+                        }
+                        let raw = XCTAttachment(data: Data(bytes), uniformTypeIdentifier: "public.data")
+                        raw.name = "linked-\(sourceOnly)-\(action)-\(phase)-rgba"
+                        raw.lifetime = .keepAlways
+                        add(raw)
+                    } else {
+                        diagnostic[phase + "BufferSamples"] = NSNull()
+                    }
+                    let picture = XCTAttachment(image: UIImage(cgImage: image))
+                    picture.name = "linked-\(sourceOnly)-\(action)-\(phase)-picture"
+                    picture.lifetime = .keepAlways
+                    add(picture)
+                }
+                let record = XCTAttachment(data: try JSONSerialization.data(withJSONObject: diagnostic, options: .sortedKeys),
+                                           uniformTypeIdentifier: "public.json")
+                record.name = "linked-\(sourceOnly)-\(action)-exact-operands"
+                record.lifetime = .keepAlways
+                add(record)
                 XCTAssertEqual(try manager.layers[0].cels.compactMap(\.vector).map(selectionInk), ink,
                                "no hidden source drawing is rewritten")
                 XCTAssertEqual(manager.layers[0].cels.map(\.id), ids)

@@ -897,13 +897,13 @@ extension CanvasManager {
     func beginVectorFolderMove(_ folderID: UUID) -> Bool {
         guard commitAllInteractiveState() else { return false }
         return liftVectorFolderMove(FolderLift(folderID: folderID, scope: folderMoveScope),
-                                    in: renderTreeAndPoses(atFrame: currentFrame))
+                                    in: renderTreeAndPoses(atFrame: currentFrame), atFrame: currentFrame)
     }
 
     /// The folder's one preparer, shared by opening Move, changing scope and stepping frames.
     /// Its accepted ID/scope do not depend on the layer the brush happens to target.
     @discardableResult
-    func liftVectorFolderMove(_ lift: FolderLift, in walk: RenderWalk) -> Bool {
+    func liftVectorFolderMove(_ lift: FolderLift, in walk: RenderWalk, atFrame documentFrame: Int) -> Bool {
         let folderID = lift.folderID
         let scope = lift.scope
         guard folders.contains(where: { $0.id == folderID }) else { return false }
@@ -912,7 +912,7 @@ extension CanvasManager {
         var posedByShownPart: [[VectorElement]] = []
         for layerIndex in descendantLayerIndices(ofFolder: folderID) where layers[layerIndex].kind == .vector {
             let layerID = layers[layerIndex].id
-            let displayed = displayedCel(inLayer: layerIndex, atFrame: currentFrame, in: walk)
+            let displayed = displayedCel(inLayer: layerIndex, atFrame: documentFrame, in: walk)
             let shownCelIndex = displayed?.index
             guard shownCelIndex.map({ layers[layerIndex].cels[$0].interpolation == nil }) ?? true else {
                 raise(.cannotMoveDerivedFrame)
@@ -933,7 +933,7 @@ extension CanvasManager {
                 let poses = (carriedDisplay.map {
                     Self.poseMaps(vector.elements, of: cel, showing: $0.frame, inheriting: $0.inheritedPose)
                 } ?? celPoseMaps(vector.elements, layerID: layerID, celID: cel.id,
-                                 atFrame: Self.frame(of: cel, nearest: currentFrame)))
+                                 atFrame: Self.frame(of: cel, nearest: documentFrame)))
                     .filter { lift.insideIDs.contains($0.key) }
                 let part = VectorFloatPart(layerID: layerID, celID: cel.id,
                                            insideIDs: lift.insideIDs,

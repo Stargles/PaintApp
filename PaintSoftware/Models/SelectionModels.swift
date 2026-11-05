@@ -840,18 +840,22 @@ extension CanvasManager {
     /// its objects live on. A held drawing keeps its Move box through a scrub: accepted movement
     /// lands at its old shown time, then the same IDs are prepared for the incoming time.
     @discardableResult
-    func handleActiveContextChanged(fromFrame previousFrame: Int? = nil) -> Bool {
+    func handleActiveContextChanged(proposingFrame proposedFrame: Int? = nil) -> Bool {
+        let incomingFrame = proposedFrame ?? currentFrame
+        // A held folder nudge belongs to its accepted frame. Refuse before any edit settlement,
+        // render preparation or publication; the public playhead has not moved.
+        if incomingFrame != currentFrame, vectorFloat?.folder != nil, moveBoxIsTouched { return false }
         // A still-adjustable fill or shape can't follow the user to another cel — bake both here so
         // they land as committed steps on the global history, against the cel they were drawn on,
         // before the active context moves off it.
         guard beginCanvasEdit() else { return false }
         let activeLayerID = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
-        let activeCelID = self.activeCelID(inLayer: currentLayerIndex, atFrame: currentFrame)
+        let activeCelID = self.activeCelID(inLayer: currentLayerIndex, atFrame: incomingFrame)
         // One transient walk for every displayed-context consumer in this transition. Container and
         // effect boxes retain their document-time target contract.
         let walk = (vectorFloat != nil || floatingPiece?.kind == .move || selection?.objects != nil || selectionEdit != nil)
-            ? renderTreeAndPoses(atFrame: currentFrame) : nil
-        let incoming = walk.flatMap { displayedCel(inLayer: currentLayerIndex, atFrame: currentFrame, in: $0) }
+            ? renderTreeAndPoses(atFrame: incomingFrame) : nil
+        let incoming = walk.flatMap { displayedCel(inLayer: currentLayerIndex, atFrame: incomingFrame, in: $0) }
         let shownCelID = incoming.map { layers[currentLayerIndex].cels[$0.index].id }
         if let piece = floatingPiece {
             let celID = piece.kind == .move ? shownCelID : activeCelID
@@ -864,12 +868,11 @@ extension CanvasManager {
         // the document that renders nowhere.
         if let float = vectorFloat {
             if let folder = float.folder {
-                if let previousFrame, previousFrame != currentFrame {
+                if incomingFrame != currentFrame {
                     // A folder owns its ID/scope, not the brush layer or one child's cel. Finish
                     // an owed pointer nudge at its accepted frame before allowing navigation.
-                    guard !moveBoxIsTouched else { return false }
                     guard commitVectorFloatIfNeeded() else { return false }
-                    if let walk { _ = liftVectorFolderMove(folder, in: walk) }
+                    if let walk { _ = liftVectorFolderMove(folder, in: walk, atFrame: incomingFrame) }
                 } else {
                     // Layer/structure navigation puts the folder down; graph-band picks never
                     // enter this owner. A frame step above reuses the same folder preparer.
@@ -905,7 +908,7 @@ extension CanvasManager {
             cancelSelectionEdit()
         }
         // **Render-cache eviction used to happen here and deliberately does not any more.**
-        // `currentFrame.didSet` calls this, so `evictDistantVectorRenderCaches` ran on every playback
+        // `currentFrame`'s setter calls this, so `evictDistantVectorRenderCaches` ran on every playback
         // tick — counting every vector cel in the document and then walking them all again taking
         // each canvas's lock, MEASURED at 0.154 ms a tick on 300 cels (RENDER.md §5 stage 7). It is
         // `VectorRenderCache` now, driven by a canvas memoizing a render rather than by the playhead

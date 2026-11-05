@@ -1665,7 +1665,7 @@ final class CanvasManager: ObservableObject {
     /// (`CanvasView` calls `applySandwichPresentationNow` on each). Publishing it would add a second
     /// pass for a value the first one already carries. `isSandwichStrokeLive` on the coordinator is
     /// the shipped precedent for exactly this shape, and this flag is here rather than beside it
-    /// because two things in the *model* read it — the playhead's own `didSet`, and
+    /// because two things in the *model* read it — the admitted playhead change, and
     /// `canvasInteractionBegan`.
     var timingStrokeIsLive = false
 
@@ -1715,19 +1715,24 @@ final class CanvasManager: ObservableObject {
         fps = wanted
         return fps != before
     }
-    @Published var currentFrame: Int = 0 {
-        didSet {
-            if oldValue != currentFrame {
-                guard handleActiveContextChanged(fromFrame: oldValue) else { currentFrame = oldValue; return }
-                // **After `handleActiveContextChanged`, which is what settles anything the outgoing
-                // frame was still holding** — and before the SwiftUI pass, which is the whole point:
-                // see `onTimingStrokeFrameAdvanced`. Guarded on the flag rather than on `isRecording`
-                // so an ordinary take driving a slider pays one `Bool` read per frame and nothing else.
-                if timingStrokeIsLive { onTimingStrokeFrameAdvanced?() }
-                ActionRecorder.ifRecording { $0.model("currentFrame", String(currentFrame)) }
+    /// The accepted document frame. Admission runs against a proposed value before publishing it;
+    /// outgoing edits still see their accepted time while the shared transition prepares incoming ink.
+    var currentFrame: Int {
+        get { acceptedFrame }
+        set {
+            let previousFrame = acceptedFrame
+            if newValue != previousFrame {
+                guard handleActiveContextChanged(proposingFrame: newValue) else { return }
             }
+            acceptedFrame = newValue
+            guard previousFrame != newValue else { return }
+            // The outgoing edit has settled. Publish the accepted frame before timing cuts the
+            // live stroke, then record the action.
+            if timingStrokeIsLive { onTimingStrokeFrameAdvanced?() }
+            ActionRecorder.ifRecording { $0.model("currentFrame", String(currentFrame)) }
         }
     }
+    @Published private var acceptedFrame: Int = 0
     @Published var isOnionSkinEnabled: Bool = true
 
     /// **Whether a ghost should be on screen at this instant** — the artist's toggle, and the one
