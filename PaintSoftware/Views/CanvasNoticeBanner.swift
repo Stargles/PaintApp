@@ -85,7 +85,7 @@ struct CanvasNoticeBanner: View {
         case .animationGroupNotAlone: return "lasso"
         // The timeline's own glyph: the message is about which frame the artist is standing on, and
         // the fix is a scrub rather than anything on the canvas.
-        case .cannotMoveDerivedFrame: return "film"
+        case .cannotMoveDerivedFrame, .cannotEditDerivedSelection: return "film"
         // The timeline's glyph again: the frame the artist is standing on is why the picture waits.
         case .editShownOnRelease: return "film"
         // **The timeline's glyph rather than the lasso's, and that is the message itself.** Both of
