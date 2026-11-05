@@ -596,6 +596,7 @@ final class TextSessionUITests: PaintUITestCase {
         XCTAssertTrue(undo.isEnabled, "the real edit creates a document Undo")
         attachScreenshot(XCUIScreen.main, "text-autosize-04-real-edit-drawn")
         undo.tap()
+        _ = app.staticTexts["canvasNotice"].waitForNonExistence(timeout: 5)
         XCTAssertTrue(try picture() == before, "one Undo restores the original cold-opened glyph picture")
         XCTAssertFalse(undo.isEnabled, "the real edit is exactly one step; unchanged editing left no hidden step")
         attachScreenshot(XCUIScreen.main, "text-autosize-05-real-edit-undone")
