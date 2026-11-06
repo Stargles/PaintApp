@@ -761,7 +761,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        guard let (_, total) = threeDrawingsUnderARepeatOfThree(app, canvas: canvas) else { return }
+        guard threeDrawingsUnderARepeatOfThree(app, canvas: canvas) != nil else { return }
         tapBornLayer(app, blockStartingAt: 2, frame: 4)
         app.buttons["toolbar.selectButton"].tap()
         let rectangle = app.buttons["selectPanel.mode.rectangle"]
