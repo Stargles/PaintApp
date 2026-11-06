@@ -126,6 +126,11 @@ final class SelectPanelEditDisclosureUITests: PaintUITestCase {
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5), "Select offers a rectangle")
         rectangle.tap()
         dragOnCanvas(app, from: at(0.10, 0.15), to: at(0.42, 0.29))
+        // Expose the paper outside the loop so pixel probes read artwork instead of the hatch.
+        let allowOutside = app.buttons["selectPanel.allowOutsideToggle"]
+        XCTAssertTrue(allowOutside.waitForExistence(timeout: 5), "Select exposes Paint Outside Selection")
+        if !allowOutside.isSelected { allowOutside.tap() }
+        XCTAssertTrue(allowOutside.isSelected, "Paint Outside Selection exposes the original line's paper")
         let copy = app.buttons["selectPanel.copyButton"]
         let duplicate = app.buttons["selectPanel.duplicateButton"]
         XCTAssertTrue(copy.waitForExistence(timeout: 5), "Copy is exposed in Select")
@@ -166,6 +171,7 @@ final class SelectPanelEditDisclosureUITests: PaintUITestCase {
         XCTAssertTrue(size.isEnabled, "the pasted line is editable vector ink")
         let abovePaste = at(0.64, 0.22 - 0.008), aboveSource = at(0.26, 0.22 - 0.008)
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: abovePaste)), "the pasted line is initially thin")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: aboveSource)), "the original line is initially thin")
         adjustSlider(size, to: 0.95, tolerance: 0.04)
         XCTAssertNotNil(waitForPixel(canvas, at: abovePaste, matches: { isRed($0) }), "widening the pasted stroke changes its drawn edge")
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: aboveSource)), "the original line's width is unchanged")
