@@ -558,6 +558,10 @@ final class TransformLayerModesUITests: PaintUITestCase {
     /// drawn at and the document's frame count, with the rail closed and the playhead on frame 3.
     private func threeDrawingsUnderARepeatOfThree(_ app: XCUIApplication, canvas: XCUIElement, bandRow: Double = 0.3)
         -> (columns: [Double], total: Int)? {
+        let onion = app.buttons["timeline.onionSkinToggle"]
+        XCTAssertTrue(onion.waitForExistence(timeout: 5))
+        if onion.value as? String == "on" { onion.tap() }
+        XCTAssertEqual(onion.value as? String, "off", "the pictures measure current artwork without neighbouring ghosts")
         guard let total = readFrameLabel(app)?.total else {
             XCTFail("No frame label")
             return nil
@@ -762,6 +766,9 @@ final class TransformLayerModesUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         guard threeDrawingsUnderARepeatOfThree(app, canvas: canvas) != nil else { return }
+        let originalLayerNames = (0..<2).map { app.staticTexts["timeline.layerName.\($0)"].label }
+        let originalRepeat = readCel(app, layerIndex: 1, celIndex: 0)
+        let originalDrawings = (0..<3).compactMap { readCel(app, layerIndex: 0, celIndex: $0) }
         tapBornLayer(app, blockStartingAt: 2, frame: 4)
         app.buttons["toolbar.selectButton"].tap()
         let rectangle = app.buttons["selectPanel.mode.rectangle"]
@@ -798,7 +805,19 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertFalse(try repeatedInkPicture(canvas, in: copyWindow).contains(true), "first Undo reverses the nudge")
         XCTAssertTrue(try repeatedInkPicture(canvas, in: originalWindow).contains(true))
         app.buttons["sideToolbar.undoButton"].tap()
-        XCTAssertFalse(destination.exists, "second Undo removes the copied layer")
+        let thirdLayerGone = app.staticTexts["timeline.layerName.2"].waitForNonExistence(timeout: 5)
+        let restoredLayerNames = (0..<2).map { app.staticTexts["timeline.layerName.\($0)"].label }
+        let restoredRepeat = readCel(app, layerIndex: 1, celIndex: 0)
+        let repeatRestored = originalRepeat.map {
+            restoredRepeat?.start == $0.start && restoredRepeat?.length == $0.length
+        } ?? false
+        let restoredDrawings = (0..<3).compactMap { readCel(app, layerIndex: 0, celIndex: $0) }
+        XCTAssertTrue(thirdLayerGone && originalLayerNames.allSatisfy { !$0.isEmpty }
+            && restoredLayerNames == originalLayerNames && repeatRestored
+            && originalDrawings.count == 3 && restoredDrawings.count == 3
+            && zip(originalDrawings, restoredDrawings).allSatisfy {
+                $0.0.start == $0.1.start && $0.0.length == $0.1.length
+            }, "second Undo removes the copied layer and restores the original layer names, Repeat span and source blocks")
         XCTAssertTrue(try repeatedInkPicture(canvas, in: originalWindow).contains(true), "source survives both Undos")
         app.buttons["sideToolbar.redoButton"].tap()
         app.buttons["sideToolbar.redoButton"].tap()
@@ -924,8 +943,10 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertTrue(pasted.contains(true), "Paste draws the actual band copied by Cut, rather than an empty raw drawing")
         attachScreenshot(XCUIScreen.main, "repeat-clipboard-2-actual-source-pasted")
         app.buttons["sideToolbar.undoButton"].tap()
+        _ = app.staticTexts["canvasNotice"].waitForNonExistence(timeout: 5)
         XCTAssertFalse(try repeatedInkPicture(canvas, in: pastedWindow).contains(true), "one Undo removes only the pasted picture")
         app.buttons["sideToolbar.redoButton"].tap()
+        _ = app.staticTexts["canvasNotice"].waitForNonExistence(timeout: 5)
         XCTAssertEqual(try repeatedInkPicture(canvas, in: pastedWindow), pasted)
     }
 
@@ -988,6 +1009,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertNotEqual(edited, before, "Edit changes the actual source letters")
         attachScreenshot(XCUIScreen.main, "repeat-selection-2-source-words-edited")
         scrub(app, toFrame: 2, total: total)
+        attachScreenshot(XCUIScreen.main, "repeat-selection-edited-source-frame-two")
         XCTAssertEqual(try picture(), edited, "the edit belongs to the source drawing")
         app.buttons["sideToolbar.undoButton"].tap()
         XCTAssertEqual(try picture(), before, "one Undo restores the source label")
