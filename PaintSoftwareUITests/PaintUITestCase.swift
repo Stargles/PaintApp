@@ -2326,7 +2326,8 @@ struct ScreenshotPixels {
         return read(column: column, row: row)
     }
 
-    private func read(column x: Int, row y: Int) -> RGBA {
+    /// Display-oriented integer coordinates for scanning one captured screenshot.
+    func read(column x: Int, row y: Int) -> RGBA {
         let raw: (x: Int, y: Int)
         switch orientation {
         case .up: raw = (x, y)

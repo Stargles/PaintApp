@@ -26,33 +26,20 @@ final class TransformLayerModesUITests: PaintUITestCase {
 
     // MARK: - Reading the canvas
 
-    /// The canvas' pixels as flat RGBA, top-left origin, with its size — one capture, every probe.
-    private func canvasPixels(_ canvas: XCUIElement) -> (bytes: [UInt8], width: Int, height: Int)? {
-        guard let cg = canvas.screenshot().image.cgImage else { return nil }
-        let w = cg.width, h = cg.height, bpr = w * 4
-        var buf = [UInt8](repeating: 0, count: h * bpr)
-        guard let ctx = CGContext(data: &buf, width: w, height: h, bitsPerComponent: 8,
-                                  bytesPerRow: bpr, space: CGColorSpaceCreateDeviceRGB(),
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-        else { return nil }
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
-        return (buf, w, h)
-    }
-
     /// The centre of gravity of the ink inside `region` (normalised to the host), as a normalised
     /// point — or nil when the region holds no ink. `region` keeps the probe off the letterbox
     /// margins, which read as black on this device (`paperRect` says why).
-    private func inkCentroid(_ pixels: (bytes: [UInt8], width: Int, height: Int),
+    private func inkCentroid(_ pixels: ScreenshotPixels,
                              in region: (minX: Double, maxX: Double, minY: Double, maxY: Double)) -> CGPoint? {
-        let (buf, w, h) = pixels
+        let w = pixels.width, h = pixels.height
         let x0 = max(0, Int(region.minX * Double(w))), x1 = min(w - 1, Int(region.maxX * Double(w)))
         let y0 = max(0, Int(region.minY * Double(h))), y1 = min(h - 1, Int(region.maxY * Double(h)))
         guard x1 > x0, y1 > y0 else { return nil }
         var sx = 0.0, sy = 0.0, n = 0.0
         for y in y0...y1 {
             for x in x0...x1 {
-                let o = y * w * 4 + x * 4
-                if Int(buf[o]) + Int(buf[o + 1]) + Int(buf[o + 2]) < 400 { sx += Double(x); sy += Double(y); n += 1 }
+                let pixel = pixels.read(column: x, row: y)
+                if Int(pixel.r) + Int(pixel.g) + Int(pixel.b) < 400 { sx += Double(x); sy += Double(y); n += 1 }
             }
         }
         guard n > 0 else { return nil }
@@ -75,11 +62,11 @@ final class TransformLayerModesUITests: PaintUITestCase {
     /// canvas — the canvas is centred on the host (`CanvasView.Coordinator.baseCenter`), and that is
     /// where a box turns about. A measurement that depends on the canvas's centre takes it from the
     /// host's own centre, `(0.5, 0.5)` in these coordinates, and never from this rectangle's.
-    private func paperBounds(_ pixels: (bytes: [UInt8], width: Int, height: Int)) -> (minX: Double, maxX: Double, minY: Double, maxY: Double)? {
-        let (buf, w, h) = pixels
+    private func paperBounds(_ pixels: ScreenshotPixels) -> (minX: Double, maxX: Double, minY: Double, maxY: Double)? {
+        let w = pixels.width, h = pixels.height
         func whitish(_ x: Int, _ y: Int) -> Bool {
-            let o = y * w * 4 + x * 4
-            return buf[o] > 235 && buf[o + 1] > 235 && buf[o + 2] > 235
+            let pixel = pixels.read(column: x, row: y)
+            return pixel.r > 235 && pixel.g > 235 && pixel.b > 235
         }
         // **Never along the centre row or column, because the ink is there.** A walk stops at the
         // first non-white pixel, and both tests below put ink on the centre row (and, after the
@@ -125,8 +112,8 @@ final class TransformLayerModesUITests: PaintUITestCase {
 
     /// The paper as the canvas shows it right now — a fresh capture and its walk, failing the test
     /// rather than guessing when the host's centre is not on the paper.
-    private func currentPaper(_ canvas: XCUIElement, _ what: String) -> (pixels: (bytes: [UInt8], width: Int, height: Int), paper: (minX: Double, maxX: Double, minY: Double, maxY: Double))? {
-        guard let pixels = canvasPixels(canvas), let paper = paperBounds(pixels) else {
+    private func currentPaper(_ canvas: XCUIElement, _ what: String) -> (pixels: ScreenshotPixels, paper: (minX: Double, maxX: Double, minY: Double, maxY: Double))? {
+        guard let pixels = ScreenshotPixels(canvas.screenshot().image), let paper = paperBounds(pixels) else {
             XCTFail("\(what): could not find the paper from the host's centre")
             return nil
         }
