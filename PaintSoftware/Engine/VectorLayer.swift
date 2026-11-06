@@ -839,11 +839,11 @@ struct VectorFillElement: Identifiable, Codable {
         self.init(path: path, paint: .solid(color), opacity: opacity, evenOddFill: evenOddFill)
     }
 
-    var cgPath: CGPath? {
+    nonisolated var cgPath: CGPath? {
         Self.decodePath(pathData)
     }
 
-    static func decodePath(_ data: Data) -> CGPath? {
+    nonisolated static func decodePath(_ data: Data) -> CGPath? {
         guard let bezier = try? NSKeyedUnarchiver.unarchivedObject(ofClass: UIBezierPath.self, from: data) else { return nil }
         return bezier.cgPath
     }
