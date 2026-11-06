@@ -384,6 +384,10 @@ vector layer above the stack at the current document frame, keeping the copied d
 Duplicate/To New Layer's shared insertion, priced Undo and ordinary Move box. It works after the
 source layer/document is gone. Select's Copy tab sits immediately left of Duplicate.
 
+Fresh placed pictures export their portable PNG as bounded reads of the immutable native source,
+using the existing PNG encoder reservation. Copy/Cut do not checkpoint the source, schedule a save,
+or require a later retry. The full selected PNG set is admitted before any picture capture.
+
 The clipboard also carries the interoperable picture. A generated frame, mixed raster/baked backing,
 live media or an unsupported native pose uses that complete picture only, rather than a partial
 native selection. Paste reads a supported native representation first without acquiring the image

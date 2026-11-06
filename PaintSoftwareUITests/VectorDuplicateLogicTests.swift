@@ -1,5 +1,6 @@
 import XCTest
 import UIKit
+import ImageIO
 
 /// **Select → Duplicate on a vector layer produces a vector layer** — TODO item (33), the owner's
 /// *"When I select and duplicate, it does not support vector (the duplicated selection is a raster
@@ -220,23 +221,48 @@ final class VectorDuplicateLogicTests: XCTestCase {
         let saved = pasteboard.items
         defer { pasteboard.items = saved }
         let (source, index, vector) = fixture()
-        let fill = VectorFillElement(path: CGPath(rect: CGRect(x: 6, y: 6, width: 48, height: 48), transform: nil),
+        let animationGroup = UUID(), motionGroup = UUID()
+        source.animationGroups = [AnimationGroup(id: animationGroup, displayName: "Source pose", tagColor: black())]
+        source.motionGroups = [MotionGroup(id: motionGroup, displayName: "Source correspondence", tagColor: black())]
+        var fill = VectorFillElement(path: CGPath(rect: CGRect(x: 6, y: 6, width: 48, height: 48), transform: nil),
                                      color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
-        let line = stroke(from: CGPoint(x: 12.125, y: 20.125), to: CGPoint(x: 46.125, y: 20.125), size: 6)
-        let text = VectorTextElement(recipe: TextRecipe(string: "A"),
+        var line = stroke(from: CGPoint(x: 12.125, y: 20.125), to: CGPoint(x: 46.125, y: 20.125), size: 6)
+        var text = VectorTextElement(recipe: TextRecipe(string: "A"),
                                     frame: TextFrame(origin: CGPoint(x: 8, y: 30), size: CGSize(width: 20, height: 20)))
         let raw = try XCTUnwrap(CoreGraphicsCompositor.makeImage(fromPremultiplied:
             [255, 0, 0, 255, 0, 0, 255, 255, 0, 255, 0, 255, 255, 255, 0, 255, 0, 255, 255, 255, 255, 0, 255, 255],
             width: 3, height: 2))
-        let picture = VectorImageElement(source: try CanvasFixture.placedSource(UIImage(cgImage: raw, scale: 2, orientation: .right)),
+        var admitsEncoding = true
+        let pictureOwner = RasterResidency(budgetBytes: 1024 * 1024, hasHeadroom: { _ in admitsEncoding })
+        var picture = VectorImageElement(source: try CanvasFixture.placedSource(
+            UIImage(cgImage: raw, scale: 2, orientation: .right), using: pictureOwner),
             transform: LayerTransform(position: CGPoint(x: 42, y: 40), scale: 10, rotation: 0))
+        fill.animationGroupID = animationGroup
+        line.animationGroupID = animationGroup; line.motionGroupID = motionGroup
+        text.animationGroupID = animationGroup; text.motionGroupID = motionGroup
+        picture.animationGroupID = animationGroup
         vector.restoreElements([.fill(fill), .stroke(line), .text(text), .image(picture)], changedInk: nil)
+        let sourceIDs = Set(vector.elements.map(\.id))
+        let ownedPixelsBefore = pictureOwner.usage
         let expected = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage)))
         source.layers[index].cels[0].frameCount = 3
         select(source, index, CGRect(x: 0, y: 0, width: 64, height: 64))
         XCTAssertTrue(source.copySelectionToPasteboard())
         let native = try XCTUnwrap(pasteboard.data(forPasteboardType: SelectionClipboard.type))
         XCTAssertNotNil(pasteboard.image?.cgImage, "other apps still receive a picture")
+        admitsEncoding = false
+        XCTAssertFalse(source.copySelectionToPasteboard(), "the portable PNG read must obtain its working reservation")
+        XCTAssertEqual(pasteboard.data(forPasteboardType: SelectionClipboard.type), native,
+                       "refused encoder admission preserves the complete previous clipboard")
+        admitsEncoding = true
+        XCTAssertTrue(source.cutSelectionToPasteboard(), "fresh native picture Copy and Cut both complete without a save or retry")
+        XCTAssertTrue(vector.elements.isEmpty, "Cut removes the complete selected native drawing")
+        XCTAssertEqual(pictureOwner.usage.pixelBytes, ownedPixelsBefore.pixelBytes, "portable export keeps the native pixel owner")
+        XCTAssertEqual(pictureOwner.usage.reservedCheckpointBytes, ownedPixelsBefore.reservedCheckpointBytes,
+                       "portable export does not replace native ownership with a durable PNG checkpoint")
+        XCTAssertEqual(pictureOwner.usage.workingBytes, 0, "portable export releases its encoder reservation")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pictureOwner.storage.url.path),
+                       "Copy and Cut schedule or write no source checkpoint files")
         // The original layer/document and even the fallback picture are unnecessary for native Paste.
         source.layers.removeAll()
         pasteboard.setItems([[SelectionClipboard.type: native]])
@@ -254,12 +280,25 @@ final class VectorDuplicateLogicTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(copied.render()?.cgImage))), expected,
                        "native geometry and the oriented scale-2 picture draw exactly as copied")
         XCTAssertEqual(copied.strokes.first?.samples.positions, line.samples.positions, "the pasted line is editable geometry")
+        XCTAssertTrue(sourceIDs.isDisjoint(with: Set(copied.elements.map(\.id))), "each incoming object has a fresh identity")
+        XCTAssertFalse(copied.elements.contains { $0.isMoved(by: .group(animationGroup)) }, "incoming objects leave the source animation group")
+        XCTAssertNil(copied.strokes.first?.motionGroupID, "the incoming stroke leaves the source interpolation group")
+        XCTAssertNil(copied.elements.compactMap(\.text).first?.motionGroupID, "the incoming text leaves the source interpolation group")
         XCTAssertEqual(destination.history.undoStack.count, 1, "the insertion is one priced history action")
+        let minimumRetainedBytes = 4096 + picture.source.logicalPayloadBytes + line.samples.positions.count * MemoryLayout<CGPoint>.stride
+            + fill.pathData.count + text.recipe.string.utf8.count
+        XCTAssertGreaterThanOrEqual(destination.history.currentCost, minimumRetainedBytes,
+                                    "the production Undo entry charges its retained picture, samples, fill and text")
         destination.undo()
         XCTAssertEqual(destination.layers.count, 1, "Undo removes the pasted layer")
         destination.redo()
         XCTAssertEqual(try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(destination.layers.last?.cels.first?.vector?.render()?.cgImage))), expected,
                        "Redo restores the complete ordered native drawing")
+        destination.history.maxCost = minimumRetainedBytes - 1
+        XCTAssertNil(destination.pasteSelectionFromPasteboard())
+        destination.commitVectorFloatIfNeeded()
+        XCTAssertTrue(destination.history.undoStack.isEmpty, "the actual retained-byte budget trims the oversized pasted actions")
+        XCTAssertEqual(destination.history.currentCost, 0, "trimmed actions retain no Undo payload charge")
     }
 
     @MainActor
@@ -291,7 +330,7 @@ final class VectorDuplicateLogicTests: XCTestCase {
     }
 
     @MainActor
-    func testNativeClipboardRedeemsItsOwnBrushTableAndRequiresEveryPictureResource() throws {
+    func testNativeClipboardRedeemsBrushesAndPreflightsCompletePictureResources() throws {
         let line = stroke(from: CGPoint(x: 12, y: 20), to: CGPoint(x: 44, y: 20))
         let native = try SelectionClipboard.encode([.stroke(line)], canvasSize: CanvasFixture.canvasSize, frameCount: 2)
         let envelope = try JSONDecoder().decode(SelectionClipboard.self, from: native)
@@ -316,6 +355,89 @@ final class VectorDuplicateLogicTests: XCTestCase {
         broken["images"] = [:]
         XCTAssertThrowsError(try SelectionClipboard.prepare(JSONSerialization.data(withJSONObject: broken)),
                              "a missing required picture refuses the entire native drawing")
+
+        // Valid solid 1-bit PNGs compress to a few KiB. Their real dimensions require more than
+        // 64MiB as RGBA: once in one picture, once only after summing two individually valid ones.
+        let budgetPNGs: [(width: Int, count: Int, base64: String)] = [
+            (8192, 1, """
+                iVBORw0KGgoAAAANSUhEUgAAIAAAAAgBAQAAAABt31OqAAAICklEQVR42u3BMQEAAADCoPVPbQsvoAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABOBg3hAAEZ
+                usn9AAAAAElFTkSuQmCC
+                """),
+            (4096, 2, """
+                iVBORw0KGgoAAAANSUhEUgAAEAAAAAgBAQAAAABFtRi2AAAEEUlEQVR42u3BMQEAAADCoPVPbQZ/oAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+                AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADgMArxAAERgASuAAAAAElFTkSuQmCC
+                """)
+        ]
+        for fixture in budgetPNGs {
+            let png = try XCTUnwrap(Data(base64Encoded: fixture.base64, options: .ignoreUnknownCharacters))
+            let header = try XCTUnwrap(CGImageSourceCreateWithData(png as CFData,
+                [kCGImageSourceShouldCache: false] as CFDictionary))
+            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(header, 0, nil) as? [CFString: Any])
+            XCTAssertEqual(properties[kCGImagePropertyPixelWidth] as? Int, fixture.width, "the small PNG really declares its tested width")
+            XCTAssertEqual(properties[kCGImagePropertyPixelHeight] as? Int, 2049, "the small PNG really declares its tested height")
+            XCTAssertLessThan(png.count, 4096, "compressed bytes alone cannot catch this decoded-size limit")
+            let declaredRGBABytes = fixture.width * 2049 * 4
+            XCTAssertGreaterThan(declaredRGBABytes * fixture.count, SelectionClipboard.maximumBytes,
+                                 "the complete declared picture set exceeds the decoded budget")
+            if fixture.count > 1 {
+                XCTAssertLessThan(declaredRGBABytes, SelectionClipboard.maximumBytes,
+                                  "each individual picture fits: only their accumulated pixels exceed the budget")
+            }
+            let refs = (0..<fixture.count).map { n in
+                VectorCanvasData.ImageRef(fileName: "picture-\(n).png", x: 32, y: 32, scale: 1, rotation: 0,
+                                          aspect: nil, stretchAxis: nil, mirrored: nil, animationGroupID: nil)
+            }
+            let pictureData = try JSONEncoder().encode(VectorCanvasData(elements: refs.map(VectorCanvasData.ElementData.image), transform: []))
+            let resourcePayload = SelectionClipboard(version: SelectionClipboard.currentVersion, frameCount: 1,
+                brushes: BrushTable(), drawing: pictureData,
+                images: Dictionary(uniqueKeysWithValues: refs.map { ($0.fileName, png) }), textures: [:])
+            let tinyOwner = RasterResidency(budgetBytes: 1, hasHeadroom: { _ in true })
+            XCTAssertThrowsError(try SelectionClipboard.prepare(JSONEncoder().encode(resourcePayload), using: tinyOwner)) { error in
+                XCTAssertTrue(error is SelectionClipboard.Failure,
+                              "decoded-size admission refuses the complete resource set before any native pixel admission")
+            }
+            XCTAssertEqual(tinyOwner.usage.allocations, 0, "an oversized resource set allocates no native picture buffers")
+        }
     }
 
     @MainActor

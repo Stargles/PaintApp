@@ -29,8 +29,7 @@ struct SelectionClipboard: Codable {
             case .stroke(let stroke): return .stroke(stroke.markedPrecise())
             case .image(var image):
                 guard image.source.logicalPayloadBytes <= maximumBytes else { throw Failure.tooLarge }
-                let checkpoint = try image.source.prepareForSave().get()
-                let data = try Data(contentsOf: checkpoint.backing.url, options: .mappedIfSafe)
+                let data = try image.source.portablePNGData().get()
                 try addResource(data, to: &resourceBytes)
                 try admitPNG(data, decodedBytes: &decodedBytes)
                 let name = "\(image.id.uuidString).png"
@@ -126,9 +125,10 @@ struct SelectionClipboard: Codable {
                   switch $0 { case .video, .stream: return false; default: return true }
               }), Set(drawing.images.map(\.fileName)) == Set(envelope.images.keys)
         else { throw Failure.invalid }
+        // Admit the whole selected resource set before any picture is decoded or captured.
+        for bytes in envelope.images.values { try admitPNG(bytes, decodedBytes: &decodedBytes) }
         var sources: [String: RasterSource] = [:]
         for (name, bytes) in envelope.images {
-            try admitPNG(bytes, decodedBytes: &decodedBytes)
             guard let image = UIImage(data: bytes) else { throw Failure.invalid }
             sources[name] = try RasterSource.capturePlaced(image, using: residency).get()
         }

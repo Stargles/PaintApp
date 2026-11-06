@@ -195,6 +195,21 @@ final class RasterSource: RasterResidencyCandidate {
         return result
     }
 
+    /// A portable selected picture is a read, not a save checkpoint. Borrow the immutable native
+    /// image and reserve the existing PNG encoder's workspace without changing its durable backing.
+    /// Unlike prepareForSave, this completes on the caller's queue and schedules no package work.
+    func portablePNGData() -> Result<Data, RasterResidency.Failure> {
+        resolveImage().flatMap { image in
+            ProjectStore.RasterBacking.admitCheckpoint(image, using: residency, excluding: [residencyID]).flatMap { encoder in
+                defer { withExtendedLifetime(encoder) {} }
+                return autoreleasepool {
+                    guard let data = ProjectStore.encodeRasterPNG(image) else { return .failure(.checkpointFailed) }
+                    return .success(data)
+                }
+            }
+        }
+    }
+
     /// Public files are derived once per immutable version and cloned by every later save.
     func copyPNG(to destination: URL) -> Result<Void, RasterResidency.Failure> {
         prepareForSave().flatMap { checkpoint in

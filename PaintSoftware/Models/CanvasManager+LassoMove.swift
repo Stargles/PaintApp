@@ -591,7 +591,6 @@ extension CanvasManager {
                                                 label: HistoryActionLabel) -> Bool {
         guard let at = celIndices(forCel: sourceCelID, inLayer: sourceLayerID),
               let source = layers[at.layer].cels[at.cel].vector else { return false }
-        guard admitChildChange(inContainer: layers[at.layer].parentFolderID) else { return false }
         let sourceCel = layers[at.layer].cels[at.cel]
         let elementsBefore = source.elements
         let canvas = VectorCanvas(size: source.size, elements: prepared)
