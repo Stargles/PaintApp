@@ -1686,17 +1686,17 @@ class PaintUITestCase: XCTestCase {
     /// needs no pan at all.
     static let wordsOffset = CGVector(dx: 0.55, dy: 0.16)
 
-    /// The words' window on the host, in screen points — above the Text panel's top edge, so a probe
-    /// measures ink and not the panel's dark card.
+    /// The high words window within the supplied rectangle, in that rectangle's coordinate units.
     func wordsWindow(in host: CGRect) -> CGRect {
         CGRect(x: host.minX + 0.45 * host.width, y: host.minY + 0.145 * host.height,
                width: 0.54 * host.width, height: 0.09 * host.height)
     }
 
-    /// Add → Add Text, a tap where the words go (`wordsOffset`) and `string` typed into the box — the
-    /// box left open, the keyboard up. Returns the point (screen points) the box's top-left sits at.
-    func writeWords(_ string: String, _ app: XCUIApplication, _ canvas: XCUIElement) -> CGPoint {
-        let offset = Self.wordsOffset
+    /// Add → Add Text, a tap at the supplied host offset (default `wordsOffset`) and `string` typed
+    /// into the box — the box left open, the keyboard up. Returns its top-left in screen points.
+    func writeWords(_ string: String, _ app: XCUIApplication, _ canvas: XCUIElement,
+                    at requestedOffset: CGVector? = nil) -> CGPoint {
+        let offset = requestedOffset ?? Self.wordsOffset
         let host = canvas.frame
         app.buttons["toolbar.addButton"].tap()
         let addText = app.buttons["add.addTextRow"]

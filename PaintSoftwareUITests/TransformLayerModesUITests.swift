@@ -556,7 +556,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
     /// the three frames are three drawings; the period field is the exposed operand (pre-filled to 12,
     /// where the held third drawing ends, then typed to 3). Returns the band column each drawing was
     /// drawn at and the document's frame count, with the rail closed and the playhead on frame 3.
-    private func threeDrawingsUnderARepeatOfThree(_ app: XCUIApplication, canvas: XCUIElement)
+    private func threeDrawingsUnderARepeatOfThree(_ app: XCUIApplication, canvas: XCUIElement, bandRow: Double = 0.3)
         -> (columns: [Double], total: Int)? {
         guard let total = readFrameLabel(app)?.total else {
             XCTFail("No frame label")
@@ -571,14 +571,15 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertEqual(bornCel(app, startingAt: 1)?.value as? String, "1,1")
         XCTAssertEqual(bornCel(app, startingAt: 2)?.value as? String, "2,10")
 
-        // A band on each of the first three frames at its own column, all on visible-paper row 0.3.
+        // The row keeps a fixture's bands separate from any text it will measure above them.
         let columns = [0.2, 0.4, 0.7]
+        let rowOffset = bandRow - 0.3
         for (frame, u) in columns.enumerated() {
             tapBornLayer(app, blockStartingAt: frame, frame: frame)
             guard let paper = currentPaper(app, canvas, "frame \(frame + 1) before drawing") else { return nil }
-            let at = hostPoint(paper.paper, u: u, v: 0.3)
+            let at = hostPoint(paper.paper, u: u, v: bandRow)
             drawBand(on: canvas, x: Double(at.dx), y: Double(at.dy), halfHeight: 0.04)
-            let read = settledColumn(app, canvas, v0: 0.15, v1: 0.45, "frame \(frame + 1) after drawing")
+            let read = settledColumn(app, canvas, v0: 0.15 + rowOffset, v1: 0.45 + rowOffset, "frame \(frame + 1) after drawing")
             XCTAssertEqual(read ?? -1, u, accuracy: 0.03, "Sanity: frame \(frame + 1)'s band is at \(u)")
         }
         attachScreenshot(app, "1-three-drawings")
@@ -679,7 +680,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertFalse(try repeatedInkPicture(canvas, in: inkWindow).contains(true),
                        "Clear removes the source band shown on frame five")
         attachScreenshot(XCUIScreen.main, "repeat-writers-1-clear-on-frame-five")
-        scrub(app, toFrame: 1, total: total)
+        scrub(app, toFrame: 2, total: total)
         XCTAssertFalse(try repeatedInkPicture(canvas, in: inkWindow).contains(true),
                        "the original frame two drawing owns the Clear")
         app.buttons["sideToolbar.undoButton"].tap()
@@ -692,7 +693,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
                        columns[1], accuracy: 0.03, "Undo restores the source band's original column")
         app.buttons["sideToolbar.redoButton"].tap()
         XCTAssertFalse(try repeatedInkPicture(canvas, in: inkWindow).contains(true), "Redo clears the source band again")
-        scrub(app, toFrame: 2, total: total)
+        scrub(app, toFrame: 3, total: total)
         guard let otherPaper = currentPaper(app, canvas, "other drawing after Clear") else { return }
         let otherStart = hostPoint(otherPaper.paper, u: columns[2] - 0.03, v: 0.15)
         let otherEnd = hostPoint(otherPaper.paper, u: columns[2] + 0.03, v: 0.45)
@@ -741,7 +742,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         let movedWindow = CGRect(x: newStart.dx, y: newStart.dy, width: newEnd.dx - newStart.dx, height: newEnd.dy - newStart.dy)
         XCTAssertFalse(try repeatedInkPicture(canvas, in: oldWindow).contains(true), "shown ink leaves its original column")
         XCTAssertTrue(try repeatedInkPicture(canvas, in: movedWindow).contains(true), "shown source follows the drag")
-        scrub(app, toFrame: 1, total: total)
+        scrub(app, toFrame: 2, total: total)
         XCTAssertFalse(try repeatedInkPicture(canvas, in: oldWindow).contains(true))
         XCTAssertTrue(try repeatedInkPicture(canvas, in: movedWindow).contains(true), "the original drawing owns Move")
         app.buttons["sideToolbar.undoButton"].tap()
@@ -749,7 +750,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertFalse(try repeatedInkPicture(canvas, in: movedWindow).contains(true))
         app.buttons["sideToolbar.redoButton"].tap()
         XCTAssertTrue(try repeatedInkPicture(canvas, in: movedWindow).contains(true))
-        scrub(app, toFrame: 2, total: total)
+        scrub(app, toFrame: 3, total: total)
         XCTAssertEqual(settledColumn(app, canvas, v0: 0.15, v1: 0.45, "other drawing after Move") ?? -1,
                        0.7, accuracy: 0.03, "the raw playhead's drawing was not edited")
         attachScreenshot(XCUIScreen.main, "repeat-move-original-source-and-other-drawing")
@@ -771,7 +772,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
                      to: hostPoint(paper.paper, u: 0.50, v: 0.65))
         app.buttons["selectPanel.duplicateButton"].tap()
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5), "Duplicate lifts the shown band")
-        let destination = app.otherElements["timeline.cel.1.1"]
+        let destination = app.otherElements["timeline.cel.1.0"]
         XCTAssertTrue(destination.waitForExistence(timeout: 5), "the copy has the source drawing's frame span")
         XCTAssertEqual(destination.value as? String, "1,1")
         guard let movingPaper = currentPaper(app, canvas, "source Duplicate box") else { return }
@@ -790,7 +791,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         let copyWindow = CGRect(x: copyStart.dx, y: copyStart.dy, width: copyEnd.dx - copyStart.dx, height: copyEnd.dy - copyStart.dy)
         XCTAssertTrue(try repeatedInkPicture(canvas, in: originalWindow).contains(true), "original remains")
         XCTAssertTrue(try repeatedInkPicture(canvas, in: copyWindow).contains(true), "copy contains the shown source ink")
-        scrub(app, toFrame: 1, total: total)
+        tapBornLayer(app, blockStartingAt: 1, frame: 1)
         XCTAssertTrue(try repeatedInkPicture(canvas, in: originalWindow).contains(true))
         XCTAssertTrue(try repeatedInkPicture(canvas, in: copyWindow).contains(true), "the copied span belongs to source frame two")
         app.buttons["sideToolbar.undoButton"].tap()
@@ -832,10 +833,11 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertTrue(destination.waitForExistence(timeout: 5), "the independent root copy is above the root Repeat")
         XCTAssertEqual(destination.value as? String, "4,1", "the copy starts where Duplicate was pressed and keeps the one-frame source duration")
         guard let movingPaper = currentPaper(app, canvas, "raster Duplicate box") else { return }
-        let box = try XCTUnwrap(settledMoveBox(app))
+        let seed = try XCTUnwrap(inkCentroid(paper.pixels,
+            in: paperRegion(paper.paper, v0: 0.15, v1: 0.45)), "the selected raster band supplies the drag point")
         let delta = CGFloat(0.15 * (movingPaper.paper.maxX - movingPaper.paper.minX))
-        dragOnCanvas(app, from: CGVector(dx: box.midX, dy: box.midY),
-                     to: CGVector(dx: box.midX + delta, dy: box.midY))
+        dragOnCanvas(app, from: CGVector(dx: seed.x, dy: seed.y),
+                     to: CGVector(dx: seed.x + delta, dy: seed.y))
         app.buttons["moveBar.doneButton"].tap()
         XCTAssertEqual(readFrameLabel(app)?.current, 5)
         guard let donePaper = currentPaper(app, canvas, "raster Duplicate after Done") else { return }
@@ -848,10 +850,10 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertTrue(try repeatedInkPicture(canvas, in: original).contains(true), "the source drawing stays on the glass")
         XCTAssertTrue(try repeatedInkPicture(canvas, in: copied).contains(true), "the independent raster copy survives Done on frame five")
         attachScreenshot(XCUIScreen.main, "raster-repeat-duplicate-current-frame-owner-landscape")
-        scrub(app, toFrame: 1, total: total)
+        scrub(app, toFrame: 2, total: total)
         XCTAssertTrue(try repeatedInkPicture(canvas, in: original).contains(true), "the source frame remains unchanged")
         XCTAssertFalse(try repeatedInkPicture(canvas, in: copied).contains(true), "the independent copy was not placed on its source frame")
-        scrub(app, toFrame: 4, total: total)
+        scrub(app, toFrame: 5, total: total)
         app.buttons["sideToolbar.undoButton"].tap()
         XCTAssertFalse(destination.exists, "one Undo removes the raster copy and its landing")
         XCTAssertTrue(try repeatedInkPicture(canvas, in: original).contains(true))
@@ -897,7 +899,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertFalse(try repeatedInkPicture(canvas, in: inkWindow).contains(true),
                        "Cut clears the repeated source drawing")
         attachScreenshot(XCUIScreen.main, "repeat-clipboard-1-cut-source-frame-five")
-        scrub(app, toFrame: 1, total: total)
+        scrub(app, toFrame: 2, total: total)
         XCTAssertFalse(try repeatedInkPicture(canvas, in: inkWindow).contains(true),
                        "the original frame two owns the Cut")
         app.buttons["sideToolbar.undoButton"].tap()
@@ -927,8 +929,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertEqual(try repeatedInkPicture(canvas, in: pastedWindow), pasted)
     }
 
-    private func repeatedInkPicture(_ canvas: XCUIElement, in requestedWindow: CGRect? = nil) throws -> [Bool] {
-        let window = requestedWindow ?? wordsWindow(in: CGRect(x: 0, y: 0, width: 1, height: 1))
+    private func repeatedInkPicture(_ canvas: XCUIElement, in window: CGRect) throws -> [Bool] {
         let probe = try settledProbe(canvas, window: window, timeout: 8)
         return (0..<24).flatMap { y in (0..<48).map { x in
             probe(window.minX + window.width * Double(x) / 48,
@@ -941,25 +942,38 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        guard let (_, total) = threeDrawingsUnderARepeatOfThree(app, canvas: canvas) else { return }
+        guard let (_, total) = threeDrawingsUnderARepeatOfThree(app, canvas: canvas, bandRow: 0.75) else { return }
         tapBornLayer(app, blockStartingAt: 2, frame: 4)
-        _ = writeWords("Hi", app, canvas)
+        let wordsPaper = paperRect(in: canvas)
+        let pictureWindow = wordsWindow(in: wordsPaper)
+        func picture() throws -> [Bool] {
+            assertBelowTheToolbar(app, canvas, dy: Double(pictureWindow.minY), "the words window")
+            assertAboveTheDock(app, canvas, dy: Double(pictureWindow.maxY), "the words window")
+            return try repeatedInkPicture(canvas, in: pictureWindow)
+        }
+        _ = writeWords("Hi", app, canvas, at: onHost(wordsPaper, 0.55, 0.16))
         app.buttons["toolbar.brushButton"].tap()
         XCTAssertTrue(waitForTextState(app, "none"))
         waitForTheKeyboardToLeave(app)
-        let before = try repeatedInkPicture(canvas)
+        let before = try picture()
         XCTAssertTrue(before.contains(true), "the source label is actually drawn on the repeated frame")
         app.buttons["toolbar.selectButton"].tap()
         let rectangle = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
         rectangle.tap()
         let host = canvas.frame
-        dragInPoints(app, from: CGPoint(x: host.minX + 0.50 * host.width, y: host.minY + 0.145 * host.height),
-                     to: CGPoint(x: host.minX + 0.88 * host.width, y: host.minY + 0.24 * host.height))
+        let selectionStart = onHost(wordsPaper, 0.50, 0.145)
+        let selectionEnd = onHost(wordsPaper, 0.88, 0.24)
+        dragInPoints(app, from: CGPoint(x: host.minX + selectionStart.dx * host.width, y: host.minY + selectionStart.dy * host.height),
+                     to: CGPoint(x: host.minX + selectionEnd.dx * host.width, y: host.minY + selectionEnd.dy * host.height))
+        let allowOutside = app.buttons["selectPanel.allowOutsideToggle"]
+        XCTAssertTrue(allowOutside.waitForExistence(timeout: 5), "Select exposes Paint Outside Selection")
+        if !allowOutside.isSelected { allowOutside.tap() }
+        XCTAssertTrue(allowOutside.isSelected, "the text pictures exclude the selection hatch")
         let edit = app.buttons["selectPanel.editTextButton"]
         XCTAssertTrue(edit.waitForExistence(timeout: 5), "Select offers the text that Repeat actually shows")
         XCTAssertEqual(edit.label, "Edit Text")
-        attachScreenshot(app, "repeat-selection-1-edit-offered-for-source-words")
+        attachScreenshot(XCUIScreen.main, "repeat-selection-1-edit-offered-for-source-words")
         edit.tap()
         XCTAssertTrue(app.buttons["textPanel.fontButton"].waitForExistence(timeout: 5))
         XCTAssertTrue(waitForTextState(app, "box", "editing"), "Edit opens the source label")
@@ -969,19 +983,19 @@ final class TransformLayerModesUITests: PaintUITestCase {
         app.buttons["toolbar.brushButton"].tap()
         XCTAssertTrue(waitForTextState(app, "none"))
         waitForTheKeyboardToLeave(app)
-        let edited = try repeatedInkPicture(canvas)
+        let edited = try picture()
         XCTAssertTrue(edited.contains(true))
         XCTAssertNotEqual(edited, before, "Edit changes the actual source letters")
-        attachScreenshot(app, "repeat-selection-2-source-words-edited")
+        attachScreenshot(XCUIScreen.main, "repeat-selection-2-source-words-edited")
         scrub(app, toFrame: 2, total: total)
-        XCTAssertEqual(try repeatedInkPicture(canvas), edited, "the edit belongs to the source drawing")
+        XCTAssertEqual(try picture(), edited, "the edit belongs to the source drawing")
         app.buttons["sideToolbar.undoButton"].tap()
-        XCTAssertEqual(try repeatedInkPicture(canvas), before, "one Undo restores the source label")
+        XCTAssertEqual(try picture(), before, "one Undo restores the source label")
         app.buttons["sideToolbar.redoButton"].tap()
-        XCTAssertEqual(try repeatedInkPicture(canvas), edited)
+        XCTAssertEqual(try picture(), edited)
         scrub(app, toFrame: 3, total: total)
-        XCTAssertFalse(try repeatedInkPicture(canvas).contains(true), "the other cel received no hidden text")
-        attachScreenshot(app, "repeat-selection-3-other-cel-unchanged")
+        XCTAssertFalse(try picture().contains(true), "the other cel received no hidden text")
+        attachScreenshot(XCUIScreen.main, "repeat-selection-3-other-cel-unchanged")
     }
 
     func testRepeatedTextIsWrittenAndReopenedOnTheShownSourceDrawing() throws {
@@ -989,20 +1003,26 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        guard let (_, total) = threeDrawingsUnderARepeatOfThree(app, canvas: canvas) else { return }
+        guard let (_, total) = threeDrawingsUnderARepeatOfThree(app, canvas: canvas, bandRow: 0.75) else { return }
         tapBornLayer(app, blockStartingAt: 2, frame: 4)
-        func picture() throws -> [Bool] { try repeatedInkPicture(canvas) }
+        let wordsPaper = paperRect(in: canvas)
+        let pictureWindow = wordsWindow(in: wordsPaper)
+        func picture() throws -> [Bool] {
+            assertBelowTheToolbar(app, canvas, dy: Double(pictureWindow.minY), "the words window")
+            assertAboveTheDock(app, canvas, dy: Double(pictureWindow.maxY), "the words window")
+            return try repeatedInkPicture(canvas, in: pictureWindow)
+        }
         XCTAssertFalse(try picture().contains(true), "PREMISE: the high words window is clear of all three brush bands")
-        let topLeft = writeWords("Hi", app, canvas)
+        let topLeft = writeWords("Hi", app, canvas, at: onHost(wordsPaper, 0.55, 0.16))
         app.buttons["toolbar.brushButton"].tap()
         XCTAssertTrue(waitForTextState(app, "none"))
         waitForTheKeyboardToLeave(app)
         let first = try picture()
         XCTAssertTrue(first.contains(true), "the new letters are drawn on the repeated frame itself")
-        attachScreenshot(app, "repeat-text-1-written-on-frame-five")
+        attachScreenshot(XCUIScreen.main, "repeat-text-1-written-on-frame-five")
         scrub(app, toFrame: 2, total: total)
         XCTAssertEqual(try picture(), first, "the same letters belong to the source drawing on frame two")
-        attachScreenshot(app, "repeat-text-2-source-frame-two")
+        attachScreenshot(XCUIScreen.main, "repeat-text-2-source-frame-two")
         scrub(app, toFrame: 3, total: total)
         XCTAssertFalse(try picture().contains(true), "the held drawing under the playhead received no text")
 
@@ -1041,7 +1061,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertEqual(try picture(), first, "one Undo restores the source label before typing")
         app.buttons["sideToolbar.redoButton"].tap()
         XCTAssertEqual(try picture(), edited)
-        attachScreenshot(app, "repeat-text-3-edited-source-after-history")
+        attachScreenshot(XCUIScreen.main, "repeat-text-3-edited-source-after-history")
         scrub(app, toFrame: 3, total: total)
         XCTAssertFalse(try picture().contains(true), "the other drawing is still unchanged after re-edit and history")
     }
