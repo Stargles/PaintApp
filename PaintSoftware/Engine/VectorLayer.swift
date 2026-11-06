@@ -5279,7 +5279,7 @@ final class VectorCanvas {
     /// succeeds for every invertible affine once there is a path to copy, and a resize's map always
     /// is one (`k > 0`). The unarchive is deterministic, so an element this admits is one the
     /// mutation pass will carry.
-    static func canBeMapped(_ element: VectorElement) -> Bool {
+    nonisolated static func canBeMapped(_ element: VectorElement) -> Bool {
         switch element {
         // `.video` joins the three that decode nothing on this path: it is a `LayerTransform`, four
         // more numbers and a file name, and the map moves the numbers without ever opening the file.
