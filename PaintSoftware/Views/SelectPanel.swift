@@ -54,12 +54,6 @@ struct SelectPanel: View {
     /// see `colourSwatch`.
     @State private var showingColourPicker = false
 
-    /// The value under the finger while a slider is being dragged, or nil between drags — so the
-    /// slider follows the finger rather than the model's rounded readout, `ChannelScalarControl`'s
-    /// own `dragValue`.
-    @State private var sizeDrag: Double?
-    @State private var opacityDrag: Double?
-
     /// Whether the edit band is unfolded under the action row — TODO (90), the owner: *"The brushstroke
     /// editor in the select menu is taking an entire layer. It should be a single icon, which expands
     /// that menu when pressed."* `ActionRecorderControls.showRecordings`' shape: view state behind a
@@ -298,13 +292,13 @@ struct SelectPanel: View {
 
             bandSlider("Size", identifier: "selectPanel.sizeSlider",
                        current: style.size.map(Double.init), mixed: style.sizeIsMixed,
-                       range: SelectionEditKind.sizeRange, drag: $sizeDrag, live: live && style.size != nil,
+                       range: SelectionEditKind.sizeRange, live: live && style.size != nil,
                        display: { String(format: "%.0f pt", $0) },
                        kind: .size, value: { .size(CGFloat($0)) })
 
             bandSlider("Opacity", identifier: "selectPanel.opacitySlider",
                        current: style.opacity, mixed: style.opacityIsMixed,
-                       range: 0...1, drag: $opacityDrag, live: live && style.opacity != nil,
+                       range: 0...1, live: live && style.opacity != nil,
                        display: { String(format: "%.0f%%", $0 * 100) },
                        kind: .opacity, value: { .opacity($0) })
         }
@@ -367,27 +361,26 @@ struct SelectPanel: View {
     }
 
     /// One of the two sliders. Touch-down opens the session, every value write previews, lift
-    /// commits — `ChannelScalarControl`'s bracket, with `beginSelectionEdit` for
-    /// `beginStructureGesture`. The readout is a **value** (`accessibilityValue`), so a test asserting
-    /// on it goes red if the control stops resolving what the loop holds.
+    /// commits. `selectionStyle` supplies the live session value and the restored value after Undo.
+    /// The readout is a **value** (`accessibilityValue`), so a test asserting on it goes red if the
+    /// control stops resolving what the loop holds.
     ///
     /// **"Mixed" shows beside the value the slider opens on**, and the first tick makes every caught
     /// element agree — which is what dragging a Size slider over three lines of three widths means,
     /// and what the caption is there to say before it happens.
     private func bandSlider(_ title: String, identifier: String,
                             current: Double?, mixed: Bool, range: ClosedRange<Double>,
-                            drag: Binding<Double?>, live: Bool,
+                            live: Bool,
                             display: @escaping (Double) -> String,
                             kind: SelectionEditKind,
                             value: @escaping (Double) -> SelectionEditValue) -> some View {
         // The slider is clamped to its range; the readout is not. A line drawn wider than 50 pt
         // reads its true width beside a thumb pinned at the end, rather than a number that is
         // true of no stroke.
-        let shown = drag.wrappedValue ?? current.map { min(max($0, range.lowerBound), range.upperBound) }
+        let shown = current.map { min(max($0, range.lowerBound), range.upperBound) }
             ?? range.lowerBound
-        let read = drag.wrappedValue ?? current ?? range.lowerBound
-        let readout = current == nil ? "—" : (mixed && drag.wrappedValue == nil
-                                              ? "Mixed · \(display(read))" : display(read))
+        let read = current ?? range.lowerBound
+        let readout = current == nil ? "—" : (mixed ? "Mixed · \(display(read))" : display(read))
         return HStack(spacing: 8) {
             Text(title)
                 .font(.caption)
@@ -396,7 +389,6 @@ struct SelectPanel: View {
             Slider(value: Binding(
                 get: { shown },
                 set: { newValue in
-                    drag.wrappedValue = newValue
                     canvasManager.previewSelectionEdit(value(newValue))
                 }),
                    in: range,
@@ -405,7 +397,6 @@ struct SelectPanel: View {
                            canvasManager.beginSelectionEdit(kind)
                        } else {
                            canvasManager.commitSelectionEdit()
-                           drag.wrappedValue = nil
                        }
                    })
             .tint(.blue)

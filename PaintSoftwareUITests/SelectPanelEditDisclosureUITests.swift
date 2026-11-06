@@ -169,6 +169,8 @@ final class SelectPanelEditDisclosureUITests: PaintUITestCase {
         let size = app.sliders["selectPanel.sizeSlider"]
         XCTAssertTrue(size.waitForExistence(timeout: 5), "the pasted line exposes its own stroke width")
         XCTAssertTrue(size.isEnabled, "the pasted line is editable vector ink")
+        let initialSizeReadout = try XCTUnwrap(size.value as? String)
+        let initialSizePosition = size.normalizedSliderPosition
         let abovePaste = at(0.64, 0.22 - 0.008), aboveSource = at(0.26, 0.22 - 0.008)
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: abovePaste)), "the pasted line is initially thin")
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: aboveSource)), "the original line is initially thin")
@@ -179,6 +181,12 @@ final class SelectPanelEditDisclosureUITests: PaintUITestCase {
         app.buttons["sideToolbar.undoButton"].tap()
         XCTAssertNotNil(waitForPixel(canvas, at: abovePaste, matches: { isWhitish($0) }), "one Undo restores the pasted line's thin edge")
         XCTAssertNotNil(waitForPixel(canvas, at: at(0.64, 0.22), matches: { isRed($0) }), "Undo keeps the pasted line's red center drawn")
+        let restoredSize = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            (size.value as? String) == initialSizeReadout
+                && abs(size.normalizedSliderPosition - initialSizePosition) <= 0.01
+        }, object: size)
+        XCTAssertEqual(XCTWaiter.wait(for: [restoredSize], timeout: 5), .completed,
+                       "one Undo restores the Size readout and thumb with the thin stroke")
         attachScreenshot(XCUIScreen.main, "clipboard-native-paste-undone-landscape")
     }
 
