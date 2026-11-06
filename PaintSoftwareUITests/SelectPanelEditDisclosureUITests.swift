@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 /// **The edit band folds behind one icon** — TODO (90), the owner: *"The brushstroke editor in the
 /// select menu is taking an entire layer. It should be a single icon, which expands that menu when
@@ -132,6 +133,7 @@ final class SelectPanelEditDisclosureUITests: PaintUITestCase {
         XCTAssertEqual(copy.frame.midY, duplicate.frame.midY, accuracy: 8, "Copy shares Duplicate's row")
         XCTAssertLessThan(copy.frame.maxX, duplicate.frame.midX, "Copy is immediately to the left of Duplicate")
         attachScreenshot(XCUIScreen.main, "clipboard-select-copy-left-of-duplicate-landscape")
+        UIPasteboard.general.items = [["public.utf8-plain-text": "clipboard-test-sentinel"]]
         if copyInSelectPanel { copy.tap() }
         app.buttons["toolbar.actionsButton"].tap()
         if !copyInSelectPanel {
