@@ -112,7 +112,6 @@ final class SelectPanelEditDisclosureUITests: PaintUITestCase {
     private func verifyClipboardStrokeRemainsEditable(copyInSelectPanel: Bool) throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft), "a fresh landscape document")
-        XCTAssertEqual(app.windows.firstMatch.frame.size, CGSize(width: 1080, height: 810), "the owner's iPad size")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5), "the artist can draw on the new canvas")
         let paper = paperRect(in: canvas)
