@@ -2159,7 +2159,7 @@ extension CanvasManager {
         let requested = selection
         guard commitAllInteractiveState(), let selection = requested else { return false }
         guard let copied = preparedSelectionCopy(selection) else { return false }
-        UIPasteboard.general.image = copied.image
+        publishSelectionCopy(copied)
         return true
     }
 
@@ -2176,7 +2176,7 @@ extension CanvasManager {
               layers[currentLayerIndex].cels.indices.contains(copied.shown.index),
               layers[currentLayerIndex].cels[copied.shown.index].id == copied.celID else { return false }
         guard clearSelectionPixels(selection, at: copied.shown) else { return false }
-        UIPasteboard.general.image = copied.image
+        publishSelectionCopy(copied)
         return true
     }
 
@@ -2185,7 +2185,7 @@ extension CanvasManager {
     /// container, exactly as the normal frozen leaf does. A failed picture/crop never admits a Cut.
     @MainActor
     private func preparedSelectionCopy(_ selection: Selection)
-        -> (shown: DisplayedCel, layerID: UUID, celID: UUID, image: UIImage)? {
+        -> (shown: DisplayedCel, layerID: UUID, celID: UUID, image: UIImage, native: Data?)? {
         guard let canvasSize else { return nil }
         let walk = renderTreeAndPoses(atFrame: currentFrame)
         guard let shown = displayedCel(actedOnBy: selection, in: walk) else { return nil }
@@ -2196,7 +2196,18 @@ extension CanvasManager {
                                                 derived: derived, pose: shown.inheritedPose),
               let cropped = PixelOps.copiedSubimage(of: flattened, in: selection.path.boundingBoxOfPath)
         else { return nil }
-        return (shown, layerID, cel.id, cropped)
+        do {
+            let native = try nativeSelectionCopy(selection, displayed: shown)
+            return (shown, layerID, cel.id, cropped, native)
+        } catch { raise(.drawingSourceUnavailable); return nil }
+    }
+
+    private func publishSelectionCopy(_ copied: (shown: DisplayedCel, layerID: UUID, celID: UUID,
+                                                  image: UIImage, native: Data?)) {
+        if let native = copied.native {
+            UIPasteboard.general.setItems([[SelectionClipboard.type: native,
+                                           "com.apple.uikit.image": copied.image]])
+        } else { UIPasteboard.general.image = copied.image }
     }
 
     // MARK: Fill / Clear (one-shot pixel edits on the current selection)

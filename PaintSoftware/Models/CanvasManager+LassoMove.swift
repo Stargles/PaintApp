@@ -543,20 +543,10 @@ extension CanvasManager {
         guard commitAllInteractiveState() else { return false }
         guard let selection, let target = activeVectorMoveTarget(),
               selection.acts(onLayer: target.layerID, cel: target.celID) else { return false }
-        let source = target.vector
-        let loops = Self.lassoLoops(of: selection, posedBy: target.poses)
-        guard let split = source.splitForLassoMove(insideLoops: loops, membership: selectionMembership) else {
-            noteALassoThatCaughtNothing(vector: source, loops: loops)
-            return false
-        }
-        let selected = split.elements.filter { split.insideIDs.contains($0.id) }
-        guard !selected.isEmpty,
-              let at = celIndices(forCel: target.celID, inLayer: target.layerID) else { return false }
-        let cel = layers[at.layer].cels[at.cel]
-        guard let copies = Self.bakedForTransfer(selected,
-            through: Self.poseMappings(cel.transformTracks, atCelLocalFrame: target.displayed.frame - cel.startFrame))
-        else { return false }
-        return commitVectorSelectionTransfer(copies, fromLayer: target.layerID, cel: target.celID,
+        guard let at = celIndices(forCel: target.celID, inLayer: target.layerID),
+              let copied = preparedVectorSelection(selection, from: target.vector, posedBy: target.poses,
+                  cel: layers[at.layer].cels[at.cel], displayed: target.displayed) else { return false }
+        return commitVectorSelectionTransfer(copied, fromLayer: target.layerID, cel: target.celID,
                                               displayed: target.displayed,
                                               sourceReplacement: nil, label: .duplicatePiece)
     }
@@ -610,50 +600,120 @@ extension CanvasManager {
         let layer = Layer(id: UUID(), name: defaultLayerName(for: .vector), opacity: 1,
                           isVisible: true, kind: .vector,
                           parentFolderID: layers[at.layer].parentFolderID, cels: [cel])
+        let sourceEdit = sourceReplacement.map {
+            VectorSelectionSourceEdit(vector: source, layerID: sourceLayerID, celID: sourceCelID,
+                                      before: elementsBefore, after: $0)
+        }
+        return insertPreparedVectorSelectionLayer(layer, at: at.layer + 1,
+            shownFrame: shown.frame, inheriting: shown.inheritedPose,
+            previousLayerID: sourceLayerID, sourceEdit: sourceEdit, label: label)
+    }
+
+    private struct VectorSelectionSourceEdit {
+        let vector: VectorCanvas
+        let layerID: UUID, celID: UUID
+        let before: [VectorElement], after: [VectorElement]
+    }
+
+    /// Duplicate, To New Layer and clipboard Paste publish the same prepared geometry and Move box.
+    /// The destination is explicit: a clipboard snapshot needs no surviving source document or cel.
+    private func insertPreparedVectorSelectionLayer(_ layer: Layer, at insertAt: Int,
+        shownFrame: Int, inheriting inherited: PoseMap?, previousLayerID: UUID?,
+        sourceEdit: VectorSelectionSourceEdit? = nil, label: HistoryActionLabel) -> Bool {
+        guard let cel = layer.cels.first, let canvas = cel.vector,
+              admitChildChange(inContainer: layer.parentFolderID) else { return false }
+        let prepared = canvas.elements
         let ids = Set(prepared.map(\.id))
-        let poses = Self.poseMaps(prepared, through: [], inheriting: shown.inheritedPose)
-        let displayed = DisplayedCel(index: 0, frame: shown.frame, inheritedPose: shown.inheritedPose)
-        // The same pure lift/measurement the ordinary Move uses, before any transfer is published.
+        let poses = Self.poseMaps(prepared, through: [], inheriting: inherited)
+        let displayed = DisplayedCel(index: 0, frame: shownFrame, inheritedPose: inherited)
         guard let lift = canvas.lift(elementIDs: ids),
               let float = preparedVectorFloat(target: (layer.id, cel.id, canvas, poses, displayed), lift: lift,
-                                               elementsBeforeLift: canvas.elements, selectionBeforeLift: nil)
+                                               elementsBeforeLift: prepared, selectionBeforeLift: nil)
         else { return false }
         let cost = UndoBudget.addingCost(4096, VectorUndoCost.bytes(
-            fromLists: [elementsBefore, []], toLists: [sourceReplacement ?? elementsBefore, prepared]))
-        let insertAt = at.layer + 1
+            fromLists: [sourceEdit?.before ?? [], []], toLists: [sourceEdit?.after ?? [], prepared]))
         layers.insert(layer, at: insertAt)
-        if let sourceReplacement {
-            source.restoreElements(sourceReplacement, changedInk: nil)
-            celContentChangedOutsideStroke(layerID: sourceLayerID, celID: sourceCelID)
+        if let sourceEdit {
+            sourceEdit.vector.restoreElements(sourceEdit.after, changedInk: nil)
+            celContentChangedOutsideStroke(layerID: sourceEdit.layerID, celID: sourceEdit.celID)
         }
         currentLayerIndex = insertAt
-        self.selection = nil
+        selection = nil
         recordUndo(label: label, cost: cost,
                    undo: { [weak self] in
                        guard let self else { return }
                        if let index = self.layers.firstIndex(where: { $0.id == layer.id }) {
                            self.layers.remove(at: index)
                        }
-                       if sourceReplacement != nil {
-                           source.restoreElements(elementsBefore, changedInk: nil)
-                           self.celContentChangedOutsideStroke(layerID: sourceLayerID, celID: sourceCelID)
+                       if let sourceEdit {
+                           sourceEdit.vector.restoreElements(sourceEdit.before, changedInk: nil)
+                           self.celContentChangedOutsideStroke(layerID: sourceEdit.layerID, celID: sourceEdit.celID)
                        }
-                       self.currentLayerIndex = self.layerIndex(ofID: sourceLayerID)
+                       self.currentLayerIndex = previousLayerID.flatMap { self.layerIndex(ofID: $0) }
                            ?? min(self.currentLayerIndex, max(0, self.layers.count - 1))
                        self.clampPlayheadToContent()
                    }, redo: { [weak self] in
                        guard let self else { return }
                        let at = min(insertAt, self.layers.count)
                        self.layers.insert(layer, at: at)
-                       if let sourceReplacement {
-                           source.restoreElements(sourceReplacement, changedInk: nil)
-                           self.celContentChangedOutsideStroke(layerID: sourceLayerID, celID: sourceCelID)
+                       if let sourceEdit {
+                           sourceEdit.vector.restoreElements(sourceEdit.after, changedInk: nil)
+                           self.celContentChangedOutsideStroke(layerID: sourceEdit.layerID, celID: sourceEdit.celID)
                        }
                        self.currentLayerIndex = at
                        self.clampPlayheadToContent()
                    })
         publishVectorFloat(float, in: canvas)
         return true
+    }
+
+    /// A native clipboard snapshot is already in shown canvas coordinates. A root layer above the
+    /// stack consumes no destination container pose or grade a second time.
+    func insertPastedVectorSelection(_ elements: [VectorElement], frameCount: Int) -> Bool {
+        guard structureUndoDepth == 0, gestureSnapshot == nil, let canvasSize,
+              Cel.checkedEndFrame(startFrame: currentFrame, frameCount: frameCount) != nil,
+              !elements.isEmpty, commitAllInteractiveState() else { return false }
+        let previous = layers.indices.contains(currentLayerIndex) ? layers[currentLayerIndex].id : nil
+        let canvas = VectorCanvas(size: canvasSize, elements: elements)
+        let cel = Cel(id: UUID(), startFrame: currentFrame, frameCount: frameCount,
+                      raster: .empty(size: canvasSize), vector: canvas)
+        let layer = Layer(id: UUID(), name: defaultLayerName(for: .vector), opacity: 1,
+                          isVisible: true, kind: .vector, cels: [cel])
+        return insertPreparedVectorSelectionLayer(layer, at: layers.count,
+            shownFrame: currentFrame, inheriting: nil, previousLayerID: previous, label: .pasteSelection)
+    }
+
+    /// Read-only counterpart of Duplicate's selected-element preparation. Unsupported content keeps
+    /// Copy's complete picture representation; it must never publish a partial native drawing.
+    func nativeSelectionCopy(_ selection: Selection, displayed shown: DisplayedCel) throws -> Data? {
+        guard layers.indices.contains(currentLayerIndex), layers[currentLayerIndex].kind == .vector,
+              layers[currentLayerIndex].cels.indices.contains(shown.index) else { return nil }
+        let cel = layers[currentLayerIndex].cels[shown.index]
+        guard cel.interpolation == nil, !cel.raster.hasContent, cel.bakedImage == nil,
+              let vector = cel.vector else { return nil }
+        let poses = Self.poseMaps(vector.elements, of: cel, showing: shown.frame, inheriting: shown.inheritedPose)
+        guard let copied = preparedVectorSelection(selection, from: vector, posedBy: poses, cel: cel,
+            displayed: shown, inheriting: shown.inheritedPose), copied.allSatisfy({
+                switch $0 { case .video, .stream: return false; default: return true }
+            }) else { return nil }
+        return try SelectionClipboard.encode(copied, canvasSize: vector.size, frameCount: cel.frameCount)
+    }
+
+    /// All native copies answer membership and commit their source pose through this one path.
+    /// Duplicate keeps the parent live; a root clipboard snapshot consumes that inherited pose too.
+    private func preparedVectorSelection(_ selection: Selection, from vector: VectorCanvas,
+        posedBy poses: [UUID: PoseMap], cel: Cel, displayed shown: DisplayedCel,
+        inheriting inherited: PoseMap? = nil) -> [VectorElement]? {
+        let loops = Self.lassoLoops(of: selection, posedBy: poses)
+        guard let split = vector.splitForLassoMove(insideLoops: loops, membership: selectionMembership) else {
+            noteALassoThatCaughtNothing(vector: vector, loops: loops)
+            return nil
+        }
+        let selected = split.elements.filter { split.insideIDs.contains($0.id) }
+        guard !selected.isEmpty, let prepared = Self.bakedForTransfer(selected,
+            through: Self.poseMappings(cel.transformTracks, atCelLocalFrame: shown.frame - cel.startFrame),
+            inheriting: inherited) else { return nil }
+        return prepared
     }
 
     /// **A lift that caught nothing says so under `Enclosed`, and stays silent otherwise** — the

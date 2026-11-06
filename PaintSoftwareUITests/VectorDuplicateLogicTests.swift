@@ -9,11 +9,8 @@ import UIKit
 /// a `.raster` layer. The copy *looked* right, which is why it survived — the original stayed vector,
 /// nothing said anything, and the artist found out when they tried to erase or re-cut the copy.
 ///
-/// **So every assertion here is about the resulting layer's kind and its geometry, never about
-/// pixels.** A rasterized duplicate renders identically to a vector one at the size it was taken at;
-/// a test that compared images would be green against the bug. The two operands that can tell them
-/// apart are `Layer.kind` and whether the new cel holds a `VectorCanvas` with the artist's samples
-/// in it.
+/// The native clipboard shares Duplicate's membership/pose preparation and layer/Move insertion.
+/// Clipboard checks also pin drawn order and resource placement; editability still needs geometry.
 final class VectorDuplicateLogicTests: XCTestCase {
 
     // MARK: - Fixtures
@@ -216,4 +213,160 @@ final class VectorDuplicateLogicTests: XCTestCase {
                        "and the source layer must not have been rasterized on the way to finding that out")
         XCTAssertNil(manager.floatingPiece, "No raster piece may be lifted from a vector layer")
     }
+
+    @MainActor
+    func testClipboardPastesAnIndependentEditableDrawingWithItsOrderPixelsSpanAndUndo() throws {
+        let pasteboard = UIPasteboard.general
+        let saved = pasteboard.items
+        defer { pasteboard.items = saved }
+        let (source, index, vector) = fixture()
+        let fill = VectorFillElement(path: CGPath(rect: CGRect(x: 6, y: 6, width: 48, height: 48), transform: nil),
+                                     color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        let line = stroke(from: CGPoint(x: 12.125, y: 20.125), to: CGPoint(x: 46.125, y: 20.125), size: 6)
+        let text = VectorTextElement(recipe: TextRecipe(string: "A"),
+                                    frame: TextFrame(origin: CGPoint(x: 8, y: 30), size: CGSize(width: 20, height: 20)))
+        let raw = try XCTUnwrap(CoreGraphicsCompositor.makeImage(fromPremultiplied:
+            [255, 0, 0, 255, 0, 0, 255, 255, 0, 255, 0, 255, 255, 255, 0, 255, 0, 255, 255, 255, 255, 0, 255, 255],
+            width: 3, height: 2))
+        let picture = VectorImageElement(source: try CanvasFixture.placedSource(UIImage(cgImage: raw, scale: 2, orientation: .right)),
+            transform: LayerTransform(position: CGPoint(x: 42, y: 40), scale: 10, rotation: 0))
+        vector.restoreElements([.fill(fill), .stroke(line), .text(text), .image(picture)], changedInk: nil)
+        let expected = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage)))
+        source.layers[index].cels[0].frameCount = 3
+        select(source, index, CGRect(x: 0, y: 0, width: 64, height: 64))
+        XCTAssertTrue(source.copySelectionToPasteboard())
+        let native = try XCTUnwrap(pasteboard.data(forPasteboardType: SelectionClipboard.type))
+        XCTAssertNotNil(pasteboard.image?.cgImage, "other apps still receive a picture")
+        // The original layer/document and even the fallback picture are unnecessary for native Paste.
+        source.layers.removeAll()
+        pasteboard.setItems([[SelectionClipboard.type: native]])
+        let destination = CanvasFixture.manager(layerCount: 1)
+        destination.currentFrame = 5
+        destination.history.removeAll()
+        XCTAssertNil(destination.pasteSelectionFromPasteboard())
+        destination.commitVectorFloatIfNeeded()
+        let pasted = try XCTUnwrap(destination.layers.last?.cels.first)
+        let copied = try XCTUnwrap(pasted.vector)
+        XCTAssertEqual(destination.layers.count, 2, "Paste always creates its own layer")
+        XCTAssertEqual([pasted.startFrame, pasted.frameCount], [5, 3], "current destination time and copied duration")
+        XCTAssertEqual(copied.elements.map { $0.fill != nil ? "fill" : $0.stroke != nil ? "stroke" : $0.text != nil ? "text" : "image" },
+                       ["fill", "stroke", "text", "image"], "all supported kinds retain their drawn order")
+        XCTAssertEqual(try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(copied.render()?.cgImage))), expected,
+                       "native geometry and the oriented scale-2 picture draw exactly as copied")
+        XCTAssertEqual(copied.strokes.first?.samples.positions, line.samples.positions, "the pasted line is editable geometry")
+        XCTAssertEqual(destination.history.undoStack.count, 1, "the insertion is one priced history action")
+        destination.undo()
+        XCTAssertEqual(destination.layers.count, 1, "Undo removes the pasted layer")
+        destination.redo()
+        XCTAssertEqual(try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(destination.layers.last?.cels.first?.vector?.render()?.cgImage))), expected,
+                       "Redo restores the complete ordered native drawing")
+    }
+
+    @MainActor
+    func testMalformedNativeClipboardRefusesBeforeSettlingAFloatAndNeverUsesItsPicture() throws {
+        let pasteboard = UIPasteboard.general
+        let saved = pasteboard.items
+        defer { pasteboard.items = saved }
+        let (manager, index, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 20, y: 32), to: CGPoint(x: 44, y: 32)))
+        select(manager, index, CGRect(x: 10, y: 22, width: 44, height: 20))
+        manager.beginDuplicate()
+        let floatID = try XCTUnwrap(manager.vectorFloat).parts[0].celID
+        let layers = manager.layers.count, steps = manager.history.undoStack.count
+        let valid = try SelectionClipboard.encode(vector.elements, canvasSize: vector.size, frameCount: 3)
+        var future = try XCTUnwrap(JSONSerialization.jsonObject(with: valid) as? [String: Any])
+        future["version"] = SelectionClipboard.currentVersion + 1
+        let fallback = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
+            UIColor.green.setFill(); context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+        for malformed in [Data("broken".utf8), try JSONSerialization.data(withJSONObject: future)] {
+            pasteboard.setItems([[SelectionClipboard.type: malformed, "com.apple.uikit.image": fallback]])
+            XCTAssertNotNil(manager.pasteSelectionFromPasteboard(), "a recognized damaged/future drawing visibly refuses")
+            XCTAssertEqual(manager.vectorFloat?.parts[0].celID, floatID, "a refused Paste does not settle the artist's Move")
+            XCTAssertEqual([manager.layers.count, manager.history.undoStack.count], [layers, steps], "no flattened layer or Undo step")
+            XCTAssertEqual(pasteboard.data(forPasteboardType: SelectionClipboard.type), malformed, "Paste never rewrites the clipboard")
+        }
+        XCTAssertThrowsError(try SelectionClipboard.prepare(Data(repeating: 0, count: SelectionClipboard.maximumBytes + 1)),
+                             "over-budget data is rejected before JSON or pixel decoding")
+    }
+
+    @MainActor
+    func testNativeClipboardRedeemsItsOwnBrushTableAndRequiresEveryPictureResource() throws {
+        let line = stroke(from: CGPoint(x: 12, y: 20), to: CGPoint(x: 44, y: 20))
+        let native = try SelectionClipboard.encode([.stroke(line)], canvasSize: CanvasFixture.canvasSize, frameCount: 2)
+        let envelope = try JSONDecoder().decode(SelectionClipboard.self, from: native)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: native) as? [String: Any])
+        var table = try XCTUnwrap(object["brushes"] as? [String: Any])
+        var entries = try XCTUnwrap(table["entries"] as? [[String: Any]])
+        entries[0]["ref"] = UInt32.max - 1
+        table["entries"] = entries; object["brushes"] = table
+        var drawing = try XCTUnwrap(JSONSerialization.jsonObject(with: envelope.drawing) as? [String: Any])
+        var elements = try XCTUnwrap(drawing["elements"] as? [[String: Any]])
+        var payload = try XCTUnwrap(elements[0]["stroke"] as? [String: Any])
+        payload["brush"] = UInt32.max - 1; elements[0]["stroke"] = payload; drawing["elements"] = elements
+        object["drawing"] = try JSONSerialization.data(withJSONObject: drawing).base64EncodedString()
+        let prepared = try SelectionClipboard.prepare(JSONSerialization.data(withJSONObject: object))
+        XCTAssertEqual(prepared.elements.first?.stroke?.brush, line.brush, "stored numbers are redeemed through this payload's table")
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 3, height: 2)).image { context in
+            UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 3, height: 2))
+        }
+        let picture = VectorImageElement(source: try CanvasFixture.placedSource(image), transform: .identity)
+        let complete = try SelectionClipboard.encode([.image(picture)], canvasSize: CanvasFixture.canvasSize, frameCount: 2)
+        var broken = try XCTUnwrap(JSONSerialization.jsonObject(with: complete) as? [String: Any])
+        broken["images"] = [:]
+        XCTAssertThrowsError(try SelectionClipboard.prepare(JSONSerialization.data(withJSONObject: broken)),
+                             "a missing required picture refuses the entire native drawing")
+    }
+
+    @MainActor
+    func testImportedBrushPixelsTravelWithoutOverwritingACollisionAndFailedInsertionRollsBack() throws {
+        let storage = BrushStorage.shared
+        let previous = storage.root
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("clipboard-brush-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        storage.relocate(to: directory)
+        defer { storage.relocate(to: previous); try? FileManager.default.removeItem(at: directory) }
+        let tipImage = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
+            UIColor.black.setFill(); context.fill(CGRect(x: 1, y: 1, width: 5, height: 6))
+        }
+        var line = stroke(from: CGPoint(x: 12, y: 20), to: CGPoint(x: 44, y: 20), size: 12)
+        line.brush.tip = try BrushTipImport.importTip(from: tipImage)
+        let originalName = try XCTUnwrap(line.brush.tip.importedTextureFileName)
+        let vector = VectorCanvas(size: CanvasFixture.canvasSize, elements: [.stroke(line)])
+        let expected = try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(vector.render()?.cgImage)))
+        let native = try SelectionClipboard.encode(vector.elements, canvasSize: vector.size, frameCount: 2)
+        let collision = Data("existing artist resource".utf8)
+        try storage.write(collision, to: originalName)
+        let prepared = try SelectionClipboard.prepare(native)
+        let adoptedName = try XCTUnwrap(prepared.elements.first?.stroke?.brush.tip.importedTextureFileName)
+        XCTAssertNotEqual(adoptedName, originalName, "different bytes under a used name receive a new name")
+        XCTAssertFalse(prepared.installingTextures(then: { false }))
+        XCTAssertEqual(storage.read(originalName), collision, "the artist's colliding file is unchanged")
+        XCTAssertFalse(storage.contains(adoptedName), "failed insertion removes only its new resource")
+        XCTAssertTrue(prepared.installingTextures(then: { true }))
+        let copied = VectorCanvas(size: vector.size, elements: prepared.elements)
+        XCTAssertEqual(try XCTUnwrap(CanvasFixture.rgbaBytes(try XCTUnwrap(copied.render()?.cgImage))), expected,
+                       "the pasted brush uses the embedded original pixels, independent of the collision")
+    }
+
+    @MainActor
+    func testMixedBackingCopyKeepsTheWholePictureFallbackInsteadOfDroppingItsNativeInk() throws {
+        let pasteboard = UIPasteboard.general
+        let saved = pasteboard.items
+        defer { pasteboard.items = saved }
+        let (manager, index, vector) = fixture()
+        vector.addStroke(stroke(from: CGPoint(x: 12, y: 20), to: CGPoint(x: 44, y: 20)))
+        let backing = UIGraphicsImageRenderer(size: CanvasFixture.canvasSize).image { context in
+            UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+        }
+        manager.layers[index].cels[0].bakedImage = try CanvasFixture.placedSource(backing)
+        select(manager, index, CGRect(x: 0, y: 0, width: 64, height: 64))
+        XCTAssertTrue(manager.copySelectionToPasteboard())
+        XCTAssertFalse(pasteboard.contains(pasteboardTypes: [SelectionClipboard.type]), "mixed backing must never become a partial native payload")
+        let copied = try XCTUnwrap(pasteboard.image?.cgImage)
+        let expected = try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[index].cels[0], canvasSize: CanvasFixture.canvasSize)?.cgImage)
+        XCTAssertEqual(CanvasFixture.rgbaBytes(copied), CanvasFixture.rgbaBytes(expected),
+                       "the interoperable picture retains both backing and vector ink")
+    }
+
 }

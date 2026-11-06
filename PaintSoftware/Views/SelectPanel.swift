@@ -3,7 +3,7 @@ import SwiftUI
 /// The Select tool's bottom-docked bar (Procreate reference: mode tabs across the top of the bar,
 /// action icons across the bottom), shown whenever the Select tool is engaged — see `DrawingView`,
 /// which docks this near the bottom the same way `MoveTransformBottomBar` docks for Move. The action
-/// row (Duplicate/Fill/Clear/Deselect) is disabled until a selection actually exists; the mode tabs
+/// row (Copy/Duplicate/Fill/Clear/Deselect) is disabled until a selection actually exists; the mode tabs
 /// and the outside-interaction toggle are available immediately so a mode can be picked before the
 /// first selection is drawn.
 ///
@@ -191,6 +191,8 @@ struct SelectPanel: View {
             // consecutive group, rather than Edit sitting alone at the far end of the row past
             // Clear and Deselect (which act on the *selection*, not its content).
             HStack(spacing: 0) {
+                actionTab(icon: "doc.on.doc", title: "Copy") { canvasManager.copySelectionToPasteboard() }
+                    .accessibilityIdentifier("selectPanel.copyButton")
                 actionTab(icon: "plus.square.on.square", title: "Duplicate") { canvasManager.beginDuplicate() }
                     .accessibilityIdentifier("selectPanel.duplicateButton")
                 actionTab(icon: "square.on.square.dashed", title: "To New Layer") { canvasManager.moveSelectionToNewLayer() }

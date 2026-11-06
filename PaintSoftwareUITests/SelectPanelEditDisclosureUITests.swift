@@ -98,4 +98,79 @@ final class SelectPanelEditDisclosureUITests: PaintUITestCase {
                           "Edit should sit immediately beside Fill, not across the row from it")
         attachScreenshot(app, "edit-beside-fill-and-to-new-layer")
     }
+
+    func testActionsCopyPasteCreatesANewLayerWhoseStrokeCanStillBeWidened() throws {
+        try verifyClipboardStrokeRemainsEditable(copyInSelectPanel: false)
+    }
+
+    func testSelectCopySitsLeftOfDuplicateAndPastesAnEditableStroke() throws {
+        try verifyClipboardStrokeRemainsEditable(copyInSelectPanel: true)
+    }
+
+    /// Both public Copy doors must produce editable ink. Moving the paste clear of the original,
+    /// then widening it and checking the actual pixels, distinguishes this from a pasted picture.
+    private func verifyClipboardStrokeRemainsEditable(copyInSelectPanel: Bool) throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft), "a fresh landscape document")
+        XCTAssertEqual(app.windows.firstMatch.frame.size, CGSize(width: 1080, height: 810), "the owner's iPad size")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5), "the artist can draw on the new canvas")
+        let paper = paperRect(in: canvas)
+        func at(_ x: Double, _ y: Double) -> CGVector { onHost(paper, x, y) }
+        setBrushColor(app, hex: "FF0000")
+        setBrushSize(app, normalized: 0.05)
+        drawLine(on: canvas, from: at(0.16, 0.22), to: at(0.36, 0.22))
+        XCTAssertNotNil(waitForPixel(canvas, at: at(0.26, 0.22), matches: { isRed($0) }), "the original red line is drawn")
+        app.buttons["toolbar.selectButton"].tap()
+        let rectangle = app.buttons["selectPanel.mode.rectangle"]
+        XCTAssertTrue(rectangle.waitForExistence(timeout: 5), "Select offers a rectangle")
+        rectangle.tap()
+        dragOnCanvas(app, from: at(0.10, 0.15), to: at(0.42, 0.29))
+        let copy = app.buttons["selectPanel.copyButton"]
+        let duplicate = app.buttons["selectPanel.duplicateButton"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 5), "Copy is exposed in Select")
+        XCTAssertTrue(copy.isEnabled, "a selected stroke enables Copy")
+        XCTAssertEqual(copy.frame.midY, duplicate.frame.midY, accuracy: 8, "Copy shares Duplicate's row")
+        XCTAssertLessThan(copy.frame.maxX, duplicate.frame.midX, "Copy is immediately to the left of Duplicate")
+        attachScreenshot(XCUIScreen.main, "clipboard-select-copy-left-of-duplicate-landscape")
+        if copyInSelectPanel { copy.tap() }
+        app.buttons["toolbar.actionsButton"].tap()
+        if !copyInSelectPanel {
+            let actionsCopy = app.buttons["actions.copyRow"]
+            XCTAssertTrue(actionsCopy.waitForExistence(timeout: 5), "Actions exposes Copy")
+            actionsCopy.tap()
+        }
+        let paste = app.buttons["actions.pasteRow"]
+        XCTAssertTrue(paste.waitForExistence(timeout: 5), "Actions exposes Paste")
+        paste.tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let allow = springboard.alerts.buttons["Allow Paste"]
+        if allow.waitForExistence(timeout: 5) { allow.tap() }
+        // Closing the menu settles the insertion; Move then lifts the new active layer as usual.
+        app.buttons["toolbar.actionsButton"].tap()
+        app.buttons["toolbar.moveButton"].tap()
+        let done = app.buttons["moveBar.doneButton"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5), "the pasted new layer can be moved")
+        dragOnCanvas(app, from: at(0.26, 0.22), to: at(0.64, 0.22))
+        done.tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: at(0.64, 0.22), matches: { isRed($0) }), "the pasted line is drawn away from its source")
+        XCTAssertNotNil(waitForPixel(canvas, at: at(0.26, 0.22), matches: { isRed($0) }), "Copy preserves the source on its separate layer")
+        app.buttons["toolbar.selectButton"].tap()
+        XCTAssertTrue(rectangle.waitForExistence(timeout: 5), "Select can catch the pasted line")
+        rectangle.tap()
+        dragOnCanvas(app, from: at(0.48, 0.15), to: at(0.80, 0.29))
+        openSelectionEditBand(app)
+        let size = app.sliders["selectPanel.sizeSlider"]
+        XCTAssertTrue(size.waitForExistence(timeout: 5), "the pasted line exposes its own stroke width")
+        XCTAssertTrue(size.isEnabled, "the pasted line is editable vector ink")
+        let abovePaste = at(0.64, 0.22 - 0.008), aboveSource = at(0.26, 0.22 - 0.008)
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: abovePaste)), "the pasted line is initially thin")
+        adjustSlider(size, to: 0.95, tolerance: 0.04)
+        XCTAssertNotNil(waitForPixel(canvas, at: abovePaste, matches: { isRed($0) }), "widening the pasted stroke changes its drawn edge")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: aboveSource)), "the original line's width is unchanged")
+        attachScreenshot(XCUIScreen.main, "clipboard-native-paste-widened-landscape")
+        app.buttons["sideToolbar.undoButton"].tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: abovePaste, matches: { isWhitish($0) }), "one Undo restores the pasted line's thin edge")
+    }
+
 }

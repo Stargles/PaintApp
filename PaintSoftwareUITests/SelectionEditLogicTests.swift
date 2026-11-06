@@ -1789,6 +1789,32 @@ final class SelectionEditLogicTests: XCTestCase {
     }
 
     @MainActor
+    func testNativeClipboardConsumesRepeatSourceChannelsAndDocumentParentExactlyOnce() throws {
+        let previous = Compositor.backend
+        Compositor.backend = .coreGraphics
+        let pasteboard = UIPasteboard.general
+        let saved = pasteboard.items
+        defer { pasteboard.items = saved; Compositor.backend = previous }
+        for sourceOnly in [false, true] {
+            let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
+            let bounds = try XCTUnwrap(f.manager.selection).bounds
+            let expected = try clipboardCropBytes(memoPicture(f.manager), rect: bounds)
+            XCTAssertTrue(f.manager.copySelectionToPasteboard())
+            let native = try XCTUnwrap(pasteboard.data(forPasteboardType: SelectionClipboard.type))
+            pasteboard.setItems([[SelectionClipboard.type: native]])
+            let destination = CanvasFixture.manager(layerCount: 1)
+            destination.currentFrame = 7
+            XCTAssertNil(destination.pasteSelectionFromPasteboard())
+            destination.commitVectorFloatIfNeeded()
+            let layer = try XCTUnwrap(destination.layers.last)
+            XCTAssertNil(layer.parentFolderID, "Paste is independent of the original Repeat/container scope")
+            XCTAssertEqual(layer.cels.first?.vector?.strokes.count, 1, "only the blue stroke actually shown in the loop travels")
+            XCTAssertEqual(try clipboardCropBytes(memoPicture(destination), rect: bounds), expected,
+                           "source time reads cel/group channels while the outer parent reads document time, exactly once")
+        }
+    }
+
+    @MainActor
     func testRepeatedCutCopiesAndClearsTheSameShownSourceAsOneUndoStep() throws {
         let previous = Compositor.backend
         Compositor.backend = .coreGraphics

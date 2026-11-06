@@ -68,6 +68,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
     /// Baking a floating Duplicate piece — distinct from `.duplicateLayer`/`.duplicateFrame`/
     /// `.duplicateGuide`, which duplicate a different kind of thing entirely.
     case duplicatePiece
+    case pasteSelection
     /// The Select panel's "To New Layer" — TODO (93): the selection leaves its layer for a new one
     /// above it, the insertion and the removal one step.
     case moveToNewLayer
@@ -301,6 +302,7 @@ enum HistoryActionLabel: CaseIterable, Equatable {
         case .resizeSelectionStrokes: return "resize strokes in selection"
         case .changeSelectionOpacity: return "change selection opacity"
         case .move: return "move"
+        case .pasteSelection: return "paste selection"
         case .duplicatePiece: return "duplicate"
         case .moveToNewLayer: return "move to new layer"
         case .insertImage: return "insert image"

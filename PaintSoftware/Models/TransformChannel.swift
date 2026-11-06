@@ -202,11 +202,12 @@ extension CanvasManager {
     /// those tracks. Unlike Bake's display fallback, a transfer must prepare every element or refuse
     /// before publishing any of them. IDs and document-level group memberships stay on the elements.
     static func bakedForTransfer(_ elements: [VectorElement],
-                                 through mappings: [(TransformChannelID, PoseMap)]) -> [VectorElement]? {
+                                 through mappings: [(TransformChannelID, PoseMap)],
+                                 inheriting inherited: PoseMap? = nil) -> [VectorElement]? {
         var prepared: [VectorElement] = []
         prepared.reserveCapacity(elements.count)
         for element in elements {
-            let map = composedPose(of: element, through: mappings, inheriting: nil)
+            let map = composedPose(of: element, through: mappings, inheriting: inherited)
             guard map == nil || map?.inverse != nil,
                   VectorCanvas.canBeMapped(element),
                   let baked = persistedPose(of: element, through: map) else { return nil }

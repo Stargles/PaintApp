@@ -93,11 +93,7 @@ struct ActionsMenu: View {
 
     private var pasteRow: some View {
         Button {
-            guard let image = UIPasteboard.general.image else {
-                notice = "Nothing to paste — copy or cut a selection first."
-                return
-            }
-            canvasManager.insertImage(image)
+            notice = canvasManager.pasteSelectionFromPasteboard()
         } label: {
             row(icon: "doc.on.clipboard", title: "Paste", enabled: canvasManager.canvasSize != nil)
         }

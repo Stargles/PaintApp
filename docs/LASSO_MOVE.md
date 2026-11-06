@@ -371,9 +371,27 @@ single insertion Undo retain that independent placement; source cels stay untouc
 span must pass the existing checked cel-end admission before any layer is inserted.
 
 Selection Fill/Clear and Cut's Clear half refuse a linked generated in-between, keep its recipe,
-and visibly ask for a hand-drawn frame. Copy still copies the shown picture. Cut prepares that
-picture first and publishes it only after the Clear write succeeds, so a refusal preserves both the
-clipboard and artwork. Whole-cel Clear in the timeline remains a separate command.
+and visibly ask for a hand-drawn frame. Copy remains a read: a linked generated frame keeps its
+shown-picture representation. Cut prepares the complete clipboard result first and publishes it only
+after the Clear write succeeds, so a refusal preserves both the clipboard and artwork. Whole-cel
+Clear in the timeline remains a separate command.
+
+Actions Copy/Cut and Select's Copy tab share that clipboard preparation. For an editable native
+selection, Duplicate and Copy share the membership split and persistent source-pose bake. The
+clipboard snapshot also consumes its inherited container pose, and carries the used brush table and
+only the selected picture/brush PNGs through existing codecs. Paste creates an independent root
+vector layer above the stack at the current document frame, keeping the copied duration, and uses
+Duplicate/To New Layer's shared insertion, priced Undo and ordinary Move box. It works after the
+source layer/document is gone. Select's Copy tab sits immediately left of Duplicate.
+
+The clipboard also carries the interoperable picture. A generated frame, mixed raster/baked backing,
+live media or an unsupported native pose uses that complete picture only, rather than a partial
+native selection. Paste reads a supported native representation first without acquiring the image
+fallback; absent native data keeps the existing image import. Recognized malformed, missing-resource,
+future-version or over-budget native data refuses visibly before settling the current tool. The
+clipboard envelope is separate from saved projects and bounded to64MiB encoded and decoded selected
+resources. Brush textures reuse equal existing bytes; collisions receive fresh library names and
+failed insertion removes only its newly written resources.
 
 **Select ▸ Tap (TODO (147), 2026-10-02) is a fourth way to make the same `Selection`, naming objects
 instead of a region.** The path is the union of the objects' own outlines (`VectorHitTest.outline(of:)`, a

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		560C11000000000000000002 /* SelectionClipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 560C11000000000000000001 /* SelectionClipboard.swift */; };
 		A05511000000000000000004 /* PaintSoftware/Engine/RasterPixels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A05511000000000000000003 /* PaintSoftware/Engine/RasterPixels.swift */; };
 		A05511000000000000000002 /* PaintSoftware/Engine/LZ4Block.swift in Sources */ = {isa = PBXBuildFile; fileRef = A05511000000000000000001 /* PaintSoftware/Engine/LZ4Block.swift */; };
 		F8A6E200A499A50028393691 /* PaintSoftware/Services/ProjectStore+RasterBacking.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6815809A8C5C2CD0814FF3F3 /* PaintSoftware/Services/ProjectStore+RasterBacking.swift */; };
@@ -672,6 +673,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		560C11000000000000000001 /* SelectionClipboard.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/SelectionClipboard.swift; sourceTree = "<group>"; };
 		A05511000000000000000003 /* PaintSoftware/Engine/RasterPixels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/RasterPixels.swift; sourceTree = "<group>"; };
 		A05511000000000000000001 /* PaintSoftware/Engine/LZ4Block.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/LZ4Block.swift; sourceTree = "<group>"; };
 		6815809A8C5C2CD0814FF3F3 /* PaintSoftware/Services/ProjectStore+RasterBacking.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Services/ProjectStore+RasterBacking.swift"; sourceTree = "<group>"; };
@@ -2007,6 +2009,7 @@
 				70F1ADCA6A700C56312DFD78 /* PaintSoftware/Models/LiquifyDeformation.swift */,
 				4A7F74630F0DA2019C9B4AFA /* PaintSoftware/Engine/LiquifyField.swift */,
 				DEC0DE00000000000000001B /* PaintSoftware/Models/SelectionModels.swift */,
+				560C11000000000000000001 /* SelectionClipboard.swift */,
 				DEC0DE00000000000000001D /* PaintSoftware/Models/UndoHistory.swift */,
 				DEC0DE00000000000000001F /* PaintSoftware/Services/PixelOps.swift */,
 				DEC0DE000000000000000021 /* PaintSoftware/Services/ProjectStore.swift */,
@@ -2699,6 +2702,7 @@
 				9438DE76ADDC619F94525E45 /* PaintSoftware/Models/LiquifyDeformation.swift in Sources */,
 				5C8A7F036C02D9A466A8B968 /* PaintSoftware/Engine/LiquifyField.swift in Sources */,
 				DEC0DE00000000000000001C /* PaintSoftware/Models/SelectionModels.swift in Sources */,
+				560C11000000000000000002 /* SelectionClipboard.swift in Sources */,
 				DEC0DE00000000000000001E /* PaintSoftware/Models/UndoHistory.swift in Sources */,
 				DEC0DE000000000000000020 /* PaintSoftware/Services/PixelOps.swift in Sources */,
 				DEC0DE000000000000000022 /* PaintSoftware/Services/ProjectStore.swift in Sources */,
