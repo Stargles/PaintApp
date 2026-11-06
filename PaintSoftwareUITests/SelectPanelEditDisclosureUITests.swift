@@ -172,7 +172,7 @@ final class SelectPanelEditDisclosureUITests: PaintUITestCase {
         let abovePaste = at(0.64, 0.22 - 0.008), aboveSource = at(0.26, 0.22 - 0.008)
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: abovePaste)), "the pasted line is initially thin")
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: aboveSource)), "the original line is initially thin")
-        adjustSlider(size, to: 0.95, tolerance: 0.04)
+        adjustSlider(size, to: 1, tolerance: 0, attempts: 1)
         XCTAssertNotNil(waitForPixel(canvas, at: abovePaste, matches: { isRed($0) }), "widening the pasted stroke changes its drawn edge")
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: aboveSource)), "the original line's width is unchanged")
         attachScreenshot(XCUIScreen.main, "clipboard-native-paste-widened-landscape")
