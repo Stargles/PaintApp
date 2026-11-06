@@ -1674,8 +1674,8 @@ final class SelectionEditLogicTests: XCTestCase {
         let previous = Compositor.backend
         Compositor.backend = .coreGraphics
         let pasteboard = UIPasteboard.general
-        let savedItems = pasteboard.items
-        defer { pasteboard.items = savedItems; Compositor.backend = previous }
+        pasteboard.items = []
+        defer { pasteboard.items = []; Compositor.backend = previous }
         for sourceOnly in [false, true] {
             for action in ["Fill", "Clear", "Cut"] {
                 let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
@@ -1753,8 +1753,8 @@ final class SelectionEditLogicTests: XCTestCase {
         let previous = Compositor.backend
         Compositor.backend = .coreGraphics
         let pasteboard = UIPasteboard.general
-        let savedItems = pasteboard.items
-        defer { pasteboard.items = savedItems; Compositor.backend = previous }
+        pasteboard.items = []
+        defer { pasteboard.items = []; Compositor.backend = previous }
         for sourceOnly in [false, true] {
             let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
             let manager = f.manager
@@ -1793,8 +1793,8 @@ final class SelectionEditLogicTests: XCTestCase {
         let previous = Compositor.backend
         Compositor.backend = .coreGraphics
         let pasteboard = UIPasteboard.general
-        let saved = pasteboard.items
-        defer { pasteboard.items = saved; Compositor.backend = previous }
+        pasteboard.items = []
+        defer { pasteboard.items = []; Compositor.backend = previous }
         for sourceOnly in [false, true] {
             let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
             let bounds = try XCTUnwrap(f.manager.selection).bounds
@@ -1819,8 +1819,8 @@ final class SelectionEditLogicTests: XCTestCase {
         let previous = Compositor.backend
         Compositor.backend = .coreGraphics
         let pasteboard = UIPasteboard.general
-        let savedItems = pasteboard.items
-        defer { pasteboard.items = savedItems; Compositor.backend = previous }
+        pasteboard.items = []
+        defer { pasteboard.items = []; Compositor.backend = previous }
         for sourceOnly in [false, true] {
             let f = try repeatedSelectionFixture(sourceOnly: sourceOnly)
             let manager = f.manager
@@ -1864,8 +1864,8 @@ final class SelectionEditLogicTests: XCTestCase {
     @MainActor
     func testFailedRequiredCopyPreservesClipboardSourceAndHistoryForCopyAndCut() throws {
         let pasteboard = UIPasteboard.general
-        let savedItems = pasteboard.items
-        defer { pasteboard.items = savedItems }
+        pasteboard.items = []
+        defer { pasteboard.items = [] }
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("repeat-clipboard-refusal-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -1899,8 +1899,8 @@ final class SelectionEditLogicTests: XCTestCase {
     @MainActor
     func testRepeatClipboardSettlesTheEarlierSelectionEditBeforeCopyOrCut() throws {
         let pasteboard = UIPasteboard.general
-        let savedItems = pasteboard.items
-        defer { pasteboard.items = savedItems }
+        pasteboard.items = []
+        defer { pasteboard.items = [] }
         for cutting in [false, true] {
             let f = try repeatedSelectionFixture(sourceOnly: true)
             let manager = f.manager

@@ -218,8 +218,8 @@ final class VectorDuplicateLogicTests: XCTestCase {
     @MainActor
     func testClipboardPastesAnIndependentEditableDrawingWithItsOrderPixelsSpanAndUndo() throws {
         let pasteboard = UIPasteboard.general
-        let saved = pasteboard.items
-        defer { pasteboard.items = saved }
+        pasteboard.items = []
+        defer { pasteboard.items = [] }
         let (source, index, vector) = fixture()
         let animationGroup = UUID(), motionGroup = UUID()
         source.animationGroups = [AnimationGroup(id: animationGroup, displayName: "Source pose", tagColor: black())]
@@ -304,8 +304,8 @@ final class VectorDuplicateLogicTests: XCTestCase {
     @MainActor
     func testMalformedNativeClipboardRefusesBeforeSettlingAFloatAndNeverUsesItsPicture() throws {
         let pasteboard = UIPasteboard.general
-        let saved = pasteboard.items
-        defer { pasteboard.items = saved }
+        pasteboard.items = []
+        defer { pasteboard.items = [] }
         let (manager, index, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 20, y: 32), to: CGPoint(x: 44, y: 32)))
         select(manager, index, CGRect(x: 10, y: 22, width: 44, height: 20))
@@ -474,8 +474,8 @@ final class VectorDuplicateLogicTests: XCTestCase {
     @MainActor
     func testMixedBackingCopyKeepsTheWholePictureFallbackInsteadOfDroppingItsNativeInk() throws {
         let pasteboard = UIPasteboard.general
-        let saved = pasteboard.items
-        defer { pasteboard.items = saved }
+        pasteboard.items = []
+        defer { pasteboard.items = [] }
         let (manager, index, vector) = fixture()
         vector.addStroke(stroke(from: CGPoint(x: 12, y: 20), to: CGPoint(x: 44, y: 20)))
         let backing = UIGraphicsImageRenderer(size: CanvasFixture.canvasSize).image { context in
