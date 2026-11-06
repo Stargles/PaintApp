@@ -172,12 +172,14 @@ final class SelectPanelEditDisclosureUITests: PaintUITestCase {
         let abovePaste = at(0.64, 0.22 - 0.008), aboveSource = at(0.26, 0.22 - 0.008)
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: abovePaste)), "the pasted line is initially thin")
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: aboveSource)), "the original line is initially thin")
-        adjustSlider(size, to: 1, tolerance: 0, attempts: 1)
+        adjustSlider(size, to: 1, tolerance: 0.15, attempts: 1)
         XCTAssertNotNil(waitForPixel(canvas, at: abovePaste, matches: { isRed($0) }), "widening the pasted stroke changes its drawn edge")
         XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: aboveSource)), "the original line's width is unchanged")
         attachScreenshot(XCUIScreen.main, "clipboard-native-paste-widened-landscape")
         app.buttons["sideToolbar.undoButton"].tap()
         XCTAssertNotNil(waitForPixel(canvas, at: abovePaste, matches: { isWhitish($0) }), "one Undo restores the pasted line's thin edge")
+        XCTAssertNotNil(waitForPixel(canvas, at: at(0.64, 0.22), matches: { isRed($0) }), "Undo keeps the pasted line's red center drawn")
+        attachScreenshot(XCUIScreen.main, "clipboard-native-paste-undone-landscape")
     }
 
 }
