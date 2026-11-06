@@ -46,8 +46,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         return CGPoint(x: sx / n / Double(w), y: sy / n / Double(h))
     }
 
-    /// A host-normalised point as a fraction of the paper — (0.5, 0.5) is the box's centre whatever
-    /// the rail has done to the layout.
+    /// A host-normalised point expressed as fractions of the visible paper.
     private func paperRelative(_ p: CGPoint, in paper: (minX: Double, maxX: Double, minY: Double, maxY: Double)) -> (u: Double, v: Double) {
         ((Double(p.x) - paper.minX) / (paper.maxX - paper.minX), (Double(p.y) - paper.minY) / (paper.maxY - paper.minY))
     }
@@ -60,7 +59,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         return (paper.minX + 0.04 * w, paper.maxX - 0.04 * w, paper.minY + v0 * h, paper.minY + v1 * h)
     }
 
-    /// The host-normalised point at paper-relative `(u, v)`.
+    /// The host-normalised point at visible-paper fractions `(u, v)`.
     private func hostPoint(_ paper: (minX: Double, maxX: Double, minY: Double, maxY: Double), u: Double, v: Double) -> CGVector {
         CGVector(dx: paper.minX + u * (paper.maxX - paper.minX), dy: paper.minY + v * (paper.maxY - paper.minY))
     }
