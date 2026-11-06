@@ -46,51 +46,6 @@ final class TransformLayerModesUITests: PaintUITestCase {
         return CGPoint(x: sx / n / Double(w), y: sy / n / Double(h))
     }
 
-    /// **The paper's edges in host-normalised coordinates, found by walking out from the host's
-    /// centre**, not estimated from the host's aspect and not the extent of every whitish pixel.
-    /// `canvas.host` is the whole screen under the toolbars: its screenshot carries the left rail's
-    /// white knobs and the top bar's white circle, so a whitish-extent scan reads 0.03…0.97 across;
-    /// `paperRect` assumes a square canvas filling the shorter side, which this document
-    /// is not; and **the canvas re-fits when the layer rail opens and closes**, so two screenshots
-    /// are only comparable in coordinates relative to the paper each one shows. The paper is one
-    /// solid white rectangle with the host's centre inside it, so its edges are where whitish stops
-    /// along the centre row and the centre column.
-    ///
-    /// **This is the *visible* paper, and its bottom edge is the timeline panel's top, not the
-    /// paper's.** The panel overlays the host's lower part (375 pt on the suite's portrait iPad, which
-    /// covers the paper's lower third), so the centre of this rectangle is not the centre of the
-    /// canvas — the canvas is centred on the host (`CanvasView.Coordinator.baseCenter`), and that is
-    /// where a box turns about. A measurement that depends on the canvas's centre takes it from the
-    /// host's own centre, `(0.5, 0.5)` in these coordinates, and never from this rectangle's.
-    private func paperBounds(_ pixels: ScreenshotPixels) -> (minX: Double, maxX: Double, minY: Double, maxY: Double)? {
-        let w = pixels.width, h = pixels.height
-        func whitish(_ x: Int, _ y: Int) -> Bool {
-            let pixel = pixels.read(column: x, row: y)
-            return pixel.r > 235 && pixel.g > 235 && pixel.b > 235
-        }
-        // **Never along the centre row or column, because the ink is there.** A walk stops at the
-        // first non-white pixel, and both tests below put ink on the centre row (and, after the
-        // turn, on the centre column), so the walk that found the paper before drawing lost half of
-        // it afterwards. The paper's top and left tenths carry no ink in either test: the vertical
-        // extent is provisionally read down the centre column, the horizontal extent is read along
-        // the row a tenth of the way down, and the vertical extent is then re-read down the column
-        // a tenth of the way in.
-        func run(_ fixed: Int, alongX: Bool) -> (Int, Int)? {
-            let limit = alongX ? w : h
-            var lo = limit / 2, hi = limit / 2
-            let at: (Int) -> Bool = alongX ? { whitish($0, fixed) } : { whitish(fixed, $0) }
-            guard at(lo) else { return nil }
-            while lo > 0, at(lo - 1) { lo -= 1 }
-            while hi < limit - 1, at(hi + 1) { hi += 1 }
-            return (lo, hi)
-        }
-        guard let (y0, y1) = run(w / 2, alongX: false),
-              let (minX, maxX) = run(y0 + (y1 - y0) / 10, alongX: true),
-              let (minY, maxY) = run(minX + (maxX - minX) / 10, alongX: false)
-        else { return nil }
-        return (Double(minX) / Double(w), Double(maxX) / Double(w), Double(minY) / Double(h), Double(maxY) / Double(h))
-    }
-
     /// A host-normalised point as a fraction of the paper — (0.5, 0.5) is the box's centre whatever
     /// the rail has done to the layout.
     private func paperRelative(_ p: CGPoint, in paper: (minX: Double, maxX: Double, minY: Double, maxY: Double)) -> (u: Double, v: Double) {
@@ -110,14 +65,15 @@ final class TransformLayerModesUITests: PaintUITestCase {
         CGVector(dx: paper.minX + u * (paper.maxX - paper.minX), dy: paper.minY + v * (paper.maxY - paper.minY))
     }
 
-    /// The paper as the canvas shows it right now — a fresh capture and its walk, failing the test
-    /// rather than guessing when the host's centre is not on the paper.
-    private func currentPaper(_ canvas: XCUIElement, _ what: String) -> (pixels: ScreenshotPixels, paper: (minX: Double, maxX: Double, minY: Double, maxY: Double))? {
-        guard let pixels = ScreenshotPixels(canvas.screenshot().image), let paper = paperBounds(pixels) else {
-            XCTFail("\(what): could not find the paper from the host's centre")
+    /// One displayed screenshot and the shared measured paper region clear of the toolbar and dock.
+    private func currentPaper(_ app: XCUIApplication, _ canvas: XCUIElement, _ what: String) -> (pixels: ScreenshotPixels, paper: (minX: Double, maxX: Double, minY: Double, maxY: Double))? {
+        let paper = visiblePaperRect(app, in: canvas)
+        guard paper.width > 0, paper.height > 0,
+              let pixels = ScreenshotPixels(canvas.screenshot().image) else {
+            XCTFail("\(what): could not measure visible paper")
             return nil
         }
-        return (pixels, paper)
+        return (pixels, (Double(paper.minX), Double(paper.maxX), Double(paper.minY), Double(paper.maxY)))
     }
 
     /// The rail is a toggle, and Done sometimes leaves it up and sometimes not — so this asks rather
@@ -231,7 +187,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        guard let blank = currentPaper(canvas, "at launch") else { return }
+        guard let blank = currentPaper(app, canvas, "at launch") else { return }
 
         // Four bands on four layers, bottom to top: the born layer, then three more. Each band sits
         // at its own paper row so the probe can tell them apart after they move by different amounts.
@@ -248,7 +204,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
             closeRail(app)
             band(row)
         }
-        guard let before = currentPaper(canvas, "before the drag") else { return }
+        guard let before = currentPaper(app, canvas, "before the drag") else { return }
         let startColumns = rows.map { v in
             inkCentroid(before.pixels, in: paperRegion(before.paper, v0: v - 0.06, v1: v + 0.06))
                 .map { paperRelative($0, in: before.paper).u }
@@ -287,7 +243,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertTrue(moveRow.waitForExistence(timeout: 5), "The Move row is still the way to the box")
         moveRow.tap()
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5), "Move raised the box")
-        guard let lifted = currentPaper(canvas, "with the box up") else { return }
+        guard let lifted = currentPaper(app, canvas, "with the box up") else { return }
         let start = canvas.coordinate(withNormalizedOffset: hostPoint(lifted.paper, u: 0.45, v: 0.5))
         let end = canvas.coordinate(withNormalizedOffset: hostPoint(lifted.paper, u: 0.75, v: 0.5))
         start.press(forDuration: 0.4, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
@@ -296,7 +252,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         attachScreenshot(app, "2-parallax-after-the-drag")
 
         // **What is drawn**: each band moved by its share of what the top band moved, in paper units.
-        guard let after = currentPaper(canvas, "after the drag") else { return }
+        guard let after = currentPaper(app, canvas, "after the drag") else { return }
         var shifts: [Double] = []
         for (i, v) in rows.enumerated() {
             guard let was = startColumns[i],
@@ -326,7 +282,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        guard let blank = currentPaper(canvas, "at launch") else { return }
+        guard let blank = currentPaper(app, canvas, "at launch") else { return }
         guard let total = readFrameLabel(app)?.total else { return XCTFail("No frame label") }
         attachScreenshot(app, "0-launch")
 
@@ -336,7 +292,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         let at = hostPoint(blank.paper, u: 0.65, v: 0.5)
         drawBand(on: canvas, x: Double(at.dx), y: Double(at.dy), halfHeight: 0.04)
         attachScreenshot(app, "0-band-drawn")
-        guard let rest = currentPaper(canvas, "after drawing"),
+        guard let rest = currentPaper(app, canvas, "after drawing"),
               let restInk = inkCentroid(rest.pixels, in: paperRegion(rest.paper, v0: 0.04, v1: 0.96)) else {
             return XCTFail("The band did not land: paper at launch \(blank.paper), drawn at \(at)")
         }
@@ -368,7 +324,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         // At the bar's first frame nothing has turned yet.
         scrub(app, toFrame: 1, total: total)
         attachScreenshot(app, "1b-at-frame-1")
-        guard let first = currentPaper(canvas, "at the first frame"),
+        guard let first = currentPaper(app, canvas, "at the first frame"),
               let atFirst = inkCentroid(first.pixels, in: paperRegion(first.paper, v0: 0.04, v1: 0.96))
                   .map({ paperRelative($0, in: first.paper) }) else {
             return XCTFail("The band vanished at the first frame")
@@ -381,7 +337,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         // the canvas is centred on the host, so it is the host's own centre — puts what was to the
         // right of it directly below it, as far below as it was to the right. Worked in the capture's
         // own pixels, where that is a rotation of the vector from the centre; the visible paper's
-        // centre is not the canvas's (`paperBounds`), and its fractions would not turn.
+        // centre is not the canvas's, and its fractions would not turn.
         scrub(app, toFrame: 7, total: total)
         let width = Double(rest.pixels.width), height = Double(rest.pixels.height)
         let fromCentre = (x: (Double(restInk.x) - 0.5) * width, y: (Double(restInk.y) - 0.5) * height)
@@ -396,7 +352,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         var atSeventh = restInk
         let deadline = Date().addingTimeInterval(8)
         repeat {
-            guard let turned = currentPaper(canvas, "at the seventh frame"),
+            guard let turned = currentPaper(app, canvas, "at the seventh frame"),
                   let read = inkCentroid(turned.pixels, in: paperRegion(turned.paper, v0: 0.04, v1: 0.96)) else {
                 return XCTFail("The band vanished at the seventh frame")
             }
@@ -427,7 +383,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
             var settled: Double?
             let deadline = Date().addingTimeInterval(8)
             repeat {
-                guard let paper = currentPaper(canvas, "\(what), frame \(frame)"),
+                guard let paper = currentPaper(app, canvas, "\(what), frame \(frame)"),
                       let read = inkCentroid(paper.pixels, in: paperRegion(paper.paper, v0: 0.15, v1: 0.96))
                           .map({ paperRelative($0, in: paper.paper).u }) else {
                     XCTFail("\(what): the band vanished at frame \(frame)")
@@ -451,20 +407,18 @@ final class TransformLayerModesUITests: PaintUITestCase {
     /// frames are read rather than one so the "moved" and "re-rolled" checks do not hang on a single
     /// noise sample that could, one time in twenty, be near zero.
     ///
-    /// The band starts at paper (0.3, 0.3) and 300 points is under 0.15 of a 2048-point paper, so
-    /// however the noise falls the band never reaches the centre column or the top tenth — the two
-    /// lines `paperBounds` walks to find the paper.
+    /// The band starts at visible-paper (0.3, 0.3).
     func testShakeJoltsTheInkTheSameWayEveryTimeUntilReRolledAndUndoBringsTheOldShakeBack() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        guard let blank = currentPaper(canvas, "at launch") else { return }
+        guard let blank = currentPaper(app, canvas, "at launch") else { return }
         guard let total = readFrameLabel(app)?.total else { return XCTFail("No frame label") }
 
         let at = hostPoint(blank.paper, u: 0.3, v: 0.3)
         drawBand(on: canvas, x: Double(at.dx), y: Double(at.dy), halfHeight: 0.04)
-        guard let rest = currentPaper(canvas, "after drawing"),
+        guard let rest = currentPaper(app, canvas, "after drawing"),
               let restU = inkCentroid(rest.pixels, in: paperRegion(rest.paper, v0: 0.15, v1: 0.96))
                   .map({ paperRelative($0, in: rest.paper).u }) else {
             return XCTFail("The band did not land")
@@ -584,11 +538,11 @@ final class TransformLayerModesUITests: PaintUITestCase {
 
     /// The band's paper-relative column inside paper rows `v0…v1`, repeated until two consecutive
     /// captures agree; nil when the region holds no ink after the deadline.
-    private func settledColumn(_ canvas: XCUIElement, v0: Double, v1: Double, _ what: String) -> Double? {
+    private func settledColumn(_ app: XCUIApplication, _ canvas: XCUIElement, v0: Double, v1: Double, _ what: String) -> Double? {
         var last: Double?
         let deadline = Date().addingTimeInterval(8)
         repeat {
-            guard let paper = currentPaper(canvas, what) else { return nil }
+            guard let paper = currentPaper(app, canvas, what) else { return nil }
             let read = inkCentroid(paper.pixels, in: paperRegion(paper.paper, v0: v0, v1: v1))
                 .map { paperRelative($0, in: paper.paper).u }
             if let read, let last, abs(last - read) < 0.002 { return read }
@@ -618,15 +572,14 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertEqual(bornCel(app, startingAt: 1)?.value as? String, "1,1")
         XCTAssertEqual(bornCel(app, startingAt: 2)?.value as? String, "2,10")
 
-        // A band on each of the first three frames at its own column, all on row 0.3 — off the
-        // centre column and the top tenth, which is where `paperBounds` walks.
+        // A band on each of the first three frames at its own column, all on visible-paper row 0.3.
         let columns = [0.2, 0.4, 0.7]
         for (frame, u) in columns.enumerated() {
             tapBornLayer(app, blockStartingAt: frame, frame: frame)
-            guard let paper = currentPaper(canvas, "frame \(frame + 1) before drawing") else { return nil }
+            guard let paper = currentPaper(app, canvas, "frame \(frame + 1) before drawing") else { return nil }
             let at = hostPoint(paper.paper, u: u, v: 0.3)
             drawBand(on: canvas, x: Double(at.dx), y: Double(at.dy), halfHeight: 0.04)
-            let read = settledColumn(canvas, v0: 0.15, v1: 0.45, "frame \(frame + 1) after drawing")
+            let read = settledColumn(app, canvas, v0: 0.15, v1: 0.45, "frame \(frame + 1) after drawing")
             XCTAssertEqual(read ?? -1, u, accuracy: 0.03, "Sanity: frame \(frame + 1)'s band is at \(u)")
         }
         attachScreenshot(app, "1-three-drawings")
@@ -671,28 +624,28 @@ final class TransformLayerModesUITests: PaintUITestCase {
         // **What is drawn**: frame 5 is frame 2's picture (the band at 0.4), not the held third
         // drawing's (0.7); frame 4 is frame 1's.
         scrub(app, toFrame: 5, total: total)
-        let atFive = settledColumn(canvas, v0: 0.15, v1: 0.45, "at frame 5")
+        let atFive = settledColumn(app, canvas, v0: 0.15, v1: 0.45, "at frame 5")
         XCTAssertEqual(atFive ?? -1, columns[1], accuracy: 0.03, "frame 5 shows frame 2's drawing, not the block sitting under the playhead")
         scrub(app, toFrame: 4, total: total)
-        XCTAssertEqual(settledColumn(canvas, v0: 0.15, v1: 0.45, "at frame 4") ?? -1, columns[0], accuracy: 0.03, "frame 4 shows frame 1's")
+        XCTAssertEqual(settledColumn(app, canvas, v0: 0.15, v1: 0.45, "at frame 4") ?? -1, columns[0], accuracy: 0.03, "frame 4 shows frame 1's")
         attachScreenshot(app, "3-frame-5-shows-frame-2")
 
         // **Ruling 13**: a second band drawn on frame 5, lower down, lands on frame 2 — and not on
         // frame 3. The born layer is selected by tapping its held block at frame 5.
         tapBornLayer(app, blockStartingAt: 2, frame: 4)
-        guard let paper = currentPaper(canvas, "frame 5 before the redirected stroke") else { return }
+        guard let paper = currentPaper(app, canvas, "frame 5 before the redirected stroke") else { return }
         let lower = hostPoint(paper.paper, u: 0.55, v: 0.65)
         drawBand(on: canvas, x: Double(lower.dx), y: Double(lower.dy), halfHeight: 0.04)
-        XCTAssertEqual(settledColumn(canvas, v0: 0.5, v1: 0.8, "frame 5 after drawing") ?? -1, 0.55, accuracy: 0.03,
+        XCTAssertEqual(settledColumn(app, canvas, v0: 0.5, v1: 0.8, "frame 5 after drawing") ?? -1, 0.55, accuracy: 0.03,
                        "the new band shows on frame 5 itself")
         scrub(app, toFrame: 2, total: total)
-        XCTAssertEqual(settledColumn(canvas, v0: 0.5, v1: 0.8, "at frame 2") ?? -1, 0.55, accuracy: 0.03,
+        XCTAssertEqual(settledColumn(app, canvas, v0: 0.5, v1: 0.8, "at frame 2") ?? -1, 0.55, accuracy: 0.03,
                        "…and on frame 2, the drawing it repeats")
-        XCTAssertEqual(settledColumn(canvas, v0: 0.15, v1: 0.45, "at frame 2, upper") ?? -1, columns[1], accuracy: 0.03,
+        XCTAssertEqual(settledColumn(app, canvas, v0: 0.15, v1: 0.45, "at frame 2, upper") ?? -1, columns[1], accuracy: 0.03,
                        "frame 2's own band is still there")
         attachScreenshot(app, "4-ink-from-frame-5-on-frame-2")
         scrub(app, toFrame: 3, total: total)
-        XCTAssertNil(settledColumn(canvas, v0: 0.5, v1: 0.8, "at frame 3"), "frame 3 did not receive it")
+        XCTAssertNil(settledColumn(app, canvas, v0: 0.5, v1: 0.8, "at frame 3"), "frame 3 did not receive it")
     }
 
     func testRepeatedSelectionClearChangesTheSourceDrawingAndOneUndoRestoresItsInk() throws {
@@ -702,15 +655,15 @@ final class TransformLayerModesUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         guard let (columns, total) = threeDrawingsUnderARepeatOfThree(app, canvas: canvas) else { return }
         tapBornLayer(app, blockStartingAt: 2, frame: 4)
-        XCTAssertEqual(settledColumn(canvas, v0: 0.15, v1: 0.45, "repeated source before Clear") ?? -1,
+        XCTAssertEqual(settledColumn(app, canvas, v0: 0.15, v1: 0.45, "repeated source before Clear") ?? -1,
                        columns[1], accuracy: 0.03)
         app.buttons["toolbar.selectButton"].tap()
         let rectangle = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
         rectangle.tap()
-        XCTAssertEqual(settledColumn(canvas, v0: 0.15, v1: 0.45, "source with Select open") ?? -1,
+        XCTAssertEqual(settledColumn(app, canvas, v0: 0.15, v1: 0.45, "source with Select open") ?? -1,
                        columns[1], accuracy: 0.03, "PREMISE: the source band is visible above the Select dock")
-        guard let paper = currentPaper(canvas, "source selection") else { return }
+        guard let paper = currentPaper(app, canvas, "source selection") else { return }
         let start = hostPoint(paper.paper, u: 0.30, v: 0.08)
         let end = hostPoint(paper.paper, u: 0.50, v: 0.65)
         let host = canvas.frame
@@ -741,7 +694,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         app.buttons["sideToolbar.redoButton"].tap()
         XCTAssertFalse(try repeatedInkPicture(canvas, in: inkWindow).contains(true), "Redo clears the source band again")
         scrub(app, toFrame: 2, total: total)
-        guard let otherPaper = currentPaper(canvas, "other drawing after Clear") else { return }
+        guard let otherPaper = currentPaper(app, canvas, "other drawing after Clear") else { return }
         let otherStart = hostPoint(otherPaper.paper, u: columns[2] - 0.03, v: 0.15)
         let otherEnd = hostPoint(otherPaper.paper, u: columns[2] + 0.03, v: 0.45)
         let otherWindow = CGRect(x: otherStart.dx, y: otherStart.dy,
@@ -767,20 +720,20 @@ final class TransformLayerModesUITests: PaintUITestCase {
         let rectangle = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
         rectangle.tap()
-        guard let paper = currentPaper(canvas, "repeated band before Move") else { return }
+        guard let paper = currentPaper(app, canvas, "repeated band before Move") else { return }
         let start = hostPoint(paper.paper, u: 0.30, v: 0.08)
         let end = hostPoint(paper.paper, u: 0.50, v: 0.65)
         dragOnCanvas(app, from: start, to: end)
         app.buttons["toolbar.moveButton"].tap()
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5), "Move lifts the shown source band")
-        guard let movingPaper = currentPaper(canvas, "source Move box") else { return }
+        guard let movingPaper = currentPaper(app, canvas, "source Move box") else { return }
         let box = try XCTUnwrap(settledMoveBox(app), "the shown source has an exposed Move hull")
         let delta = CGFloat(0.15 * (movingPaper.paper.maxX - movingPaper.paper.minX))
         dragOnCanvas(app, from: CGVector(dx: box.midX, dy: box.midY),
                      to: CGVector(dx: box.midX + delta, dy: box.midY))
         attachScreenshot(XCUIScreen.main, "repeat-move-source-band-under-the-box")
         app.buttons["moveBar.doneButton"].tap()
-        guard let donePaper = currentPaper(canvas, "after repeated Move") else { return }
+        guard let donePaper = currentPaper(app, canvas, "after repeated Move") else { return }
         let oldStart = hostPoint(donePaper.paper, u: 0.34, v: 0.15)
         let oldEnd = hostPoint(donePaper.paper, u: 0.46, v: 0.45)
         let newStart = hostPoint(donePaper.paper, u: 0.50, v: 0.15)
@@ -798,7 +751,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         app.buttons["sideToolbar.redoButton"].tap()
         XCTAssertTrue(try repeatedInkPicture(canvas, in: movedWindow).contains(true))
         scrub(app, toFrame: 2, total: total)
-        XCTAssertEqual(settledColumn(canvas, v0: 0.15, v1: 0.45, "other drawing after Move") ?? -1,
+        XCTAssertEqual(settledColumn(app, canvas, v0: 0.15, v1: 0.45, "other drawing after Move") ?? -1,
                        0.7, accuracy: 0.03, "the raw playhead's drawing was not edited")
         attachScreenshot(XCUIScreen.main, "repeat-move-original-source-and-other-drawing")
     }
@@ -814,7 +767,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         let rectangle = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
         rectangle.tap()
-        guard let paper = currentPaper(canvas, "repeated band before Duplicate") else { return }
+        guard let paper = currentPaper(app, canvas, "repeated band before Duplicate") else { return }
         dragOnCanvas(app, from: hostPoint(paper.paper, u: 0.30, v: 0.08),
                      to: hostPoint(paper.paper, u: 0.50, v: 0.65))
         app.buttons["selectPanel.duplicateButton"].tap()
@@ -822,14 +775,14 @@ final class TransformLayerModesUITests: PaintUITestCase {
         let destination = app.otherElements["timeline.cel.1.1"]
         XCTAssertTrue(destination.waitForExistence(timeout: 5), "the copy has the source drawing's frame span")
         XCTAssertEqual(destination.value as? String, "1,1")
-        guard let movingPaper = currentPaper(canvas, "source Duplicate box") else { return }
+        guard let movingPaper = currentPaper(app, canvas, "source Duplicate box") else { return }
         let box = try XCTUnwrap(settledMoveBox(app), "the copied source has an exposed Move hull")
         let delta = CGFloat(0.15 * (movingPaper.paper.maxX - movingPaper.paper.minX))
         dragOnCanvas(app, from: CGVector(dx: box.midX, dy: box.midY),
                      to: CGVector(dx: box.midX + delta, dy: box.midY))
         attachScreenshot(XCUIScreen.main, "repeat-duplicate-source-band-and-live-copy")
         app.buttons["moveBar.doneButton"].tap()
-        guard let donePaper = currentPaper(canvas, "after repeated Duplicate") else { return }
+        guard let donePaper = currentPaper(app, canvas, "after repeated Duplicate") else { return }
         let originalStart = hostPoint(donePaper.paper, u: 0.34, v: 0.15)
         let originalEnd = hostPoint(donePaper.paper, u: 0.46, v: 0.45)
         let copyStart = hostPoint(donePaper.paper, u: 0.50, v: 0.15)
@@ -871,7 +824,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         let rectangle = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
         rectangle.tap()
-        guard let paper = currentPaper(canvas, "repeated raster band before Duplicate") else { return }
+        guard let paper = currentPaper(app, canvas, "repeated raster band before Duplicate") else { return }
         dragOnCanvas(app, from: hostPoint(paper.paper, u: 0.30, v: 0.08),
                      to: hostPoint(paper.paper, u: 0.50, v: 0.65))
         app.buttons["selectPanel.duplicateButton"].tap()
@@ -879,14 +832,14 @@ final class TransformLayerModesUITests: PaintUITestCase {
         let destination = app.otherElements["timeline.cel.2.0"]
         XCTAssertTrue(destination.waitForExistence(timeout: 5), "the independent root copy is above the root Repeat")
         XCTAssertEqual(destination.value as? String, "4,1", "the copy starts where Duplicate was pressed and keeps the one-frame source duration")
-        guard let movingPaper = currentPaper(canvas, "raster Duplicate box") else { return }
+        guard let movingPaper = currentPaper(app, canvas, "raster Duplicate box") else { return }
         let box = try XCTUnwrap(settledMoveBox(app))
         let delta = CGFloat(0.15 * (movingPaper.paper.maxX - movingPaper.paper.minX))
         dragOnCanvas(app, from: CGVector(dx: box.midX, dy: box.midY),
                      to: CGVector(dx: box.midX + delta, dy: box.midY))
         app.buttons["moveBar.doneButton"].tap()
         XCTAssertEqual(readFrameLabel(app)?.current, 5)
-        guard let donePaper = currentPaper(canvas, "raster Duplicate after Done") else { return }
+        guard let donePaper = currentPaper(app, canvas, "raster Duplicate after Done") else { return }
         func window(_ left: Double, _ right: Double) -> CGRect {
             let a = hostPoint(donePaper.paper, u: left, v: 0.15)
             let b = hostPoint(donePaper.paper, u: right, v: 0.45)
@@ -925,7 +878,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         let rectangle = app.buttons["selectPanel.mode.rectangle"]
         XCTAssertTrue(rectangle.waitForExistence(timeout: 5))
         rectangle.tap()
-        guard let paper = currentPaper(canvas, "before repeated Cut") else { return }
+        guard let paper = currentPaper(app, canvas, "before repeated Cut") else { return }
         let start = hostPoint(paper.paper, u: 0.30, v: 0.08)
         let end = hostPoint(paper.paper, u: 0.50, v: 0.65)
         let host = canvas.frame
@@ -961,7 +914,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         let allowPaste = springboard.alerts.buttons["Allow Paste"]
         if allowPaste.waitForExistence(timeout: 5) { allowPaste.tap() }
         app.buttons["toolbar.actionsButton"].tap()
-        guard let pastedPaper = currentPaper(canvas, "after source Paste") else { return }
+        guard let pastedPaper = currentPaper(app, canvas, "after source Paste") else { return }
         let pastedStart = hostPoint(pastedPaper.paper, u: 0.35, v: 0.10)
         let pastedEnd = hostPoint(pastedPaper.paper, u: 0.65, v: 0.65)
         let pastedWindow = CGRect(x: pastedStart.dx, y: pastedStart.dy,
@@ -1139,7 +1092,7 @@ final class TransformLayerModesUITests: PaintUITestCase {
         // **What is drawn**: the loop's pictures, from drawings that are really there.
         for frame in [3, 4, 5, 7, 11] {
             tapBornLayer(app, blockStartingAt: frame, frame: frame)
-            XCTAssertEqual(settledColumn(canvas, v0: 0.15, v1: 0.45, "frame \(frame + 1) after the bake") ?? -1,
+            XCTAssertEqual(settledColumn(app, canvas, v0: 0.15, v1: 0.45, "frame \(frame + 1) after the bake") ?? -1,
                            columns[frame % 3], accuracy: 0.03,
                            "frame \(frame + 1) draws drawing \(frame % 3 + 1), now a drawing of its own")
         }
