@@ -1,5 +1,9 @@
 # Handoff — active owner-resumed work (October 29)
 
+**Latest owner instruction: PAUSED.** See TODO.md → “Latest owner requests — 2026-11-07” for the
+Undo regression, whole-iPad reboot, recording paths and deferred crash-report viewer. Every task
+belongs in TODO.md; older continuation/build instructions below do not authorize resuming.
+
 Kevin said **continue; do not park**. TODO.md retains every unfinished owner ask. Use useful agents,
 conserve usage, solve causes through existing owners and remove superseded paths. Kevin confirms the
 rapid erasing crash uses **To Cross**. His previous sleep-until-noon period has passed, but fresh

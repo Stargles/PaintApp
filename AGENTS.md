@@ -34,9 +34,10 @@ own branch, so `main`'s HANDOFF.md can be behind.
 - **When a choice costs appearance, render the A/B and send the images** — he has reversed rulings on
   seeing what he had accepted on reading a number.
 - **A feature asked for "later" is written down, not researched.**
-- **Record before you act**: every report or ruling lands in TODO.md (and HANDOFF.md if the next step
-  changes) *before* work starts, and both are re-checked after every merge. A session can end at any
-  moment; what lives only in a conversation is lost.
+- **Record before you act**: every task, report, ruling and deferred request ALWAYS lands in
+  TODO.md *before* work starts. Fold updates into the existing task where appropriate. HANDOFF.md
+  points to TODO.md when the next step changes; it must never be the sole record of a task. Re-check
+  both after every merge. A session can end at any moment; conversation-only tasks are lost.
 - **His usage budget is set per session** (how many agents, which models). Ask if it was not stated;
   put cheap models on mechanical work.
 - **A real scene is 300–1000 drawn cels.** Design memory around a window or budget, never "load it

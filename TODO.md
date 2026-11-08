@@ -1,5 +1,37 @@
 # TODO
 
+## Latest owner requests — 2026-11-07; PAUSED
+
+**Every task ALWAYS goes in TODO.md**, including deferred requests and new reports on old bugs.
+HANDOFF.md is a navigation/checkpoint document, never the only record of an outstanding task.
+The owner has exhausted usage: record these items and remain paused; no diagnosis, tests or builds.
+This instruction supersedes older “continue” instructions and percentages below.
+
+- [ ] **Fix severe Undo latency.** Owner reports drawing is responsive after the latest Release
+  install (`d4d59f6bc261d23366c8e713ecab96353fe0183c`), but Undo still has “enormous latency” despite an
+  earlier fix. Reproduce and compare that specific path first; correct the root cause efficiently.
+  Do not start another broad audit or testing/storage framework.
+- [ ] **Resolve the full-iPad crash during rapid drawing → Undo → drawing.** Owner says the whole
+  iPad goes black/reboots for a few seconds, rather than PaintApp alone exiting. It still happens;
+  do not close it based on the earlier successful rapid-erasing session. The recording may end
+  abruptly. Investigate its possible relationship to Undo latency and unnecessary retained memory;
+  memory overload is the owner's hypothesis, not an established cause. Reuse the existing crash/
+  erasing investigation rather than creating a parallel fix. Establish actual allocation ownership
+  and release lifetimes before changing memory policy. Verify the repaired workflow and directly
+  related drawing/erasing/Undo/Redo paths; do not claim zero bugs from passing tests.
+  Retrieved, size-verified evidence (no investigation performed):
+  `/Users/juliapark/PaintWork/recordings/2026-11-07/recording-20261107-221600.jsonl`, 192674 bytes,
+  SHA256 `a667509c30962d5a7b54e012bef9f500f2f7bcb7d19c7e75f136baf971ed5590`.
+  Earlier drawing/erasing-latency recording:
+  `/Users/juliapark/PaintWork/recordings/2026-11-07/recording-20261107-202427.jsonl`, 145173 bytes,
+  SHA256 `a479de0d1ccfb562408e89e25c01a2cf5e54ddbee50293aec1556cb3aad2ace1`.
+- [ ] **Deferred: view previous crash reports in the app**, similarly to recordings. Owner asked
+  “at some point if it is possible”; record only, do not research or implement while paused.
+
+Other outstanding requests remain below. Historical status/proof paths may refer to the PaintWork
+folders the owner deleted during the emergency cleanup; verify availability before relying on them.
+
+
 ## Current owner-facing status — October 29
 
 **Active: continue; do not park.** Kevin resumed after noon Toronto time. Work continues; a new disruptive device
