@@ -11,9 +11,8 @@ import Combine   // objectWillChange.send()
 /// make: a solid rectangle, a solid ellipse and a gradient, each of the fill tool's own kind
 /// (`CanvasManager+FillObjects.swift`).
 ///
-/// **Every object row here primes rather than places** (TODO (149), `CanvasManager+Placement.swift`):
-/// a tap arms the placement tool with that object, and the artist's next pen-down on the canvas puts
-/// it down and drags it to size. The photo and video rows pick first and prime with what was picked.
+/// Shapes prime the placement tool (`CanvasManager+Placement.swift`) for the artist to drag out.
+/// Picked photos and videos appear immediately through the existing media insertion paths.
 ///
 /// **The one panel besides `ActionsMenu` that needs the `activePanel` binding**, and for the same
 /// reason `ActionsMenu` first grew it: "Add Text" is a mode change, not a direct action, and entering
@@ -51,7 +50,7 @@ struct AddMenu: View {
             }
             .accessibilityIdentifier("add.insertPhotoRow")
             .onChange(of: photoPickerItem) { _, newItem in
-                Task { await primePhoto(newItem) }
+                Task { await importPhoto(newItem) }
             }
 
             // **VIDEO.md stage 4, and it is deliberately the picker beside the photo one rather than
@@ -63,7 +62,7 @@ struct AddMenu: View {
             }
             .accessibilityIdentifier("add.insertVideoRow")
             .onChange(of: videoPickerItem) { _, newItem in
-                Task { await primeVideo(newItem) }
+                Task { await importVideo(newItem) }
             }
 
             streamScreenRow
@@ -209,16 +208,16 @@ struct AddMenu: View {
         .contentShape(Rectangle())
     }
 
-    /// **A picked photo primes the placement tool rather than landing** (TODO (149)): the artist drags it
-    /// out where they want it. The picker's selection is cleared once it is read, so choosing the same
-    /// photo a second time — after putting the first priming down, say — still fires.
-    private func primePhoto(_ item: PhotosPickerItem?) async {
+    /// Inserts the picked photo immediately. Clear the selection so the same photo can be picked again.
+    private func importPhoto(_ item: PhotosPickerItem?) async {
         guard let item else { return }
         let image = (try? await item.loadTransferable(type: Data.self)).flatMap(UIImage.init(data:))
         await MainActor.run {
             photoPickerItem = nil
-            guard let image, canvasManager.primeImage(image) else {
-                notice = "That photo could not be read."
+            guard let image else { notice = "That photo could not be read."; return }
+            canvasManager.leavePlacement()
+            guard canvasManager.insertImage(image) else {
+                notice = "That photo could not be inserted."
                 return
             }
             activePanel = .none
@@ -231,22 +230,22 @@ struct AddMenu: View {
     /// and `loadTransferable(type: Data.self)` on a half-gigabyte clip is a half-gigabyte of resident
     /// memory on the device this app's `Compositor` header already documents jetsam killing.
     ///
-    /// The primed object owns the file from here (`CanvasManager.primeVideo`): the placement *moves* it
-    /// into the document, and a priming that ends first deletes it. The system deletes its own export the
-    /// moment the transfer closure returns, so the copy `PickedMovie` made is the only one.
-    private func primeVideo(_ item: PhotosPickerItem?) async {
+    /// `insertVideo` moves the owned picked copy into the document. A refused import discards only
+    /// that temporary copy; the Photos library's original is never the file passed here.
+    private func importVideo(_ item: PhotosPickerItem?) async {
         guard let item else { return }
-        guard let movie = try? await item.loadTransferable(type: PickedMovie.self) else {
-            return await MainActor.run { notice = "That video could not be read." }
-        }
+        let movie = try? await item.loadTransferable(type: PickedMovie.self)
         await MainActor.run {
             videoPickerItem = nil
-            if canvasManager.primeVideo(at: movie.url) {
-                activePanel = .none
-            } else {
-                try? FileManager.default.removeItem(at: movie.url)
-                notice = "That video could not be read."
+            guard let movie else { notice = "That video could not be read."; return }
+            defer { try? FileManager.default.removeItem(at: movie.url) }
+            canvasManager.leavePlacement()
+            guard canvasManager.insertVideo(at: movie.url, consumingSource: true) else {
+                notice = "That video could not be inserted."
+                return
             }
+            canvasManager.currentFrame = 0
+            activePanel = .none
         }
     }
 }
@@ -254,7 +253,7 @@ struct AddMenu: View {
 /// **A picked movie, as a file rather than as bytes** — the `Transferable` the video picker loads.
 ///
 /// `PhotosPickerItem` will hand a clip over as `Data`, and doing that is what this type exists to
-/// avoid: see `AddMenu.primeVideo`. The import closure has to copy, because the file it is
+/// avoid: see `AddMenu.importVideo`. The import closure has to copy, because the file it is
 /// given is deleted as soon as it returns; `CanvasManager.insertVideo` then *moves* that copy into
 /// `VideoImportStore`, so the picked clip is written twice on its way in and not three times.
 struct PickedMovie: Transferable {
