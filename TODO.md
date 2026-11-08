@@ -14,7 +14,10 @@ This instruction supersedes older “continue” instructions and percentages be
 - [ ] **Resolve the full-iPad crash during rapid drawing → Undo → drawing.** Owner says the whole
   iPad goes black/reboots for a few seconds, rather than PaintApp alone exiting. It still happens;
   do not close it based on the earlier successful rapid-erasing session. The recording may end
-  abruptly. Investigate its possible relationship to Undo latency and unnecessary retained memory;
+  abruptly. **Additional owner hint:** “I think the crash happens when I do this while there is a
+  stream loaded.” On resumption, compare the same rapid drawing/Undo workflow with and without a
+  loaded stream; this is a suspected trigger, not a proven cause. No investigation authorized while
+  paused. Investigate its possible relationship to Undo latency and unnecessary retained memory;
   memory overload is the owner's hypothesis, not an established cause. Reuse the existing crash/
   erasing investigation rather than creating a parallel fix. Establish actual allocation ownership
   and release lifetimes before changing memory policy. Verify the repaired workflow and directly
