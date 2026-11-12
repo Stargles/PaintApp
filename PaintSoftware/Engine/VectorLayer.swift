@@ -5657,7 +5657,17 @@ final class VectorCanvas {
     /// the memo is refused (`install`); `StrokeCanvasView.finishVectorRender` tests staleness again
     /// on the main thread before it shows anything, and `Frozen` wants exactly this image.
     func render(quality: RenderQuality, ifStillAtVersion version: Int) -> UIImage? {
-        guard let image = rasterize(quality: quality, ifStillAtVersion: version) else { return nil }
+        render(quality: quality, requiring: .display(version))
+    }
+
+    enum RenderRequirement {
+        case display(Int)
+        /// The host's separate stream window owns any reference-only pixel changes.
+        case document(Int)
+    }
+
+    func render(quality: RenderQuality, requiring revision: RenderRequirement) -> UIImage? {
+        guard let image = rasterize(quality: quality, requiring: revision) else { return nil }
         VectorRenderCache.noteRendered(self)   // outside the lock — see `render(quality:)`
         return image
     }
@@ -5711,7 +5721,7 @@ final class VectorCanvas {
     /// `render(quality:ifStillAtVersion:)`, whose contract this shares in full.
     func render(quality: RenderQuality, resolution: CGFloat, ifStillAtVersion version: Int) -> UIImage? {
         guard let image = rasterize(quality: quality, requestedResolution: resolution,
-                                    ifStillAtVersion: version) else { return nil }
+                                    requiring: .display(version)) else { return nil }
         VectorRenderCache.noteRendered(self)   // outside the lock — see `render(quality:resolution:)`
         return image
     }
@@ -6110,8 +6120,8 @@ final class VectorCanvas {
     ///
     /// Caller must hold `lock`.
     private func planRender(quality: RenderQuality, resolution: CGFloat,
-                            ifStillAtVersion required: Int?) -> RenderStep {
-        if let required, version != required { return .superseded }
+                            requiring required: RenderRequirement?) -> RenderStep {
+        if let required, !matches(required) { return .superseded }
         // An empty canvas is now the steady state of a freshly added layer, and it is reached
         // eagerly: `StrokeCanvasView.vectorCanvas`'s `didSet` renders on assignment. Without this,
         // every empty vector layer would retain 16.8 MB of transparent pixels at 2048², 64 MB at
@@ -6338,7 +6348,7 @@ final class VectorCanvas {
     /// Concurrent reduced requests may both prepare one picture before either installs. The
     /// version, element-count and suppression checks still fence installation.
     private func rasterize(quality: RenderQuality, requestedResolution: CGFloat = 1,
-                           ifStillAtVersion required: Int? = nil) -> UIImage? {
+                           requiring required: RenderRequirement? = nil) -> UIImage? {
         // **The one clamp: a request may only ask for *less*.** `RenderRequest.renderSize(fitting:within:)`'
         // rule and for its reason — rendering above native invents no detail and costs more than the
         // native render it replaces. It is here rather than at the three entry points above because
@@ -6351,7 +6361,7 @@ final class VectorCanvas {
         // The plan below re-asks under the lock that matters; this is an optimisation, not the test.
         if let required {
             lock.lock()
-            let moved = version != required
+            let moved = !matches(required)
             lock.unlock()
             if moved { return nil }
         }
@@ -6359,7 +6369,7 @@ final class VectorCanvas {
         if shares { rasterizeLock.lock() }
         defer { if shares { rasterizeLock.unlock() } }
         lock.lock()
-        let step = planRender(quality: quality, resolution: resolution, ifStillAtVersion: required)
+        let step = planRender(quality: quality, resolution: resolution, requiring: required)
         lock.unlock()
         switch step {
         case .superseded: return nil
@@ -6372,6 +6382,14 @@ final class VectorCanvas {
             install(result, from: plan)
             lock.unlock()
             return result.image
+        }
+    }
+
+    /// Called with `lock` held, including when the render plan actually captures its inputs.
+    private func matches(_ requirement: RenderRequirement) -> Bool {
+        switch requirement {
+        case .display(let expected): version == expected
+        case .document(let expected): documentVersion == expected
         }
     }
 
@@ -6618,6 +6636,23 @@ final class VectorCanvas {
         guard let element = _elements.first(where: { $0.id == id }),
               let stream = Self.posed(element, by: posedBy)?.stream else { return nil }
         return Self.window(of: stream, in: size)
+    }
+
+    /// Every visible moving reference has a front window at its current placement. A later
+    /// eraser can make that front transparent over the native base, so it needs the exact base.
+    func streamFramesAreCovered(by presentedWindows: [UUID: CGRect]) -> Bool {
+        guard !presentedWindows.isEmpty else { return false }
+        lock.lock(); defer { lock.unlock() }
+        var coveredStream = false
+        var erasedAbove = false
+        for element in _elements.reversed() where !_suppressedElementIDs.contains(element.id) {
+            if element.stroke?.composite == .erase { erasedAbove = true }
+            guard let stream = element.stream, !stream.isFrozen,
+                  let window = Self.window(of: stream, in: size) else { continue }
+            guard !erasedAbove, presentedWindows[stream.id] == window else { return false }
+            coveredStream = true
+        }
+        return coveredStream
     }
 
     /// **Draws one stream element's window into `cg`, the caller's own context** — the pixels

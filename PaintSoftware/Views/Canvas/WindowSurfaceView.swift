@@ -121,6 +121,8 @@ final class WindowSurfaceView: UIView {
     private(set) var presentedCount = 0
     /// The window the surfaces are sized to, in canvas points; `.null` before the first present.
     private(set) var surfaceWindow = CGRect.null
+    /// The window whose pixels reached the front, including an older front during a resize.
+    var presentedWindow: CGRect? { isHidden ? nil : presented?.window }
 
     /// `queue` is where every picture is drawn — serial, so the draws of every view sharing it
     /// take turns (`StrokeCanvasView.renderQueue`).

@@ -2,6 +2,41 @@ import XCTest
 
 /// Cold-start reachability and actual pixels, including the artist's rotoscoping gesture.
 final class StreamPlacementUITests: StreamUITestCase {
+    /// Each layer selection reconciles exposed hosts without editing their ink. A decoded stream
+    /// frame changes the pixels on screen before that pass, without a fresh full-canvas base.
+    func testOnTopStreamFramesStayOffTheNativeBaseDuringLayerSelection() throws {
+        let app = XCUIApplication()
+        let canvas = launchWithALiveStream(app, orientationBeforeCreatingCanvas: .landscapeLeft)
+        laptop.show(.red)
+        guard waitForPicture(.red, on: canvas) else { return }
+        XCTAssertEqual(app.buttons["streamBar.placementButton"].value as? String, "onTop")
+        XCTAssertEqual(readField(app, "sandwich:"), "off", "The ordinary vector hosts are exposed")
+        XCTAssertNotNil(waitForBakeBar(app, timeout: 30) { $0.isEmpty })
+
+        func selectLayer(_ index: Int) {
+            openLayerPanel(app)
+            app.staticTexts["layerPanel.row.\(index)"].tap()
+            closeLayerRail(app)
+        }
+
+        selectLayer(0)
+        selectLayer(1)
+        let baseline = try XCTUnwrap(Int(readField(app, "rasterizes:")))
+
+        for (screen, colour, layer) in [(FakeLaptopStreamer.Screen.green, Colour.green, 0),
+                                        (.blue, .blue, 1), (.red, .red, 0)] {
+            laptop.show(screen)
+            guard waitForPicture(colour, on: canvas) else { return }
+            selectLayer(layer)
+            guard waitForPicture(colour, on: canvas) else { return }
+        }
+        // Publish the counters again after the preceding presentation and leave the stream selected.
+        selectLayer(1)
+        let after = try XCTUnwrap(Int(readField(app, "rasterizes:")))
+        XCTAssertEqual(after, baseline, "Receiving stream frames must not rerasterize an exposed host")
+        attachScreenshot(XCUIScreen.main, "stream-on-top-after-host-installs")
+    }
+
     /// The test laptop sends one solid-colour frame, so the edge of that colour is the stream's
     /// actual drawn rectangle. Read it from the canvas screenshot in the same unit square as
     /// `moveBox(_:)`; this deliberately compares the artist-visible picture with the published

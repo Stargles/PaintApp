@@ -279,7 +279,7 @@ final class StrokeCanvasView: CanvasPlaneView {
             // A rasterize in flight belongs to the canvas that asked for it; a different canvas at
             // the same version number is a coincidence, not a match. Cleared here so
             // `finishVectorRender`'s pending test can be a plain integer comparison.
-            pendingVectorRenderVersion = nil
+            pendingVectorRender = nil
             // **And held ink belongs to the canvas it was drawn on, for the same reason and one that
             // is worse.** Two cels' `version` counters are independent and can be equal by
             // coincidence, so a picture kept across a layer, cel or frame change could be retired by
@@ -415,10 +415,8 @@ final class StrokeCanvasView: CanvasPlaneView {
         }
     }
 
-    /// The `VectorCanvas.version` a background rasterize is running for, or nil. The other half of
-    /// `DeferredVectorRender`'s two-integer ordering rule; always about `vectorCanvas`, because the
-    /// `didSet` above clears it whenever that changes.
-    private var pendingVectorRenderVersion: Int?
+    /// The background rasterize this host is waiting for, always about `vectorCanvas`.
+    private var pendingVectorRender: DeferredVectorRender.Revision?
 
     /// Where the committed render is rasterized — RENDER.md §2.13, and stage 2's second half.
     ///
@@ -753,12 +751,6 @@ final class StrokeCanvasView: CanvasPlaneView {
     func refreshDisplayIfStale(waitingForTheRender wait: Bool = false) -> Bool {
         if let vectorCanvas {
             guard displayedVectorVersion != vectorCanvas.version else { return true }
-            // **A stream frame moves `version` and not `documentVersion`** (`VectorCanvas.setStreamFrame`),
-            // and while a surface is presenting the element the base underneath need not be redrawn
-            // for it: the surface covers exactly the pixels that changed. Redrawing it anyway is what
-            // TODO (97) was — a canvas-sized rasterize and upload per frame. The base catches up on
-            // the next committed change, or when the surfaces go (a cel switch, a blanked host).
-            if !wait, !streamSurfaces.isEmpty, baseDocumentVersion == vectorCanvas.documentVersion { return false }
             return refreshDisplay(waitingForTheRender: wait)
         } else if let raster, displayedRasterVersion != raster.version {
             return refreshDisplay()
@@ -793,6 +785,13 @@ final class StrokeCanvasView: CanvasPlaneView {
         didSet {
             for id in streamIDsDrawnByComposite { removeStreamSurface(id) }
         }
+    }
+
+    private var streamHasDisplayOwner: Bool {
+        guard !streamSurfaces.isEmpty else { return false }
+        return vectorCanvas?.streamFramesAreCovered(by: streamSurfaces.compactMapValues {
+            $0.presentedWindow
+        }) == true
     }
 
     func presentStreamFrame(elementID: UUID, isolating ids: Set<UUID>? = nil,
@@ -1069,10 +1068,6 @@ final class StrokeCanvasView: CanvasPlaneView {
         // Move with no selection lifts a float now, so there is one latch for both.
         guard vectorFloatBase == nil else { return false }
         if vectorCanvas != nil { displayedRasterVersion = raster?.version ?? Self.nothingDisplayed }
-        // A committed change under a live stream — ink drawn over it, an undo — is in the surface's
-        // window too, and the surface is what the artist sees there. Redrawn from the same list the
-        // base is about to be, so the two agree; dropped where `presentStreamFrame` refuses.
-        for elementID in streamSurfaces.keys { presentStreamFrame(elementID: elementID) }
         guard let vectorCanvas else {
             // `renderIfNonEmpty` rather than `renderToUIImage`: a blank tier's canvas-sized sheet of
             // transparency is 1 GiB at 16383², and Core Animation skips a nil contents outright.
@@ -1092,6 +1087,16 @@ final class StrokeCanvasView: CanvasPlaneView {
         let plan = VectorPreviewPlan.forVectorLayer(role: vectorScratchRole,
                                                     hasScratch: scratch != nil,
                                                     hasInterpolationImage: interpolationImage != nil)
+        // Source installation, stroke refreshes and async retries all enter here. The stream's
+        // window owns new reference pixels while the committed base stays current.
+        if plan.base == .committedRender, !waitingForTheRender, streamHasDisplayOwner,
+           baseDocumentVersion == documentVersion {
+            showOverlays(plan.showsScratchLayer ? scratch : nil)
+            return true
+        }
+        // A committed change under a live stream is in the window too. Redraw it from the same
+        // list as the base, or remove it when the host switches to a derived picture.
+        for elementID in streamSurfaces.keys { presentStreamFrame(elementID: elementID) }
         // At an in-between the cel's own canvas is empty, so the interpolated frame wins the base
         // slot — and it must, or an in-between would display as nothing now that an empty canvas
         // renders to nil rather than to a transparent sheet. It is already an image, so there is
@@ -1101,6 +1106,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         var installedRevision: Int?
         switch plan.base {
         case .interpolation:
+            baseDocumentVersion = Self.nothingDisplayed
             displayedVectorVersion = vectorCanvas.version
             shownVectorVersion = vectorCanvas.version
             base = interpolationImage
@@ -1116,7 +1122,10 @@ final class StrokeCanvasView: CanvasPlaneView {
                 return false
             }
             let cached = vectorCanvas.cachedRender()
-            switch DeferredVectorRender.step(for: cached, pending: pendingVectorRenderVersion,
+            let revision = DeferredVectorRender.Revision(display: cached.version, document: documentVersion)
+            let streamHasWindow = streamHasDisplayOwner
+            switch DeferredVectorRender.step(for: cached, at: revision, pending: pendingVectorRender,
+                                             streamHasWindow: streamHasWindow,
                                              hostIsBlanked: hostIsBlanked,
                                              waitingForTheRender: waitingForTheRender) {
             case .blankedByTheComposite:
@@ -1127,7 +1136,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                 // coincidence, and a stale-but-matching version would leave the previous cel's
                 // picture on this layer for good the moment the host un-blanks.
                 // `LayerHostView.setBlanked` is what asks for the repaint on that edge.
-                pendingVectorRenderVersion = nil
+                pendingVectorRender = nil
                 displayedVectorVersion = StrokeCanvasView.nothingDisplayed
                 shownVectorVersion = StrokeCanvasView.nothingDisplayed
                 // Nothing held can reach the screen either, and the pass that un-blanks the host
@@ -1137,14 +1146,14 @@ final class StrokeCanvasView: CanvasPlaneView {
                 showOverlays(plan.showsScratchLayer ? scratch : nil)
                 return false
             case .showNow(let version):
-                pendingVectorRenderVersion = nil
+                pendingVectorRender = nil
                 displayedVectorVersion = version
                 shownVectorVersion = version
                 base = cached.image
                 installedRevision = currentRevision
             case .rasterize(let version):
                 if waitingForTheRender {
-                    pendingVectorRenderVersion = nil
+                    pendingVectorRender = nil
                     guard let rendered = PlaybackTrace.span(.vectorRasterize, { vectorCanvas.render() }) else {
                         showOverlays(plan.showsScratchLayer ? scratch : nil)
                         return false
@@ -1154,8 +1163,8 @@ final class StrokeCanvasView: CanvasPlaneView {
                     base = rendered
                     installedRevision = currentRevision
                 } else {
-                    pendingVectorRenderVersion = version
-                    startVectorRender(of: vectorCanvas, atVersion: version, documentVersion: documentVersion)
+                    pendingVectorRender = revision
+                    startVectorRender(of: vectorCanvas, at: revision, streamHasWindow: streamHasWindow)
                     // The base slot keeps what it has, and so does the held ink — which is the
                     // whole of this defect's fix: the picture the base is missing stays up until the
                     // render that contains it lands.
@@ -1181,18 +1190,20 @@ final class StrokeCanvasView: CanvasPlaneView {
         return true
     }
 
-    /// Rasterizes `version` of `canvas` on `renderQueue` and hands the result back on main.
+    /// Rasterizes the requested base on `renderQueue` and hands the result back on main.
     ///
-    /// **`render(quality:ifStillAtVersion:)` rather than `render()`, and that is what makes a
-    /// superseded request cheap**: a drag that invalidates faster than this can rasterize gets one
-    /// lock acquisition per abandoned request instead of one canvas-sized rasterize.
+    /// The required revision makes a superseded request cheap: a drag that invalidates faster
+    /// than this can rasterize gets one lock acquisition per abandoned request. When a stream
+    /// has its own window, a new reference frame leaves the requested document revision valid.
     ///
     /// It is also the call that keeps the memo *shared*. The composite's snapshot asks the same
     /// canvas for the same version through `VectorCanvas.Frozen`, so whichever of the two arrives
     /// first fills `cachedImage` and the other reads it — which is the arrangement the synchronous
     /// code had for free and the one thing this change could quietly have thrown away.
-    private func startVectorRender(of canvas: VectorCanvas, atVersion version: Int, documentVersion: Int) {
-        let revision = contentRevisions.committed(canvas)
+    private func startVectorRender(of canvas: VectorCanvas, at revision: DeferredVectorRender.Revision,
+                                   streamHasWindow: Bool) {
+        let coverage = contentRevisions.committed(canvas)
+        let requirement = revision.requirement(streamHasWindow: streamHasWindow)
         Self.renderQueue.async { [weak self] in
             // **Zero on every ordinary launch** — `-uiTestSlowVectorRenderMillis` and nothing else,
             // simulator only. See `UITestSeeds.slowVectorRenderDelay` for why the defect this file's
@@ -1204,19 +1215,20 @@ final class StrokeCanvasView: CanvasPlaneView {
             // paying — so it is a named row in a `PlaybackTrace` report rather than something a
             // reader has to infer from `VectorCanvas.totalRasterizations` moving.
             let image = PlaybackTrace.span(.vectorRasterize) {
-                canvas.render(quality: .full, ifStillAtVersion: version)
+                canvas.render(quality: .full, requiring: requirement)
             }
             DispatchQueue.main.async {
                 PlaybackTrace.span(.renderLanded) {
-                    self?.finishVectorRender(image, of: canvas, atVersion: version,
-                                             documentVersion: documentVersion, covering: revision)
+                    self?.finishVectorRender(image, of: canvas, at: revision, covering: coverage,
+                                             streamHadWindow: streamHasWindow)
                 }
             }
         }
     }
 
-    private func finishVectorRender(_ image: UIImage?, of canvas: VectorCanvas, atVersion version: Int,
-                                    documentVersion: Int, covering revision: Int) {
+    private func finishVectorRender(_ image: UIImage?, of canvas: VectorCanvas,
+                                    at revision: DeferredVectorRender.Revision, covering coverage: Int,
+                                    streamHadWindow: Bool) {
         // A different canvas is a different layer; this view has moved on and owes it nothing.
         guard canvas === vectorCanvas else { return }
         // Nil is a superseded or refused rasterize; neither can replace the displayed picture.
@@ -1225,35 +1237,40 @@ final class StrokeCanvasView: CanvasPlaneView {
         let plan = VectorPreviewPlan.forVectorLayer(role: vectorScratchRole,
                                                     hasScratch: scratch != nil,
                                                     hasInterpolationImage: interpolationImage != nil)
+        let current = DeferredVectorRender.Revision(display: canvas.version, document: canvas.documentVersion)
+        let streamHasWindow = streamHasDisplayOwner
         let landing: DeferredVectorRender.Landing = image == nil ? .refuse
-            : DeferredVectorRender.landing(rendered: version, current: canvas.version,
-                                           pending: pendingVectorRenderVersion,
+            : DeferredVectorRender.landing(rendered: revision, current: current, pending: pendingVectorRender,
+                                           streamHasWindow: streamHasWindow,
                                            shown: shownVectorVersion, hostIsBlanked: hostIsBlanked,
                                            baseIsDerived: plan.base == .interpolation)
         guard let image, landing != .refuse else {
-            // A newer version needs a new request. Refusal at the same version retains the old
-            // picture and waits for the next natural refresh, rather than retrying in a tight loop.
-            if pendingVectorRenderVersion == version {
-                pendingVectorRenderVersion = nil
-                if canvas.version != version { refreshDisplay() }
+            // Ask again for newer content or when a first stream window superseded an exact
+            // request. An allocation refusal for a still-current base waits for a natural refresh.
+            if pendingVectorRender == revision {
+                pendingVectorRender = nil
+                if !revision.covers(current, streamHasWindow: streamHasWindow)
+                    || (!streamHadWindow && current.display != revision.display) {
+                    refreshDisplayIfStale()
+                }
             }
             return
         }
-        if landing == .show { pendingVectorRenderVersion = nil }
+        if landing == .show { pendingVectorRender = nil }
         // **Before the assignment and in the same main-thread turn**, so Core Animation commits the
         // new base and the removal of the ink it now contains together. One turn apart is one frame
         // with the stroke drawn twice. Right for an intermediate frame too: it is a base rasterized
         // at `version`, so everything held up to `version` is in it and everything held after stays
         // drawn over it.
-        retireUnlandedInk(coveredByRevision: revision)
+        retireUnlandedInk(coveredByRevision: coverage)
         if imageView.image !== image { imageView.image = image }
-        baseDocumentVersion = documentVersion
-        shownVectorVersion = version
+        baseDocumentVersion = revision.document
+        shownVectorVersion = revision.display
         // **Recorded as displayed only when it is the canvas's own version.** An intermediate frame
         // (`DeferredVectorRender.landing`, TODO (42)) leaves `displayedVectorVersion` stale on
         // purpose: it is what `refreshDisplayIfStale` compares, and the newer render this frame is
         // standing in for has to be asked for again if it is ever dropped.
-        if landing == .show { displayedVectorVersion = version }
+        if landing == .show { displayedVectorVersion = revision.display }
         // **The raw scratch rather than a `VectorPreviewPlan`'s**, and it is the same answer: the one
         // role the plan would filter out is `.none`, which stamps nothing into its window, so its
         // `image` is nil and its `replacesBase` is false. Both branches below are then the no-ops

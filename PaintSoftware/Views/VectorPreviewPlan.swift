@@ -121,6 +121,21 @@ struct VectorPreviewPlan: Equatable {
 /// `VectorPreviewPlan` for that type's own stated reason.
 enum DeferredVectorRender {
 
+    /// The display revision includes incoming stream frames. An On Top window can keep those
+    /// pixels current independently of the host's committed base.
+    struct Revision: Equatable {
+        let display: Int
+        let document: Int
+
+        func covers(_ current: Revision, streamHasWindow: Bool) -> Bool {
+            display == current.display || (streamHasWindow && document == current.document)
+        }
+
+        func requirement(streamHasWindow: Bool) -> VectorCanvas.RenderRequirement {
+            streamHasWindow ? .document(document) : .display(display)
+        }
+    }
+
     /// What one refresh does about the base slot.
     enum Step: Equatable {
         /// Install `VectorCanvas.CachedRender.image` — an image, or nil for an empty canvas — and
@@ -137,6 +152,14 @@ enum DeferredVectorRender {
         /// nothing — PERFORMANCE.md §13.5) and `displayedVectorVersion` goes to the "nothing shown"
         /// sentinel, so the pass that un-blanks the host repaints it.
         case blankedByTheComposite
+    }
+
+    static func step(for cached: VectorCanvas.CachedRender, at current: Revision, pending: Revision?,
+                     streamHasWindow: Bool, hostIsBlanked: Bool, waitingForTheRender: Bool) -> Step {
+        let pendingVersion = pending.map { $0.covers(current, streamHasWindow: streamHasWindow)
+            ? current.display : $0.display }
+        return step(for: cached, pending: pendingVersion, hostIsBlanked: hostIsBlanked,
+                    waitingForTheRender: waitingForTheRender)
     }
 
     /// - Parameter pending: the version a rasterize is already running for, or nil.
@@ -201,6 +224,14 @@ enum DeferredVectorRender {
         case showAsIntermediate
         /// Do nothing with it.
         case refuse
+    }
+
+    static func landing(rendered: Revision, current: Revision, pending: Revision?, streamHasWindow: Bool,
+                        shown: Int, hostIsBlanked: Bool, baseIsDerived: Bool) -> Landing {
+        let currentVersion = rendered.covers(current, streamHasWindow: streamHasWindow && !hostIsBlanked)
+            ? rendered.display : current.display
+        return landing(rendered: rendered.display, current: currentVersion, pending: pending?.display,
+                       shown: shown, hostIsBlanked: hostIsBlanked, baseIsDerived: baseIsDerived)
     }
 
     /// `mayShow` with a third answer for the picture that used to be thrown away — TODO (42).

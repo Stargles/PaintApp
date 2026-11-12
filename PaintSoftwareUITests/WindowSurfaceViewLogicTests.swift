@@ -91,7 +91,8 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
 
     func testAResizedWindowKeepsTheOldFrontUntilTheNewPictureLands() throws {
         let view = WindowSurfaceView(queue: queue)
-        present(view, window: CGRect(x: 0, y: 0, width: 8, height: 4), count: 1)
+        let original = CGRect(x: 0, y: 0, width: 8, height: 4)
+        present(view, window: original, count: 1)
         let old = try XCTUnwrap(view.layer.contents as AnyObject?)
         let gate = DispatchSemaphore(value: 0)
         let new = CGRect(x: 0, y: 0, width: 16, height: 8)
@@ -101,12 +102,14 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
             return new
         }
         XCTAssertFalse(view.isHidden, "a resize never exposes the old plain hosts")
+        XCTAssertEqual(view.presentedWindow, original, "The pending size is still only a request")
         XCTAssertTrue(view.layer.contents as AnyObject? === old)
         XCTAssertEqual(view.layer.bounds.size, CGSize(width: 8, height: 4), "old pixels retain their placement")
         gate.signal()
         let until = Date().addingTimeInterval(2)
         while view.presentedCount < 2, Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.005)) }
         XCTAssertEqual(view.presentedCount, 2)
+        XCTAssertEqual(view.presentedWindow, new)
         XCTAssertEqual(view.layer.bounds.size, new.size)
         XCTAssertFalse(view.layer.contents as AnyObject? === old)
     }
@@ -628,6 +631,7 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
         let surface = try XCTUnwrap(owner!.subviews.compactMap { $0 as? WindowSurfaceView }.first)
         XCTAssertEqual(refusalsRemaining, 0, "PREMISE: the first surface allocation was refused")
         XCTAssertEqual(surface.presentedCount, 0, "PREMISE: refusal produced no picture")
+        XCTAssertNil(surface.presentedWindow, "A refused first allocation provides no display coverage")
         XCTAssertEqual(WindowSurfaceView.residentBytes, before,
                        "PREMISE: refusal allocated no retained surface memory")
 

@@ -55,6 +55,82 @@ final class DeferredVectorRenderLogicTests: XCTestCase {
                        "A second refresh while the same version is rasterizing must not queue a second one")
     }
 
+    func testStreamFramesLeaveAnAwaitedDocumentRenderCurrentOnlyWhileAWindowOwnsThem() throws {
+        let stream = VectorStreamElement(naturalSize: CGSize(width: 8, height: 8),
+            host: "laptop", port: 47301, sourceLabel: "Screen",
+            transform: LayerTransform(position: CGPoint(x: 16, y: 16), scale: 1, rotation: 0))
+        let inked = canvas(withInk: true)
+        inked.restoreElements([.stream(stream)] + inked.elements, changedInk: nil)
+        let requested = DeferredVectorRender.Revision(display: inked.version, document: inked.documentVersion)
+        let red = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }
+
+        XCTAssertTrue(inked.setStreamFrame(id: stream.id, image: red, index: 1))
+        let afterFrame = DeferredVectorRender.Revision(display: inked.version, document: inked.documentVersion)
+        XCTAssertNotEqual(afterFrame.display, requested.display)
+        let cached = inked.cachedRender()
+        XCTAssertEqual(DeferredVectorRender.step(for: cached, at: afterFrame, pending: requested,
+            streamHasWindow: true, hostIsBlanked: false, waitingForTheRender: false), .wait,
+            "A pending base already covers the document beneath a new stream frame")
+        XCTAssertEqual(DeferredVectorRender.step(for: cached, at: afterFrame, pending: requested,
+            streamHasWindow: false, hostIsBlanked: false, waitingForTheRender: false), .rasterize(version: afterFrame.display),
+            "A host without a stream window must still display the stream's current pixels")
+        XCTAssertEqual(DeferredVectorRender.step(for: cached, at: afterFrame, pending: requested,
+            streamHasWindow: true, hostIsBlanked: false, waitingForTheRender: true), .rasterize(version: afterFrame.display),
+            "A required render still gets the exact picture synchronously")
+        XCTAssertNil(inked.render(quality: .full, requiring: requested.requirement(streamHasWindow: false)),
+                     "An exact request cannot draw pixels from a later frame")
+        XCTAssertEqual(inked.rasterizations, 0)
+        let base = try XCTUnwrap(inked.render(quality: .full, requiring: requested.requirement(streamHasWindow: true)))
+        XCTAssertEqual(base.size, inked.size, "The awaited document base still renders when a frame arrives first")
+        XCTAssertEqual(inked.rasterizations, 1)
+        XCTAssertTrue(inked.setStreamFrame(id: stream.id, image: red, index: 2))
+        let atLanding = DeferredVectorRender.Revision(display: inked.version, document: inked.documentVersion)
+        XCTAssertEqual(DeferredVectorRender.landing(rendered: requested, current: atLanding, pending: requested,
+            streamHasWindow: true, shown: -1, hostIsBlanked: false, baseIsDerived: false), .show,
+            "Another frame arriving before landing does not withhold the awaited base")
+        XCTAssertEqual(DeferredVectorRender.landing(rendered: requested, current: atLanding, pending: requested,
+            streamHasWindow: false, shown: -1, hostIsBlanked: false, baseIsDerived: false), .refuse,
+            "A render that missed an unowned stream frame cannot be the current base")
+
+        inked.restoreElements([.stream(stream)], changedInk: nil)
+        let afterUndo = DeferredVectorRender.Revision(display: inked.version, document: inked.documentVersion)
+        XCTAssertEqual(DeferredVectorRender.landing(rendered: requested, current: afterUndo, pending: requested,
+            streamHasWindow: true, shown: -1, hostIsBlanked: false, baseIsDerived: false), .refuse,
+            "Undo replaces the requested document revision")
+        XCTAssertNil(inked.render(quality: .full, requiring: requested.requirement(streamHasWindow: true)),
+                     "A request for ink that has been undone is superseded before rasterizing")
+        XCTAssertEqual(inked.rasterizations, 1)
+    }
+
+    func testAnOldStreamWindowCannotCoverASecondOrReplacementStream() throws {
+        let size = CGSize(width: 32, height: 32)
+        let transform = LayerTransform(position: CGPoint(x: 16, y: 16), scale: 1, rotation: 0)
+        let first = VectorStreamElement(naturalSize: CGSize(width: 8, height: 8),
+            host: "laptop", port: 47301, sourceLabel: "First", transform: transform)
+        let second = VectorStreamElement(naturalSize: first.naturalSize,
+            host: first.host, port: first.port, sourceLabel: "Second", transform: transform)
+        let canvas = VectorCanvas(size: size, elements: [.stream(first), .stream(second)])
+        let window = try XCTUnwrap(canvas.streamWindow(id: first.id))
+        XCTAssertFalse(canvas.streamFramesAreCovered(by: [first.id: window]))
+        XCTAssertTrue(canvas.streamFramesAreCovered(by: [first.id: window, second.id: window]))
+
+        canvas.restoreElements([.stream(second)], changedInk: nil)
+        XCTAssertFalse(canvas.streamFramesAreCovered(by: [first.id: window]))
+        XCTAssertFalse(canvas.streamFramesAreCovered(by: [second.id: window.offsetBy(dx: 1, dy: 0)]))
+        XCTAssertTrue(canvas.streamFramesAreCovered(by: [second.id: window]))
+
+        var eraser = try XCTUnwrap(self.canvas(withInk: true).elements.first?.stroke)
+        eraser.composite = .erase
+        canvas.restoreElements([.stroke(eraser), .stream(second)], changedInk: nil)
+        XCTAssertTrue(canvas.streamFramesAreCovered(by: [second.id: window]))
+        canvas.restoreElements([.stream(second), .stroke(eraser)], changedInk: nil)
+        XCTAssertFalse(canvas.streamFramesAreCovered(by: [second.id: window]),
+                       "An eraser above the stream can reveal older native pixels")
+    }
+
     /// **A rasterize running for an older version does not stop a newer one starting**, which is the
     /// case a `pending != nil` test would get wrong: the older result can never be shown, so treating
     /// it as "something is already running" would leave the canvas waiting on a render that is
