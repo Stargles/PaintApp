@@ -2,14 +2,28 @@
 
 ## Current checkpoint — 2026-11-11
 
-Kevin resumed. See TODO.md for the repeated Fill report, rapid drawing/Undo crash with a running
-background stream, severe Undo latency, and deferred crash-report viewer. Limited recent use did
-not reproduce the crash. No cause established. Start with the two November 7 recordings in TODO,
-matching device reports if available, and the source of the installed Release `d4d59f6b`. That
-source is preserved in `~/PaintApp`; this repository's older source and historical worktree paths
-below are not the installed baseline. Use bounded storage under `~/PaintWork`, separate read-only
-findings from device qualification, and keep this checkpoint current. No physical device operation
-or code change in this checkpoint.
+Kevin resumed. Priority is the whole-iPad black screen during rapid drawing/Undo or repeated Fill
+while a stream is running, plus severe Undo latency. TODO.md holds the reports and recording paths.
+
+- The crash recording is Test1 at 5000 × 5000 and ends without a stop at 22:16:08 Toronto on Nov 7.
+  Matching `~/PaintWork/crash-20261111/JetsamEvent-2026-11-07-221608.ips` kills `backboardd` at its
+  process limit, about 1859 MiB. PaintSoftware held about 967 MiB and `videocodecd` about 20 MiB.
+  Five nearby terminations restarted the interface while the OS stayed up. The exact installed
+  executable UUID is `7639BBB7-8740-3CA1-A138-313C09A203B5`, Release `d4d59f6b` in `~/PaintApp`.
+  This establishes the failure mode. It does not identify the memory allocation owner or verify
+  the later Fill incident. Keep the reports and recordings; no scene/device mutation was made.
+- The recording's Undo handler took 6.58 ms. Background vector rasterizations took up to 1.11 s.
+  `undo_latency` is developing a focused inverse of the existing append-base transition so a fast
+  Undo can recover its exact previous picture without a full redraw. Settled Undo remains separate.
+- `stream_memory` found that `StrokeCanvasView.installContent` bypasses the stream-only refresh
+  guard when an unchanged exposed host is reconciled during edits. At 5000² one native BGRA picture
+  is about 95 MiB before display-service allocations. The agent is correcting and testing that
+  path. Source evidence supports the mechanism; an iPad stress comparison remains outstanding.
+- Working code branches are `tmp/undo-before-land` and `tmp/stream-base-refresh` in the installed
+  line's repository (`~/PaintApp`). They start at `d39ca2f2`. Desktop main is older and does not
+  represent what is installed. Root owns the native lane. Next: review the two commits, then use
+  one owned simulator and one bounded build directory for the relevant logic/UI checks. No new
+  build or install yet. The crash-report viewer and interpolation overhaul stay deferred.
 
 Kevin said **continue; do not park**. TODO.md retains every unfinished owner ask. Use useful agents,
 conserve usage, solve causes through existing owners and remove superseded paths. Kevin confirms the
