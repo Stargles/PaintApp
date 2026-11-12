@@ -4452,43 +4452,37 @@ struct CanvasView: UIViewRepresentable {
             canvasGestures.append(recognizer)
         }
 
+        private var strandedCheck = CanvasRepairDeadline()
+
         /// How long after the lift the repair looks. **Not the next turn of the main queue**: UIKit
         /// returns a failed or ended recognizer to `.possible` from its own run-loop pass, and a block
         /// queued at the lift can run before it — MEASURED, an ordinary one-finger tap read
-        /// `canvas.pan` still `.failed` and "repaired" a healthy recognizer. A stranded one is out of
-        /// `.possible` for good, so looking late costs nothing but the look; a touch that lands in
-        /// between defers it to the next lift.
+        /// `canvas.pan` still `.failed` and "repaired" a healthy recognizer. A new touch cancels
+        /// that lift's eligibility and its own final lift gets the full window.
         private static let strandedCheckDelay: TimeInterval = 0.1
 
-        /// **Replaces every canvas recognizer UIKit has stranded — the canvas freeze, repaired at the
-        /// moment it happens.** Runs shortly after the last canvas touch lifts, by when UIKit has
-        /// reset every recognizer those touches were bound to back to `.possible`. One still out of
-        /// `.possible` then will never be offered a touch again: it is stranded, and it stays so
-        /// until the project is reopened. MEASURED: once so, no `isEnabled` toggle, `reset()`,
-        /// `state = .possible` or re-add returns the *same* instance to service — but a fresh
-        /// instance, built by the same code, works on the very next touch.
+        /// Replaces canvas recognizers still out of `.possible` after the latest lift's settlement
+        /// window. When UIKit leaves a recognizer stranded, a fresh instance built by the same code
+        /// works on the next touch. An `isEnabled` toggle, `reset()`, `state = .possible` or re-add
+        /// could not return the same stranded instance to service in the reproduced case.
         ///
-        /// **Two causes are known, and the app cannot stop either.** A UIKit presentation torn down
-        /// under a live two-finger gesture: a popover, `Menu` or `.contextMenu` over the canvas
+        /// A UIKit presentation torn down under a live two-finger gesture could strand the
+        /// recognizers: a popover, `Menu` or `.contextMenu` over the canvas
         /// dismisses itself when two fingers land outside it, and whatever recognizers it had bound
         /// to those touches go with it mid-gesture. The owner's canvas freeze, TODO (110), reproduced
         /// as exactly that — the Blend Mode / Effect menu open over a value layer, then a two-finger
         /// pan (`CanvasTransformFreezeUITests`). Nothing the editor raises is a UIKit presentation any
-        /// more (`CanvasPresentation`). And, on the owner's iPad only, a third touch landing about
-        /// 20 ms after two others, or a touch the system cancels and begins again on the same spot —
-        /// no presentation anywhere near, and never reproduced on a simulator (BUGS.md, "The canvas's
-        /// recognizers strand when a touch joins two others"). The repair is what stops both, and any
-        /// cause not yet met, becoming a frozen canvas.
+        /// more (`CanvasPresentation`). The owner's iPad also recorded late third touches and
+        /// cancelled-and-reissued touches before a repair (BUGS.md, "The canvas's recognizers strand
+        /// when a touch joins two others"). The trigger for that reset failure is still open.
         ///
         /// Counts itself (`CanvasRepairCount`, kept across launches and shown in the Settings menu), then
-        /// tells the action recorder, which saves its last ninety seconds: a repair is the moment the
-        /// freeze *would* have happened, and the ring holds how it came about. It also says what else
+        /// tells the action recorder, which saves its last ninety seconds and a census of what else
         /// under the window was out of `.possible` or still holding a touch
-        /// (`WindowEventTap.unquietRecognizers`), which no earlier file could.
-        private func replaceStrandedRecognizers() {
-            // A touch that landed between the lift and this block is a new sequence in flight, and
-            // its recognizers are legitimately out of `.possible`. The next lift asks again.
-            guard touchCountRecognizer?.activeCount == 0 else { return }
+        /// (`WindowEventTap.unquietRecognizers`).
+        private func replaceStrandedRecognizers(after check: CanvasRepairDeadline.Check) {
+            guard let counter = touchCountRecognizer,
+                  strandedCheck.isCurrent(check, counter: counter, activeCount: counter.activeCount) else { return }
             let strandedOwn = canvasGestures.filter { $0.isEnabled && $0.state != .possible }
             let strandedStrokes = layerHosts.filter { $0.value.strokeView.strokeRecognizer.state != .possible }
             guard !strandedOwn.isEmpty || !strandedStrokes.isEmpty else { return }
@@ -4616,12 +4610,13 @@ struct CanvasView: UIViewRepresentable {
             // It is the edge the stranded-recognizer repair runs on: soon after the last canvas
             // touch lifts, every other recognizer here should be back in `.possible` — see
             // `strandedCheckDelay` for how soon.
-            touchCounter.onTouchesChanged = { [weak self] total in
-                self?.canvasManager.canvasTouchCountChanged(total)
-                if total == 0 {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + Self.strandedCheckDelay) {
-                        self?.replaceStrandedRecognizers()
-                    }
+            touchCounter.onTouchesChanged = { [weak self, weak touchCounter] total in
+                guard let self, let touchCounter, self.touchCountRecognizer === touchCounter else { return }
+                let check = self.strandedCheck.touchCountChanged(to: total, counter: touchCounter)
+                self.canvasManager.canvasTouchCountChanged(total)
+                guard let check else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.strandedCheckDelay) { [weak self] in
+                    self?.replaceStrandedRecognizers(after: check)
                 }
             }
             // The drags a held finger qualifies declare themselves to the hold, which tells the shape's

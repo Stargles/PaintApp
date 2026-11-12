@@ -95,3 +95,29 @@ struct CanvasTouchSettle {
         watching = nil
     }
 }
+
+/// Eligibility for the canvas recognizer repair after a lift. The coordinator owns the timer
+/// and only checks the recognizers if the counter and its most recent touch sequence still agree.
+struct CanvasRepairDeadline {
+    struct Check {
+        fileprivate let generation: UInt64
+        fileprivate weak var counter: AnyObject?
+    }
+
+    private var generation: UInt64 = 0
+    private var hadTouches = false
+
+    mutating func touchCountChanged(to total: Int, counter: AnyObject) -> Check? {
+        defer { hadTouches = total > 0 }
+        if total > 0 {
+            generation &+= 1
+            return nil
+        }
+        guard hadTouches else { return nil }
+        return Check(generation: generation, counter: counter)
+    }
+
+    func isCurrent(_ check: Check, counter: AnyObject, activeCount: Int) -> Bool {
+        check.generation == generation && check.counter === counter && activeCount == 0
+    }
+}
