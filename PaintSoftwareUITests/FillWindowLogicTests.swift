@@ -170,18 +170,24 @@ final class FillWindowLogicTests: XCTestCase {
         let vectorCanvas = VectorCanvas(size: CanvasFixture.canvasSize)
         vectorManager.layers[0].cels[0].vector = vectorCanvas
         let initialVectorVersion = vectorCanvas.version
+        let previewBounds = CGRect(x: 12, y: 12, width: 48, height: 48)
+        let commitBounds = CGRect(x: 20, y: 20, width: 32, height: 32)
+        let commitClip = CGPath(rect: commitBounds, transform: nil)
+        vectorManager.selection = Selection(path: CGPath(rect: previewBounds, transform: nil), bounds: previewBounds)
         var vectorLandingObserved = false
-        var expectedPreviewRect: CGRect?
+        var expectedRender: CanvasManager.FillRenderResult?
         var events: [String] = []
         vectorManager.onLivePictureWillLand = { landing in
-            guard case .fill(let layerID, let celID, let preview) = landing else {
+            guard case .fill(let layerID, let celID, let preview, let render, let clip) = landing else {
                 XCTFail("the fill callback keeps its typed payload")
                 return
             }
             events.append("landing")
+            XCTAssertTrue(render === expectedRender, "the handoff identifies the render used by the commit")
+            XCTAssertEqual(clip, commitClip, "the handoff carries the clip resolved for this commit")
             vectorLandingObserved = vectorManager.liveFill == nil
                 && vectorCanvas.version > initialVectorVersion
-                && preview.rect == expectedPreviewRect
+                && preview.rect == expectedRender?.window.rect
                 && layerID == vectorManager.layers[0].id
                 && celID == vectorManager.layers[0].cels[0].id
         }
@@ -189,8 +195,9 @@ final class FillWindowLogicTests: XCTestCase {
         vectorManager.endInteractiveFill()
         vectorManager.fillQueue.sync {}
         settle()
-        XCTAssertNotNil(vectorManager.liveFill?.preview, "the vector fill has a visible surface before commit")
-        expectedPreviewRect = vectorManager.liveFill?.preview?.rect
+        expectedRender = try XCTUnwrap(vectorManager.liveFill?.render, "the preview render exists before commit")
+        XCTAssertEqual(vectorManager.liveFill?.clip?.boundingBoxOfPath, previewBounds)
+        vectorManager.selection = Selection(path: commitClip, bounds: commitBounds)
         vectorManager.onHeldPictureMoved = { events.append("teardown") }
         vectorManager.commitInteractiveFill()
         XCTAssertTrue(vectorLandingObserved,

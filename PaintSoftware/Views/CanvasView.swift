@@ -351,8 +351,9 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.canvasManager.onLivePictureWillLand = { [weak coordinator = context.coordinator] landing in
             guard let coordinator else { return }
             switch landing {
-            case .fill(let layerID, let celID, let preview):
-                coordinator.prepareLiveFillLanding(preview, layerID: layerID, celID: celID)
+            case .fill(let layerID, let celID, let preview, let render, let clip):
+                coordinator.prepareLiveFillLanding(preview, render: render, clip: clip,
+                                                   layerID: layerID, celID: celID)
             case .vectorFloat(let float):
                 for part in float.parts where part.isShown {
                     guard let host = coordinator.layerHosts[part.layerID],
@@ -2186,7 +2187,8 @@ struct CanvasView: UIViewRepresentable {
         /// vector base is rasterized asynchronously, so its exact visible preview joins the same
         /// `UnlandedInk` set as a finished stroke until that version lands. A raster base can be
         /// installed synchronously, so refresh it first and then let the fill surface go.
-        func prepareLiveFillLanding(_ preview: FillPreview, layerID: UUID, celID: UUID) {
+        func prepareLiveFillLanding(_ preview: FillPreview, render: CanvasManager.FillRenderResult,
+                                    clip: CGPath?, layerID: UUID, celID: UUID) {
             guard let layerIndex = canvasManager.layers.firstIndex(where: { $0.id == layerID }),
                   let celIndex = canvasManager.layers[layerIndex].cels.firstIndex(where: { $0.id == celID }),
                   let host = layerHosts[layerID] else { return }
@@ -2194,8 +2196,7 @@ struct CanvasView: UIViewRepresentable {
             let cel = canvasManager.layers[layerIndex].cels[celIndex]
             if let vectorCanvas = cel.vector {
                 host.strokeView.vectorCanvas = vectorCanvas
-                host.strokeView.holdUnlandedWindow(preview.image, rect: preview.rect,
-                                                   at: vectorCanvas.version)
+                host.holdCommittedFill(preview, render: render, clip: clip, at: vectorCanvas.version)
             } else {
                 host.strokeView.raster = cel.raster
             }

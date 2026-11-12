@@ -1527,31 +1527,26 @@ final class StrokeCanvasView: CanvasPlaneView {
         // Exactly the three fields `showOverlays` reads off a live scratch, so the picture does
         // not change when it changes hands.
         let alpha = scratch.replacesBase ? 1 : scratch.opacity
-        holdUnlandedPicture(image, rect: scratch.windowRect, alpha: alpha,
+        holdUnlandedPicture(.image(image), rect: scratch.windowRect, alpha: alpha,
                             replacesBase: scratch.replacesBase, at: version)
     }
 
-    /// Holds a committed fill's already-visible window in the same set as finished stroke and edit
+    /// Holds a committed fill's preview window in the same set as finished stroke and edit
     /// pictures. The vector base lands asynchronously; `refreshDisplay` retires this when its version
     /// arrives, exactly as it does for every other unlanded picture.
-    func holdUnlandedWindow(_ image: UIImage, rect: CGRect, at version: Int) {
+    func holdUnlandedWindow(_ contents: UnlandedInk.Picture.Contents, rect: CGRect, at version: Int) {
         guard vectorCanvas != nil, !rect.isNull else { return }
-        holdUnlandedPicture(image, rect: rect, alpha: 1, replacesBase: false, at: version)
+        holdUnlandedPicture(contents, rect: rect, alpha: 1, replacesBase: false, at: version)
         showOverlays(scratch)
     }
 
-    private func holdUnlandedPicture(_ image: UIImage, rect: CGRect, alpha: CGFloat,
+    private func holdUnlandedPicture(_ contents: UnlandedInk.Picture.Contents, rect: CGRect, alpha: CGFloat,
                                     replacesBase: Bool, at version: Int) {
         guard let canvas = vectorCanvas, canvas.version == version else { return }
         let revision = contentRevisions.committed(canvas)
-        holdUnlandedPicture(image, rect: rect, alpha: alpha, replacesBase: replacesBase, atRevision: revision)
-    }
-
-    private func holdUnlandedPicture(_ image: UIImage, rect: CGRect, alpha: CGFloat,
-                                    replacesBase: Bool, atRevision revision: Int) {
         unlandedInk.hold(UnlandedInk.Picture(id: nextUnlandedInkID, version: revision,
                                              windowRect: rect, alpha: alpha,
-                                             replacesBase: replacesBase, image: image))
+                                             replacesBase: replacesBase, contents: contents))
         nextUnlandedInkID += 1
     }
 

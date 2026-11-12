@@ -96,6 +96,13 @@ final class LayerHostView: CanvasPlaneView {
         fillPlane.showFill(render, clip: clip)
     }
 
+    func holdCommittedFill(_ preview: FillPreview, render: CanvasManager.FillRenderResult,
+                           clip: CGPath?, at version: Int) {
+        let contents = fillPlane.contentsForLanding(preview, render: render, clip: clip)
+        // Both representations span the same rect in the layer's ink plane, even at a reduced scale.
+        strokeView.holdUnlandedWindow(contents, rect: preview.rect, at: version)
+    }
+
     /// The accepted ink and backing placements belong to the same installed base. Ordinary cel
     /// channels move native ink only; stored pixel tiers retain their container placement.
     var contentPlacement: CelContentPlacement {

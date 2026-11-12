@@ -1179,7 +1179,7 @@ final class CanvasManager: ObservableObject {
     /// A live picture is transferred immediately before its existing display owner is released.
     /// The receiver retains the already-shown representation until an installed base covers it.
     enum LivePictureLanding {
-        case fill(layerID: UUID, celID: UUID, preview: FillPreview)
+        case fill(layerID: UUID, celID: UUID, preview: FillPreview, render: FillRenderResult, clip: CGPath?)
         case vectorFloat(VectorFloat)
     }
     var onLivePictureWillLand: ((LivePictureLanding) -> Void)?

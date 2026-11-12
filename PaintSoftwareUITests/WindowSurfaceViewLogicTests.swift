@@ -514,6 +514,77 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
         XCTAssertEqual(WindowSurfaceView.residentBytes, before)
     }
 
+    private func assertFillBitmap(_ contents: UnlandedInk.Picture.Contents, is image: UIImage,
+                                  file: StaticString = #filePath, line: UInt = #line) {
+        guard case .image(let held) = contents else {
+            return XCTFail("the ineligible front must use the prepared bitmap", file: file, line: line)
+        }
+        XCTAssertTrue(held === image, "the fallback keeps the prepared image", file: file, line: line)
+    }
+
+    func testLayerFillHandsOffOnlyTheMatchingClippedFront() throws {
+        let before = WindowSurfaceView.residentBytes
+        try autoreleasepool {
+            let owner = LayerFillView(queue: queue)
+            let canvas = CGSize(width: 64, height: 64)
+            let window = FillWindow.fitting(CGRect(x: 8, y: 12, width: 24, height: 16),
+                                            in: canvas, pixelBudget: 96)
+            let bytes = Array(repeating: [UInt8(128), 0, 0, 128],
+                              count: window.workingWidth * window.workingHeight).flatMap { $0 }
+            let render = CanvasManager.FillRenderResult(generation: 1, documentFrame: 0,
+                                                         bytes: bytes, window: window)
+            let staleRender = CanvasManager.FillRenderResult(generation: 1, documentFrame: 0,
+                bytes: Array(repeating: [UInt8(0), 0, 128, 128],
+                             count: window.workingWidth * window.workingHeight).flatMap { $0 }, window: window)
+            let bounds = CGRect(x: 10, y: 14, width: 8, height: 8)
+            let clip = CGPath(rect: bounds, transform: nil)
+            let commitClip = CGPath(rect: bounds, transform: nil)
+            XCTAssertFalse(clip === commitClip, "PREMISE: the commit resolved its own path")
+            let preview = try XCTUnwrap(render.preview(clippedTo: commitClip))
+            XCTAssertTrue(owner.showFill(render, clip: clip))
+            let child = try XCTUnwrap(owner.subviews.first as? WindowSurfaceView)
+            spin(until: { child.presentedCount == 1 }, "the clipped preview actually presents")
+            let front = try XCTUnwrap(child.layer.contents as? IOSurface)
+            let stalePreview = try XCTUnwrap(staleRender.preview(clippedTo: commitClip))
+            assertFillBitmap(owner.contentsForLanding(stalePreview, render: staleRender, clip: commitClip),
+                             is: stalePreview.image)
+            let otherClip = CGPath(rect: bounds.offsetBy(dx: 8, dy: 0), transform: nil)
+            let otherPreview = try XCTUnwrap(render.preview(clippedTo: otherClip))
+            assertFillBitmap(owner.contentsForLanding(otherPreview, render: render, clip: otherClip),
+                             is: otherPreview.image)
+            XCTAssertTrue(child.layer.contents as? IOSurface === front, "fallback leaves the shown preview in place")
+
+            let contents = owner.contentsForLanding(preview, render: render, clip: commitClip)
+            guard case .surface(let frozen) = contents else { return XCTFail("transfer the matching front") }
+            XCTAssertTrue(frozen.surface === front, "the held picture uses the exact displayed surface")
+            XCTAssertNil(child.layer.contents, "the old view sets down its front")
+            XCTAssertEqual(WindowSurfaceView.residentBytes - before, front.allocationSize,
+                           "only the front survives, including in the owner's memory accounting")
+
+            let placement = CelContentPlacement(ink: .affine(CGAffineTransform(translationX: 4, y: 3)))
+            let held = UnlandedInk.Picture(id: 1, version: 1, windowRect: preview.rect, alpha: 1,
+                                          replacesBase: false, contents: contents)
+            let heldView = held.makeCanvasView(size: canvas, placement: placement)
+            let plane = try XCTUnwrap(heldView.subviews.first)
+            let shown = try XCTUnwrap(plane.subviews.first)
+            XCTAssertEqual(shown.frame, frozen.window.applying(frozen.placement),
+                           "the reduced surface still covers its original canvas window")
+            XCTAssertEqual(plane.layer.affineTransform(), placement.ink?.affine)
+            XCTAssertTrue(shown.layer.contents as? IOSurface === front)
+            let locked = front.lock(options: [.readOnly], seed: nil)
+            XCTAssertEqual(locked, KERN_SUCCESS)
+            guard locked == KERN_SUCCESS else { return }
+            defer { _ = front.unlock(options: [.readOnly], seed: nil) }
+            let pixels = front.baseAddress.assumingMemoryBound(to: UInt8.self)
+            let row = 2 * front.bytesPerRow
+            XCTAssertEqual(pixels[row + 2 * 4 + 3], 128, "the held fill keeps the preview's partial opacity")
+            XCTAssertEqual(pixels[row + 8 * 4 + 3], 0, "the held fill keeps the preview's clipped exterior")
+            XCTAssertTrue(owner.showFill(nil, clip: nil))
+            XCTAssertTrue(owner.subviews.isEmpty)
+        }
+        XCTAssertEqual(WindowSurfaceView.residentBytes, before)
+    }
+
     /// The real layer fill owner, extracted without fixing its old size-replacement policy.
     /// The queue gate holds B before its preview runs; this is not an inside-render timing hook.
     func testTheLayerFillOwnerKeepsOneSurfaceThroughQueuedWindowGrowth() throws {
@@ -568,6 +639,8 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
             XCTAssertTrue(surface.layer.contents as AnyObject? === front, "Growth keeps the old front until landing")
             XCTAssertEqual(surface.layer.bounds.size, CGSize(width: 8, height: 4), "The old front keeps its extent")
             XCTAssertEqual(surface.layer.position, CGPoint(x: 4, y: 6), "The old front keeps its placement")
+            let pending = try XCTUnwrap(newest.preview(clippedTo: nil))
+            assertFillBitmap(owner!.contentsForLanding(pending, render: newest, clip: nil), is: pending.image)
             let children = owner!.subviews.compactMap { $0 as? WindowSurfaceView }
             XCTAssertEqual(children.count, 1, "Different working sizes share one layer fill surface owner")
             XCTAssertTrue(children.last === surface, "The newest request keeps the original surface view identity")
@@ -597,13 +670,12 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
              "Clearing the owner and draining its own queue retires all actual surface allocations")
     }
 
-    /// A refused surface allocation leaves this render and clip eligible for another admission.
-    /// The factory returns the real IOSurface on the next request; it changes no drawing behavior.
+    /// A refused resize leaves the old front visible and the new render eligible for another request.
     func testLayerFillRetriesTheSameRenderAfterOneSurfaceAllocationRefusal() throws {
         let before = WindowSurfaceView.residentBytes
         let gate = DispatchSemaphore(value: 0)
         var released = false
-        var refusalsRemaining = 1
+        var refusalsRemaining = 0
         let factory: WindowSurfaceView.SurfaceFactory = { width, height in
             if refusalsRemaining > 0 {
                 refusalsRemaining -= 1
@@ -611,7 +683,6 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
             }
             return WindowSurfaceView.makeSurface(width: width, height: height)
         }
-        queue.async { gate.wait() }
         var owner: LayerFillView? = LayerFillView(queue: queue, surfaceFactory: factory)
         defer {
             _ = owner?.showFill(nil, clip: nil)
@@ -622,27 +693,37 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
         let canvas = CGSize(width: 64, height: 64)
         let window = FillWindow.fitting(CGRect(x: 4, y: 6, width: 8, height: 4),
                                        in: canvas, pixelBudget: 4096)
+        let firstWindow = FillWindow.fitting(CGRect(x: 4, y: 6, width: 4, height: 4),
+                                            in: canvas, pixelBudget: 4096)
+        let first = CanvasManager.FillRenderResult(generation: 1, documentFrame: 0,
+            bytes: Array(repeating: [UInt8(255), 0, 0, 255],
+                         count: firstWindow.workingWidth * firstWindow.workingHeight).flatMap { $0 }, window: firstWindow)
         let green: [UInt8] = [0, 255, 0, 255]
-        let render = CanvasManager.FillRenderResult(generation: 1, documentFrame: 0,
+        let render = CanvasManager.FillRenderResult(generation: 2, documentFrame: 0,
             bytes: Array(repeating: green, count: window.workingWidth * window.workingHeight).flatMap { $0 },
             window: window)
 
-        XCTAssertTrue(owner!.showFill(render, clip: nil), "the initial fill request changes the owner")
+        XCTAssertTrue(owner!.showFill(first, clip: nil))
         let surface = try XCTUnwrap(owner!.subviews.compactMap { $0 as? WindowSurfaceView }.first)
+        spin(until: { surface.presentedCount == 1 }, "PREMISE: there is an older front")
+        let front = try XCTUnwrap(surface.layer.contents as? IOSurface)
+        refusalsRemaining = 1
+        XCTAssertTrue(owner!.showFill(render, clip: nil))
         XCTAssertEqual(refusalsRemaining, 0, "PREMISE: the first surface allocation was refused")
-        XCTAssertEqual(surface.presentedCount, 0, "PREMISE: refusal produced no picture")
-        XCTAssertNil(surface.presentedWindow, "A refused first allocation provides no display coverage")
-        XCTAssertEqual(WindowSurfaceView.residentBytes, before,
-                       "PREMISE: refusal allocated no retained surface memory")
+        let refused = try XCTUnwrap(render.preview(clippedTo: nil))
+        assertFillBitmap(owner!.contentsForLanding(refused, render: render, clip: nil), is: refused.image)
+        XCTAssertTrue(surface.layer.contents as? IOSurface === front, "the older front stays up until teardown or retry")
+        XCTAssertEqual(WindowSurfaceView.residentBytes - before, front.allocationSize)
 
+        queue.async { gate.wait() }
         let retryAccepted = owner!.showFill(render, clip: nil)
         XCTAssertTrue(retryAccepted, "the same render and clip are admitted after allocation recovers")
         guard retryAccepted else { return }
         XCTAssertFalse(owner!.showFill(render, clip: nil), "the admitted retry is deduped while pending")
-        XCTAssertEqual(surface.presentedCount, 0, "PREMISE: the gate keeps the admitted request pending")
+        XCTAssertEqual(surface.presentedCount, 1, "PREMISE: the gate keeps the admitted request pending")
         gate.signal()
         released = true
-        spin(until: { surface.presentedCount == 1 }, "the admitted retry reaches the surface")
+        spin(until: { surface.presentedCount == 2 }, "the admitted retry reaches the surface")
         let pixels = try XCTUnwrap(surface.layer.contents as? IOSurface)
         let lockResult = pixels.lock(options: [.readOnly], seed: nil)
         XCTAssertEqual(lockResult, KERN_SUCCESS, "the recovered surface can be read")

@@ -5,10 +5,10 @@ final class LayerFillView: UIView {
     /// The adjustable fill's picture (`showFill`) — made with the fill's first render, and let go with
     /// the fill.
     private var fillSurface: WindowSurfaceView?
-    /// The render and clip `fillSurface` was last asked to show, so the passes that change nothing are
-    /// two identity checks.
-    private var shownFill: (render: CanvasManager.FillRenderResult, clip: CGPath?)?
-    /// Fences a refusal for an older A request after a reentrant A→B→A replacement.
+    /// The last request and whether its pixels reached the front. An older front can stay visible
+    /// while its replacement draws.
+    private var requestedFill: (render: CanvasManager.FillRenderResult, clip: CGPath?, isPresented: Bool)?
+    /// Fences completions for older requests, including a reentrant A→B→A replacement.
     private var fillAttempt: UInt64 = 0
     /// Where every host's fill pictures are drawn — one fill is live at a time.
     private static let fillDrawQueue = DispatchQueue(label: "com.paintapp.LayerFillView.fill",
@@ -41,17 +41,17 @@ final class LayerFillView: UIView {
     @discardableResult
     func showFill(_ render: CanvasManager.FillRenderResult?, clip: CGPath?) -> Bool {
         guard let render else {
-            guard shownFill != nil || fillSurface != nil || !subviews.isEmpty else { return false }
+            guard requestedFill != nil || fillSurface != nil || !subviews.isEmpty else { return false }
             fillAttempt &+= 1
-            shownFill = nil
+            requestedFill = nil
             fillSurface = nil
             for surface in subviews { surface.removeFromSuperview() }
             return true
         }
-        guard shownFill?.render !== render || shownFill?.clip !== clip else { return false }
+        guard requestedFill?.render !== render || requestedFill?.clip !== clip else { return false }
         fillAttempt &+= 1
         let attempt = fillAttempt
-        shownFill = (render, clip)
+        requestedFill = (render, clip, false)
         let window = CGRect(x: 0, y: 0, width: render.window.workingWidth, height: render.window.workingHeight)
         if fillSurface == nil {
             let surface = WindowSurfaceView(queue: drawQueue, surfaceFactory: surfaceFactory)
@@ -63,11 +63,23 @@ final class LayerFillView: UIView {
             preview.image.draw(in: window)
             return window
         }, finished: { [weak self] shown in
-            guard !shown, let self, self.fillAttempt == attempt,
-                  self.shownFill?.render === render, self.shownFill?.clip === clip else { return }
-            self.shownFill = nil
+            guard let self, self.fillAttempt == attempt else { return }
+            if shown { self.requestedFill?.isPresented = true }
+            else { self.requestedFill = nil }
         })
         return true
     }
 
+    /// Transfers the exact front when it matches the commit. The commit can resolve a fresh copy
+    /// of the same clip, so compare path contents. The prepared bitmap covers a pending or refused
+    /// draw and a commit whose render or clip differs from the front.
+    func contentsForLanding(_ preview: FillPreview, render: CanvasManager.FillRenderResult,
+                            clip: CGPath?) -> UnlandedInk.Picture.Contents {
+        guard let requestedFill, requestedFill.isPresented, requestedFill.render === render,
+              requestedFill.clip == clip, let frozen = fillSurface?.freezePresented() else {
+            return .image(preview.image)
+        }
+        self.requestedFill = nil
+        return .surface(frozen)
+    }
 }

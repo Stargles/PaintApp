@@ -166,12 +166,10 @@ extension CanvasManager {
 
     /// Lets the gesture's picture go — its pixels are in the document by now, or were thrown away —
     /// and publishes once, so the canvas re-cuts without the fill's host.
-    private func endLiveFill(landing preview: FillPreview? = nil) {
-        guard let fill = liveFill else { return }
+    private func endLiveFill(landing: LivePictureLanding? = nil) {
+        guard liveFill != nil else { return }
         endLiveEdit {
-            if let preview {
-                onLivePictureWillLand?(.fill(layerID: fill.layerID, celID: fill.celID, preview: preview))
-            }
+            if let landing { onLivePictureWillLand?(landing) }
         }
     }
 
@@ -716,6 +714,8 @@ extension CanvasManager {
               let preview = render.preview(clippedTo: clip) else {
             raise(.drawingSourceUnavailable); return nil
         }
+        let landing = LivePictureLanding.fill(layerID: layerID, celID: celID, preview: preview,
+                                              render: render, clip: clip)
         let label: HistoryActionLabel = fillGestureIsLasso ? .lassoFill : .fill
         var cel = staging[celID] ?? layers[layerIndex].cels[celIndex]
         if layers[layerIndex].kind == .vector {
@@ -752,7 +752,7 @@ extension CanvasManager {
                     newElements: elements, layerID: layerID, celID: celID, label: label,
                     swap: .addsAndRemoves(ink: added.ink))
                 self.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
-                self.finishInteractiveFill(landing: preview)
+                self.finishInteractiveFill(landing: landing)
             }
         }
         let before = cel
@@ -777,11 +777,11 @@ extension CanvasManager {
             self.registerUndoableCelChange(layerID: layerID, celID: celID,
                 oldRaster: before.raster, oldBaked: before.bakedImage,
                 newRaster: raster, newBaked: nil, label: label)
-            self.finishInteractiveFill(landing: preview)
+            self.finishInteractiveFill(landing: landing)
         }
     }
 
-    private func finishInteractiveFill(landing: FillPreview? = nil) {
+    private func finishInteractiveFill(landing: LivePictureLanding? = nil) {
         fillGestureActive = false
         fillFingerDown = false
         fillGestureIsLasso = false
