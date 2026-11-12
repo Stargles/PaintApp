@@ -896,7 +896,9 @@ final class StrokeCanvasView: CanvasPlaneView {
     @discardableResult
     private func takeDownHeldEdit(landing: Bool, committedEdit: LiveCelContentEdit? = nil) -> Bool {
         guard heldEdit != nil || heldEditSurface != nil || committedEdit != nil else { return false }
-        let edit = committedEdit ?? heldEdit
+        // Only an explicit Liquify landing can name the picture written to the cel. A
+        // cancellation or unrelated cel revision must never promote the last preview.
+        let edit = committedEdit ?? heldEdit.flatMap { $0.procedure == nil ? $0 : nil }
         let surface = heldEditSurface
         let footprint = heldEditHole
         let presentedTick = heldEditPresentedTick
