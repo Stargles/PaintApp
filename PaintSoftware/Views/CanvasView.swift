@@ -354,6 +354,10 @@ struct CanvasView: UIViewRepresentable {
             case .fill(let layerID, let celID, let preview, let render, let clip):
                 coordinator.prepareLiveFillLanding(preview, render: render, clip: clip,
                                                    layerID: layerID, celID: celID)
+            case .liquify(let edit):
+                guard let host = coordinator.layerHosts[edit.layerID] else { return }
+                coordinator.showLiveCelContentEdit(on: host, layerID: edit.layerID,
+                                                   celID: edit.celID, landing: edit)
             case .vectorFloat(let float):
                 for part in float.parts where part.isShown {
                     guard let host = coordinator.layerHosts[part.layerID],
@@ -2321,9 +2325,10 @@ struct CanvasView: UIViewRepresentable {
 
         /// Transient sources enter at their layer before every blend, mask, effect and Guide.
         /// These values are frozen at mint time; no view or mutable cel crosses to the worker.
-        private func streamDisplaySources() -> (values: [UUID: PixelOps.CelDisplay], bounds: CGRect) {
+        private func streamDisplaySources() -> (values: [UUID: PixelOps.CelDisplay], bounds: CGRect, liquify: LiquifyProcedure?) {
             var values: [UUID: PixelOps.CelDisplay] = [:]
             var bounds = CGRect.null
+            var liquify: LiquifyProcedure?
             let size = canvasManager.canvasSize ?? .zero
             for (id, host) in layerHosts {
                 if let source = host.strokeView.displaySource {
@@ -2331,12 +2336,16 @@ struct CanvasView: UIViewRepresentable {
                     bounds = bounds.union(source.bounds)
                 }
             }
-            if let edit = canvasManager.liveCelContentEdit, edit.procedure?.isResolved != false {
+            if let edit = canvasManager.liveCelContentEdit, edit.procedure?.isResolved != false,
+               let index = canvasManager.layers.firstIndex(where: { $0.id == edit.layerID }),
+               let celIndex = canvasManager.displayedCelIndex(inLayer: index, atFrame: canvasManager.currentFrame),
+               canvasManager.layers[index].cels[celIndex].id == edit.celID {
                 var value = values[edit.layerID] ?? PixelOps.CelDisplay()
                 let placement = canvasManager.celContentPlacement(forLayerID: edit.layerID)
                 value.drawOverlays = edit.displaySource(placement: placement, canvasSize: size)
                 values[edit.layerID] = value
                 bounds = bounds.union(edit.displayedBounds(placement: placement))
+                liquify = edit.procedure
             }
             if let fill = canvasManager.liveFill, let render = fill.render {
                 var value = values[fill.layerID] ?? PixelOps.CelDisplay()
@@ -2404,7 +2413,7 @@ struct CanvasView: UIViewRepresentable {
                     values[id] = value
                 }
             }
-            return (values, bounds)
+            return (values, bounds, liquify)
         }
 
         private func mintStreamDisplay() -> WindowSurfaceView.Frame? {
@@ -2417,7 +2426,7 @@ struct CanvasView: UIViewRepresentable {
             let scale = CGAffineTransform(scaleX: size.width / (display.recipe.window?.frameSize.width ?? size.width),
                                           y: size.height / (display.recipe.window?.frameSize.height ?? size.height))
             let budget = canvasManager.frameBaker.budgetBytes
-            let procedure = canvasManager.liveCelContentEdit?.procedure
+            let procedure = sources.liquify
             return WindowSurfaceView.Frame(window: display.core, placement: scale, draw: { cg in
                 guard let image = display.recipe.composite(budgetBytes: budget), procedure?.hasFailed != true else { return nil }
                 PaddingCoverView.marginGrey.setFill()
@@ -2540,7 +2549,8 @@ struct CanvasView: UIViewRepresentable {
         /// takes down whatever the host was showing otherwise (`CanvasManager.liveCelContentEdit`, TODO
         /// (173)). Returns whether the host's picture changed.
         @discardableResult
-        private func showLiveCelContentEdit(on host: LayerHostView, layerID: UUID, celID: UUID?) -> Bool {
+        private func showLiveCelContentEdit(on host: LayerHostView, layerID: UUID, celID: UUID?,
+                                            landing: LiveCelContentEdit? = nil) -> Bool {
             let live = canvasManager.liveCelContentEdit.flatMap {
                 $0.layerID == layerID && $0.celID == celID ? $0 : nil
             }
@@ -2563,7 +2573,7 @@ struct CanvasView: UIViewRepresentable {
                     host.strokeView.bindContent(raster: cel.raster, vector: cel.vector)
                 }
             }
-            return host.strokeView.showHeldEdit(live)
+            return host.strokeView.showHeldEdit(live, landing: landing)
         }
 
         // MARK: §6.4's live mask

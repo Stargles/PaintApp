@@ -27,6 +27,8 @@ enum HeldEdit {
     /// A live element edit's window — the Select panel's drag and the gradient panel (TODO (173)).
     /// The cel's host draws it over the base, punched out underneath.
     case celContent(LiveCelContentEdit)
+    /// A Liquify stroke prepares the next replacement while the host keeps its last ready picture.
+    case liquify(HeldLiquify)
     /// The adjustable fill's picture (TODO (157)), drawn by the cel's host over its own.
     case fill(CanvasManager.LiveFill)
     /// A grade under the finger — the effect bar's controls, the Duplicate Offset's box, a graph-band
@@ -64,7 +66,15 @@ enum HeldEdit {
     }
 
     var celContent: LiveCelContentEdit? {
-        if case .celContent(let edit) = self { return edit }
+        switch self {
+        case .celContent(let edit): return edit
+        case .liquify(let held): return held.shown
+        default: return nil
+        }
+    }
+
+    var liquify: HeldLiquify? {
+        if case .liquify(let held) = self { return held }
         return nil
     }
 
@@ -147,6 +157,7 @@ enum HeldEdit {
         switch self {
         case .pose, .grade, .mask, .channel, .valueFill: return nil
         case .celContent(let edit): return edit.layerID
+        case .liquify(let held): return held.requested.layerID
         case .fill(let fill): return fill.layerID
         case .interpolation(let held): return held.layerID
         case .channelCurves, .groupPose: return nil
@@ -165,7 +176,7 @@ enum HeldEdit {
         case .channel(let held): return canvasEngaged || held.channel != .opacity
         case .channelCurves(let held): return canvasEngaged || held.curves.keys.contains { $0 != TargetChannel.opacity.id }
         case .valueFill, .groupPose: return canvasEngaged
-        case .pose, .celContent, .fill, .interpolation: return false
+        case .pose, .celContent, .liquify, .fill, .interpolation: return false
         }
     }
 }
@@ -338,6 +349,8 @@ extension CanvasManager {
     var liveFill: LiveFill? { liveEdit?.fill }
     /// The live element edit's window, when that is what is held.
     var liveCelContentEdit: LiveCelContentEdit? { liveEdit?.celContent }
+    /// The exact Liquify request to settle at lift or an explicit edit boundary.
+    var requestedLiquifyEdit: LiveCelContentEdit? { liveEdit?.liquify?.requested }
 
     /// **Opens a hold the canvas has to cut its live picture around** — a fill's or an element edit's,
     /// whose host must keep drawing (`heldHostLayerIndices`). Publishes once, so the cut is made before
@@ -361,8 +374,10 @@ extension CanvasManager {
     /// which takes the picture down, and publishes once so it re-cuts without the hold's host.
     func endLiveEdit(beforeNotify: () -> Void = {}) {
         guard liveEdit != nil else { return }
-        MainActor.assumeIsolated { liquifyPictures.cancel() }
-        liveCelContentEdit?.procedure?.cancel()
+        if let procedure = requestedLiquifyEdit?.procedure {
+            MainActor.assumeIsolated { liquifyPictures.cancel() }
+            procedure.cancel()
+        }
         liveEdit = nil
         mirrorLiveEdit()
         // Transfer any committed picture after clearing the model hold, before removing its surface.

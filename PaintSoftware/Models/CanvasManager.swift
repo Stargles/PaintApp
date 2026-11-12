@@ -1180,6 +1180,7 @@ final class CanvasManager: ObservableObject {
     /// The receiver retains the already-shown representation until an installed base covers it.
     enum LivePictureLanding {
         case fill(layerID: UUID, celID: UUID, preview: FillPreview, render: FillRenderResult, clip: CGPath?)
+        case liquify(LiveCelContentEdit)
         case vectorFloat(VectorFloat)
     }
     var onLivePictureWillLand: ((LivePictureLanding) -> Void)?
@@ -2004,8 +2005,8 @@ final class CanvasManager: ObservableObject {
         var cels: [UUID: Cel] = [:]
         var actions: [() -> Void] = []
         var liquifyIsCurrent: () -> Bool = { true }
-        let procedure = liveCelContentEdit?.procedure
-        if let edit = liveCelContentEdit, let procedure {
+        let procedure = requestedLiquifyEdit?.procedure
+        if let edit = requestedLiquifyEdit, let procedure {
             guard let prepared = procedure.preparePending(edit.elements, staging: &cels) else {
                 raise(.drawingSourceUnavailable); return nil
             }
@@ -2039,7 +2040,7 @@ final class CanvasManager: ObservableObject {
                   self.shapeGestureCelID == shapeState.2,
                   self.textGestureActive == textState.0, self.textGestureLayerID == textState.1,
                   self.textGestureCelID == textState.2,
-                  self.liveCelContentEdit?.procedure === procedure,
+                  self.requestedLiquifyEdit?.procedure === procedure,
                   identities.allSatisfy({ id, identity in
                       self.layers.lazy.flatMap(\.cels).first(where: { $0.id == id }).map(CelContentIdentity.init) == identity
                   }) else { return false }
@@ -2061,7 +2062,7 @@ final class CanvasManager: ObservableObject {
     /// editor's channel list stays up through a whole keying session, and an autosave held for as long
     /// as it was up would leave that session's keys out of every saved version.
     var hasInteractiveStatePending: Bool {
-        liveCelContentEdit?.procedure != nil || fillGestureActive || shapeGestureActive || textGestureActive || selectionEdit != nil
+        requestedLiquifyEdit != nil || fillGestureActive || shapeGestureActive || textGestureActive || selectionEdit != nil
             || gradientEdit != nil || floatingPieceHoldsUnsettledEdit || vectorFloat != nil
     }
 

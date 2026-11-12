@@ -834,6 +834,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     private var heldEditSurface: WindowSurfaceView?
     private var heldEdit: LiveCelContentEdit?
     private var heldEditHole: CGPath?
+    private var heldEditPresentedTick: Int?
     private var heldEditBaseRevision = 0
     private let contentRevisions = CelContentRevisions()
     private var celPixelSnapshot: CelPixelSnapshot?
@@ -847,7 +848,11 @@ final class StrokeCanvasView: CanvasPlaneView {
     }
 
     @discardableResult
-    func showHeldEdit(_ edit: LiveCelContentEdit?) -> Bool {
+    func showHeldEdit(_ edit: LiveCelContentEdit?, landing: LiveCelContentEdit? = nil) -> Bool {
+        if let landing, landing.celID == contentRevisions.celID,
+           landing.vectorCanvas === vectorCanvas, vectorCanvas != nil, !hostIsBlanked {
+            return takeDownHeldEdit(landing: true, committedEdit: landing)
+        }
         guard let edit, edit.celID == contentRevisions.celID,
               edit.vectorCanvas === vectorCanvas, !hostIsBlanked else {
             return takeDownHeldEdit(landing: edit == nil)
@@ -879,6 +884,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         }, finished: { [weak self] shown in
             guard let self, self.heldEditSurface === surface else { return }
             guard shown else { edit.procedure?.didReject(); return }
+            self.heldEditPresentedTick = edit.tick
             if self.heldEditHole != footprint {
                 self.heldEditHole = footprint
                 self.showOverlays(self.scratch)
@@ -888,19 +894,21 @@ final class StrokeCanvasView: CanvasPlaneView {
     }
 
     @discardableResult
-    private func takeDownHeldEdit(landing: Bool) -> Bool {
-        guard heldEdit != nil || heldEditSurface != nil else { return false }
-        let edit = heldEdit
+    private func takeDownHeldEdit(landing: Bool, committedEdit: LiveCelContentEdit? = nil) -> Bool {
+        guard heldEdit != nil || heldEditSurface != nil || committedEdit != nil else { return false }
+        let edit = committedEdit ?? heldEdit
         let surface = heldEditSurface
         let footprint = heldEditHole
+        let presentedTick = heldEditPresentedTick
         heldEdit = nil
         heldEditHole = nil
+        heldEditPresentedTick = nil
         heldEditSurface?.removeFromSuperview()
         heldEditSurface = nil
         if landing, let edit, edit.celID == contentRevisions.celID,
-           contentRevisions.current > heldEditBaseRevision {
+           committedEdit != nil || contentRevisions.current > heldEditBaseRevision {
             let revision = contentRevisions.current
-            if edit.procedure?.isPresented == true, let frozen = surface?.freezePresented(),
+            if edit.procedure != nil, presentedTick == edit.tick, let frozen = surface?.freezePresented(),
                let footprint {
                 unlandedInk.hold(UnlandedInk.Picture(id: nextUnlandedInkID, version: revision,
                     windowRect: frozen.window, replacing: footprint, contents: .surface(frozen)))

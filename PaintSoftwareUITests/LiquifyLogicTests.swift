@@ -950,7 +950,7 @@ final class LiquifyLogicTests: XCTestCase {
         session.samples = StrokeSamples([VectorSample(x: 32, y: 24), VectorSample(x: 32, y: 48)], channels: .pressureOnly)
         session.window = CGRect(x: 0, y: 0, width: 64, height: 64)
         manager.holdLiquify(&session)
-        let procedure = try XCTUnwrap(manager.liveCelContentEdit?.procedure)
+        let procedure = try XCTUnwrap(manager.requestedLiquifyEdit?.procedure)
         manager.commitLiquify(session)
         return (manager, canvas, ink, session, procedure)
     }
@@ -960,8 +960,8 @@ final class LiquifyLogicTests: XCTestCase {
         XCTAssertTrue(procedure.isPending)
         XCTAssertLessThanOrEqual(procedure.resolutionCount, 1, "the preparing worker may already own the one final value")
         XCTAssertTrue(manager.history.undoStack.isEmpty)
-        let picture = try XCTUnwrap(manager.liveCelContentEdit).picture()
-        _ = try XCTUnwrap(manager.liveCelContentEdit).picture()
+        let picture = try XCTUnwrap(manager.requestedLiquifyEdit).picture()
+        _ = try XCTUnwrap(manager.requestedLiquifyEdit).picture()
         XCTAssertEqual(procedure.resolutionCount, 1, "repeated presentation reads reuse one resolved tick")
         XCTAssertNotEqual(procedure.resolve(session.elementsBefore).first?.id, nil)
         procedure.didPresent()
@@ -1003,7 +1003,7 @@ final class LiquifyLogicTests: XCTestCase {
     }
 
     @MainActor
-    func testNewestPreparedTickIsTheOnlyTickThatCanPresentAndCommit() throws {
+    func testNewestWaitingTickIsTheOnlyQueuedTickThatGetsPrepared() throws {
         let manager = CanvasFixture.manager(); manager.addVectorLayer()
         let layer = manager.layers[1], canvas = try XCTUnwrap(layer.cels[0].vector)
         canvas.addStroke(stroke([CGPoint(x: 10, y: 24), CGPoint(x: 50, y: 24)]))
@@ -1013,10 +1013,10 @@ final class LiquifyLogicTests: XCTestCase {
         XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
         defer { release.signal() }
         let shown = expectation(description: "newest complete normal stroke picture")
-        var presented: [UUID] = []
+        var presented: [Int] = []
         manager.onHeldPictureMoved = { [weak manager] in
-            guard let procedure = manager?.liveCelContentEdit?.procedure, procedure.isResolved else { return }
-            presented.append(procedure.deformation.id)
+            guard let edit = manager?.liveCelContentEdit, let procedure = edit.procedure else { return }
+            presented.append(edit.tick)
             procedure.didPresent()
             shown.fulfill()
         }
@@ -1025,10 +1025,10 @@ final class LiquifyLogicTests: XCTestCase {
         session.samples = StrokeSamples(points: [CGPoint(x: 32, y: 24), CGPoint(x: 32, y: 32)])
         session.window = CGRect(x: 0, y: 0, width: 64, height: 64)
         manager.holdLiquify(&session)
-        let stale = try XCTUnwrap(manager.liveCelContentEdit?.procedure)
+        let stale = try XCTUnwrap(manager.requestedLiquifyEdit?.procedure)
         session.samples.append(VectorSample(x: 32, y: 48))
         manager.holdLiquify(&session)
-        let newest = try XCTUnwrap(manager.liveCelContentEdit?.procedure)
+        let newest = try XCTUnwrap(manager.requestedLiquifyEdit?.procedure)
         XCTAssertFalse(newest === stale)
         manager.commitLiquify(session)
         XCTAssertTrue(newest.isPending)
@@ -1037,9 +1037,70 @@ final class LiquifyLogicTests: XCTestCase {
         wait(for: [shown], timeout: 15)
         XCTAssertEqual(stale.resolutionCount, 0, "superseded queued geometry never allocates a picture")
         XCTAssertEqual(newest.resolutionCount, 1)
-        XCTAssertEqual(presented, [newest.deformation.id])
+        XCTAssertEqual(presented, [2])
         XCTAssertEqual(manager.history.undoStack.count, 1)
         XCTAssertNil(manager.liveCelContentEdit)
+    }
+
+    @MainActor
+    func testCompletedTickShowsWhileNewerInputWaitsAndOnlyTheFinalTickCommits() throws {
+        let manager = CanvasFixture.manager(); manager.addVectorLayer()
+        let layer = manager.layers[1], canvas = try XCTUnwrap(layer.cels[0].vector)
+        let original = stroke([CGPoint(x: 10, y: 24), CGPoint(x: 50, y: 24)])
+        canvas.addStroke(original)
+        manager.history.removeAll()
+        let queue = DispatchQueue(label: "LiquifyLogicTests.heldPreview")
+        let firstGate = DispatchSemaphore(value: 0), finalGate = DispatchSemaphore(value: 0)
+        manager.liquifyPictures = LatestWins(queue: queue)
+        queue.async { firstGate.wait() }
+        defer { firstGate.signal(); finalGate.signal() }
+
+        let firstShown = expectation(description: "show the in-flight tick while a newer tick waits")
+        let finalShown = expectation(description: "show the final tick before its single commit")
+        var shownTicks: [Int] = []
+        manager.onHeldPictureMoved = { [weak manager] in
+            guard let edit = manager?.liveCelContentEdit, let procedure = edit.procedure else { return }
+            shownTicks.append(edit.tick)
+            procedure.didPresent()
+            if edit.tick == 1 { firstShown.fulfill() }
+            if edit.tick == 2 { finalShown.fulfill() }
+        }
+        let profile = ToolProfile(preset: TestBrushes.hardRound, size: 50, opacity: 1)
+        var session = try XCTUnwrap(manager.beginLiquify(layerID: layer.id, profile: profile, size: 50, seed: 7))
+        session.samples = StrokeSamples(points: [CGPoint(x: 32, y: 24), CGPoint(x: 32, y: 34)])
+        session.window = CGRect(x: 0, y: 0, width: 64, height: 64)
+        manager.holdLiquify(&session)
+        let first = try XCTUnwrap(manager.requestedLiquifyEdit?.procedure)
+        XCTAssertTrue(manager.liquifyPictures.isBusy, "the first tick has been minted")
+        XCTAssertFalse(first.isResolved)
+        queue.async { finalGate.wait() }
+        session.samples.append(VectorSample(x: 32, y: 48))
+        manager.holdLiquify(&session)
+        let final = try XCTUnwrap(manager.requestedLiquifyEdit?.procedure)
+        XCTAssertFalse(first === final)
+        XCTAssertNil(manager.liveCelContentEdit, "an unresolved tick has no display picture")
+
+        firstGate.signal()
+        wait(for: [firstShown], timeout: 10)
+        let visible = try XCTUnwrap(manager.liveCelContentEdit)
+        XCTAssertTrue(visible.procedure === first)
+        XCTAssertTrue(manager.requestedLiquifyEdit?.procedure === final)
+        XCTAssertFalse(final.isResolved, "the newer input is still waiting while the older picture is visible")
+        let heldSamples = try XCTUnwrap(visible.picture().elements.first?.stroke?.samples)
+        XCTAssertNotEqual(heldSamples, original.samples)
+        XCTAssertEqual(canvas.elements.first?.stroke?.samples, original.samples)
+
+        manager.commitLiquify(session)
+        XCTAssertTrue(final.isPending)
+        XCTAssertTrue(manager.history.undoStack.isEmpty, "showing an intermediate tick cannot commit the lift")
+        finalGate.signal()
+        wait(for: [finalShown], timeout: 10)
+        XCTAssertEqual(shownTicks, [1, 2])
+        let committed = try XCTUnwrap(canvas.elements.first?.stroke?.samples)
+        XCTAssertNotEqual(committed, heldSamples)
+        XCTAssertEqual(committed, final.resolve(session.elementsBefore).first?.stroke?.samples)
+        XCTAssertEqual(manager.history.undoStack.map(\.label), [.liquify])
+        XCTAssertNil(manager.requestedLiquifyEdit)
     }
 
     @MainActor
@@ -1058,7 +1119,7 @@ final class LiquifyLogicTests: XCTestCase {
         session.samples = StrokeSamples(points: [CGPoint(x: 32, y: 24), CGPoint(x: 32, y: 48)])
         session.window = CGRect(x: 0, y: 0, width: 64, height: 64)
         manager.holdLiquify(&session)
-        let abandoned = try XCTUnwrap(manager.liveCelContentEdit?.procedure)
+        let abandoned = try XCTUnwrap(manager.requestedLiquifyEdit?.procedure)
         manager.endLiveEdit()
         var latePictures = 0
         manager.onHeldPictureMoved = { latePictures += 1 }

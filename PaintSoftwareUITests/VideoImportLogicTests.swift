@@ -257,7 +257,7 @@ final class VideoImportLogicTests: XCTestCase {
                                                         channels: .pressureOnly)
                         session.window = CGRect(x: 0, y: 0, width: 60, height: 48)
                         manager.holdLiquify(&session)
-                        let procedure = try XCTUnwrap(manager.liveCelContentEdit?.procedure)
+                        let procedure = try XCTUnwrap(manager.requestedLiquifyEdit?.procedure)
                         _ = procedure.resolve(session.elementsBefore)
                         XCTAssertFalse(procedure.hasFailed, "PREMISE: the actual finish is ready before admission refuses")
                         allowsPixels = false
@@ -287,7 +287,7 @@ final class VideoImportLogicTests: XCTestCase {
                 XCTAssertEqual(CelContentIdentity(manager.layers[active].cels[0]), identity)
                 XCTAssertTrue(manager.history.undoStack.isEmpty, "No failed creation consumes an undo step")
                 if reason == "settlement" {
-                    XCTAssertTrue(try XCTUnwrap(manager.liveCelContentEdit?.procedure).isPending)
+                    XCTAssertTrue(try XCTUnwrap(manager.requestedLiquifyEdit?.procedure).isPending)
                 } else if reason == "float" {
                     XCTAssertEqual(manager.floatingPiece?.kind, .move)
                     XCTAssertEqual(manager.floatingPiece?.targetLayerID, layers[active])

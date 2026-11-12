@@ -1377,7 +1377,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         session.samples = StrokeSamples([VectorSample(x: 24, y: 24), VectorSample(x: 38, y: 24)], channels: .pressureOnly)
         session.window = CGRect(x: 0, y: 0, width: 60, height: 48)
         manager.holdLiquify(&session)
-        let procedure = try XCTUnwrap(manager.liveCelContentEdit?.procedure)
+        let procedure = try XCTUnwrap(manager.requestedLiquifyEdit?.procedure)
         _ = procedure.resolve(session.elementsBefore)
         XCTAssertFalse(procedure.hasFailed)
         refusing = true
@@ -1387,7 +1387,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         for _ in 0..<3 {
             XCTAssertFalse(manager.beginCanvasEdit())
             XCTAssertTrue(procedure.isPending)
-            XCTAssertTrue(manager.liveCelContentEdit?.procedure === procedure)
+            XCTAssertTrue(manager.requestedLiquifyEdit?.procedure === procedure)
             XCTAssertEqual(CelContentIdentity(manager.layers[0].cels[0]), original)
             XCTAssertTrue(manager.history.undoStack.isEmpty && manager.history.redoStack.isEmpty)
             XCTAssertEqual(owner.usage.chargedBytes, refusedBytes)

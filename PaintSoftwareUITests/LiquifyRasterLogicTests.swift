@@ -93,7 +93,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
             manager.layers[2].cels[0].bakedImage = backingSource
             manager.history.removeAll()
             let session = try held(manager, layer: 2)
-            let procedure = try XCTUnwrap(manager.liveCelContentEdit?.procedure)
+            let procedure = try XCTUnwrap(manager.requestedLiquifyEdit?.procedure)
             manager.commitLiquify(session)
             XCTAssertEqual(procedure.resolutionCount, 1, "ink and backing use one completed producer")
             let after = manager.layers[2].cels[0]
@@ -122,7 +122,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
         manager.history.removeAll()
         manager.onHeldPictureMoved = {}
         var session = try held(manager, layer: 0)
-        let good = try XCTUnwrap(manager.liveCelContentEdit)
+        let good = try XCTUnwrap(manager.requestedLiquifyEdit)
         let view = WindowSurfaceView(queue: DispatchQueue(label: "LiquifyRasterLogicTests.rejection"))
         let first = expectation(description: "valid paint shown")
         view.present(window: good.window, placement: .identity, draw: { good.drawWindow(into: $0) }, finished: { shown in
@@ -133,7 +133,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
         // Deliberately under-declare the source support: an in-canvas inverse cannot be sampled.
         session.window = CGRect(x: 30, y: 20, width: 2, height: 2)
         manager.holdLiquify(&session)
-        let bad = try XCTUnwrap(manager.liveCelContentEdit)
+        let bad = try XCTUnwrap(manager.requestedLiquifyEdit)
         manager.commitLiquify(session)
         let rejected = expectation(description: "invalid draw rejected")
         view.present(window: bad.window, placement: .identity, draw: { bad.drawWindow(into: $0) }, finished: { shown in
@@ -290,7 +290,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
         var session = try held(manager, layer: 0)
         session.window = CGRect(x: 3, y: 3, width: 57, height: 45)
         manager.holdLiquify(&session)
-        let edit = try XCTUnwrap(manager.liveCelContentEdit)
+        let edit = try XCTUnwrap(manager.requestedLiquifyEdit)
         let placement = manager.celContentPlacement(forLayerID: edit.layerID)
         XCTAssertNotNil(placement.ink)
         let footprint = edit.displayedBounds(placement: placement)

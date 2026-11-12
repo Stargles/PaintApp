@@ -35,32 +35,80 @@ final class LiquifyUITests: PaintUITestCase {
     }
 
     func testColdStartVectorPushMovesDrawnInkUnderTheFingerAndOneUndoRestoresIt() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 256, height: 256)), "a fresh scene")
+        let window = rotateDevice(app, to: .landscapeLeft)
+        XCTAssertGreaterThan(window.width, window.height)
         addVectorLayer(app)
         let canvas = app.otherElements["canvas.host"], paper = paperRect(in: canvas)
+        assertAboveTheDock(app, canvas, dy: Double(hostPoint(paper, 0, 0.47).dy), "Liquify's drag and pixel probes")
         drawLine(on: canvas, from: hostPoint(paper, 0.2, 0.30), to: hostPoint(paper, 0.8, 0.30))
         commitPendingShape(on: app)
-        let region = paperPatch(canvas, paper, x: 0.3...0.7, y: 0.25...0.45)
+        drawLine(on: canvas, from: hostPoint(paper, 0.2, 0.12), to: hostPoint(paper, 0.8, 0.12))
+        commitPendingShape(on: app)
+        let target = stride(from: 0.28, through: 0.46, by: 0.01).flatMap {
+            paperRow(canvas, paper, x: 0.33...0.67, y: $0)
+        }
+        let outside = paperPatch(canvas, paper, x: 0.35...0.65, y: 0.10...0.14)
+        let region = target + outside
         let before = readScreenNow(region).map(dark)
-        XCTAssertGreaterThan(before.filter { $0 }.count, 10, "PREMISE: the brush drew the line")
-        attachScreenshot(app, "liquify-vector-before")
+        XCTAssertEqual(before.count, region.count)
+        let outsideBefore = Array(before.suffix(outside.count))
+        XCTAssertGreaterThan(before.prefix(target.count).filter { $0 }.count, 10, "the target line is drawn")
+        XCTAssertGreaterThan(outsideBefore.filter { $0 }.count, 10, "the separate line outside the field is drawn")
+        attachScreenshot(XCUIScreen.main, "liquify-vector-before")
         app.buttons["toolbar.liquifyButton"].tap()
         let beforePasses = try passes(app)
-        let held = samplesDuring(region, "Liquify Push") {
-            canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.5, 0.30))
-                .press(forDuration: 0.05,
-                       thenDragTo: canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.5, 0.46)),
-                       withVelocity: XCUIGestureVelocity(100), thenHoldForDuration: 3)
+        func moved(_ pixels: [Bool]) -> Bool {
+            zip(pixels.prefix(target.count), before.prefix(target.count)).filter { $0 != $1 }.count > 10
         }
-        let changed = held.map { zip($0.pixels.map(self.dark), before).filter { $0 != $1 }.count }
-        XCTAssertTrue(changed.contains { $0 > 10 }, "the drawn line never moved under the finger: \(changed)")
+        var firstMoved: (time: CFAbsoluteTime, screenshot: XCUIScreenshot)?
+        let sampler = MidGestureSampler(points: region) { sample, screenshot in
+            if firstMoved == nil, moved(sample.pixels.map(self.dark)) {
+                firstMoved = (sample.finished, screenshot)
+            }
+        }
+        let start = canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.5, 0.30)).screenPoint
+        let end = canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.5, 0.46)).screenPoint
+        let path = (0...180).map { step in
+            let progress = CGFloat(step) / 180
+            // Move farther while there is still input arriving. A stationary hold lets a
+            // starved preview catch up even though it never followed the moving finger.
+            let fraction = pow(progress, 0.7)
+            return CGPoint(x: start.x, y: start.y + (end.y - start.y) * fraction)
+        }
+        sampler.start()
+        let returned: CFAbsoluteTime
+        do {
+            try fingerStroke(through: path)
+            returned = CFAbsoluteTimeGetCurrent()
+        } catch {
+            _ = sampler.stop()
+            throw error
+        }
+        let held = sampler.stop().filter { $0.finished < returned - 2 }
+        XCTAssertFalse(held.isEmpty, "screen samples finish before the gesture lifts")
+        XCTAssertTrue(held.contains { moved($0.pixels.map(dark)) }, "the line must reshape during the moving drag")
+        XCTAssertTrue(held.allSatisfy { Array($0.pixels.map(dark).suffix(outside.count)) == outsideBefore },
+                      "the separate exterior line stays fixed throughout the drag")
+        let movement = try XCTUnwrap(firstMoved, "capture the first reshaped picture during the gesture")
+        XCTAssertLessThan(movement.time, returned - 2)
+        let witness = XCTAttachment(screenshot: movement.screenshot)
+        witness.name = "liquify-vector-while-moving"
+        witness.lifetime = .keepAlways
+        add(witness)
         XCTAssertLessThanOrEqual(try passes(app) - beforePasses, 10, "a brush tick must not publish the whole scene")
-        attachScreenshot(app, "liquify-vector-after")
+        let committed = NSPredicate { _, _ in
+            let pixels = self.readScreenNow(region).map(self.dark)
+            return moved(pixels) && Array(pixels.suffix(outside.count)) == outsideBefore
+        }
+        wait(for: [XCTNSPredicateExpectation(predicate: committed, object: nil)], timeout: 15)
+        attachScreenshot(XCUIScreen.main, "liquify-vector-after")
         app.buttons["sideToolbar.undoButton"].tap()
         let restored = NSPredicate { _, _ in self.readScreenNow(region).map(self.dark) == before }
         wait(for: [XCTNSPredicateExpectation(predicate: restored, object: nil)], timeout: 15)
-        attachScreenshot(app, "liquify-vector-one-undo")
+        attachScreenshot(XCUIScreen.main, "liquify-vector-one-undo")
     }
 
     func testColdStartPushMovesAWideRoundDotWithoutStretchingItsBrushMark() throws {

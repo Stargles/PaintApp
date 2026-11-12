@@ -2095,14 +2095,17 @@ class PaintUITestCase: XCTestCase {
         typealias Sample = (finished: CFAbsoluteTime, pixels: [RGBA?])
         private let points: [CGPoint]
         private let interval: TimeInterval
+        private let capture: ((Sample, XCUIScreenshot) -> Void)?
         private var stopped = false
         private var samples: [Sample] = []
         private let lock = NSLock()
         private let group = DispatchGroup()
 
-        init(points: [CGPoint], interval: TimeInterval = 0.2) {
+        init(points: [CGPoint], interval: TimeInterval = 0.2,
+             capture: ((Sample, XCUIScreenshot) -> Void)? = nil) {
             self.points = points
             self.interval = interval
+            self.capture = capture
         }
 
         func start() {
@@ -2112,10 +2115,11 @@ class PaintUITestCase: XCTestCase {
                 while true {
                     lock.lock(); let done = stopped; lock.unlock()
                     if done { return }
-                    let image = XCUIScreen.main.screenshot().image
+                    let screenshot = XCUIScreen.main.screenshot()
                     let finished = CFAbsoluteTimeGetCurrent()
-                    let read = Self.pixels(in: image, at: points)
-                    lock.lock(); samples.append((finished, read)); lock.unlock()
+                    let sample = (finished, Self.pixels(in: screenshot.image, at: points))
+                    lock.lock(); samples.append(sample); lock.unlock()
+                    capture?(sample, screenshot)
                     Thread.sleep(forTimeInterval: interval)
                 }
             }
