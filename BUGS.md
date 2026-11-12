@@ -387,6 +387,12 @@ Sourcead1548d6 is harvested after independent0241a072/root review; normal270,13c
 qualification remain pending. One shared strict bake/preflight and narrow transfer reversal, no new
 state; existing frame clamp shared after metadata parity review. No RSS/respring attribution.
 
+November 12 regression: clipboard extraction (`341d45d1`) made source pricing depend on a source
+edit. Duplicate leaves its source unchanged, so its cut case omitted the source array charge and
+its uncut case charged the already shared fill archive. The Debug fast tier reproduced both costs
+and the failure to evict the cut Duplicate's Undo step at its budget limit. The shared insertion now
+receives the pricing lists independently of the optional source edit. Paste supplies no source.
+
 ## Neighborhood effect limits, apron and warm admission — 2026-10-25
 
 Read-only source audit ec843eee freezes three root causes before code: tapCount converts finite large

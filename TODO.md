@@ -26,6 +26,11 @@ The owner resumed on November 11. Keep HANDOFF.md current for compaction and usa
   SHA256 `a479de0d1ccfb562408e89e25c01a2cf5e54ddbee50293aec1556cb3aad2ace1`.
 - [ ] **Deferred: view previous crash reports in the app**, similarly to recordings. Owner asked
   “at some point if it is possible.” Keep deferred until requested.
+- [ ] **Restore vector selection Duplicate's Undo budget accounting.** The November 12 Debug fast
+  tier at `2c26812a` found that clipboard extraction (`341d45d1`, already in `d4d59f6b`) dropped the
+  unchanged source list from Duplicate's Undo price. Restore the source array charge and count a
+  shared geometry archive once. Verify the existing cut/touching Duplicate and To New Layer test
+  for exact costs, rendered Undo/Redo pixels, and budget eviction.
 
 Other outstanding requests remain below. Historical status/proof paths may refer to the PaintWork
 folders the owner deleted during the emergency cleanup; verify availability before relying on them.

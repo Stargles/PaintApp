@@ -605,7 +605,9 @@ extension CanvasManager {
         }
         return insertPreparedVectorSelectionLayer(layer, at: at.layer + 1,
             shownFrame: shown.frame, inheriting: shown.inheritedPose,
-            previousLayerID: sourceLayerID, sourceEdit: sourceEdit, label: label)
+            previousLayerID: sourceLayerID,
+            sourceLists: (before: elementsBefore, after: sourceReplacement ?? elementsBefore),
+            sourceEdit: sourceEdit, label: label)
     }
 
     private struct VectorSelectionSourceEdit {
@@ -615,9 +617,11 @@ extension CanvasManager {
     }
 
     /// Duplicate, To New Layer and clipboard Paste publish the same prepared geometry and Move box.
-    /// The destination is explicit: a clipboard snapshot needs no surviving source document or cel.
+    /// Pricing includes Duplicate's unchanged source list to recognize shared payloads. Clipboard
+    /// Paste has no source list. Only To New Layer supplies an edit for the undo and redo writes.
     private func insertPreparedVectorSelectionLayer(_ layer: Layer, at insertAt: Int,
         shownFrame: Int, inheriting inherited: PoseMap?, previousLayerID: UUID?,
+        sourceLists: (before: [VectorElement], after: [VectorElement]) = ([], []),
         sourceEdit: VectorSelectionSourceEdit? = nil, label: HistoryActionLabel) -> Bool {
         guard let cel = layer.cels.first, let canvas = cel.vector,
               admitChildChange(inContainer: layer.parentFolderID) else { return false }
@@ -630,7 +634,7 @@ extension CanvasManager {
                                                elementsBeforeLift: prepared, selectionBeforeLift: nil)
         else { return false }
         let cost = UndoBudget.addingCost(4096, VectorUndoCost.bytes(
-            fromLists: [sourceEdit?.before ?? [], []], toLists: [sourceEdit?.after ?? [], prepared]))
+            fromLists: [sourceLists.before, []], toLists: [sourceLists.after, prepared]))
         layers.insert(layer, at: insertAt)
         if let sourceEdit {
             sourceEdit.vector.restoreElements(sourceEdit.after, changedInk: nil)
