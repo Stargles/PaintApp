@@ -2323,12 +2323,14 @@ struct CanvasView: UIViewRepresentable {
             for overlay in orderedChrome { container.bringSubviewToFront(overlay) }
         }
 
+        private typealias StreamLiquifySource = (procedure: LiquifyProcedure, layerIndex: Int, layerID: UUID, celID: UUID)
+
         /// Transient sources enter at their layer before every blend, mask, effect and Guide.
         /// These values are frozen at mint time; no view or mutable cel crosses to the worker.
-        private func streamDisplaySources() -> (values: [UUID: PixelOps.CelDisplay], bounds: CGRect, liquify: LiquifyProcedure?) {
+        private func streamDisplaySources() -> (values: [UUID: PixelOps.CelDisplay], bounds: CGRect, liquify: StreamLiquifySource?) {
             var values: [UUID: PixelOps.CelDisplay] = [:]
             var bounds = CGRect.null
-            var liquify: LiquifyProcedure?
+            var liquify: StreamLiquifySource?
             let size = canvasManager.canvasSize ?? .zero
             for (id, host) in layerHosts {
                 if let source = host.strokeView.displaySource {
@@ -2345,7 +2347,7 @@ struct CanvasView: UIViewRepresentable {
                 value.drawOverlays = edit.displaySource(placement: placement, canvasSize: size)
                 values[edit.layerID] = value
                 bounds = bounds.union(edit.displayedBounds(placement: placement))
-                liquify = edit.procedure
+                liquify = edit.procedure.map { ($0, index, edit.layerID, edit.celID) }
             }
             if let fill = canvasManager.liveFill, let render = fill.render {
                 var value = values[fill.layerID] ?? PixelOps.CelDisplay()
@@ -2400,6 +2402,7 @@ struct CanvasView: UIViewRepresentable {
                     return completed
                 }
                 values[piece.sourceLayerID] = value
+                if liquify?.layerID == piece.sourceLayerID { liquify = nil }
                 let original = CGRect(x: -piece.baseSize.width / 2, y: -piece.baseSize.height / 2,
                                       width: piece.baseSize.width, height: piece.baseSize.height)
                     .applying(piece.liftTransform.affineTransform)
@@ -2426,7 +2429,31 @@ struct CanvasView: UIViewRepresentable {
             let scale = CGAffineTransform(scaleX: size.width / (display.recipe.window?.frameSize.width ?? size.width),
                                           y: size.height / (display.recipe.window?.frameSize.height ?? size.height))
             let budget = canvasManager.frameBaker.budgetBytes
-            let procedure = sources.liquify
+            let procedure: LiquifyProcedure?
+            let canPresent: (@MainActor () -> Bool)?
+            if let source = sources.liquify,
+               let sourceDisplay = sources.values[source.layerID],
+               case .cel(let cel)? = display.recipe.leaves[source.layerIndex]?.content,
+               cel.identity.celID == source.celID, cel.display?.identity == sourceDisplay.identity {
+                procedure = source.procedure
+                let project = canvasManager.projectID
+                let frame = display.recipe.frame
+                let layerID = source.layerID, celID = source.celID
+                let gesture = source.procedure.deformation.id
+                // A prepared tick can show while the same gesture requests a newer one.
+                canPresent = { [weak self] in
+                    guard let manager = self?.canvasManager, manager.projectID == project,
+                          manager.currentFrame == frame,
+                          let edit = manager.requestedLiquifyEdit, edit.layerID == layerID, edit.celID == celID,
+                          edit.procedure?.deformation.id == gesture,
+                          let layer = manager.layers.firstIndex(where: { $0.id == layerID }),
+                          let index = manager.displayedCelIndex(inLayer: layer, atFrame: frame) else { return false }
+                    return manager.layers[layer].cels[index].id == celID
+                }
+            } else {
+                procedure = nil
+                canPresent = nil
+            }
             return WindowSurfaceView.Frame(window: display.core, placement: scale, draw: { cg in
                 guard let image = display.recipe.composite(budgetBytes: budget), procedure?.hasFailed != true else { return nil }
                 PaddingCoverView.marginGrey.setFill()
@@ -2434,7 +2461,7 @@ struct CanvasView: UIViewRepresentable {
                 UIImage(cgImage: image, scale: 1, orientation: .up).draw(in:
                     display.buffer.offsetBy(dx: -display.core.minX, dy: -display.core.minY))
                 return display.core
-            }, finished: { [weak self] shown in
+            }, canPresent: canPresent, finished: { [weak self] shown in
                 guard shown else { procedure?.didReject(); return }
                 self?.frontStreamDisplay()
                 procedure?.didPresent()

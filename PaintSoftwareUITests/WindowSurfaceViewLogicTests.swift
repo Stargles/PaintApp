@@ -309,6 +309,46 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
         XCTAssertGreaterThan(Int(bytes[2]), Int(bytes[1]) + 100, "the newest frame (red) is what is on the layer")
     }
 
+    func testPresentationKeepsTheFrontWhenAFrameLosesItsOwnerBeforeLanding() throws {
+        let view = WindowSurfaceView(queue: queue)
+        let window = CGRect(x: 0, y: 0, width: 8, height: 4)
+        let gesture = UUID()
+        var currentGesture: UUID? = gesture
+        var outcomes: [Bool] = []
+        view.present {
+            WindowSurfaceView.Frame(window: window, placement: .identity, draw: { cg in
+                cg.setFillColor(UIColor.green.cgColor)
+                cg.fill(window)
+                return window
+            }, canPresent: { currentGesture == gesture }, finished: { outcomes.append($0) })
+        }
+        spin(until: { outcomes.count == 1 }, "the current owner's frame finished")
+        let original = try XCTUnwrap(view.layer.contents as? IOSurface)
+        let movedWindow = window.offsetBy(dx: 10, dy: 20)
+        view.present {
+            WindowSurfaceView.Frame(window: movedWindow, placement: .identity, draw: { cg in
+                cg.setFillColor(UIColor.red.cgColor)
+                cg.fill(window)
+                return movedWindow
+            }, canPresent: { currentGesture == gesture }, finished: { shown in
+                outcomes.append(shown)
+                XCTAssertTrue(view.layer.contents as? IOSurface === original, "refusal keeps the front allocation")
+                XCTAssertEqual(view.presentedWindow, window, "refusal keeps the front placement")
+            })
+        }
+        view.present(window: window, placement: .identity, draw: { _ in window },
+                     finished: { outcomes.append($0) })
+        // The serial worker finishes first, while main still holds the result's landing.
+        let drawCompleted = DispatchSemaphore(value: 0)
+        queue.async { drawCompleted.signal() }
+        XCTAssertEqual(drawCompleted.wait(timeout: .now() + 2), .success)
+        currentGesture = nil
+
+        spin(until: { outcomes.count == 3 }, "the refused frame and the next request both finished")
+        XCTAssertEqual(outcomes, [true, false, true])
+        XCTAssertEqual(view.presentedCount, 2)
+    }
+
     /// **A frame that cannot be minted reports refusal and does not wedge the view** — the next valid
     /// request completes successfully and leaves its actual pixels on the layer.
     func testAFrameWithNoSurfaceToDrawIntoLeavesTheViewAbleToDrawTheNext() throws {

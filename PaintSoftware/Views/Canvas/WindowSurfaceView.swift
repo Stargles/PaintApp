@@ -171,13 +171,15 @@ final class WindowSurfaceView: UIView {
     /// abandon; a rectangle other than `window` means the element moved between the two reads, and the
     /// frame is dropped rather than shown in the wrong place. The next present sizes again.
     ///
-    /// `finished` runs on the main queue when the draw is over, with whether it became the layer's
-    /// contents — in the same turn, so a caller that has been waiting for something to show may stop
+    /// `canPresent` checks the frame's owner on the main queue immediately before the swap.
+    /// A refusal keeps the previous front. `finished` runs on the main queue when the draw is over
+    /// and reports whether it became the layer's contents, so a caller waiting for it may stop
     /// waiting (a base hole punched before it would show the pixels under it for a frame).
     struct Frame {
         let window: CGRect
         let placement: CGAffineTransform
         let draw: (CGContext) -> CGRect?
+        var canPresent: (@MainActor () -> Bool)? = nil
         var finished: ((_ shown: Bool) -> Void)? = nil
     }
 
@@ -216,7 +218,7 @@ final class WindowSurfaceView: UIView {
     /// to draw into.
     private func drawing(_ frame: Frame) -> LatestWins.Work? {
         let window = frame.window, placement = frame.placement
-        let draw = frame.draw, finished = frame.finished
+        let draw = frame.draw, canPresent = frame.canPresent, finished = frame.finished
         size(for: window)
         guard surfaces.count == 2 else { return nil }
         let target = surfaces[back]
@@ -242,7 +244,8 @@ final class WindowSurfaceView: UIView {
             _ = target.surface.unlock(options: [], seed: nil)
             return { [weak self] in
                 guard let self else { return }
-                guard drawn == window, self.surfaces.count == 2, self.surfaceWindow == window else {
+                guard drawn == window, self.surfaces.count == 2, self.surfaceWindow == window,
+                      canPresent?() != false else {
                     finished?(false)
                     return
                 }
