@@ -2549,7 +2549,7 @@ struct CanvasView: UIViewRepresentable {
         /// takes down whatever the host was showing otherwise (`CanvasManager.liveCelContentEdit`, TODO
         /// (173)). Returns whether the host's picture changed.
         @discardableResult
-        private func showLiveCelContentEdit(on host: LayerHostView, layerID: UUID, celID: UUID?,
+        fileprivate func showLiveCelContentEdit(on host: LayerHostView, layerID: UUID, celID: UUID?,
                                             landing: LiveCelContentEdit? = nil) -> Bool {
             let live = canvasManager.liveCelContentEdit.flatMap {
                 $0.layerID == layerID && $0.celID == celID ? $0 : nil
