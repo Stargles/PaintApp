@@ -276,6 +276,103 @@ final class FillMendUITests: PaintUITestCase {
         attachScreenshot(XCUIScreen.main, "mend-one-fill-on-line-art-hidden")
     }
 
+    func testBucketOnAnotherVectorLayerCoversTheShortLineInsideADrawnCircle() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let app = XCUIApplication()
+        let size = CGSize(width: 2048, height: 1024)
+        XCTAssertTrue(launchIntoEditor(app, size: size))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        // A roughly six-canvas-pixel brush is within the ordinary 12 px Mend Reach.
+        setBrushSize(app, normalized: 0.025)
+        app.buttons["toolbar.brushButton"].tap()
+        let paper = visiblePaperRect(app, in: canvas, canvasSize: size)
+        let host = canvas.frame
+        let radiusY = paper.height * 0.28
+        let radiusX = radiusY * host.height / host.width
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGVector {
+            CGVector(dx: paper.midX + radiusX * x, dy: paper.midY + radiusY * y)
+        }
+        // Carry the same stroke just past its start so the freehand outline is closed.
+        let circle = (0...76).map { step in
+            let angle = CGFloat(step) * .pi / 36
+            return logicalAppPoint(in: host, normalizedOffset: point(-cos(angle), sin(angle)))
+        }
+        try fingerStroke(through: circle)
+        drawLine(on: canvas, from: point(-0.35, 0), to: point(0.35, 0))
+        let line = point(0, 0)
+        let outline = point(-1, 0)
+        let seed = point(0, -0.55)
+        let outside = [point(-1.15, 0), point(1.15, 0), point(0, -1.15), point(0, 1.15)]
+        XCTAssertTrue(waitUntil(canvas, line, isInk), "PREMISE: a dark short line landed inside the circle")
+        XCTAssertTrue(waitUntil(canvas, outline, isInk), "PREMISE: the reference circle's left edge is drawn")
+
+        openLayerPanel(app)
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 2,
+                       "PREMISE: the outline and short line belong to one reference layer")
+        addVectorLayerFromOpenPanel(app)
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.isVector, true,
+                       "PREMISE: the new fill target is a different vector layer")
+        closeLayerRail(app)
+        setBrushColor(app, hex: "FF0000")
+
+        let fillButton = app.buttons["toolbar.fillButton"]
+        let overlap = app.sliders["fillPanel.edgeOverlapSlider"]
+        let mend = app.switches["fillPanel.mendGapToggle"]
+        let reach = app.sliders["fillPanel.mendReachSlider"]
+        XCTAssertTrue(openFillPanel(app))
+        // Zero overlap keeps the OFF control visible under the thin stroke.
+        setEdgeOverlapToZero(overlap, in: app)
+        scrollFillPanel(app, to: reach)
+        XCTAssertTrue(app.staticTexts["Mend Reach: 12 px"].exists, "PREMISE: the reach is the default 12 px")
+        XCTAssertEqual(mend.value as? String, "1", "PREMISE: Mend Gaps is on for the first bucket tap")
+        fillButton.tap()
+        XCTAssertTrue(overlap.waitForNonExistence(timeout: 5))
+
+        canvas.coordinate(withNormalizedOffset: seed).tap()
+        XCTAssertTrue(waitUntil(canvas, seed, isRed), "one bucket tap fills inside the reference circle")
+        XCTAssertTrue(waitUntil(canvas, line, isRed), "the first fill also covers the short line")
+
+        // The fill is above the reference, so its same live footprint reveals the line when off.
+        XCTAssertTrue(openFillPanel(app))
+        scrollFillPanel(app, to: mend)
+        mend.tap()
+        XCTAssertEqual(mend.value as? String, "0")
+        fillButton.tap()
+        XCTAssertTrue(overlap.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(waitUntil(canvas, line, isInk), "with Mend Gaps off, the same fill leaves the line bare")
+        XCTAssertTrue(isRed(rgbaPixel(of: canvas, at: seed)), "the surrounding fill remains on screen")
+        attachScreenshot(XCUIScreen.main, "cross-layer-circle-mend-off")
+
+        XCTAssertTrue(openFillPanel(app))
+        scrollFillPanel(app, to: mend)
+        mend.tap()
+        XCTAssertEqual(mend.value as? String, "1")
+        fillButton.tap()
+        XCTAssertTrue(overlap.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(waitUntil(canvas, line, isRed), "Mend Gaps covers the line again in the same live fill")
+        app.buttons["toolbar.brushButton"].tap() // commit
+        openLayerPanel(app)
+        tapWhenHittable(app.buttons["layerPanel.row.0.visibility"], "Hide the reference circle and line")
+        closeLayerRail(app)
+        XCTAssertTrue(waitUntil(canvas, outline, isWhitish), "the hidden circle's own footprint stays unpainted")
+
+        let upperLeft = point(-0.43, -0.08)
+        let lowerRight = point(0.43, 0.08)
+        let collar = CGRect(x: upperLeft.dx, y: upperLeft.dy, width: lowerRight.dx - upperLeft.dx,
+                            height: lowerRight.dy - upperLeft.dy)
+        let picture = try screen(of: canvas)
+        attachScreenshot(XCUIScreen.main, "cross-layer-circle-mend-reference-hidden")
+        XCTAssertEqual(picture.pixelCount(in: collar, matching: { !isRed($0) }), 0,
+                       "the committed fill covers the complete line footprint, including both ends")
+        for probe in outside {
+            XCTAssertTrue(isWhitish(picture.pixel(normalizedX: probe.dx, normalizedY: probe.dy)),
+                          "exterior paper stays clear around the circle")
+        }
+    }
+
     /// Cold launch → saved vector fill with the option off → the vector layer action → one undo.
     /// The hidden line art remains an explicit reference, so the picture reads the fill itself.
     func testMendAllFillsIsVectorOnlyRepairsAnAttachedStemAndUndoesAsOneStep() throws {
