@@ -529,13 +529,12 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
             let canvas = CGSize(width: 64, height: 64)
             let window = FillWindow.fitting(CGRect(x: 8, y: 12, width: 24, height: 16),
                                             in: canvas, pixelBudget: 96)
-            let bytes = Array(repeating: [UInt8(128), 0, 0, 128],
-                              count: window.workingWidth * window.workingHeight).flatMap { $0 }
+            let pixelCount = window.workingWidth * window.workingHeight
+            let bytes = Array(repeating: [128, 0, 0, 128] as [UInt8], count: pixelCount).flatMap { $0 }
             let render = CanvasManager.FillRenderResult(generation: 1, documentFrame: 0,
                                                          bytes: bytes, window: window)
             let staleRender = CanvasManager.FillRenderResult(generation: 1, documentFrame: 0,
-                bytes: Array(repeating: [UInt8(0), 0, 128, 128],
-                             count: window.workingWidth * window.workingHeight).flatMap { $0 }, window: window)
+                bytes: Array(repeating: [0, 0, 128, 128] as [UInt8], count: pixelCount).flatMap { $0 }, window: window)
             let bounds = CGRect(x: 10, y: 14, width: 8, height: 8)
             let clip = CGPath(rect: bounds, transform: nil)
             let commitClip = CGPath(rect: bounds, transform: nil)
