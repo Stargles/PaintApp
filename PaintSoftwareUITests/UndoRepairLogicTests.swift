@@ -325,6 +325,50 @@ final class UndoRepairLogicTests: XCTestCase {
                       "nothing arrives, so the vacated ink is the whole of the difference and it is measured")
     }
 
+    func testUndoBeforeAnAppendRendersReusesTheNativeAndReducedPictures() throws {
+        let canvas = Self.drawnCanvas(24)
+        let manager = manager(around: canvas)
+        let before = canvas.elements
+        let native = try XCTUnwrap(canvas.render())
+        let reduced = try XCTUnwrap(canvas.render(quality: .full, resolution: 0.5))
+
+        canvas.addStroke(Self.mark(30))
+        let pendingVersion = canvas.version
+        manager.registerVectorElementsUndo(vectorCanvas: canvas, oldElements: before,
+                                           newElements: canvas.elements, layerID: manager.layers[0].id,
+                                           celID: manager.layers[0].cels[0].id, label: .brushStroke,
+                                           swap: .addsAndRemoves(ink: nil))
+        manager.undo()
+
+        let current = canvas.cachedRender()
+        XCTAssertTrue(current.image === native, "Undo can immediately show the pre-append native picture")
+        XCTAssertTrue(canvas.render(quality: .full, resolution: 0.5) === reduced,
+                      "Undo can immediately use the pre-append reduced picture")
+        XCTAssertGreaterThan(current.version, pendingVersion,
+                             "A render for the undone append must have a stale version")
+    }
+
+    func testRestoringAReorderedOrRewrittenPrefixDoesNotReuseTheOldPicture() {
+        let first = Self.mark(2)
+        let second = Self.mark(3)
+        let third = Self.mark(4)
+        let original: [VectorElement] = [.stroke(first), .stroke(second)]
+        let reordered = VectorCanvas(size: Self.canvasSize, elements: original)
+        _ = reordered.render()
+        reordered.addStroke(third)
+        reordered.restoreElements(Array(original.reversed()), changedInk: nil)
+        XCTAssertNil(reordered.cachedRender().image, "The same IDs in another order need another picture")
+
+        let rewritten = VectorCanvas(size: Self.canvasSize, elements: original)
+        _ = rewritten.render()
+        rewritten.addStroke(third)
+        var changed = first
+        changed.color = CodableColor(red: 1, green: 0, blue: 0, alpha: 1)
+        rewritten.restoreElements([.stroke(changed), .stroke(second)], changedInk: nil,
+                                  rewriting: [first.id])
+        XCTAssertNil(rewritten.cachedRender().image, "Rewritten ink under the same ID needs another picture")
+    }
+
     /// **And redoing that append is bounded by what it painted before it left.**
     ///
     /// This test said the opposite until the general pass, and the sentence it was written to defend

@@ -144,6 +144,41 @@ final class UnlandedInkUITests: PaintUITestCase {
                        + "rasterize is doing — RENDER.md §2.13")
     }
 
+    func testUndoClearsTheNewStrokeBeforeItsRenderCanLand() throws {
+        let delay = 8
+        let app = XCUIApplication()
+        app.launchArguments = ["-uiTestSlowVectorRenderMillis", "\(delay * 1000)",
+                               "-uiTestSlowBakeMillis", "\(delay * 1000)"]
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = visiblePaperRect(app, in: canvas)
+        let frame = canvas.frame
+        let standing = onHost(paper, 0.50, 0.34)
+        let pending = onHost(paper, 0.50, 0.63)
+        func pixel(_ point: CGVector) -> RGBA? {
+            ScreenshotPixels(XCUIScreen.main.screenshot().image)?.pixel(
+                at: CGPoint(x: frame.minX + point.dx * frame.width,
+                            y: frame.minY + point.dy * frame.height))
+        }
+
+        XCTAssertTrue(isWhitish(pixel(pending)), "The pending stroke's midpoint starts on paper")
+        drawLine(on: canvas, from: onHost(paper, 0.34, 0.34), to: onHost(paper, 0.66, 0.34))
+        // Give the standing line a base. Both background producers are delayed so neither
+        // can build the next append's picture before the Undo tap and pixel reads below.
+        Thread.sleep(forTimeInterval: TimeInterval(delay + 1))
+        let beforeAppend = Date()
+        drawLine(on: canvas, from: onHost(paper, 0.34, 0.63), to: onHost(paper, 0.66, 0.63))
+        guard isInk(pixel(pending)) else { return XCTFail("The second stroke must visibly reach the canvas") }
+
+        app.buttons["sideToolbar.undoButton"].tap()
+        XCTAssertTrue(isWhitish(pixel(pending)), "Undo clears the held second stroke before its render lands")
+        XCTAssertLessThan(Date().timeIntervalSince(beforeAppend), TimeInterval(delay),
+                          "The Undo pixel must be read inside the delayed render window")
+        XCTAssertTrue(isInk(pixel(standing)), "The settled first stroke remains visible")
+        attachScreenshot(XCUIScreen.main, "Undo while the second stroke is still rendering")
+    }
+
     /// The paper around both strokes, as flat RGBA8 — `rgbaPixel`'s buffer over a region instead of
     /// one point, so two moments can be compared rather than sampled.
     ///

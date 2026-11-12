@@ -2520,9 +2520,9 @@ final class VectorCanvas {
     private(set) var lastDamage: Damage = .everything
 
     /// Caller must hold `lock`.
-    private func invalidate(_ damage: Damage) {
+    private func invalidate(_ damage: Damage, restoringAppendPrefix: Bool = false) {
         contentVersion += 1
-        invalidateRenderOnly(damage)
+        invalidateRenderOnly(damage, restoringAppendPrefix: restoringAppendPrefix)
     }
 
     /// Drops the memoized renders and moves the display's staleness key, **without** claiming the
@@ -2531,7 +2531,8 @@ final class VectorCanvas {
     ///
     /// `changesDocument` is false for exactly one caller — a stream frame arriving, which changes no
     /// picture the document keeps and so leaves `documentVersion` still; see that property.
-    private func invalidateRenderOnly(_ damage: Damage, changesDocument: Bool = true) {
+    private func invalidateRenderOnly(_ damage: Damage, changesDocument: Bool = true,
+                                      restoringAppendPrefix: Bool = false) {
         version += 1
         if changesDocument { documentVersion += 1 }
         if case .region(let rect) = damage, rect.isNull {
@@ -2548,14 +2549,21 @@ final class VectorCanvas {
             lastDamage = damage
             return
         }
-        // **Before `cachedImage` is cleared**, because the picture being cleared is the one a region
-        // re-walk starts from. This is the only ordering constraint in this method.
-        applyToRegionBase(damage)
-        cachedImage = nil
+        if restoringAppendPrefix, let base = incrementalBase, base.prefixCount == _elements.count {
+            // The held base already depicts the restored list. Make it current so the host can
+            // replace the pending append's overlay without waiting for a new rasterize.
+            cachedImage = base.image
+            regionBase = nil
+            appendedSinceBase = 0
+        } else {
+            // The region re-walk starts from the image about to be invalidated.
+            applyToRegionBase(damage)
+            cachedImage = nil
+            applyToIncrementalBase(damage)
+        }
         cachedPreviewImage = nil
         lastDamage = damage
-        applyToIncrementalBase(damage)
-        applyToReducedRender(damage)
+        applyToReducedRender(damage, restoringAppendPrefix: restoringAppendPrefix)
         // The memo is gone but a base may have survived it, and a base is a canvas-sized bitmap. The
         // registry has to be told the new figure rather than simply forgetting this canvas, or a cel
         // between an append and the render that consumes it would be charged nothing while holding
@@ -2671,8 +2679,15 @@ final class VectorCanvas {
     /// The conditions are the native ones verbatim, for the reasons stated there: a base is only a
     /// base with nothing suppressed, an append keeps the footprints and
     /// drops the region base, and a `.region` that cannot be bounded drops it too.
-    private func applyToReducedRender(_ damage: Damage) {
+    private func applyToReducedRender(_ damage: Damage, restoringAppendPrefix: Bool) {
         guard var slot = reducedRender else { return }
+        if restoringAppendPrefix, let base = slot.incrementalBase, base.prefixCount == _elements.count {
+            slot.image = base.image
+            slot.regionBase = nil
+            slot.appendedSinceBase = 0
+            reducedRender = slot
+            return
+        }
         switch damage {
         case .everything, .appended:
             slot.regionBase = nil
@@ -2813,6 +2828,12 @@ final class VectorCanvas {
                          rewriting rewritten: Set<UUID>) {
         lock.lock()
         defer { lock.unlock() }
+        // A render may still be working on the appended tail. Each slot independently retains the
+        // pre-append picture, and its prefix count certifies exactly which list it depicts.
+        let restoresAppendPrefix = rewritten.isEmpty && newValue.count < _elements.count
+            && (incrementalBase?.prefixCount == newValue.count
+                || reducedRender?.incrementalBase?.prefixCount == newValue.count)
+            && _elements.prefix(newValue.count).lazy.map(\.id).elementsEqual(newValue.lazy.map(\.id))
         let change = replacement(by: newValue, rewriting: rewritten)
         let damage = restoreDamage(to: newValue, departed: change.departed, rewrites: change.rewrites,
                                    changedInk: changedInk)
@@ -2829,7 +2850,7 @@ final class VectorCanvas {
         // A rewritten element's entry was a promise it has not changed, and it has. Forgotten rather
         // than moved to `vacatedInk`: the id is still in the list, and the next walk measures it.
         forgetPaintedBounds(change.rewrites.lazy.map(\.new.id))
-        invalidate(damage)
+        invalidate(damage, restoringAppendPrefix: restoresAppendPrefix)
     }
 
     /// **How a list that replaces the standing one differs from it by id** — what left, and the
