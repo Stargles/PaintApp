@@ -67,10 +67,10 @@ enum VectorMendSupport {
 
         // Each corner reads two neighbours. Segment tangents test both corners and can read
         // two more neighbours. A direction read can also fall back to two more neighbours.
-        var corner: Int { 1 + 2 * neighbourVisits }
-        var tangents: Int { 1 + 6 * neighbourVisits }
-        var direction: Int { 1 + tangents + 2 * neighbourVisits }
-        var flattenedSegment: Int { tangents + StrokePath.maximumSubdivisions }
+        var cornerSearches: Int { 2 * neighbourVisits }
+        var tangentSearches: Int { 3 * cornerSearches }
+        var direction: Int { 2 + tangentSearches + cornerSearches }
+        var flattenedSegment: Int { 1 + tangentSearches + StrokePath.maximumSubdivisions }
     }
 
     fileprivate struct Captured {
@@ -261,8 +261,8 @@ enum VectorMendSupport {
         guard let first = path.points.first else { return nil }
         try meter.retainArray(Curve.self, count: path.points.count)
         try meter.retainArray(Bool.self, count: path.points.count)
-        try meter.visit(path.points.count, times: captured.work.corner)
-        try meter.visit(path.points.count - 1, times: captured.work.tangents)
+        try meter.visit(path.points.count, times: 8 + captured.work.cornerSearches)
+        try meter.visit(path.points.count - 1, times: captured.work.tangentSearches)
         var curves: [Curve] = [], creases: [Bool] = []
         curves.reserveCapacity(max(0, path.points.count - 1)); creases.reserveCapacity(path.points.count)
         for i in path.points.indices {

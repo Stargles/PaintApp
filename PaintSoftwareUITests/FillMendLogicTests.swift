@@ -1614,8 +1614,8 @@ final class FillMendLogicTests: XCTestCase {
 
     func testMendWorkBoundsNeighbourSearchesAcrossStationaryAndNearCoincidentKnots() throws {
         let repeated = Array(repeating: CGPoint.zero, count: 32)
-        // Each offset is within epsilon of the middle knot, while successive offsets are farther
-        // than epsilon apart. A search from the middle still visits the full run and its exit.
+        // Each offset is within epsilon of the starting knot, while successive offsets are farther
+        // than epsilon apart. A search from the starting knot still visits the full run and its exit.
         let alternating = [CGPoint.zero] + (0..<32).map { index in
             CGPoint(x: index.isMultiple(of: 2) ? 0.75e-9 : -0.75e-9, y: 0)
         }
