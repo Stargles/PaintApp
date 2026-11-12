@@ -340,7 +340,8 @@ final class LiquifyRasterLogicTests: XCTestCase {
         manager.layers[1].cels[0].bakedImage = try CanvasFixture.rasterSource(image())
         let original = try XCTUnwrap(PixelOps.rasterize(cel: manager.layers[1].cels[0], canvasSize: size, memoize: false))
         let session = try held(manager, layer: 1)
-        let old = try XCTUnwrap(manager.liveCelContentEdit)
+        // This headless fixture prepares the requested window itself before compositing it.
+        let old = try XCTUnwrap(manager.requestedLiquifyEdit)
         let oldRendered = try XCTUnwrap(old.presentation(placement: .identity))
         manager.commitLiquify(session)
         let beforePanel = canvas.elements
