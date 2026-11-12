@@ -1,8 +1,15 @@
 # Handoff — active owner-resumed work (October 29)
 
-**Latest owner instruction: PAUSED.** See TODO.md → “Latest owner requests — 2026-11-07” for the
-Undo regression, whole-iPad reboot, recording paths and deferred crash-report viewer. Every task
-belongs in TODO.md; older continuation/build instructions below do not authorize resuming.
+## Current checkpoint — 2026-11-11
+
+Kevin resumed. See TODO.md for the repeated Fill report, rapid drawing/Undo crash with a running
+background stream, severe Undo latency, and deferred crash-report viewer. Limited recent use did
+not reproduce the crash. No cause established. Start with the two November 7 recordings in TODO,
+matching device reports if available, and the source of the installed Release `d4d59f6b`. That
+source is preserved in `~/PaintApp`; this repository's older source and historical worktree paths
+below are not the installed baseline. Use bounded storage under `~/PaintWork`, separate read-only
+findings from device qualification, and keep this checkpoint current. No physical device operation
+or code change in this checkpoint.
 
 Kevin said **continue; do not park**. TODO.md retains every unfinished owner ask. Use useful agents,
 conserve usage, solve causes through existing owners and remove superseded paths. Kevin confirms the

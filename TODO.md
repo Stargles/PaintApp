@@ -1,27 +1,23 @@
 # TODO
 
-## Latest owner requests — 2026-11-07; PAUSED
+## Latest owner requests — resumed 2026-11-11
 
 **Every task ALWAYS goes in TODO.md**, including deferred requests and new reports on old bugs.
 HANDOFF.md is a navigation/checkpoint document, never the only record of an outstanding task.
-The owner has exhausted usage: record these items and remain paused; no diagnosis, tests or builds.
-This instruction supersedes older “continue” instructions and percentages below.
+The owner resumed on November 11. Keep HANDOFF.md current for compaction and usage cutoffs.
 
 - [ ] **Fix severe Undo latency.** Owner reports drawing is responsive after the latest Release
   install (`d4d59f6bc261d23366c8e713ecab96353fe0183c`), but Undo still has “enormous latency” despite an
   earlier fix. Reproduce and compare that specific path first; correct the root cause efficiently.
   Do not start another broad audit or testing/storage framework.
-- [ ] **Resolve the full-iPad crash during rapid drawing → Undo → drawing.** Owner says the whole
-  iPad goes black/reboots for a few seconds, rather than PaintApp alone exiting. It still happens;
-  do not close it based on the earlier successful rapid-erasing session. The recording may end
-  abruptly. **Additional owner hint:** “I think the crash happens when I do this while there is a
-  stream loaded.” On resumption, compare the same rapid drawing/Undo workflow with and without a
-  loaded stream; this is a suspected trigger, not a proven cause. No investigation authorized while
-  paused. Investigate its possible relationship to Undo latency and unnecessary retained memory;
-  memory overload is the owner's hypothesis, not an established cause. Reuse the existing crash/
-  erasing investigation rather than creating a parallel fix. Establish actual allocation ownership
-  and release lifetimes before changing memory policy. Verify the repaired workflow and directly
-  related drawing/erasing/Undo/Redo paths; do not claim zero bugs from passing tests.
+- [ ] **Resolve intermittent whole-iPad failures during rapid edits.** Owner reports a black screen
+  and brief restart during drawing → Undo → drawing. On November 11 he also reported a crash after
+  repeated Fill. The observed crashes coincided with rapid activity and a running background stream.
+  He could not reproduce it in limited recent testing. Compare the same workload with and without
+  a running stream and correlate the recording with device diagnostics. Look for memory retained by
+  stream decode/display, Undo, Fill, and baked frame ownership. Owner expects baked scenes to keep
+  working memory bounded as artwork accumulates. The cause and relationship to Undo latency are open.
+  Verify the repaired workflow and directly related drawing, erasing, Fill and Undo/Redo paths.
   Retrieved, size-verified evidence (no investigation performed):
   `/Users/juliapark/PaintWork/recordings/2026-11-07/recording-20261107-221600.jsonl`, 192674 bytes,
   SHA256 `a667509c30962d5a7b54e012bef9f500f2f7bcb7d19c7e75f136baf971ed5590`.
@@ -29,7 +25,7 @@ This instruction supersedes older “continue” instructions and percentages be
   `/Users/juliapark/PaintWork/recordings/2026-11-07/recording-20261107-202427.jsonl`, 145173 bytes,
   SHA256 `a479de0d1ccfb562408e89e25c01a2cf5e54ddbee50293aec1556cb3aad2ace1`.
 - [ ] **Deferred: view previous crash reports in the app**, similarly to recordings. Owner asked
-  “at some point if it is possible”; record only, do not research or implement while paused.
+  “at some point if it is possible.” Keep deferred until requested.
 
 Other outstanding requests remain below. Historical status/proof paths may refer to the PaintWork
 folders the owner deleted during the emergency cleanup; verify availability before relying on them.
