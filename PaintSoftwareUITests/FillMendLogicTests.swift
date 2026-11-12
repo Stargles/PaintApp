@@ -1612,6 +1612,31 @@ final class FillMendLogicTests: XCTestCase {
         XCTAssertTrue(on.isBare(94, 48) && on.isBare(108, 48), "the enclosing edge and outside stay protected")
     }
 
+    func testMendWorkBoundsNeighbourSearchesAcrossStationaryAndNearCoincidentKnots() throws {
+        let repeated = Array(repeating: CGPoint.zero, count: 32)
+        // Each offset is within epsilon of the middle knot, while successive offsets are farther
+        // than epsilon apart. A search from the middle still visits the full run and its exit.
+        let alternating = [CGPoint.zero] + (0..<32).map { index in
+            CGPoint(x: index.isMultiple(of: 2) ? 0.75e-9 : -0.75e-9, y: 0)
+        }
+        for run in [repeated, alternating] {
+            let points = [CGPoint(x: -1, y: 0)] + run + [CGPoint(x: 1, y: 0)]
+            let limit = try XCTUnwrap(StrokePath(points: points).distinctNeighbourVisitLimit)
+            var longestSearch = 0
+            for index in points.indices {
+                for step in [-1, 1] {
+                    var reads = 0
+                    _ = StrokePath.distinctNeighbour(of: index, step: step, count: points.count) {
+                        reads += 1
+                        return points[$0]
+                    }
+                    longestSearch = max(longestSearch, reads - 1) // The first read is the starting knot.
+                }
+            }
+            XCTAssertLessThanOrEqual(longestSearch, limit, "Mend must admit every candidate visit")
+        }
+    }
+
     func testCanonicalSupportCertifiesWholeStraightCurvedAndScatteredFreeCaps() throws {
         let paths = [[CGPoint(x: 20, y: 20), CGPoint(x: 76, y: 20)],
                      [CGPoint(x: 20, y: 20), CGPoint(x: 20, y: 76)],

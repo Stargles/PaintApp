@@ -62,12 +62,24 @@ enum VectorMendSupport {
         let parameter: CGFloat?
     }
 
+    fileprivate struct StrokeWork {
+        let neighbourVisits: Int
+
+        // Each corner reads two neighbours. Segment tangents test both corners and can read
+        // two more neighbours. A direction read can also fall back to two more neighbours.
+        var corner: Int { 1 + 2 * neighbourVisits }
+        var tangents: Int { 1 + 6 * neighbourVisits }
+        var direction: Int { 1 + tangents + 2 * neighbourVisits }
+        var flattenedSegment: Int { tangents + StrokePath.maximumSubdivisions }
+    }
+
     fileprivate struct Captured {
         struct Sampling {
             let plan: ImageWarp.RasterScaleSupport
             let nativeTransform: CGAffineTransform
         }
         let walk: VectorStrokeRenderWalk
+        let work: StrokeWork
         let dabs: [Dab]
         let blendMode: CGBlendMode
         let transform: CGAffineTransform
@@ -110,7 +122,7 @@ enum VectorMendSupport {
         try meter.visit(preparation.captured.count)
         var groups: [Captured] = []; groups.reserveCapacity(preparation.captured.count)
         for group in preparation.captured {
-            groups.append(Captured(walk: group.walk, dabs: group.dabs, blendMode: group.blendMode,
+            groups.append(Captured(walk: group.walk, work: group.work, dabs: group.dabs, blendMode: group.blendMode,
                 transform: group.transform.concatenating(window.transform),
                 sampling: .init(plan: sampling, nativeTransform: group.transform)))
         }
@@ -249,9 +261,8 @@ enum VectorMendSupport {
         guard let first = path.points.first else { return nil }
         try meter.retainArray(Curve.self, count: path.points.count)
         try meter.retainArray(Bool.self, count: path.points.count)
-        // Distinct-neighbour searches can cross a whole stationary run at each knot.
-        try meter.visit(path.points.count, times: path.points.count)
-        try meter.visit(path.points.count, times: 8)
+        try meter.visit(path.points.count, times: captured.work.corner)
+        try meter.visit(path.points.count - 1, times: captured.work.tangents)
         var curves: [Curve] = [], creases: [Bool] = []
         curves.reserveCapacity(max(0, path.points.count - 1)); creases.reserveCapacity(path.points.count)
         for i in path.points.indices {
@@ -390,8 +401,9 @@ enum VectorMendSupport {
     /// shared one-point floor, and at most one extra site per segment covers roundoff/carry.
     private static func capture(_ inputs: [Input], meter: inout Meter,
                                 isCurrent: () -> Bool = { true }) throws(Failure) -> [Captured] {
-        var recipes: [(VectorStrokeRenderWalk, Int)] = []
-        try meter.retainArray((VectorStrokeRenderWalk, Int).self, count: inputs.count)
+        typealias Recipe = (walk: VectorStrokeRenderWalk, capacity: Int, work: StrokeWork)
+        var recipes: [Recipe] = []
+        try meter.retainArray(Recipe.self, count: inputs.count)
         try meter.retainArray(Captured.self, count: inputs.count)
         recipes.reserveCapacity(inputs.count)
         var upperDabs = 0
@@ -407,19 +419,25 @@ enum VectorMendSupport {
                 guard CompositorBudget.hasHeadroom(for: meter.bytes - sampleStart) else { throw .exceedsBudget }
             }
             let walk = VectorStrokeRenderWalk(input.stroke)
-            if input.stroke.opacity <= 0 { recipes.append((walk, 0)); continue }
-            // Admit repeated-position neighbour searches as well as the shared <=64 subdivisions;
-            // samples*64 alone is not a work bound for a long stationary pressure run.
-            try meter.visit(walk.samples.count, times: walk.samples.count)
-            try meter.visit(max(1, walk.samples.count), times: 64)
+            if input.stroke.opacity <= 0 || walk.samples.isEmpty {
+                recipes.append((walk, 0, StrokeWork(neighbourVisits: 0)))
+                continue
+            }
             let path = StrokePath(points: walk.samples.positions)
+            try meter.visit(path.points.count)
+            guard let neighbourVisits = path.distinctNeighbourVisitLimit else { throw .invalidWindow }
+            let work = StrokeWork(neighbourVisits: neighbourVisits)
+            let segments = path.points.count - 1
+            try meter.visit(segments, times: work.flattenedSegment)
             let length = path.arcLength(to: path.domainEnd)
             guard length.isFinite, length >= 0, length < CGFloat(Int.max / 2) else { throw .exceedsWork }
             let (upper, overflow) = Int(length.rounded(.up)).addingReportingOverflow(max(1, walk.samples.count))
             let (sum, sumOverflow) = upperDabs.addingReportingOverflow(upper)
             guard !overflow, !sumOverflow else { throw .exceedsWork }
+            try admitStampWork(work, segments: segments, sites: upper, brush: input.stroke.brush,
+                               size: walk.size, meter: &meter)
             upperDabs = sum
-            recipes.append((walk, upper))
+            recipes.append((walk, upper, work))
         }
         try meter.visit(upperDabs)
         let captureStart = meter.bytes
@@ -430,8 +448,7 @@ enum VectorMendSupport {
         captured.reserveCapacity(inputs.count)
         for (input, recipe) in zip(inputs, recipes) {
             guard isCurrent() else { throw .cancelled }
-            let (walk, capacity) = recipe
-            try meter.visit(capacity, times: max(1, walk.samples.count))
+            let (walk, capacity, work) = recipe
             try meter.retainArray(Dab.self, count: 0) // its payload was precharged in upperDabs
             let target = Capture(capacity: capacity)
             if capacity > 0 {
@@ -439,12 +456,49 @@ enum VectorMendSupport {
             }
             guard target.dabs.count <= capacity else { throw .exceedsBudget }
             try meter.checkCapacity(target.dabs, chargedCount: capacity)
-            captured.append(Captured(walk: walk, dabs: target.dabs,
+            captured.append(Captured(walk: walk, work: work, dabs: target.dabs,
                                      blendMode: target.blendMode, transform: input.transform))
         }
         try meter.checkCapacity(recipes, chargedCount: inputs.count)
         try meter.checkCapacity(captured, chargedCount: inputs.count)
         return captured
+    }
+
+    /// Reserve the full replay walk, including sites suppressed by the visible range or density.
+    private static func admitStampWork(_ work: StrokeWork, segments: Int, sites: Int, brush: Brush,
+                                       size: CGFloat, meter: inout Meter) throws(Failure) {
+        try meter.visit(segments, times: work.flattenedSegment) // advance
+        try meter.visit(sites, times: work.direction) // frame passed to stampDab
+        var readsTaper = false
+        var readsDirection = brush.dab.angle.directionFollow != 0
+        if readsDirection { try meter.visit(sites, times: work.direction) }
+        func admitInput(_ input: BrushInput) throws(Failure) {
+            switch input {
+            case .taper: readsTaper = true
+            case .direction:
+                readsDirection = true
+                try meter.visit(sites, times: work.direction)
+            default: break
+            }
+        }
+        for row in brush.modulations.rows {
+            // This scan and replay's two input queries (construct and check each input list).
+            try meter.visit(1, times: 5)
+            try meter.visit(row.modules.count, times: 5)
+            try meter.visit(sites) // the row's input and fixed evaluation
+            try meter.visit(sites, times: row.modules.count)
+            try admitInput(row.input)
+            for module in row.modules {
+                if let input = module.scaleInput { try admitInput(input) }
+            }
+        }
+        if readsTaper && size > 0 { try meter.visit(segments, times: work.flattenedSegment) }
+        if readsDirection && segments > 0 {
+            // Build the heading's arc table and locate its two anchors. Each anchor resolves
+            // a parameter by flattening one segment, then reads the tangent at that parameter.
+            try meter.visit(segments, times: work.flattenedSegment + 3)
+            try meter.visit(2, times: work.flattenedSegment + work.direction)
+        }
     }
 
     private struct GroupPair: Hashable { let a: Int, b: Int }

@@ -75,6 +75,7 @@ struct StrokePath {
     /// dabs land, and a flatness that moved with `spacing` would make a stroke re-render differently
     /// after a spacing edit — which is exactly what §12 stage 0 exists to make impossible.
     static let flatness: CGFloat = 0.05
+    static let maximumSubdivisions = 64
 
     /// Whether the path creases at knot `index` rather than curving through it. Endpoints crease by
     /// definition: they have no far side to blend with.
@@ -104,6 +105,31 @@ struct StrokePath {
             i += step
         }
         return nil
+    }
+
+    /// Upper bound on candidate visits in one distinct-neighbour search in either direction.
+    /// Skipped candidates are all within epsilon of the starting knot, so their adjacent
+    /// distances are at most twice epsilon by the triangle inequality. Count the longest such
+    /// run and allow the first candidate that ends the search.
+    var distinctNeighbourVisitLimit: Int? {
+        guard var previous = points.first else { return 0 }
+        guard previous.x.isFinite, previous.y.isFinite else { return nil }
+        // Allow rounding in the coordinate differences and hypotenuses at the threshold.
+        let closeDistance = 2 * Self.epsilon * (1 + 8 * CGFloat.ulpOfOne)
+        var longest = 0
+        var run = 0
+        for point in points.dropFirst() {
+            let distance = hypot(point.x - previous.x, point.y - previous.y)
+            guard distance.isFinite else { return nil }
+            if distance <= closeDistance {
+                run += 1
+                longest = max(longest, run)
+            } else {
+                run = 0
+            }
+            previous = point
+        }
+        return min(points.count - 1, longest + 1)
     }
 
     // MARK: - The segment
@@ -182,7 +208,7 @@ struct StrokePath {
         let curvature = max(hypot(startX, startY), hypot(endX, endY))
         guard curvature > epsilon else { return 1 }
         let n = (curvature / (8 * flatness)).squareRoot().rounded(.up)
-        return min(max(Int(n), 1), 64)
+        return min(max(Int(n), 1), maximumSubdivisions)
     }
 
     // MARK: - Reading the curve

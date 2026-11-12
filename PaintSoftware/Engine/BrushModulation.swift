@@ -199,6 +199,11 @@ enum BrushModule: Hashable {
     /// same reason the reading is — at `a > 1` the mix exceeds 1 and a scale would *amplify*, which
     /// is the one thing §2.22 rules it may never do.
     case scale(BrushInput, ResponseCurve, Double)
+
+    var scaleInput: BrushInput? {
+        if case .scale(let input, _, _) = self { return input }
+        return nil
+    }
 }
 
 extension BrushModule {
@@ -352,7 +357,7 @@ struct BrushModulation: Codable, Hashable {
     /// own, which is what stops one of them being widened and the other forgotten.
     var readInputs: [BrushInput] {
         var inputs = [input]
-        for module in modules { if case .scale(let scaled, _, _) = module { inputs.append(scaled) } }
+        for module in modules { if let scaled = module.scaleInput { inputs.append(scaled) } }
         return inputs
     }
 
