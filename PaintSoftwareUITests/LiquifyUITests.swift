@@ -69,10 +69,11 @@ final class LiquifyUITests: PaintUITestCase {
                 firstMoved = (sample.finished, screenshot)
             }
         }
-        let start = canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.5, 0.30)).screenPoint
-        let end = canvas.coordinate(withNormalizedOffset: hostPoint(paper, 0.5, 0.46)).screenPoint
-        let path = (0...180).map { step in
-            let progress = CGFloat(step) / 180
+        let host = canvas.frame
+        let start = logicalAppPoint(in: host, normalizedOffset: hostPoint(paper, 0.5, 0.30))
+        let end = logicalAppPoint(in: host, normalizedOffset: hostPoint(paper, 0.5, 0.46))
+        let path = (0...240).map { step in
+            let progress = CGFloat(step) / 240
             // Move farther while there is still input arriving. A stationary hold lets a
             // starved preview catch up even though it never followed the moving finger.
             let fraction = pow(progress, 0.7)
@@ -87,7 +88,16 @@ final class LiquifyUITests: PaintUITestCase {
             _ = sampler.stop()
             throw error
         }
-        let held = sampler.stop().filter { $0.finished < returned - 2 }
+        let samples = sampler.stop()
+        let held = samples.filter { $0.finished < returned - 2 }
+        let trace = XCTAttachment(string: samples.map { sample in
+            let differences = zip(sample.pixels.prefix(target.count).map(dark), before.prefix(target.count))
+                .filter { $0 != $1 }.count
+            return String(format: "%+.2fs: %d changed probes", sample.finished - returned, differences)
+        }.joined(separator: "\n"))
+        trace.name = "Vector Liquify pixel samples relative to gesture return"
+        trace.lifetime = .keepAlways
+        add(trace)
         XCTAssertFalse(held.isEmpty, "screen samples finish before the gesture lifts")
         XCTAssertTrue(held.contains { moved($0.pixels.map(dark)) }, "the line must reshape during the moving drag")
         XCTAssertTrue(held.allSatisfy { Array($0.pixels.map(dark).suffix(outside.count)) == outsideBefore },
