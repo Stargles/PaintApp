@@ -1572,6 +1572,46 @@ final class FillMendLogicTests: XCTestCase {
             window: original, isCurrent: { false }), "a cancelled request publishes no partial picture or rows")
     }
 
+    func testLongSnappedCircleDoesNotSuppressMendingOfADetachedInteriorLine() throws {
+        let size = CGSize(width: 2048, height: 2048)
+        let circle = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 274, y: 274),
+                                   endPoint: CGPoint(x: 1774, y: 1774))
+        let line = supportStroke([CGPoint(x: 1700, y: 1024), CGPoint(x: 1740, y: 1024)])
+        // A thin Smart Shape samples its settled outline at one canvas pixel per step.
+        let samples = ShapeDetector.collapseSamplesToShape(samples: StrokeSamples(points: []),
+                                                           shape: circle, spacing: 1)
+        XCTAssertGreaterThan(samples.count, 4700, "PREMISE: this is the long snapped outline's stored geometry")
+        let outline = VectorStroke(brush: line.brush, color: line.color, size: line.size,
+                                   opacity: 1, samples: samples, seed: 0x7355)
+        // Use a native crop around the line and the circle's right edge. The whole outline still
+        // belongs to the frozen display list, while the GPU only needs a small working window.
+        let crop = CGRect(x: 1680, y: 976, width: 120, height: 96)
+        let window = FillWindow.fitting(crop, in: size, pixelBudget: 120 * 96)
+        let reference = try supportReference([outline, line], canvasSize: size, window: window,
+                                             emptyReferenceAbove: true)
+        let engine = try XCTUnwrap(MetalFillEngine.shared)
+        let session = try XCTUnwrap(engine.makeSession(referenceRGBA: reference.rgba,
+            width: window.workingWidth, height: window.workingHeight, pathWall: reference.pathWall(),
+            gapWidthLimit: 8).session)
+        session.installVectorReference(reference.support)
+
+        func bucket(reach: Float) throws -> Pixels {
+            let seed = session.seedColor(atX: 10, y: 24)
+            let bytes = try XCTUnwrap(session.fill(seedX: 10, seedY: 24, seedColor: seed, threshold: 0.15,
+                gapWidth: 8, edgeOverlap: 0, mendReach: reach, fillColor: SIMD4(1, 0, 0, 1)))
+            return Pixels(bytes: bytes, width: window.workingWidth)
+        }
+
+        let off = try bucket(reach: 0)
+        XCTAssertTrue(off.isRed(10, 24), "PREMISE: the ordinary bucket fills inside the circle")
+        XCTAssertTrue(off.isBare(50, 48), "PREMISE: the detached stroke is bare without the mend")
+        XCTAssertTrue(off.isBare(94, 48) && off.isBare(108, 48), "PREMISE: the outline stops the bucket")
+
+        let on = try bucket(reach: 12)
+        XCTAssertTrue(on.isRed(50, 48), "the long unrelated outline must leave the short line eligible for mending")
+        XCTAssertTrue(on.isBare(94, 48) && on.isBare(108, 48), "the enclosing edge and outside stay protected")
+    }
+
     func testCanonicalSupportCertifiesWholeStraightCurvedAndScatteredFreeCaps() throws {
         let paths = [[CGPoint(x: 20, y: 20), CGPoint(x: 76, y: 20)],
                      [CGPoint(x: 20, y: 20), CGPoint(x: 20, y: 76)],
