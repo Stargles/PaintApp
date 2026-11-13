@@ -975,6 +975,115 @@ final class RecordingLogicTests: XCTestCase {
         }
     }
 
+    func testSliderCallbacksAfterThePlaybackEndpointCannotChangeTheRecordedCurve() throws {
+        for looping in [true, false] {
+            let (manager, clock) = self.manager(frames: 16)
+            defer { manager.stopPlayback() }
+            manager.fps = 8 // Exact binary fractions let the slider report at the endpoint itself.
+            manager.setLoopStart(3)
+            manager.setLoopEnd(7)
+            manager.isLoopEnabled = looping
+            let tgt = target(manager)
+            let original = storedValue(manager, tgt, brightnessID)
+            let before = manager.history.undoStack.count
+            let epoch = clock.now
+            if !looping {
+                manager.play()
+                clock.now = epoch + 0.125
+                manager.tickPlayback()
+            }
+            XCTAssertNil(manager.armRecording())
+            XCTAssertTrue(manager.beginArmedTake(on: tgt))
+            let firstFrame = looping ? 3 : 4
+            XCTAssertEqual(manager.currentFrame, firstFrame)
+
+            drag(manager, clock, tgt, brightnessID, to: 0.25, at: clock.now)
+            clock.now = epoch + 0.25
+            manager.tickPlayback()
+            XCTAssertEqual(manager.currentFrame, 5)
+            drag(manager, clock, tgt, brightnessID, to: 0.875, at: clock.now)
+            let lastTimelyTime = epoch + (looping ? 0.5 : 0.375)
+            drag(manager, clock, tgt, brightnessID, to: 1.5, at: lastTimelyTime)
+            // The transport is still showing frame 5. One late report arrives within a fraction
+            // of the final frame interval, and the looping case also gets a report two frames late.
+            drag(manager, clock, tgt, brightnessID, to: 1.75, at: epoch + 0.53125)
+            if looping {
+                drag(manager, clock, tgt, brightnessID, to: 0.5, at: epoch + 0.75)
+            }
+            if !looping { lift(manager) }
+            XCTAssertEqual(manager.currentFrame, 5, "Setup: the final playback tick has not run")
+            XCTAssertTrue(manager.isRecording)
+
+            manager.tickPlayback()
+            XCTAssertEqual(manager.currentFrame, 7)
+            XCTAssertFalse(manager.isRecording)
+            XCTAssertFalse(manager.isPlaying)
+            let curve = try XCTUnwrap(manager.keyframeState(of: tgt).tracks[brightnessID])
+            XCTAssertEqual(curve.keys.map(\.frame), [firstFrame, looping ? 7 : 6])
+            XCTAssertEqual(curve.evaluate(at: 7), 1.5, accuracy: 1e-9,
+                           "The endpoint keeps the last timely value, even when the curve holds it")
+
+            lift(manager)
+            XCTAssertEqual(manager.history.undoStack.count, before + 1)
+            XCTAssertEqual(manager.history.undoStack.last?.label, .recordAnimation)
+            XCTAssertEqual(manager.keyframeState(of: tgt).tracks[brightnessID], curve,
+                           "Lifting the same slider must not turn a late report into an ordinary key")
+            XCTAssertEqual(storedValue(manager, tgt, brightnessID), original)
+            manager.undo()
+            XCTAssertNil(manager.keyframeState(of: tgt).tracks[brightnessID])
+        }
+    }
+
+    func testManuallyStoppingARecordingKeepsOnlySliderSamplesWithinPlayback() throws {
+        for mode in [(stopPlayback: false, lateReports: false),
+                     (stopPlayback: false, lateReports: true),
+                     (stopPlayback: true, lateReports: true)] {
+            let (manager, clock) = self.manager(frames: 16)
+            defer { manager.stopPlayback() }
+            manager.fps = 8
+            manager.setLoopEnd(4)
+            let tgt = target(manager)
+            XCTAssertNil(manager.startRecording(target: tgt))
+            let epoch = clock.now
+            drag(manager, clock, tgt, brightnessID, to: 0.25, at: epoch)
+            drag(manager, clock, tgt, brightnessID, to: 1.5, at: epoch + 0.25)
+            if mode.lateReports {
+                drag(manager, clock, tgt, brightnessID, to: 0.5, at: epoch + 0.75)
+                drag(manager, clock, tgt, contrastID, to: 0.25, at: epoch + 0.875)
+                drag(manager, clock, tgt, contrastID, to: 1.5, at: epoch + 1)
+            }
+
+            if mode.stopPlayback { manager.stopPlayback() } else { manager.toggleRecording() }
+
+            let tracks = manager.keyframeState(of: tgt).tracks
+            let curve = try XCTUnwrap(tracks[brightnessID])
+            XCTAssertEqual(curve.keys.map(\.frame), [0, 2])
+            XCTAssertEqual(curve.evaluate(at: 4), 1.5, accuracy: 1e-9)
+            XCTAssertNil(tracks[contrastID], "A channel with only late reports adds no curve")
+        }
+    }
+
+    func testAnUnmarkedTakeUsesTheLastDrawnFrameAsItsSliderDeadline() throws {
+        let (manager, clock) = self.manager(frames: 16)
+        defer { manager.stopPlayback() }
+        manager.fps = 8
+        manager.isLoopEnabled = false
+        let tgt = target(manager)
+        XCTAssertNil(manager.startRecording(target: tgt))
+        let epoch = clock.now
+        drag(manager, clock, tgt, brightnessID, to: 0.25, at: epoch)
+        drag(manager, clock, tgt, brightnessID, to: 1.5, at: epoch + 1.875)
+        drag(manager, clock, tgt, brightnessID, to: 0.5, at: epoch + 2.125)
+
+        manager.tickPlayback()
+
+        XCTAssertEqual(manager.currentFrame, 15)
+        XCTAssertFalse(manager.isRecording)
+        let curve = try XCTUnwrap(manager.keyframeState(of: tgt).tracks[brightnessID])
+        XCTAssertEqual(curve.keys.map(\.frame), [0, 15])
+        XCTAssertEqual(curve.evaluate(at: 15), 1.5, accuracy: 1e-9)
+    }
+
     /// The other branch that can end a take mid-tick: running off the end **without** looping, which
     /// stops through the ordinary `stopPlayback` path rather than the boundary-landing one above.
     func testARecordingIsStoppedWhenPlaybackRunsOffTheEndWithoutLooping() {

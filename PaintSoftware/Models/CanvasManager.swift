@@ -3314,6 +3314,19 @@ final class CanvasManager: ObservableObject {
     private var playbackClock: PlaybackClock?
     private var playbackTimer: Timer?
 
+    private func playbackDeadline(clock: PlaybackClock, from frame: Int, through end: Int) -> TimeInterval {
+        let remaining = max(0, end - frame)
+        let finalFrameOffset = Double(clock.framesConsumed) + Double(remaining)
+        return clock.epoch + finalFrameOffset / Double(fps)
+    }
+
+    /// Manual stops use the current clock before it is cleared. A tick that reaches the end passes
+    /// its deadline explicitly, using the clock and playhead from before the tick spent its frames.
+    func recordingPlaybackDeadline() -> TimeInterval? {
+        guard let clock = playbackClock else { return nil }
+        return playbackDeadline(clock: clock, from: currentFrame, through: playbackEndFrame)
+    }
+
     /// How much faster than the frame rate the tick source asks. The tick only sets the *resolution*
     /// of the answer — `PlaybackClock` decides how many frames are actually due — but a tick source
     /// running at exactly `1/fps` lands 0 frames on one fire and 2 on the next as the two clocks
@@ -3333,8 +3346,9 @@ final class CanvasManager: ObservableObject {
 
     /// Stop, from wherever. Idempotent — `@Published` fires on every write, equal or not, so the
     /// guard is what keeps a stop from a view that is merely disappearing off the invalidation path.
-    func stopPlayback() {
+    func stopPlayback(atRecordingDeadline deadline: TimeInterval? = nil) {
         guard isPlaying else { return }
+        let recordingDeadline = isRecording ? (deadline ?? recordingPlaybackDeadline()) : nil
         playbackTimer?.invalidate()
         playbackTimer = nil
         playbackClock = nil
@@ -3346,7 +3360,7 @@ final class CanvasManager: ObservableObject {
         // against a clock that is no longer moving the playhead, so its samples would all resample
         // onto one frame. `stopRecording` calls this in turn; the `isRecording` guard there is what
         // makes the pair terminate.
-        if isRecording { stopRecording() }
+        if isRecording { stopRecording(atPlaybackDeadline: recordingDeadline) }
     }
 
     func togglePlayback() {
@@ -3381,7 +3395,9 @@ final class CanvasManager: ObservableObject {
     /// Hands the playhead whatever frames the wall clock says are due, and stops playback if that
     /// ran off the end. Called by the tick source, and directly by tests driving `playbackNow`.
     func tickPlayback() {
-        guard isPlaying, !playbackHeld, var clock = playbackClock else { return }
+        guard isPlaying, !playbackHeld, let previousClock = playbackClock else { return }
+        let previousFrame = currentFrame
+        var clock = previousClock
         let due = clock.take(at: playbackNow(), fps: fps)
         playbackClock = clock
         guard due > 0 else { return }
@@ -3390,16 +3406,14 @@ final class CanvasManager: ObservableObject {
         // placed *after* the advance deliberately: the flip is what the artist sees, and the SwiftUI
         // pass that draws it has not started yet. See `PlaybackTrace` for what the report is for.
         PlaybackTrace.mark(.tick, value: currentFrame)
+        // A take stops on the final frame even with looping enabled (KEYFRAMES.md §5). The clock
+        // from before this tick gives that frame's deadline even when the tick arrived late.
+        let end = isRecording ? playbackEndFrame : nil
         if !advanced {
-            stopPlayback()
-        } else if isRecording, currentFrame >= playbackEndFrame {
-            // **A take ends at the end of the animation, looping or not** — KEYFRAMES.md §5, and it
-            // is a decision rather than a consequence. `ValueRecording.resampled` maps the i-th stop
-            // to `startFrame + i` because the playhead is there; a loop that wrapped would break
-            // that correspondence and write keys onto frames the artist never watched. Stopping at
-            // the boundary is the narrowest rule that keeps the two arithmetics one, and it costs a
-            // looping artist nothing they can see, since the take was over anyway.
-            stopRecording()
+            let deadline = end.map { playbackDeadline(clock: previousClock, from: previousFrame, through: $0) }
+            stopPlayback(atRecordingDeadline: deadline)
+        } else if let end, currentFrame >= end {
+            stopRecording(atPlaybackDeadline: playbackDeadline(clock: previousClock, from: previousFrame, through: end))
         }
     }
 

@@ -53,6 +53,11 @@ struct ValueRecording: Equatable {
         samples.append(Sample(time: time, value: value))
     }
 
+    /// Drops reports past the deadline, keeping a report made exactly at it.
+    mutating func discardSamples(after deadline: TimeInterval) {
+        while let last = samples.last, last.time > deadline { samples.removeLast() }
+    }
+
     var isEmpty: Bool { samples.isEmpty }
 
     /// Wall seconds from the first sample to the last. Zero for a take of one sample.

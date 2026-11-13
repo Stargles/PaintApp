@@ -70,6 +70,13 @@ extension CanvasManager {
         /// cels. That is the "refusal that names the wrong way out" this file already has a case
         /// about, reached by a new door.
         var caughtInk = false
+
+        mutating func discardLateSliderSamples(after deadline: TimeInterval) {
+            for id in Array(channels.keys) {
+                channels[id]?.discardSamples(after: deadline)
+                if channels[id]?.isEmpty == true { channels.removeValue(forKey: id) }
+            }
+        }
     }
 
     /// Why a take could not start, or produced nothing. **Every case has a sentence an artist reads**
@@ -586,14 +593,18 @@ extension CanvasManager {
     ///
     /// - Returns: the refusal if the take produced nothing, or nil if it wrote at least one curve.
     @discardableResult
-    func stopRecording() -> RecordingRefusal? {
-        guard isRecording, let take = recordingTake else { return nil }
+    func stopRecording(atPlaybackDeadline deadline: TimeInterval? = nil) -> RecordingRefusal? {
+        guard isRecording, var take = recordingTake else { return nil }
+        let deadline = deadline ?? recordingPlaybackDeadline()
         let ownedMoveBox = recordingOwnsMoveBox
         isRecording = false
         isRecordingArmed = false
         recordingTake = nil
         if isPlaying { stopPlayback() }
 
+        // The slider may report a value before a delayed tick but after the final frame came due.
+        // Trim the raw stream before it can affect interpolation, endpoint pinning or simplification.
+        if let deadline { take.discardLateSliderSamples(after: deadline) }
         let written = commitRecordingTake(take)
         // A slider still held when the scene ran out: what it showed of the take is on the curve now.
         releaseTakePreview(of: take.target)
