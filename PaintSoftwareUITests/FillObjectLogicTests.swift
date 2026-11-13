@@ -944,6 +944,124 @@ final class FillObjectLogicTests: XCTestCase {
         XCTAssertEqual(ordinary.rasterizations, walks, "a repeated ordinary reference reuses its picture")
     }
 
+    func testNativeStreamReferenceSubwindowMatchesWholeCanvasBytesWithoutANativeRasterization() throws {
+        let (manager, layer, vector) = vectorFixture()
+        let size = CanvasFixture.canvasSize
+        let fullRect = CGRect(origin: .zero, size: size)
+        let rect = CGRect(x: 9, y: 13, width: 40, height: 32)
+        let full = FillWindow.fitting(fullRect, in: size, pixelBudget: side * side)
+        let window = FillWindow.fitting(rect, in: size, pixelBudget: side * side)
+        manager.layers[0].cels[0].bakedImage = try CanvasFixture.rasterSource(
+            CanvasFixture.solidImage(.blue, rect: CGRect(x: 10, y: 24, width: 15, height: 14)))
+        manager.layers[layer].cels[0].bakedImage = try CanvasFixture.rasterSource(
+            CanvasFixture.solidImage(.green, rect: CGRect(x: 32, y: 24, width: 15, height: 14)))
+        let streamSize = CGSize(width: 42, height: 19)
+        let frame = UIGraphicsImageRenderer(size: streamSize, format: PixelOps.transparentFormat()).image { context in
+            UIColor.yellow.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 42, height: 16))
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 30, height: 4))
+        }
+        let suppressed = VectorFillElement(path: CGPath(rect: fullRect, transform: nil),
+                                           color: CodableColor(UIColor.magenta))
+
+        for inPlace in [false, true] {
+            let stream = VectorStreamElement(naturalSize: streamSize, host: "fixture", port: 47301,
+                sourceLabel: "reference subwindow", rendersInPlace: inPlace,
+                transform: LayerTransform(position: CGPoint(x: 28.25, y: 29.75), scale: 1.2, rotation: 0.15))
+            vector.restoreElements([.stream(stream), .fill(suppressed)], changedInk: nil)
+            vector.suppressedElementIDs = [suppressed.id]
+            XCTAssertTrue(vector.setStreamFrame(id: stream.id, image: frame, index: 1))
+            let sources = manager.fillReferenceSources()
+            let baseline = VectorCanvas.totalRasterizations
+            let canvasBytes = try XCTUnwrap(CanvasManager.compositeReferenceRGBA(references: sources, window: full))
+            XCTAssertEqual(VectorCanvas.totalRasterizations - baseline, 1, "The whole canvas renders one vector tier")
+            let expected = (Int(rect.minY)..<Int(rect.maxY)).flatMap { y in
+                let start = (y * side + Int(rect.minX)) * 4
+                return canvasBytes[start..<(start + window.workingWidth * 4)]
+            }
+            for _ in 0..<2 {
+                let bytes = try XCTUnwrap(CanvasManager.compositeReferenceRGBA(references: sources, window: window))
+                let centre = ((30 - Int(rect.minY)) * window.workingWidth + 28 - Int(rect.minX)) * 4
+                XCTAssertEqual(Array(bytes[centre..<(centre + 4)]), [255, 255, 0, 255], "The captured stream is drawn")
+                XCTAssertTrue(bytes == expected, "All reference bytes match the whole-canvas draw, In Place = \(inPlace)")
+            }
+            XCTAssertEqual(VectorCanvas.totalRasterizations - baseline, 1,
+                           "Two streamed reference windows require zero extra whole-canvas rasterizations")
+        }
+    }
+
+    func testStreamReferenceBeforeTheFirstFrameRetainsItsPlaceholderDraw() throws {
+        let (manager, _, vector) = vectorFixture()
+        let size = CanvasFixture.canvasSize
+        let stream = VectorStreamElement(naturalSize: CGSize(width: 36, height: 20), host: "fixture", port: 47301,
+            sourceLabel: "reference before first frame",
+            transform: LayerTransform(position: CGPoint(x: 28.25, y: 29.75), scale: 1.2, rotation: 0.15))
+        vector.restoreElements([.stream(stream)], changedInk: nil)
+        let rect = CGRect(x: 9, y: 13, width: 40, height: 32)
+        let window = FillWindow.fitting(rect, in: size, pixelBudget: side * side)
+        let sources = manager.fillReferenceSources()
+        let baseline = VectorCanvas.totalRasterizations
+        let bytes = try XCTUnwrap(CanvasManager.compositeReferenceRGBA(references: sources, window: window))
+        XCTAssertEqual(VectorCanvas.totalRasterizations - baseline, 1, "The drawn placeholder keeps the original rasterizer")
+        let pixelOffset = ((27 - Int(rect.minY)) * window.workingWidth + 21 - Int(rect.minX)) * 4
+        XCTAssertGreaterThan(bytes[pixelOffset + 3], 0, "The reference includes the visible placeholder")
+    }
+
+    func testNativeStreamReferenceWithAnEraserKeepsItsIsolatedWholeCanvasDraw() throws {
+        let (manager, layer, vector) = vectorFixture()
+        let size = CanvasFixture.canvasSize
+        let streamSize = CGSize(width: 36, height: 20)
+        let stream = VectorStreamElement(naturalSize: streamSize, host: "fixture", port: 47301,
+            sourceLabel: "reference with eraser", transform: LayerTransform(position: CGPoint(x: 28, y: 30),
+                                                                           scale: 1, rotation: 0))
+        var erase = mendReferenceStroke([CGPoint(x: 16, y: 30), CGPoint(x: 40, y: 30)], size: 7)
+        erase.composite = .erase
+        vector.restoreElements([.stream(stream), .stroke(erase)], changedInk: nil)
+        XCTAssertTrue(vector.setStreamFrame(id: stream.id, image: CanvasFixture.solidImage(.yellow,
+            rect: CGRect(origin: .zero, size: streamSize), size: streamSize), index: 1))
+        manager.layers[0].cels[0].bakedImage = try CanvasFixture.rasterSource(
+            CanvasFixture.solidImage(.blue, rect: CGRect(x: 10, y: 24, width: 15, height: 14)))
+        manager.layers[layer].cels[0].bakedImage = try CanvasFixture.rasterSource(
+            CanvasFixture.solidImage(.green, rect: CGRect(x: 32, y: 24, width: 15, height: 14)))
+        let rect = CGRect(x: 9, y: 13, width: 40, height: 32)
+        let window = FillWindow.fitting(rect, in: size, pixelBudget: side * side)
+        let sources = manager.fillReferenceSources()
+        let baseline = VectorCanvas.totalRasterizations
+        let bytes = try XCTUnwrap(CanvasManager.compositeReferenceRGBA(references: sources, window: window))
+        XCTAssertEqual(VectorCanvas.totalRasterizations - baseline, 1, "Mixed content keeps the native sampling route")
+        func sample(_ x: Int, _ y: Int) -> [UInt8] {
+            let start = ((y - Int(rect.minY)) * window.workingWidth + x - Int(rect.minX)) * 4
+            return Array(bytes[start..<(start + 4)])
+        }
+        XCTAssertEqual(sample(17, 30), [0, 0, 255, 255], "Erasing the stream reveals the lower cel")
+        XCTAssertEqual(sample(39, 30), [0, 255, 0, 255], "Erasing the stream reveals this cel’s baked tier")
+        XCTAssertEqual(sample(27, 36), [255, 255, 0, 255], "The stream remains outside the eraser")
+    }
+
+    func testNativeStreamReferenceSubwindowRefusesAnUnavailablePlacedImage() throws {
+        let (manager, _, vector) = vectorFixture()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("fill-reference-\(UUID()).png")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let size = CGSize(width: 8, height: 8)
+        let picture = CanvasFixture.solidImage(.green, rect: CGRect(origin: .zero, size: size), size: size)
+        try XCTUnwrap(picture.pngData()).write(to: url)
+        let residency = RasterResidency(budgetBytes: 4096)
+        let backing = try ProjectStore.RasterBacking.protect(url, using: residency).get()
+        let source = RasterSource.backed(by: backing, using: residency)
+        try FileManager.default.removeItem(at: backing.url)
+        let stream = VectorStreamElement(naturalSize: size, host: "fixture", port: 47301,
+            sourceLabel: "reference subwindow", transform: LayerTransform(position: CGPoint(x: 24, y: 24),
+                                                                         scale: 1, rotation: 0))
+        let image = VectorImageElement(source: source, transform: LayerTransform(position: CGPoint(x: 24, y: 24),
+                                                                                 scale: 1, rotation: 0))
+        vector.restoreElements([.stream(stream), .image(image)], changedInk: nil)
+        let window = FillWindow.fitting(CGRect(x: 16, y: 16, width: 20, height: 20),
+                                       in: CanvasFixture.canvasSize, pixelBudget: side * side)
+        XCTAssertNil(CanvasManager.makeFillReference(references: manager.fillReferenceSources(), window: window),
+                     "A vector tier with unavailable placed pixels cannot publish a partial Fill reference")
+    }
+
     func testMendAllFillsDiscardsEveryPreparedCelWhenReferenceOrNeighbourRenderingRefuses() async throws {
         defer { VectorRenderCache.removeAll() }
         for failsInReference in [true, false] {

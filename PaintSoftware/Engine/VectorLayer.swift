@@ -5871,15 +5871,14 @@ final class VectorCanvas {
             cg.translateBy(x: frameRect.minX, y: frameRect.minY)
             cg.scaleBy(x: frameRect.width / size.width, y: frameRect.height / size.height)
             let walked = VectorCanvas.drawLocalContent(into: cg,
-                elements: elements.filter { !suppressed.contains($0.id) },
+                elements: VectorCanvas.visible(elements, suppressing: suppressed),
                 quality: quality, clippedTo: cg.boundingBoxOfClipPath, known: known)
             cg.restoreGState()
             return walked?.dabCount
         }
 
-        /// Draw the exact ordinary image route or saved-fill direct route, and mint support only
-        /// after inspecting their actual stages. No composed affine can certify a resampled image.
         var fillReferenceRecordCount: Int { elements.count }
+        /// The sampled route reserves the native image before drawing any tiles.
         var fillReferenceImageBytes: Int {
             guard !elements.isEmpty else { return 0 }
             let pixels = size.width * size.height
@@ -5906,6 +5905,7 @@ final class VectorCanvas {
             catch { support = nil }
         }
 
+        /// Mint native support only after a successful draw on the actual pixel grid.
         func drawFillReference(into cg: CGContext, frameRect: CGRect, width: Int, height: Int,
                                excludingElement: UUID?, support: inout VectorMendSupport.Reference.Builder?,
                                sampling: ImageWarp.RasterScaleSupport? = nil,
@@ -5913,16 +5913,18 @@ final class VectorCanvas {
                                isCurrent: () -> Bool = { true }) -> Frozen? {
             let snapshot = fillReferenceSnapshot(excludingElement: excludingElement)
             let ctm = cg.ctm
+            let destination = CGRect(x: 0, y: 0, width: width, height: height)
             let nativeContext = ctm.a == 1 && ctm.b == 0 && ctm.c == 0 && ctm.d == -1
                 && ctm.tx == 0 && ctm.ty == CGFloat(height)
-                && cg.boundingBoxOfClipPath == CGRect(x: 0, y: 0, width: width, height: height)
-            var native = nativeContext && size.width > 0 && size.height > 0
+                && cg.boundingBoxOfClipPath == destination
+            var native = nativeContext && size.width.isFinite && size.height.isFinite
+                && size.width > 0 && size.height > 0
                 && size.width.rounded() == size.width && size.height.rounded() == size.height
                 && frameRect.size == size && frameRect.minX.rounded() == frameRect.minX
                 && frameRect.minY.rounded() == frameRect.minY
             if let sampling {
                 guard isCurrent(), nativeContext, sampling.sourceSize == snapshot.size,
-                      sampling.destination == CGRect(x: 0, y: 0, width: width, height: height) else { return nil }
+                      sampling.destination == destination else { return nil }
                 if !snapshot.elements.isEmpty {
                     // A captured document memo is borrowed. Otherwise the existing detached
                     // renderer owns one request image; filling must not install native images
@@ -5946,6 +5948,12 @@ final class VectorCanvas {
                 return snapshot
             } else if excludingElement != nil {
                 guard snapshot.draw(into: cg, frameRect: frameRect, quality: .full) != nil else { return nil }
+            } else if snapshot.source == nil, native, frameRect != destination, frameRect.contains(destination),
+                      snapshot.hasOnlyCapturedStreamFrames {
+                // The ordinary Fill freeze detaches stream-bearing cels. Reproduce their
+                // isolated tier on the same pixel grid, retaining the existing rasterizer for
+                // artwork whose sampling can depend on the full clip.
+                guard snapshot.drawIsolatedFillWindow(destination, frameRect: frameRect) else { return nil }
             } else {
                 guard let image = snapshot.render(quality: .full), let pixels = image.cgImage else { return nil }
                 native = native && image.scale == 1 && image.imageOrientation == .up && image.size == size
@@ -5956,6 +5964,31 @@ final class VectorCanvas {
             do throws(VectorMendSupport.Failure) { try support?.append(snapshot, transform: mapping) }
             catch { support = nil } // A refused certificate never discards the ordinary reference picture.
             return snapshot
+        }
+
+        private var hasOnlyCapturedStreamFrames: Bool {
+            // The placeholder uses antialiased vector geometry, just like ordinary artwork.
+            var hasFrame = false
+            for element in elements where !suppressed.contains(element.id) {
+                guard element.stream?.displayFrame != nil else { return false }
+                hasFrame = true
+            }
+            return hasFrame
+        }
+
+        private func drawIsolatedFillWindow(_ window: CGRect, frameRect: CGRect) -> Bool {
+            let renderer = UIGraphicsImageRenderer(size: window.size, format: VectorCanvas.localContentFormat())
+            var drawn = false
+            let image = renderer.image { context in
+                drawn = draw(into: context.cgContext, frameRect: frameRect, quality: .full) != nil
+            }
+            guard drawn, let pixels = image.cgImage, image.scale == 1, image.imageOrientation == .up,
+                  CGFloat(pixels.width) == window.width, CGFloat(pixels.height) == window.height else {
+                MemoryPressure.signal(.allocationRefused)
+                return false
+            }
+            image.draw(in: window)
+            return true
         }
 
         func appendFillWalls(to strokes: inout [(path: CGPath, colour: UIColor)]) {
@@ -6881,16 +6914,10 @@ final class VectorCanvas {
             return LocalContent(image: Self.transparentPixel, escaped: .null, measured: [:],
                                 dabCount: 0)
         }
-        // `.standard` is load-bearing: `.preferredRange` defaults to `.automatic`, which on a
-        // wide-colour iPad backs the context with an extended-range 16-bit bitmap, and stamping
-        // thousands of radial gradients into that is drastically slower than into 8-bit. No fidelity
-        // is lost — every raster tier already renders and persists as 8-bit deviceRGB.
-        let format = PixelOps.transparentFormat(scale: resolution)
-        format.preferredRange = .standard
         // Hoisted so the walk's findings can be read once the (synchronous) renderer closure below
         // has finished drawing — and nil afterwards exactly when it never ran.
         var walked: Walk?
-        let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+        let image = UIGraphicsImageRenderer(size: size, format: localContentFormat(resolution: resolution)).image { ctx in
             let cg = ctx.cgContext
             // 1:1 into a context of the same size, format and scale, over transparent black — so
             // every destination pixel is `0`, source-over leaves the source exactly as it was, and
@@ -6917,6 +6944,14 @@ final class VectorCanvas {
         }
         return LocalContent(image: image, escaped: walked.escaped, measured: walked.measured,
                             dabCount: walked.dabCount)
+    }
+
+    private static func localContentFormat(resolution: CGFloat = 1) -> UIGraphicsImageRendererFormat {
+        // Keep native and clipped walks in the same 8-bit range. UIKit's automatic format can
+        // choose a 16-bit bitmap on wide-colour devices, making dab gradients much more expensive.
+        let format = PixelOps.transparentFormat(scale: resolution)
+        format.preferredRange = .standard
+        return format
     }
 
     /// What one walk learned — the footprints it measured, where it painted outside its clip

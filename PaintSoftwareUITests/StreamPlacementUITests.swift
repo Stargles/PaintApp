@@ -559,6 +559,45 @@ final class StreamPlacementUITests: StreamUITestCase {
         attachScreenshot(app, "one semitransparent fill over a frozen In Place reference")
     }
 
+    func testRepeatedBucketFillUsesTheEdgeOfALiveStreamAsItsReference() throws {
+        let app = XCUIApplication()
+        let canvas = launchWithALiveStream(app, orientationBeforeCreatingCanvas: .landscapeLeft)
+        let placement = app.buttons["streamBar.placementButton"]
+        XCTAssertEqual(placement.value as? String, "onTop")
+        placement.tap()
+        XCTAssertEqual(placement.value as? String, "inPlace")
+        guard waitForPicture(.red, on: canvas) else { return }
+        addVectorLayer(app)
+        if !brushIsSelected(app) { app.buttons["toolbar.brushButton"].tap() }
+        let paper = paperRect(in: canvas)
+        func point(_ x: Double, _ y: Double) -> CGVector { onHost(paper, x, y) }
+        let inside = point(0.5, 0.23), below = point(0.5, 0.34), outside = point(0.68, 0.23)
+        assertAboveTheDock(app, canvas, dy: point(0.5, 0.40).dy, "the stream edge and all brush marks")
+        // The stream's upper edge is at 27.5% of the paper. It closes the open bottom of this
+        // outline, so filling its interior stays inside the bucket's first 1024px window.
+        drawLine(on: canvas, from: point(0.40, 0.40), to: point(0.40, 0.14))
+        drawLine(on: canvas, from: point(0.40, 0.14), to: point(0.60, 0.14))
+        drawLine(on: canvas, from: point(0.60, 0.14), to: point(0.60, 0.40))
+        setBrushColor(app, hex: "0000FF")
+        for (screen, colour) in [(FakeLaptopStreamer.Screen.red, Colour.red), (.green, .green)] {
+            laptop.show(screen)
+            XCTAssertNotNil(waitForPixel(canvas, at: below, matches: colour.matches),
+                            "The live frame is visible at the open end of the outline")
+            XCTAssertNotNil(waitForPixel(canvas, at: inside, matches: isWhitish))
+            app.buttons["toolbar.fillButton"].tap()
+            canvas.coordinate(withNormalizedOffset: inside).tap()
+            XCTAssertNotNil(waitForPixel(canvas, at: inside, matches: isBlue), "The bucket paints the enclosed paper")
+            app.buttons["toolbar.brushButton"].tap()
+            XCTAssertNotNil(waitForPixel(canvas, at: inside, matches: isBlue), "The paint remains after commit")
+            XCTAssertNotNil(waitForPixel(canvas, at: below, matches: colour.matches),
+                            "The stream edge stops the paint where there is no closing brush mark")
+            XCTAssertNotNil(waitForPixel(canvas, at: outside, matches: isWhitish), "The fill stays in the outline")
+            attachScreenshot(XCUIScreen.main, "bucket-fill-at-\(colour.rawValue)-stream-edge")
+            app.buttons["sideToolbar.undoButton"].tap()
+            XCTAssertNotNil(waitForPixel(canvas, at: inside, matches: isWhitish))
+        }
+    }
+
     func testPlacementSurvivesASaveAndColdRelaunch() throws {
         let app = XCUIApplication()
         let canvas = launchWithALiveStream(app)
