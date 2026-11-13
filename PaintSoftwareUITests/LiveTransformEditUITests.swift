@@ -294,7 +294,7 @@ final class LiveTransformEditUITests: PaintUITestCase {
             guard pixels.count == 3 else { return [] }
             return [isRed(pixels[0]), isInk(pixels[1]), isInk(pixels[2])]
         }
-        XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 40, "The seeded pose bakes"))
+        XCTAssertEqual(sandwichState(app), "off", "a lone cel draws through its ordinary host at rest")
         XCTAssertEqual(marks(readScreenNow(points)), [true, true, false], "red backing and original black ink")
         attachScreenshot(app, "mixed-cel-before-graph-drag")
 
@@ -329,8 +329,8 @@ final class LiveTransformEditUITests: PaintUITestCase {
         attachment.name = "mixed-cel-held-graph-drag"
         attachment.lifetime = .keepAlways
         add(attachment)
-        XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 40, "The edited pose bakes"))
-        XCTAssertEqual(marks(readScreenNow(points)), [true, false, true], "the same placement after the bake")
+        XCTAssertEqual(sandwichState(app), "off", "the ordinary host takes over after lift")
+        XCTAssertEqual(marks(readScreenNow(points)), [true, false, true], "the same placement after lift")
         attachScreenshot(app, "mixed-cel-settled-graph-result")
     }
 }
