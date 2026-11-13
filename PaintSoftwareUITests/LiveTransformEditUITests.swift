@@ -285,11 +285,9 @@ final class LiveTransformEditUITests: PaintUITestCase {
         let redRow = 56.0 / size.height
         let inkRow = 80.0 / size.height
         assertAboveTheDock(app, canvas, dy: onHost(paper, 0, inkRow).dy, "The mixed cel's ink")
+        let canvasFrame = canvas.frame
         func point(x: Double, y: Double) -> CGPoint {
-            let fraction = onHost(paper, x / size.width, y)
-            let frame = canvas.frame
-            return CGPoint(x: frame.minX + frame.width * fraction.dx,
-                           y: frame.minY + frame.height * fraction.dy)
+            logicalAppPoint(in: canvasFrame, normalizedOffset: onHost(paper, x / size.width, y))
         }
         let points = [point(x: 104, y: redRow), point(x: 72, y: inkRow), point(x: 204, y: inkRow)]
         func marks(_ pixels: [RGBA?]) -> [Bool] {
@@ -304,22 +302,33 @@ final class LiveTransformEditUITests: PaintUITestCase {
         let initial = rest + 32
         let axis = TimelineGraphBand.anchoredRange(reference: rest,
             minimumSpan: PoseComponents.Component.x.minimumAxisSpan, keyValues: [initial])
+        let bandHeight = band.frame.height
         func y(_ value: Double) -> CGFloat {
-            TimelineGraphBand.y(ofValue: value, in: axis, bandHeight: band.frame.height)
+            TimelineGraphBand.y(ofValue: value, in: axis, bandHeight: bandHeight)
         }
         let node = band.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
             dx: TimelineGraphBand.x(ofFrame: 0, pixelsPerFrame: TimelineKeyMarkers.basePixelsPerFrame),
             dy: y(initial)))
-        let bandHeight = band.frame.height
-        let destination = node.withOffset(CGVector(dx: 0,
-            dy: TimelineGraphBand.y(ofValue: initial + 24, in: axis, bandHeight: bandHeight) - y(initial)))
-        let held = samplesDuring(points, "mixed cel X node") {
-            node.press(forDuration: 0.6, thenDragTo: destination,
-                       withVelocity: XCUIGestureVelocity(40), thenHoldForDuration: 4)
-        }.map { marks($0.pixels) }
-        attachScreenshot(app, "mixed-cel-live-graph-result")
+        let destination = node.withOffset(CGVector(dx: 0, dy: y(initial + 24) - y(initial)))
+        var firstMoved: (time: CFAbsoluteTime, screenshot: XCUIScreenshot)?
+        let sampler = MidGestureSampler(points: points) { sample, screenshot in
+            if firstMoved == nil, marks(sample.pixels) == [true, false, true] {
+                firstMoved = (sample.finished, screenshot)
+            }
+        }
+        sampler.start()
+        node.press(forDuration: 0.6, thenDragTo: destination,
+                   withVelocity: XCUIGestureVelocity(40), thenHoldForDuration: 4)
+        let returned = CFAbsoluteTimeGetCurrent()
+        let held = sampler.stop().filter { $0.finished < returned - 2 }.map { marks($0.pixels) }
         XCTAssertTrue(held.contains([true, false, true]), "red stayed while black moved: \(held)")
         XCTAssertTrue(held.allSatisfy { $0.first == true }, "the red backing must stay through every held sample: \(held)")
+        let witness = try XCTUnwrap(firstMoved, "capture both tiers at the new ink position")
+        XCTAssertLessThan(witness.time, returned - 2, "capture the picture while the finger is still down")
+        let attachment = XCTAttachment(screenshot: witness.screenshot)
+        attachment.name = "mixed-cel-held-graph-drag"
+        attachment.lifetime = .keepAlways
+        add(attachment)
         XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 40, "The edited pose bakes"))
         XCTAssertEqual(marks(readScreenNow(points)), [true, false, true], "the same placement after the bake")
         attachScreenshot(app, "mixed-cel-settled-graph-result")
