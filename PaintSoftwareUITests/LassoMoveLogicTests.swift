@@ -962,7 +962,7 @@ final class LassoMoveLogicTests: XCTestCase {
     ///
     /// The two halves are asserted together on purpose. `CanvasTouchOwner` says the tap away from the
     /// box belongs to `.moveBoxCommit`; `commitVectorFloatIfNeeded()` is what that handler calls, and
-    /// is the same call `TopToolbar.toggleMove`'s vector-float branch makes. Driving the model call
+    /// is the same call `CanvasManager.toggleMove`'s vector-float branch makes. Driving the model call
     /// alone would leave "and it is actually reached by a tap" unstated.
     ///
     /// Watched failing with the plausible wrong answer written in — a commit that writes the box's
@@ -4089,7 +4089,7 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertEqual(stepsSince(baseline, manager), 0, "and the action itself is a no-op")
     }
 
-    /// **An in-between refuses too**, for `TopToolbar.toggleMove`'s reason: an interpolated cel's
+    /// **An in-between refuses too**, for `CanvasManager.toggleMove`'s reason: an interpolated cel's
     /// frame is derived, so the write would land on a `VectorCanvas` the displayed image is not
     /// computed from and the artist would see nothing change.
     ///

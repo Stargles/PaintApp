@@ -939,6 +939,8 @@ final class CanvasManager: ObservableObject {
             if (oldValue == nil) != (openLasso == nil) { refreshUndoRedoState() }
         }
     }
+    /// Reads the current Freehand node reach in canvas points from the live selection overlay.
+    var readLassoNodeReach: (() -> CGFloat?)?
     @Published var transformMode: TransformMode = .uniform
     /// **TODO (135) — which cels a folder's Move carries**, the picker on the Move bar while a folder's
     /// box is up. `.thisCel` is the shipped behaviour and the default.

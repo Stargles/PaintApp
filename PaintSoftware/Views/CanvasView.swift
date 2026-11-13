@@ -419,6 +419,9 @@ struct CanvasView: UIViewRepresentable {
         // Freehand selection (TODO (184)): the model decides whether a stroke or tap closes the lasso
         // or leaves it open, and the overlay is told the answer in the same turn of the run loop, so
         // the preview never shows a lifted stroke between the lift and the pass that follows it.
+        canvasManager.readLassoNodeReach = { [weak selectionOverlay] in
+            selectionOverlay?.nodeReach
+        }
         selectionOverlay.onLassoStroke = { [weak coordinator = context.coordinator] run, reach in
             coordinator?.canvasManager.liftLassoStroke(run, nodeReach: reach)
             coordinator?.updateSelectionOverlay()
@@ -4798,7 +4801,7 @@ struct CanvasView: UIViewRepresentable {
         /// raising a notice.
         ///
         /// **One arm, where there were two.** A float settles through `commitVectorFloatIfNeeded()` —
-        /// the branch `TopToolbar.toggleMove` already takes when Move is engaged, so tapping away and
+        /// the branch `CanvasManager.toggleMove` already takes when Move is engaged, so tapping away and
         /// tapping the Move button are the same call. It records no step of its own: a float's nudges
         /// are already on the stack one apiece (LASSO_MOVE.md §5). The second arm settled a whole-layer
         /// transform with `isVectorTransforming = false`; TODO item (12) stage 2 deleted it, because

@@ -1079,7 +1079,7 @@ extension CanvasManager {
         // `rasterize` calls that gets a provider**, because it is the only read-only one — the other
         // four lift or bake pixels into `bakedImage`/`raster`, and baking an evaluated in-between
         // would leave the recipe still deriving over the top of it. Move already refuses an
-        // in-between outright (`TopToolbar.toggleMove`, `activeVectorMoveTarget`), and recolour and
+        // in-between outright (`CanvasManager.toggleMove`, `activeVectorMoveTarget`), and recolour and
         // clear take their vector arm on a vector layer, so none of the four can reach one today;
         // divorcing them properly is VECTOR_INTERPOLATION item 26, not this seam.
         //
@@ -1132,14 +1132,38 @@ extension CanvasManager {
 
     // MARK: Move / Duplicate — lifting into a floating piece
 
+    /// The toolbar's Move action. Finish an open Freehand loop before choosing what to lift.
+    func toggleMove() {
+        // A second tap sets down the existing vector float. Settling first would let this tap lift again.
+        if vectorFloat != nil {
+            commitVectorFloatIfNeeded()
+            return
+        }
+
+        // Settle adjustable content before Move reads it, keeping the draft available to close.
+        guard commitEditsInFlight() else { return }
+        if openLasso != nil {
+            // A draft expresses a region. An incomplete loop or a subtract that empties the selection
+            // must not turn into a whole-cel Move.
+            guard closeOpenLassoForMove(), selection != nil else { return }
+        }
+
+        if activeLayerIsVector {
+            if selection != nil {
+                beginVectorLassoMove()
+            } else {
+                beginVectorWholeCelMove()
+            }
+        } else {
+            beginMove()
+        }
+    }
+
     /// Begins transforming the current selection (or, if there isn't one, the whole current layer),
     /// in place: the source cel immediately shows a transparent hole where the piece was lifted from.
     func beginMove() {
-        // **A transformation layer is routed here rather than at the toolbar**, which is
-        // `TopToolbar.toggleMove`'s own founding lesson: a rule a view holds is a rule the fast tier
-        // cannot see, and the duplicate derived-frame guard that lived there is the one this file
-        // already points at. `layerTransform`, never the raw field — a `.raster` layer carrying a
-        // pose left behind by a kind change poses nothing, so Move on it is the ordinary pixel lift.
+        // A transformation layer poses the layers beneath it instead of lifting pixels.
+        // A raster layer may carry a pose left behind by a kind change, so read `layerTransform`.
         if layers.indices.contains(currentLayerIndex), layers[currentLayerIndex].layerTransform != nil {
             beginContainerPoseMove()
             return

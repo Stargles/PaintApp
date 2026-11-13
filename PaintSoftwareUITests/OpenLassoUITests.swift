@@ -116,6 +116,76 @@ final class OpenLassoUITests: PaintUITestCase {
         attachScreenshot(app, "one-stroke-loop-cleared")
     }
 
+    func testMoveClosesAnOpenFreehandUAndMovesOnlyTheInkInside() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = paperRect(in: canvas)
+        let exposed = visiblePaperRect(app, in: canvas)
+        let top = exposed.minY + exposed.height * 0.12
+        let row = exposed.minY + exposed.height * 0.26
+        let bottom = exposed.minY + exposed.height * 0.39
+        func at(_ x: Double, _ y: Double) -> CGVector {
+            CGVector(dx: paper.minX + paper.width * x, dy: y)
+        }
+
+        setBrushColor(app, hex: "FF0000")
+        setBrushSize(app, normalized: 0.12)
+        let inside = at(0.36, row), outside = at(0.73, row)
+        drawLine(on: canvas, from: at(0.30, row), to: at(0.42, row))
+        drawLine(on: canvas, from: at(0.67, row), to: at(0.79, row))
+        XCTAssertTrue(waitUntil(canvas, inside, isRed), "the ink inside the U is drawn")
+        XCTAssertTrue(waitUntil(canvas, outside, isRed), "the ink outside the U is drawn")
+
+        app.buttons["toolbar.selectButton"].tap()
+        let freehand = app.buttons["selectPanel.mode.lasso"]
+        XCTAssertTrue(freehand.waitForExistence(timeout: 5))
+        freehand.tap()
+        assertBelowTheToolbar(app, canvas, dy: top, "The open end of the U")
+        assertAboveTheDock(app, canvas, dy: bottom, "The bottom of the U")
+        let corners = [at(0.23, top), at(0.23, bottom), at(0.50, bottom), at(0.50, top)]
+            .map { hostPoint(canvas, $0) }
+        let points = zip(corners, corners.dropFirst()).flatMap { a, b in
+            (0..<10).map { step in
+                let t = Double(step) / 10
+                return CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t)
+            }
+        }
+        try fingerStroke(through: points + [corners[3]])
+        XCTAssertTrue(try nodeIsDrawn(canvas, at: corners[0]), "the lifted U still has its open start node")
+        XCTAssertFalse(app.buttons["selectPanel.deselectButton"].isEnabled, "the U has not closed yet")
+        attachScreenshot(XCUIScreen.main, "open-u-before-move")
+
+        app.buttons["toolbar.moveButton"].tap()
+        let done = app.buttons["moveBar.doneButton"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5), "one Move tap lifts the enclosed ink")
+        let box = try XCTUnwrap(settledMoveBox(app))
+        XCTAssertTrue(box.contains(CGPoint(x: inside.dx, y: inside.dy)))
+        XCTAssertLessThan(box.maxX, at(0.50, row).dx, "the Move box fits only the enclosed stroke")
+        let probe = try pixelProbe(canvas)
+        let blueEdge = (-3...3).contains { offset in
+            isNodeRing(probe(box.midX, box.minY + Double(offset) / canvas.frame.height))
+        }
+        XCTAssertTrue(blueEdge, "the blue Move box is drawn over the ink")
+        XCTAssertFalse(try nodeIsDrawn(canvas, at: corners[0]), "the open start node has gone")
+        attachScreenshot(XCUIScreen.main, "open-u-move-box")
+
+        let destination = row + exposed.height * 0.19
+        assertAboveTheDock(app, canvas, dy: destination, "The moved stroke")
+        dragOnCanvas(app, from: CGVector(dx: box.midX, dy: box.midY),
+                     to: CGVector(dx: box.midX, dy: box.midY + destination - row))
+        let moved = try XCTUnwrap(settledMoveBox(app))
+        XCTAssertGreaterThan(moved.midY - box.midY, exposed.height * 0.09, "dragging the Move box moves the ink")
+        done.tap()
+
+        let landed = CGVector(dx: inside.dx + moved.midX - box.midX, dy: inside.dy + moved.midY - box.midY)
+        XCTAssertTrue(waitUntil(canvas, landed, isRed), "the moved stroke is drawn at its new position")
+        XCTAssertTrue(waitUntil(canvas, inside, isWhitish), "the moved stroke left its old position")
+        XCTAssertTrue(waitUntil(canvas, outside, isRed), "the ink outside the U stayed where it was")
+        attachScreenshot(XCUIScreen.main, "open-u-moved-ink")
+    }
+
     /// **A stroke lifted anywhere else leaves the lasso open**, and Undo takes it back — then a mode
     /// switch puts an open lasso down. The straight drag is `dragOnCanvas`: it lifts nowhere near where
     /// it landed, which used to select the diagonal's bounding box and now selects nothing.

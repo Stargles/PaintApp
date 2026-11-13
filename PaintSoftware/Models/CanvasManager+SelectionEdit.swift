@@ -377,7 +377,7 @@ extension CanvasManager {
     ///
     /// **Pixel layers are out of scope** (owner, 2026-08-28): every arm rewrites a stored *field* on
     /// an element, and a raster cel has pixels and no elements. **An in-between refuses** for
-    /// `TopToolbar.toggleMove`'s reason: an interpolated cel's frame is derived, so the write would
+    /// `CanvasManager.toggleMove`'s reason: an interpolated cel's frame is derived, so the write would
     /// land on a `VectorCanvas` the displayed image is not computed from.
     ///
     /// Says nothing about whether a selection exists: the whole band is already disabled without one

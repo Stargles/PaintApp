@@ -45,7 +45,7 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
     /// happen**, and a conflict list nobody can act on is the same as no conflict list. Each clause
     /// below names the code that makes it impossible.
     private func isReachable(_ i: CanvasTouchInputs) -> Bool {
-        // `TopToolbar.toggleMove` branches on `activeLayerIsVector`: a raster Move lifts a
+        // `CanvasManager.toggleMove` branches on `activeLayerIsVector`: a raster Move lifts a
         // `floatingPiece`, a vector one begins a `vectorFloat`. Never both.
         if i.hasFloatingPiece && i.hasVectorFloat { return false }
         // `beginMove` needs an active layer to lift from.

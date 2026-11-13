@@ -192,6 +192,76 @@ final class OpenLassoLogicTests: XCTestCase {
         XCTAssertTrue(contains(manager, CGPoint(x: 1, y: 5)), "…and only its region")
     }
 
+    // MARK: - Move
+
+    @MainActor
+    private func vectorInkForMove(_ manager: CanvasManager) throws -> [UUID] {
+        manager.addVectorLayer()
+        let vector = try XCTUnwrap(manager.layers[manager.currentLayerIndex].cels.first?.vector)
+        for point in [inside, outside] {
+            vector.addStroke(VectorStroke(id: UUID(), brush: TestBrushes.hardRound,
+                                          color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                          size: 2, opacity: 1,
+                                          samples: [VectorSample(x: point.x - 3, y: point.y, pressure: 1),
+                                                    VectorSample(x: point.x + 3, y: point.y, pressure: 1)]))
+        }
+        return vector.elements.map(\.id)
+    }
+
+    @MainActor
+    func testMoveClosesAnOpenStrokeLikeTheStartNodeAndLiftsOnlyItsInk() throws {
+        let manager = CanvasFixture.manager()
+        let ids = try vectorInkForMove(manager)
+        manager.readLassoNodeReach = { self.reach }
+        let baseline = manager.history.undoStack.count
+        manager.liftLassoStroke(stroke(through: square), nodeReach: reach)
+
+        let explicit = CanvasFixture.manager()
+        explicit.liftLassoStroke(stroke(through: square), nodeReach: reach)
+        explicit.tapLasso(at: square[0], nodeReach: reach)
+        let explicitPath = try XCTUnwrap(explicit.selection?.path)
+
+        manager.toggleMove()
+
+        XCTAssertNil(manager.openLasso)
+        XCTAssertEqual(manager.selection?.path, explicitPath)
+        XCTAssertEqual(manager.vectorFloat?.parts.first?.insideIDs, [ids[0]])
+        XCTAssertEqual(manager.history.undoStack.count, baseline + 1, "closing records the normal Select undo step")
+    }
+
+    @MainActor
+    func testMoveLeavesAnIncompleteDraftOpenAndKeepsTheWholeCelPathWithoutADraft() throws {
+        let manager = CanvasFixture.manager()
+        let ids = try vectorInkForMove(manager)
+        manager.readLassoNodeReach = { self.reach }
+        manager.tapLasso(at: square[0], nodeReach: reach)
+        manager.tapLasso(at: square[1], nodeReach: reach)
+
+        manager.toggleMove()
+
+        XCTAssertEqual(manager.openLasso?.points, Array(square.prefix(2)))
+        XCTAssertNil(manager.vectorFloat)
+
+        manager.deselect()
+        manager.toggleMove()
+        XCTAssertEqual(manager.vectorFloat?.parts.first?.insideIDs, Set(ids))
+    }
+
+    @MainActor
+    func testMoveClosesAnEmptyLoopWithoutLiftingTheWholeCel() throws {
+        let manager = CanvasFixture.manager()
+        _ = try vectorInkForMove(manager)
+        manager.readLassoNodeReach = { self.reach }
+        let blank = square.map { CGPoint(x: $0.x - 7, y: 0.5 * $0.y) }
+        manager.liftLassoStroke(stroke(through: blank), nodeReach: reach)
+
+        manager.toggleMove()
+
+        XCTAssertNil(manager.openLasso)
+        XCTAssertTrue(contains(manager, CGPoint(x: 15, y: 13)), "the closed loop stays on the blank paper")
+        XCTAssertNil(manager.vectorFloat, "the ink outside the loop stays where it is")
+    }
+
     // MARK: - Undo
 
     /// **Undo while a lasso is open takes back its last corner, then its last stroke, and never

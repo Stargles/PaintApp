@@ -120,6 +120,14 @@ extension CanvasManager {
         }
     }
 
+    /// Move is an explicit close at the start node, using the overlay's current reach.
+    func closeOpenLassoForMove() -> Bool {
+        guard let lasso = openLasso, let reach = readLassoNodeReach?(),
+              lasso.closes(at: lasso.start, within: reach) else { return false }
+        close(lasso)
+        return true
+    }
+
     /// Closes the lasso into a loop and hands it to `finishSelection` — the door a rectangle and the
     /// wand arrive by — so it adds to or subtracts from the selection exactly as they do.
     private func close(_ lasso: OpenLasso) {

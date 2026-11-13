@@ -486,7 +486,7 @@ extension CanvasManager {
     }
 
     /// The current layer is showing an interpolated cel at the playhead. Move is refused on one
-    /// (`TopToolbar.toggleMove`): it would act on the cel's own empty `VectorCanvas`, which the
+    /// (`CanvasManager.toggleMove`): it would act on the cel's own empty `VectorCanvas`, which the
     /// evaluated image doesn't come from.
     var activeCelIsInBetween: Bool {
         guard layers.indices.contains(currentLayerIndex) else { return false }

@@ -62,7 +62,7 @@ struct TopToolbar: View {
                     .accessibilityValue(canvasManager.primedObject?.name ?? "")
                 iconButton(system: "lasso", isActive: CanvasManager.selectIconIsActive(selectPanelOpen: activePanel == .select, selection: canvasManager.selection)) { toggle(.select) }
                     .accessibilityIdentifier("toolbar.selectButton")
-                iconButton(system: "arrow.up.and.down.and.arrow.left.and.right", isActive: canvasManager.floatingPiece != nil || canvasManager.vectorFloat != nil) { toggleMove() }
+                iconButton(system: "arrow.up.and.down.and.arrow.left.and.right", isActive: canvasManager.floatingPiece != nil || canvasManager.vectorFloat != nil) { canvasManager.toggleMove() }
                     .accessibilityIdentifier("toolbar.moveButton")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -163,51 +163,6 @@ struct TopToolbar: View {
         // artist's way of starting over.
         if panel == .select, activePanel == .select { canvasManager.deselect() }
         activePanel = (activePanel == panel) ? .none : panel
-    }
-
-    /// Tapping Move toggles between lifting the current selection (or, if there is none, the whole
-    /// current layer) into a floating piece, and committing whatever's currently floating.
-    private func toggleMove() {
-        // **Before the bake below, not after.** A lassoed piece is settled by
-        // `commitAllInteractiveState()` like everything else, so asking afterwards whether one was
-        // floating always answers no — and the second tap of Move would read as a fresh one and lift
-        // again (or, with the selection already cleared at bake, start transforming the whole cel).
-        if canvasManager.vectorFloat != nil {
-            canvasManager.commitVectorFloatIfNeeded()
-            return
-        }
-        // A still-adjustable shape or fill must bake before Move can act on it — otherwise Move
-        // would engage against stale committed content while the shape/fill sits in its own
-        // transient tier, then get silently re-baked (at its *original*, undragged geometry) the
-        // next time something else forces a commit, producing exactly the "content teleports back"
-        // bug this guards against.
-        guard canvasManager.commitAllInteractiveState() else { return }
-        // Move lifts vector geometry into the shared float and drags it with the on-canvas box.
-        if canvasManager.activeLayerIsVector {
-            // **The interpolated-cel refusal used to be spelled again here, and it is not any more.**
-            // It is `CanvasManager.activeVectorMoveTarget`'s, which both lifts go through, and it
-            // raises `CanvasNotice.cannotMoveDerivedFrame` rather than returning in silence. A rule a
-            // view holds is a rule the fast tier cannot see (KEYFRAMES.md stage 3a's own finding), and
-            // this copy of it is what made the refusal invisible from a logic test.
-            // With a loop drawn, Move is about the region inside it (LASSO_MOVE.md §5.1). Note the
-            // unconditional return: a lasso that caught nothing does **nothing**, and deliberately
-            // does not fall through to moving the artist's whole drawing — that is the destructive
-            // surprise, and the loop stays on screen to be redrawn (owner, 2026-08-22).
-            if canvasManager.selection != nil {
-                canvasManager.beginVectorLassoMove()
-                return
-            }
-            // No loop: the whole cel travels through the same float.
-            // The second tap is the `vectorFloat != nil` arm at the top of this method, which is why
-            // this is a plain begin rather than a toggle.
-            canvasManager.beginVectorWholeCelMove()
-            return
-        }
-        if canvasManager.floatingPiece != nil {
-            canvasManager.commitFloatingPieceIfNeeded()
-        } else {
-            canvasManager.beginMove()
-        }
     }
 
     /// Brush, eraser, and fill are two-stage: the first tap only *selects* the tool (closing any open
