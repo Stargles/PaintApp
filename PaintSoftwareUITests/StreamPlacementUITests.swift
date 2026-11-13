@@ -1,4 +1,5 @@
 import XCTest
+@testable import PaintSoftware
 
 /// Cold-start reachability and actual pixels, including the artist's rotoscoping gesture.
 final class StreamPlacementUITests: StreamUITestCase {
@@ -408,9 +409,17 @@ final class StreamPlacementUITests: StreamUITestCase {
         XCTAssertTrue(brush.waitForExistence(timeout: 5))
         if !brush.isSelected { tapWhenHittable(brush, "The Opaque Round paint brush") }
         XCTAssertTrue(brush.isSelected)
-        setBrushSize(app, normalized: 0.05)
         app.buttons["toolbar.brushButton"].tap()
         XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5))
+        // A one-point brush can straddle two native rows without covering either completely.
+        let size = app.sliders["sideToolbar.brushSizeSlider"]
+        XCTAssertTrue(size.waitForExistence(timeout: 5))
+        let target = BrushSizeCurve.sliderPosition(forPercent: 11 / Double(scene.width))
+        adjustSlider(size, to: CGFloat(target), tolerance: 0.03)
+        let diameter = BrushSizeCurve.percent(forSliderPosition: Double(size.normalizedSliderPosition))
+            * Double(scene.width)
+        XCTAssertTrue((8...14).contains(diameter),
+                      "PREMISE: the brush is \(diameter) canvas points wide on the 128 × 128 scene")
         setBrushColor(app, hex: "000000")
         drawLine(on: canvas, from: hostPoint(0.44, 0.50), to: hostPoint(0.56, 0.50))
         XCTAssertNotNil(waitForPixel(canvas, at: eraseHost, matches: Colour.black.matches),
