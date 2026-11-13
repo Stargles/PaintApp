@@ -498,6 +498,18 @@ final class FlightRecorderLogicTests: XCTestCase {
             ActionRecorder.isCapturing = wasCapturing
         }
         let marker = "test-no-motion-" + UUID().uuidString
+        func newFlights() -> Set<URL> { Set(recorder.recordings.map(\.url)).subtracting(known) }
+        func waitForFlight(count: Int, excluding: Set<URL> = []) throws -> URL {
+            let saved = expectation(for: NSPredicate { _, _ in newFlights().count == count }, evaluatedWith: recorder)
+            wait(for: [saved], timeout: 5)
+            let all = newFlights()
+            created = Array(all)
+            return try XCTUnwrap(all.subtracting(excluding).first)
+        }
+        func readLines(in url: URL, containing marker: String) throws -> [[String: Any]] {
+            let data = try recordingBytes(at: url, containing: marker)
+            return try String(decoding: data, as: UTF8.self).split(separator: "\n").map { try headerFields(String($0)) }
+        }
         let object = NSObject()
         var miss = CanvasNavigationMiss()
         let bound = [CanvasWedgeDetector.canvasMarker]
@@ -525,26 +537,13 @@ final class FlightRecorderLogicTests: XCTestCase {
 
         let partial = try XCTUnwrap(runReissue(interruption: "cancelled", lostNavigation: true, end: CGPoint(x: 851, y: 220.5)))
         recorder.canvasNavigationMissed(partial)
-        // Switching before the 200 ms diagnostic save still uses the outgoing context and keeps
-        // both observations in one file.
-        recorder.startFlight(canvasSize: CGSize(width: 200, height: 200), projectName: "navigation-test-next")
-        let saved = expectation(for: NSPredicate { _, _ in
-            Set(recorder.recordings.map(\.url)).subtracting(known).count == 1
-        }, evaluatedWith: recorder)
-        wait(for: [saved], timeout: 5)
-        created = Array(Set(recorder.recordings.map(\.url)).subtracting(known))
-        XCTAssertEqual(created.count, 1)
-        let url = try XCTUnwrap(created.first)
-        let data = try recordingBytes(at: url, containing: marker)
-        let lines = try String(decoding: data, as: UTF8.self).split(separator: "\n").map { try headerFields(String($0)) }
+        // The pending item itself writes the first flight. There is no project switch, manual
+        // Save Last 90 Seconds, or repair callback to land it for the recorder.
+        let first = try waitForFlight(count: 1)
+        let lines = try readLines(in: first, containing: marker)
         let missedLine = lines.first { $0["event"] as? String == "canvasNavigationMiss" && $0["touch"] as? Int == 1567 }
         XCTAssertEqual(lines.first?["trigger"] as? String, "navigation")
         XCTAssertEqual(lines.first?["project"] as? String, "navigation-test-source")
-        let reissue = lines.first { $0["event"] as? String == "canvasNavigationMiss" && $0["touch"] as? Int == 3694 }
-        XCTAssertEqual(reissue?["kind"] as? String, "cancelReissue")
-        XCTAssertEqual(reissue?["lost"] as? String, "canvas.pinch,canvas.rotation")
-        XCTAssertEqual(reissue?["survivor"] as? Int, 3692)
-        XCTAssertEqual(reissue?["moves"] as? Int, 17)
         let snapshots = lines.filter { ($0["edge"] as? String)?.hasPrefix(marker) == true }
         XCTAssertEqual(snapshots.count, 2)
         for key in ["scale", "cx", "cy", "rot", "writes", "canvas.pan.changed", "canvas.pinch.changed", "canvas.rotation.changed"] {
@@ -557,6 +556,26 @@ final class FlightRecorderLogicTests: XCTestCase {
         XCTAssertEqual(missedLine?["touch"] as? Int, 1567)
         XCTAssertEqual(missedLine?["travel"] as? Double, 120)
         XCTAssertEqual(missedLine?["moves"] as? Int, 19)
+
+        let reissue = lines.first { $0["event"] as? String == "canvasNavigationMiss" && $0["touch"] as? Int == 3694 }
+        XCTAssertEqual(reissue?["kind"] as? String, "cancelReissue")
+        XCTAssertEqual(reissue?["lost"] as? String, "canvas.pinch,canvas.rotation")
+        XCTAssertEqual(reissue?["survivor"] as? Int, 3692)
+        XCTAssertEqual(reissue?["moves"] as? Int, 17)
+
+        recorder.canvasNavigationMissed(partial)
+        // Switching before the diagnostic delay preserves the outgoing project context.
+        recorder.startFlight(canvasSize: CGSize(width: 200, height: 200), projectName: "navigation-test-next")
+        let afterSwitch = try waitForFlight(count: 2, excluding: [first])
+        let switchedLines = try readLines(in: afterSwitch, containing: "cancelReissue")
+        XCTAssertEqual(switchedLines.first?["project"] as? String, "navigation-test-source")
+
+        // The canceled pending timer must leave the two files alone after its deadline.
+        let duplicate = expectation(for: NSPredicate { _, _ in newFlights().count > 2 }, evaluatedWith: recorder)
+        duplicate.isInverted = true
+        wait(for: [duplicate], timeout: 0.35)
+        created = Array(newFlights())
+        XCTAssertEqual(created.count, 2)
     }
 
     // MARK: - The ring
