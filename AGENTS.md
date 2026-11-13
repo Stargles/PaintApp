@@ -40,6 +40,11 @@ own branch, so `main`'s HANDOFF.md can be behind.
   both after every merge. A session can end at any moment; conversation-only tasks are lost.
 - **His usage budget is set per session** (how many agents, which models). Ask if it was not stated;
   put cheap models on mechanical work.
+  For new subtasks, spawn fresh agents with short briefs. Restarting a finished agent replays its
+  old context and costs usage. Send active agents only updates that affect their current task.
+  The root agent acts as project manager: delegate investigation, implementation and focused
+  verification with clear acceptance criteria. Root coordinates the shared native lane, reviews
+  results and makes integration/release decisions without pulling routine test detail into its context.
 - **A real scene is 300–1000 drawn cels.** Design memory around a window or budget, never "load it
   all" (he named the YouTube-buffer shape himself).
 

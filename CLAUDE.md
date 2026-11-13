@@ -853,7 +853,12 @@ xcodebuild clean "${BUILD_ARGS[@]}" || exit 1
 xcodebuild build "${BUILD_ARGS[@]}" -allowProvisioningUpdates \
   -allowProvisioningDeviceRegistration || exit 1
 codesign --verify --deep --strict <path>.app || exit 1
-EXP=$(security cms -D -i <path>.app/embedded.mobileprovision | plutil -extract ExpirationDate raw - -o -); [[ $(( $(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$EXP" +%s) - $(date +%s) )) -lt $((5*86400)) ]] && echo "REFUSE: profile expires $EXP — under 5 days, do not install" && exit 1
+EXP=$(security cms -D -i <path>.app/embedded.mobileprovision | plutil -extract ExpirationDate raw - -o -) || exit 1
+EXP_EPOCH=$(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$EXP" +%s) || exit 1
+if [[ $((EXP_EPOCH - $(date +%s))) -lt $((5*86400)) ]]; then
+  echo "REFUSE: profile expires $EXP — under 5 days, do not install"
+  exit 1
+fi
 xcrun devicectl device install app --device E3B83820-DF74-5042-B52B-0D5BA17E4877 <path>.app
 ```
 **Name the iPad and allow device registration when a profile has to be minted**: on 2026-10-08 the
