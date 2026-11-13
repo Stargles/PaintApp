@@ -14,12 +14,15 @@ import XCTest
 /// mark, scrub, Move, drag, mark again, scrub back to the middle — and only then Done. Before (153) that
 /// Done put back the pose the box found and wrote the drag at the middle frame, so the row showed two
 /// bare primed marks and the drawing sat moved at every frame.
-///
-/// A class of one test on purpose (CLAUDE.md's cost model: `xcodebuild` distributes per test *class*).
 final class TransformKeysSurviveUITests: PaintUITestCase {
 
-    /// The window of `canvas.host` the stroke lives in, clear of the paper's edge and the box's outline.
+    /// The window for the baked and reopened transformation-layer test, with the box dismissed.
     private let inkWindow = CGRect(x: 0.20, y: 0.22, width: 0.55, height: 0.40)
+
+    /// The diagonal crosses these fixed columns inside the Move box, away from its outline and knobs.
+    /// The columns stay on exposed paper even after the two drags move the stroke down by 0.18.
+    private let moveStrokeInterior = CGRect(x: 0.34, y: 0.23, width: 0.04, height: 0.26)
+    private let moveStrokeWindow = CGRect(x: 0.25, y: 0.23, width: 0.33, height: 0.26)
 
     /// Puts the playhead on `frame` with the transport — to the start, then a step at a time — which
     /// lands on an exact frame and, unlike a tap on a block, never raises the block's menu.
@@ -55,14 +58,29 @@ final class TransformKeysSurviveUITests: PaintUITestCase {
         try inkTopLeft(try settledProbe(canvas, window: inkWindow), in: inkWindow)
     }
 
+    private func drawMoveStroke(_ app: XCUIApplication) {
+        dragOnCanvas(app, from: CGVector(dx: 0.28, dy: 0.26), to: CGVector(dx: 0.55, dy: 0.33))
+    }
+
+    private func moveStrokeInk(_ app: XCUIApplication, _ canvas: XCUIElement, in window: CGRect,
+                               file: StaticString = #filePath, line: UInt = #line) throws -> CGPoint {
+        XCTAssertTrue(visiblePaperRect(app, in: canvas).contains(window),
+                      "The stroke scan \(window) must stay on exposed paper", file: file, line: line)
+        let probe = try settledProbe(canvas, window: window)
+        return try XCTUnwrap(try? inkTopLeft(probe, in: window),
+                             "Expected visible black stroke ink on exposed paper in \(window)",
+                             file: file, line: line)
+    }
+
     func testHeldDrawingKeepsItsSelectedMoveBoxFromKeyAThroughScrubAndKeyBToTheNextDrag() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
         XCTAssertEqual(app.windows.firstMatch.frame.size, CGSize(width: 1080, height: 810))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        dragOnCanvas(app, from: CGVector(dx: 0.28, dy: 0.32), to: CGVector(dx: 0.55, dy: 0.32))
-        let original = try inkCorner(canvas)
+        drawMoveStroke(app)
+        let originalX = try moveStrokeInk(app, canvas, in: moveStrokeWindow).x
+        let originalY = try moveStrokeInk(app, canvas, in: moveStrokeInterior).y
         addKeysAtThePlayhead(app, layer: 0, frame: 0)
         app.buttons["toolbar.moveButton"].tap()
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5))
@@ -76,17 +94,19 @@ final class TransformKeysSurviveUITests: PaintUITestCase {
                      to: CGVector(dx: box.midX, dy: box.midY + 0.12))
         app.buttons["moveBar.doneButton"].tap()
         XCTAssertEqual(markers(app, layer: 0), "0|10")
-        let b = try inkCorner(canvas)
+        let bX = try moveStrokeInk(app, canvas, in: moveStrokeWindow).x
+        let bY = try moveStrokeInk(app, canvas, in: moveStrokeInterior).y
         goTo(app, frame: 0)
-        let a = try inkCorner(canvas)
-        XCTAssertEqual(a.x, original.x, accuracy: 0.006)
-        XCTAssertEqual(a.y, original.y, accuracy: 0.006, "A keeps the original picture")
-        XCTAssertEqual(b.x, a.x, accuracy: 0.006)
-        XCTAssertEqual(b.y - a.y, 0.12, accuracy: 0.02, "B receives the drag without another Move press or selection")
         attachScreenshot(XCUIScreen.main, "repeat-move-held-key-a-original-picture")
+        let aX = try moveStrokeInk(app, canvas, in: moveStrokeWindow).x
+        let aY = try moveStrokeInk(app, canvas, in: moveStrokeInterior).y
+        XCTAssertEqual(aX, originalX, accuracy: 0.006)
+        XCTAssertEqual(aY, originalY, accuracy: 0.006, "A keeps the original picture")
+        XCTAssertEqual(bX, aX, accuracy: 0.006)
+        XCTAssertEqual(bY - aY, 0.12, accuracy: 0.02, "B receives the drag without another Move press or selection")
         goTo(app, frame: 10)
-        XCTAssertEqual(try inkCorner(canvas).y, b.y, accuracy: 0.006)
         attachScreenshot(XCUIScreen.main, "repeat-move-held-key-b-drawn-picture")
+        XCTAssertEqual(try moveStrokeInk(app, canvas, in: moveStrokeInterior).y, bY, accuracy: 0.006)
 
         // A fresh box over the now-keyed drawing must follow its picture when it is scrubbed,
         // without a nudge to force a new isolated bitmap. A stored box value alone cannot prove it.
@@ -94,12 +114,12 @@ final class TransformKeysSurviveUITests: PaintUITestCase {
         app.buttons["toolbar.moveButton"].tap()
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5))
         goTo(app, frame: 10)
+        attachScreenshot(XCUIScreen.main, "repeat-move-zero-nudge-key-b-picture-under-box")
         XCTAssertTrue(app.buttons["moveBar.doneButton"].exists)
         let movedBox = try XCTUnwrap(settledMoveBox(app), "the incoming keyed picture still has a box")
         XCTAssertGreaterThan(movedBox.midY, box.midY + 0.08)
-        XCTAssertEqual(try inkCorner(canvas).y, b.y, accuracy: 0.006,
+        XCTAssertEqual(try moveStrokeInk(app, canvas, in: moveStrokeInterior).y, bY, accuracy: 0.006,
                        "an unmoved replacement shows B's actual ink while its box is still up")
-        attachScreenshot(XCUIScreen.main, "repeat-move-zero-nudge-key-b-picture-under-box")
         app.buttons["moveBar.doneButton"].tap()
         XCTAssertEqual(markers(app, layer: 0), "0|10", "the unmoved replacement writes no extra key")
     }
@@ -110,8 +130,8 @@ final class TransformKeysSurviveUITests: PaintUITestCase {
         XCTAssertEqual(app.windows.firstMatch.frame.size, CGSize(width: 1080, height: 810))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
-        dragOnCanvas(app, from: CGVector(dx: 0.28, dy: 0.32), to: CGVector(dx: 0.55, dy: 0.32))
-        let original = try inkCorner(canvas)
+        drawMoveStroke(app)
+        let originalY = try moveStrokeInk(app, canvas, in: moveStrokeInterior).y
         addKeysAtThePlayhead(app, layer: 0, frame: 0)
         app.buttons["toolbar.moveButton"].tap()
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5))
@@ -121,23 +141,25 @@ final class TransformKeysSurviveUITests: PaintUITestCase {
         goTo(app, frame: 10)
         XCTAssertTrue(app.buttons["moveBar.doneButton"].exists, "landing the old edit preserves the box")
         addKeysAtThePlayhead(app, layer: 0, frame: 10)
-        let secondBox = try XCTUnwrap(settledMoveBox(app))
-        XCTAssertEqual(try inkCorner(canvas).y - original.y, 0.06, accuracy: 0.02,
-                       "the replacement's actual bitmap includes the earlier drag")
         attachScreenshot(XCUIScreen.main, "repeat-move-earlier-drag-retained-under-new-box")
+        let secondBox = try XCTUnwrap(settledMoveBox(app))
+        XCTAssertEqual(try moveStrokeInk(app, canvas, in: moveStrokeInterior).y - originalY, 0.06, accuracy: 0.02,
+                       "the replacement's actual bitmap includes the earlier drag")
         dragOnCanvas(app, from: CGVector(dx: secondBox.midX, dy: secondBox.midY),
                      to: CGVector(dx: secondBox.midX, dy: secondBox.midY + 0.12))
-        XCTAssertTrue(app.buttons["moveBar.doneButton"].exists)
-        XCTAssertEqual(try inkCorner(canvas).y - original.y, 0.18, accuracy: 0.02,
-                       "both authored drags are drawn while the box stays up")
         attachScreenshot(XCUIScreen.main, "repeat-move-second-drag-drawn-with-box-up")
+        XCTAssertTrue(app.buttons["moveBar.doneButton"].exists)
+        XCTAssertEqual(try moveStrokeInk(app, canvas, in: moveStrokeInterior).y - originalY, 0.18, accuracy: 0.02,
+                       "both authored drags are drawn while the box stays up")
         app.buttons["moveBar.doneButton"].tap()
         XCTAssertEqual(markers(app, layer: 0), "0|10")
         goTo(app, frame: 0)
-        XCTAssertEqual(try inkCorner(canvas).y, original.y, accuracy: 0.006, "A retains its pre-drag picture")
+        XCTAssertEqual(try moveStrokeInk(app, canvas, in: moveStrokeInterior).y, originalY, accuracy: 0.006,
+                       "A retains its pre-drag picture")
         goTo(app, frame: 10)
-        XCTAssertEqual(try inkCorner(canvas).y - original.y, 0.18, accuracy: 0.02, "B retains both authored drags")
         attachScreenshot(XCUIScreen.main, "repeat-move-authored-drag-key-b-committed")
+        XCTAssertEqual(try moveStrokeInk(app, canvas, in: moveStrokeInterior).y - originalY, 0.18, accuracy: 0.02,
+                       "B retains both authored drags")
     }
 
     func testScaleArtworkKeepsTheDistanceBetweenTwoDrawnCelPoses() throws {
