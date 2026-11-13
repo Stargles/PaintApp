@@ -439,6 +439,57 @@ final class LiveTransformEditLogicTests: XCTestCase {
                           xCurve(restX - 5), "the cel itself is untouched until the lift")
     }
 
+    func testCelPoseDragShowsStationaryBackingAndMovingInkBeforeAndAfterLift() throws {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.isCanvasBackgroundVisible = false
+        manager.addVectorLayer()
+        let index = manager.currentLayerIndex
+        let target = KeyframeTarget.layer(id: manager.layers[index].id)
+        let vector = try XCTUnwrap(manager.layers[index].cels[0].vector)
+        vector.addFill(path: CGPath(rect: CGRect(x: 22, y: 6, width: 4, height: 4), transform: nil),
+                       color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        let backing = CanvasFixture.solidImage(.blue, rect: CGRect(x: 6, y: 6, width: 4, height: 4))
+        manager.layers[index].cels[0].bakedImage = try CanvasFixture.rasterSource(backing)
+        manager.layers[index].cels[0].transformTracks = [
+            TransformChannelID.cel.id: TransformTrack(box: canvasBox, curves: [.x: xCurve(canvasBox.midX)])
+        ]
+
+        let celX = PoseChannelID.cel(.cel).parameterID(.x)
+        let edit = try XCTUnwrap(manager.graphBandEdit(target: target, parameterIDs: [celX]))
+        manager.beginLiveTransformEdit(edit)
+        let runs = manager.liveTransformRuns(edit, atFrame: 0)
+        let recipe = try XCTUnwrap(manager.makeSandwichRecipe(atFrame: 0, runs: runs))
+        let minted = try XCTUnwrap(manager.liveTransformMaps(edit, runs: runs, atFrame: 0).first)
+        let bands = try XCTUnwrap(recipe.compositeBands())
+
+        manager.holdLivePose([celX: xCurve(canvasBox.midX + 8)], of: target)
+        let held = try XCTUnwrap(manager.liveTransformMaps(edit, runs: runs, atFrame: 0,
+                                                          holding: manager.liveEdit).first)
+        let delta = try XCTUnwrap(minted.inverse?.concatenating(held).affine)
+        let shown = try XCTUnwrap(lay(bands, deltas: [1: delta]))
+        XCTAssertTrue(manager.commitLivePose(), "the lift wrote the held graph node")
+        manager.endLiveTransformEdit()
+        let settled = try XCTUnwrap(manager.makeRenderRequest(atFrame: 0, includeBackground: false)
+            .flatMap(Compositor.composite))
+
+        func sampleRow(_ image: CGImage) throws -> [[UInt8]] {
+            let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(image))
+            return [8, 16, 24, 32].map { x in
+                let offset = (8 * image.width + x) * 4
+                return Array(bytes[offset..<(offset + 4)])
+            }
+        }
+        let blue: [UInt8] = [0, 0, 255, 255]
+        let red: [UInt8] = [255, 0, 0, 255]
+        let clear: [UInt8] = [0, 0, 0, 0]
+        XCTAssertEqual(try sampleRow(XCTUnwrap(lay(bands, deltas: [:]))), [blue, clear, red, clear],
+                       "the starting bands contain both tiers at their original positions")
+        XCTAssertEqual(try sampleRow(settled), [blue, clear, clear, red],
+                       "after lift only the red fill moves eight pixels")
+        XCTAssertEqual(try sampleRow(shown), [blue, clear, clear, red],
+                       "under the finger only the red fill moves eight pixels")
+    }
+
     // MARK: - The Move box holds its pose too — TODO (164)
 
     /// One tick of the box's drag: the overlay reports the whole box, carried `dx`, `dy` from where it
