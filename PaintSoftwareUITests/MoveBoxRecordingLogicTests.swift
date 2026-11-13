@@ -73,6 +73,10 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
         // The playhead has to be where the wall clock says before the sample is taken, or the take's
         // stops and the frames the artist watched are two different sequences.
         manager.tickPlayback()
+        reportBox(manager, to: delta)
+    }
+
+    private func reportBox(_ manager: CanvasManager, to delta: CGVector) {
         manager.updateFloatingPose(
             transform: FloatingTransform(position: CGPoint(x: canvasCentre.x + delta.dx,
                                                            y: canvasCentre.y + delta.dy),
@@ -562,6 +566,104 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
             try XCTUnwrap(held.layers[moverIndex].layerTransform).pose, inBox: canvasBox))
         XCTAssertEqual(heldBase.x, Double(canvasCentre.x) + 9, accuracy: 1e-6, "which lands at its lift")
         XCTAssertNil(held.liveTransformEdit)
+    }
+
+    // MARK: - The end of playback
+
+    func testALateMoveReportCannotChangeTheCurveOrExtendItPastPlayback() throws {
+        // A report just after the endpoint can change its pinned value. One arriving two frames
+        // later can also put keys beyond the range, while the same playback tick is still pending.
+        for lateDelay in [0.03125, 0.25] {
+            let (manager, clock) = movingDocument(frames: 16)
+            defer { manager.stopPlayback() }
+            manager.fps = 8
+            manager.setLoopStart(3)
+            manager.setLoopEnd(7)
+            manager.isLoopEnabled = true
+            let base = try XCTUnwrap(manager.layers[moverIndex].layerTransform)
+            let undoCount = manager.history.undoStack.count
+            XCTAssertNil(manager.armRecording())
+            XCTAssertTrue(manager.beginContainerPoseMove())
+            manager.moveBoxTouched()
+            XCTAssertTrue(manager.recordingOwnsMoveBox)
+            XCTAssertEqual(manager.currentFrame, 3)
+            let start = clock.now
+            reportBox(manager, to: .zero)
+            dragBox(manager, clock, to: CGVector(dx: 8, dy: 0), at: start + 0.25)
+            let deadline = try XCTUnwrap(manager.recordingPlaybackDeadline())
+            XCTAssertEqual(deadline, start + 0.5, accuracy: 1e-9)
+            clock.now = deadline
+            reportBox(manager, to: CGVector(dx: 16, dy: 0))
+            clock.now = deadline + lateDelay
+            reportBox(manager, to: CGVector(dx: 48, dy: 0))
+            XCTAssertEqual(manager.currentFrame, 5, "Setup: no playback tick has reached the end")
+            XCTAssertTrue(manager.isRecording)
+
+            manager.tickPlayback()
+            manager.moveBoxLifted()
+
+            XCTAssertEqual(manager.currentFrame, 7)
+            XCTAssertFalse(manager.isPlaying)
+            XCTAssertFalse(manager.isRecording)
+            let after = try XCTUnwrap(manager.layers[moverIndex].layerTransform)
+            let curve = try XCTUnwrap(after.track.curve(.x))
+            XCTAssertEqual(curve.keys.map(\.frame), [3, 7])
+            XCTAssertEqual(after.resolvedValues(atFrame: 7).x, Double(canvasCentre.x) + 16, accuracy: 1e-6,
+                           "The drawing ends at the position reported exactly when frame 7 came due")
+            XCTAssertEqual(after.pose, base.pose)
+            XCTAssertEqual(manager.history.undoStack.count, undoCount + 1)
+            XCTAssertEqual(manager.history.undoStack.last?.label, .recordAnimation)
+            manager.undo()
+            XCTAssertEqual(manager.layers[moverIndex].layerTransform, base)
+        }
+    }
+
+    func testALateOnlyMoveReportCannotLandAsAnOrdinaryMove() throws {
+        // With a lift before the final tick, the stop releases the nudge. With a finger still
+        // down at the stop, the later lift releases it instead.
+        for liftBeforeStop in [true, false] {
+            let (manager, clock) = movingDocument(frames: 16)
+            defer { manager.stopPlayback() }
+            manager.fps = 8
+            manager.setLoopStart(3)
+            manager.setLoopEnd(7)
+            var base = try XCTUnwrap(manager.layers[moverIndex].layerTransform)
+            let restX = Double(canvasCentre.x)
+            base.track.setCurve(AnimationCurve(keys: [
+                .init(frame: 3, value: restX), .init(frame: 7, value: restX)
+            ]), for: .x)
+            manager.layers[moverIndex].transform = base
+            let undoCount = manager.history.undoStack.count
+            XCTAssertNil(manager.armRecording())
+            XCTAssertTrue(manager.beginContainerPoseMove())
+            manager.moveBoxTouched()
+            XCTAssertTrue(manager.recordingOwnsMoveBox)
+            clock.now += 0.25
+            manager.tickPlayback()
+            XCTAssertEqual(manager.currentFrame, 5)
+            XCTAssertEqual(manager.containerPoseWrite(target(manager), atFrame: 5), .key,
+                           "Setup: an ordinary Move here would add a key to the existing curve")
+            let deadline = try XCTUnwrap(manager.recordingPlaybackDeadline())
+            clock.now = deadline + 0.25
+            reportBox(manager, to: CGVector(dx: 24, dy: 0))
+            if liftBeforeStop { manager.moveBoxLifted() }
+            XCTAssertTrue(manager.isRecording)
+            XCTAssertEqual(manager.currentFrame, 5)
+
+            manager.tickPlayback()
+            if !liftBeforeStop { manager.moveBoxLifted() }
+
+            XCTAssertEqual(manager.currentFrame, 7)
+            XCTAssertFalse(manager.isPlaying)
+            XCTAssertFalse(manager.isRecording)
+            let after = try XCTUnwrap(manager.layers[moverIndex].layerTransform)
+            XCTAssertEqual(after.pose, base.pose, "Late-only input must leave the stored pose in place")
+            XCTAssertEqual(after.track, base.track, "Releasing the drag must add no ordinary Move key")
+            XCTAssertEqual(after.resolvedValues(atFrame: 5).x, restX, accuracy: 1e-6)
+            XCTAssertEqual(manager.history.undoStack.count, undoCount)
+            XCTAssertNotNil(manager.floatingPiece, "An empty take leaves its Move box up")
+            XCTAssertNil(manager.livePose)
+        }
     }
 
     // MARK: - The refusals
