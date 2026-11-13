@@ -329,6 +329,9 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.observeBrushColor()
         context.coordinator.observeOnionSkin()
         context.coordinator.containerView = container
+        host.recordNavigationSnapshot = { [weak coordinator = context.coordinator] edge, touch, recorder in
+            coordinator?.recordNavigationSnapshot(edge: edge, touch: touch, recorder: recorder)
+        }
         context.coordinator.onionSkinView = onionSkin
         context.coordinator.paperView = paper
         context.coordinator.transformOverlay = transformOverlay
@@ -4368,7 +4371,7 @@ struct CanvasView: UIViewRepresentable {
         /// handles stay a fixed size in screen points however far the artist has zoomed.
         private var canvasContentScale: CGFloat { fitScale * committedScale * liveScale }
 
-        private func applyTransform() {
+        private func applyTransform(navigation: CanvasNavigationGesture? = nil) {
             // On every exit, including the no-op early return: the label has to track the transform
             // even on the passes that change nothing in Core Animation, or a test reads a stale
             // value — and **after the container's transform is written**, because `movebox:` is
@@ -4420,9 +4423,25 @@ struct CanvasView: UIViewRepresentable {
 
             container.transform = CGAffineTransform.identity.rotated(by: rotation).scaledBy(x: scale, y: scale)
             container.center = CGPoint(x: baseCenter.x + offset.width, y: baseCenter.y + offset.height)
+            if ActionRecorder.isFlying {
+                navigationTransformWrites += 1
+                if let navigation { navigationDelivery[navigation.rawValue].writes += 1 }
+            }
         }
 
         // MARK: - Gestures
+
+        private var navigationTransformWrites = 0
+        private var navigationDelivery = Array(repeating: CanvasNavigationGesture.Delivery(),
+                                               count: CanvasNavigationGesture.allCases.count)
+
+        func recordNavigationSnapshot(edge: String, touch: Int?, recorder: ActionRecorder) {
+            guard let container = containerView else { return }
+            recorder.canvasNavigationSnapshot(edge: edge, touch: touch, container: container,
+                                              writes: navigationTransformWrites, pan: panRecognizer,
+                                              pinch: pinchRecognizer, rotation: rotationRecognizer,
+                                              delivery: navigationDelivery)
+        }
 
         /// **Everything this coordinator hangs on a layer's stroke recognizer**, in one place, because
         /// there are two moments it happens: when the layer's host is built, and when
@@ -4489,7 +4508,8 @@ struct CanvasView: UIViewRepresentable {
             // Read before anything is replaced: the replacement takes the evidence away with the
             // recognizers it replaces.
             var notAtRest: [String] = []
-            ActionRecorder.ifRecording { _ in
+            ActionRecorder.ifRecording { recorder in
+                recordNavigationSnapshot(edge: "repair", touch: nil, recorder: recorder)
                 notAtRest = containerView?.window.map { WindowEventTap.unquietRecognizers(under: $0) } ?? []
             }
             var stranded: [String] = []
@@ -4938,9 +4958,17 @@ struct CanvasView: UIViewRepresentable {
         /// lands *after* the drag began is a hold and never reaches these (`ModifierHold`). A pan
         /// already in progress when the drag begins is left alone; only a beginning is refused.
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            let transformRecognizers: [UIGestureRecognizer] = [panRecognizer, pinchRecognizer, rotationRecognizer].compactMap { $0 }
-            guard transformRecognizers.contains(where: { $0 === gestureRecognizer }) else { return true }
-            return !assistedDragIsLive
+            let navigation: CanvasNavigationGesture
+            if gestureRecognizer === panRecognizer { navigation = .pan }
+            else if gestureRecognizer === pinchRecognizer { navigation = .pinch }
+            else if gestureRecognizer === rotationRecognizer { navigation = .rotation }
+            else { return true }
+            let allowed = !assistedDragIsLive
+            if ActionRecorder.isFlying {
+                if allowed { navigationDelivery[navigation.rawValue].allowed += 1 }
+                else { navigationDelivery[navigation.rawValue].refused += 1 }
+            }
+            return allowed
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -5092,35 +5120,49 @@ struct CanvasView: UIViewRepresentable {
         /// produce one more `.changed` as the recognizer collapses from 2 touches to fewer, and that
         /// frame is not an intentional transform.
         private func handleTransformGesture<Recognizer: UIGestureRecognizer>(
-            _ recognizer: Recognizer, applyLiveValue: (Recognizer) -> Void) {
-            guard let host = hostView else { return }
+            _ recognizer: Recognizer, navigation: CanvasNavigationGesture, applyLiveValue: (Recognizer) -> Void) {
+            let records = ActionRecorder.isFlying
+            let index = navigation.rawValue
+            guard let host = hostView else {
+                if records { navigationDelivery[index].noHost += 1 }
+                return
+            }
             switch recognizer.state {
             case .began:
+                if records { navigationDelivery[index].began += 1 }
                 beginAnchorIfNeeded(at: recognizer.location(in: host))
                 applyLiveValue(recognizer)
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .changed:
-                guard recognizer.numberOfTouches >= 2 else { return }
+                if records { navigationDelivery[index].changed += 1 }
+                guard recognizer.numberOfTouches >= 2 else {
+                    if records { navigationDelivery[index].underTwo += 1 }
+                    return
+                }
                 applyLiveValue(recognizer)
                 updateLiveOffset(currentLocation: recognizer.location(in: host))
             case .ended, .cancelled:
+                if records {
+                    if recognizer.state == .ended { navigationDelivery[index].ended += 1 }
+                    else { navigationDelivery[index].cancelled += 1 }
+                }
                 commitLiveTransformIfAllEnded()
             default:
                 break
             }
-            applyTransform()
+            applyTransform(navigation: navigation)
         }
 
         @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
-            handleTransformGesture(recognizer) { _ in }
+            handleTransformGesture(recognizer, navigation: .pan) { _ in }
         }
 
         @objc func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
-            handleTransformGesture(recognizer) { self.liveScale = $0.scale }
+            handleTransformGesture(recognizer, navigation: .pinch) { self.liveScale = $0.scale }
         }
 
         @objc func handleRotation(_ recognizer: UIRotationGestureRecognizer) {
-            handleTransformGesture(recognizer) { self.liveRotation = $0.rotation }
+            handleTransformGesture(recognizer, navigation: .rotation) { self.liveRotation = $0.rotation }
         }
 
         @objc func handleTwoFingerTap() {

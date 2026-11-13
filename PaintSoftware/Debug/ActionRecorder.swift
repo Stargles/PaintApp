@@ -121,6 +121,7 @@ final class ActionRecorder: ObservableObject {
     /// burst from growing it.
     private var ring = FlightRing<(event: String, fields: [(String, JSONValue)])>(capacity: 5000, window: 90)
     private var wedge = CanvasWedgeDetector()
+    private var pendingNavigationFlight: DispatchWorkItem?
     /// The editor the flight ring is watching, for a dump's header. Updated on every `startFlight`,
     /// which each editor appearance calls.
     private var flightContext: (canvasSize: CGSize?, projectName: String) = (nil, "")
@@ -133,6 +134,9 @@ final class ActionRecorder: ObservableObject {
     /// project it came from. A window whose `sendEvent` cannot be intercepted still flies — the model
     /// events do not need the tap — and says so on `problem`.
     func startFlight(canvasSize: CGSize?, projectName: String) {
+        if pendingNavigationFlight != nil, flightContext != (canvasSize, projectName) {
+            saveFlight(trigger: "navigation")
+        }
         flightContext = (canvasSize, projectName)
         guard !Self.isFlying else { return }
         ensureTap()
@@ -149,6 +153,10 @@ final class ActionRecorder: ObservableObject {
     /// and the badge catch up when the file is on disk.
     @discardableResult
     func saveFlight(trigger: String) -> URL? {
+        if trigger == "stranded" || trigger == "wedge" || trigger == "navigation" {
+            pendingNavigationFlight?.cancel()
+            pendingNavigationFlight = nil
+        }
         let now = CACurrentMediaTime()
         let entries = ring.elements(asOf: now)
         let url: URL
@@ -163,10 +171,11 @@ final class ActionRecorder: ObservableObject {
                                      tap: tapReport, url: url, freezesCaught: AppSettings.standard.canvasRepairCount,
                                      flight: [("trigger", .str(trigger)), ("events", .int(entries.count)),
                                               ("seconds", .num(now - base))])
-        let notice: String
+        let notice: String?
         switch trigger {
         case "wedge": notice = "The canvas froze — saved the last 90 s"
         case "stranded": notice = "Caught a canvas freeze and fixed it — saved the last 90 s"
+        case "navigation": notice = nil
         default: notice = "Saved the last 90 s"
         }
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -182,6 +191,7 @@ final class ActionRecorder: ObservableObject {
                     return
                 }
                 self.refreshRecordings()
+                guard let notice else { return }
                 self.flightNotice = notice
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
                     if self?.flightNotice == notice { self?.flightNotice = nil }
@@ -192,12 +202,66 @@ final class ActionRecorder: ObservableObject {
     }
 
     /// A touch has begun — fed by `WindowEventTap` for every one, so the wedge detector sees what the
-    /// ring sees. Saves the ring the moment the detector trips.
-    func touchBegan(startsSequence: Bool, boundRecognizers: [String]) {
-        guard wedge.touchBegan(startsSequence: startsSequence, boundRecognizers: boundRecognizers) else { return }
+    /// ring sees. A trip is saved after the dispatch's final observations are recorded.
+    func touchBegan(startsSequence: Bool, boundRecognizers: [String]) -> Bool {
+        wedge.touchBegan(startsSequence: startsSequence, boundRecognizers: boundRecognizers)
+    }
+
+    func saveWedgeFlight() {
         emit("note", [("text", .str("canvas wedge detected: \(wedge.strandedSequences) sequences in a row "
                                     + "began on the canvas bound to none of pan/pinch/rotation"))])
         saveFlight(trigger: "wedge")
+    }
+
+    func canvasNavigationMissed(_ finding: CanvasNavigationMiss.Finding) {
+        emit("canvasNavigationMiss", [
+            ("kind", .str(finding.kind)), ("touch", .int(finding.touch)),
+            ("cancelledTouch", finding.cancelledTouch.map(JSONValue.int) ?? .null),
+            ("survivor", finding.survivor.map(JSONValue.int) ?? .null),
+            ("lost", .str(finding.lost.joined(separator: ","))),
+            ("travel", .num(finding.travel)), ("moves", .int(finding.moves))
+        ])
+        // Let the existing 100 ms repair include this finding in its own flight if it runs.
+        // A diagnostic alone is silent: missing bindings can still leave working navigation.
+        guard pendingNavigationFlight == nil else { return }
+        let work = DispatchWorkItem { [weak self] in self?.saveFlight(trigger: "navigation") }
+        pendingNavigationFlight = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+    }
+
+    func canvasNavigationSnapshot(edge: String, touch: Int?, container: UIView, writes: Int,
+                                  pan: UIGestureRecognizer?, pinch: UIGestureRecognizer?, rotation: UIGestureRecognizer?,
+                                  delivery: [CanvasNavigationGesture.Delivery]) {
+        let transform = container.transform
+        var fields: [(String, JSONValue)] = [
+            ("edge", .str(edge)), ("touch", touch.map(JSONValue.int) ?? .null),
+            ("canvas", .str(Self.shortObject(ObjectIdentifier(container)))),
+            ("scale", .num(hypot(transform.a, transform.b))), ("rot", .num(atan2(transform.b, transform.a))),
+            ("cx", .num(container.center.x)), ("cy", .num(container.center.y)), ("writes", .int(writes))
+        ]
+        for (kind, recognizer) in zip(CanvasNavigationGesture.allCases, [pan, pinch, rotation]) {
+            let key = kind.name + "."
+            if let recognizer {
+                fields += [
+                    (key + "obj", .str(Self.shortObject(ObjectIdentifier(recognizer)))),
+                    (key + "view", recognizer.view.map { .str(Self.shortObject(ObjectIdentifier($0))) } ?? .null),
+                    (key + "enabled", .bool(recognizer.isEnabled)),
+                    (key + "state", .str(Self.stateName(recognizer.state))),
+                    (key + "touches", .int(recognizer.numberOfTouches))
+                ]
+            } else {
+                fields.append((key + "obj", .null))
+            }
+            let count = delivery[kind.rawValue]
+            fields += [
+                (key + "allowed", .int(count.allowed)), (key + "refused", .int(count.refused)),
+                (key + "began", .int(count.began)), (key + "changed", .int(count.changed)),
+                (key + "underTwo", .int(count.underTwo)), (key + "ended", .int(count.ended)),
+                (key + "cancelled", .int(count.cancelled)), (key + "noHost", .int(count.noHost)),
+                (key + "writes", .int(count.writes))
+            ]
+        }
+        emit("canvasNavigation", fields)
     }
 
     /// The canvas found recognizers UIKit had stranded and replaced them

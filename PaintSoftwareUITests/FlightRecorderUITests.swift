@@ -50,13 +50,18 @@ final class FlightRecorderUITests: PaintUITestCase {
 
     func testSaveLast90SecondsIsReachableFromANewDocumentAndListsTheFile() throws {
         let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        // Something for the ninety seconds to hold: a stroke and a pinch.
-        drawLine(on: canvas, from: CGVector(dx: 0.30, dy: 0.50), to: CGVector(dx: 0.50, dy: 0.55))
-        canvas.pinch(withScale: 1.5, velocity: 1)
+        // Leave asymmetric ink and visibly zoom while the automatic flight is the only recorder.
+        let paper = visiblePaperRect(app, in: canvas)
+        drawLine(on: canvas, from: onHost(paper, 0.30, 0.30), to: onHost(paper, 0.50, 0.42))
+        let beforePinch = readTransform(app)
+        attachScreenshot(app, "automatic-flight-before-pinch")
+        try pinchAboveTheDock(app, canvas, scale: 1.5)
+        XCTAssertNotEqual(readTransform(app), beforePinch, "the healthy gesture moves the exposed canvas transform")
+        attachScreenshot(app, "automatic-flight-after-pinch")
 
         app.buttons["toolbar.settingsButton"].tap()
         let save = app.buttons["recorder.saveFlight"]

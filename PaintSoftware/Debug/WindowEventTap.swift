@@ -59,10 +59,7 @@ struct TouchSample {
     /// reader can tell "the pen stopped moving" from "we thinned the data here".
     let coalescedAway: Int?
     /// `UITouch.view`'s class at the moment `sendEvent` was entered, or `"nil"`. **Distinct from
-    /// `hitClass`, which falls back to re-running `hitTest` when `view` is nil** — so the two agreeing
-    /// says UIKit bound the touch to a view, and `"nil"` here beside a plausible `hitClass` says the
-    /// touch was hit-tested somewhere real and then dropped. Recorded on `.began` only; it does not
-    /// change afterwards.
+    /// `hitClass`, which describes the initial hit view for replay. Recorded on `.began` only.
     let touchViewClass: String?
     /// The recognizers UIKit bound this touch to, by the names the rest of the file uses. Populated
     /// during hit-testing, i.e. before `sendEvent`, so reading it here is reading UIKit's own decision
@@ -73,6 +70,11 @@ struct TouchSample {
     /// touch never entered the gesture pipeline at all, and no amount of per-recognizer logic can see
     /// it. `.began` only, for the same reason.
     let boundRecognizers: [String]?
+}
+
+@MainActor
+protocol CanvasNavigationSnapshotSource: AnyObject {
+    var recordNavigationSnapshot: ((String, Int?, ActionRecorder) -> Void)? { get }
 }
 
 /// Intercepts `UIWindow.sendEvent(_:)` for as long as either of `ActionRecorder`'s sinks is on — the
@@ -176,6 +178,7 @@ struct TouchSample {
         registryByID.removeAll()
         targeted.removeAll()
         tracks.removeAll()
+        navigationMiss = CanvasNavigationMiss()
         window = nil
         originalClass = nil
         if Self.current === self { Self.current = nil }
@@ -209,9 +212,9 @@ struct TouchSample {
                 let tap = WindowEventTap.current
                 // Touches are logged *before* dispatch and recognizer states *after*, so the file
                 // reads as cause then effect: the touch line, then the transitions it produced.
-                tap?.willSend(event, window: window)
+                let edge = tap?.willSend(event, window: window)
                 callOriginal(receiver, selector, event)
-                tap?.didSend(event)
+                tap?.didSend(event, edge: edge)
             }
         }
         guard class_addMethod(subclass, selector, imp_implementationWithBlock(block), method_getTypeEncoding(method)) else {
@@ -224,12 +227,23 @@ struct TouchSample {
 
     // MARK: - Event handling
 
-    private func willSend(_ event: UIEvent, window: UIWindow?) {
-        guard event.type == .touches, let window, let touches = event.allTouches else { return }
+    private struct NavigationEdge {
+        let host: (any CanvasNavigationSnapshotSource)?
+        let touch: Int?
+        let phases: EventPhases
+        let miss: CanvasNavigationMiss.Finding?
+        let wedge: Bool
+    }
+
+    private var navigationMiss = CanvasNavigationMiss()
+
+    @MainActor
+    private func willSend(_ event: UIEvent, window: UIWindow?) -> NavigationEdge? {
+        guard event.type == .touches, let window, let touches = event.allTouches else { return nil }
         // A move costs one increment, so the touch's end line can say how many it had; nothing is
         // looked up or written for it unless a recording is running.
         for touch in touches where touch.phase == .moved { tracks[ObjectIdentifier(touch)]?.moves += 1 }
-        guard recordsInFull || touches.contains(where: { Self.isSequenceEdge($0.phase) }) else { return }
+        guard recordsInFull || touches.contains(where: { Self.isSequenceEdge($0.phase) }) else { return nil }
         let recorder = ActionRecorder.shared
         // Counted from the whole event, not from the touches we end up writing: "how many fingers
         // are down" is the thing that separates a two-finger pan from a one-finger draw, and it has
@@ -238,17 +252,48 @@ struct TouchSample {
         // Whether this event starts a touch sequence: every touch in it has only just begun. For
         // `CanvasWedgeDetector`, which counts sequences — so only the first began touch of such an
         // event is reported as starting one.
-        var startsSequence = touches.allSatisfy { $0.phase == .began }
+        let freshSequence = touches.allSatisfy { $0.phase == .began }
+        var startsSequence = freshSequence
+        var edgeSamples: [TouchSample] = []
+        var phases: EventPhases = []
+        var firstCanvasTouch: (host: any CanvasNavigationSnapshotSource, id: Int)?
+        var wedge = false
         for touch in touches {
             guard recordsInFull || Self.isSequenceEdge(touch.phase),
                   let sample = sample(touch, in: window, concurrent: concurrent) else { continue }
             recorder.touch(sample)
+            if Self.isSequenceEdge(touch.phase) {
+                edgeSamples.append(sample)
+                phases.formUnion(EventPhases(touch.phase))
+                if firstCanvasTouch == nil, let host = Self.canvasHost(of: touch.view) {
+                    firstCanvasTouch = (host, sample.touchID)
+                }
+            }
             if touch.phase == .began, let bound = sample.boundRecognizers {
                 watchNewlyBoundRecognizers(of: touch)
-                recorder.touchBegan(startsSequence: startsSequence, boundRecognizers: bound)
+                if recorder.touchBegan(startsSequence: startsSequence, boundRecognizers: bound) { wedge = true }
                 startsSequence = false
             }
         }
+        guard !edgeSamples.isEmpty else { return nil }
+        let wasWatching = navigationMiss.isWatching
+        let miss = navigationMiss.observe(edgeSamples, startsSequence: freshSequence)
+        if let firstCanvasTouch, wasWatching || navigationMiss.isWatching || wedge {
+            let id = miss?.touch ?? firstCanvasTouch.id
+            firstCanvasTouch.host.recordNavigationSnapshot?("before:" + phases.tag, id, recorder)
+            return NavigationEdge(host: firstCanvasTouch.host, touch: id, phases: phases, miss: miss, wedge: wedge)
+        }
+        guard miss != nil || wedge else { return nil }
+        return NavigationEdge(host: nil, touch: nil, phases: phases, miss: miss, wedge: wedge)
+    }
+
+    private static func canvasHost(of hitView: UIView?) -> (any CanvasNavigationSnapshotSource)? {
+        var view = hitView
+        while let current = view {
+            if let host = current as? any CanvasNavigationSnapshotSource { return host }
+            view = current.superview
+        }
+        return nil
     }
 
     private static func isSequenceEdge(_ phase: UITouch.Phase) -> Bool {
@@ -292,13 +337,20 @@ struct TouchSample {
     /// strands the canvas is a third touch joining a pair (BUGS.md), and a sweep after a move inside it
     /// is what says a recognizer failed between the edges rather than at one. Rare and cheap — an undo
     /// or redo tap, a few moves long.
-    private func didSend(_ event: UIEvent) {
+    @MainActor
+    private func didSend(_ event: UIEvent, edge: NavigationEdge?) {
         guard event.type == .touches, let touches = event.allTouches else { return }
         var phases: EventPhases = []
         for touch in touches { phases.formUnion(EventPhases(touch.phase)) }
         guard recordsInFull || !phases.isDisjoint(with: .sequenceEdges)
                 || (phases.contains(.moved) && Self.touchesDown(in: touches) >= Self.fingersThatSweepMoves) else { return }
         sweepRecognizerStates(after: phases)
+        if let edge {
+            let recorder = ActionRecorder.shared
+            edge.host?.recordNavigationSnapshot?("after:" + edge.phases.tag, edge.touch, recorder)
+            if let miss = edge.miss { recorder.canvasNavigationMissed(miss) }
+            if edge.wedge { recorder.saveWedgeFlight() }
+        }
     }
 
     private static let fingersThatSweepMoves = 3

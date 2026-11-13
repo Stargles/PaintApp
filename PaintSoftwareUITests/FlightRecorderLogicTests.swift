@@ -206,12 +206,13 @@ final class FlightRecorderLogicTests: XCTestCase {
 
     // MARK: - What a stranded canvas's flight carries (BUGS.md, "The canvas's recognizers strand…")
 
-    private func touchSample(phase: String, touchID: Int, object: AnyObject, moves: Int?) -> TouchSample {
-        TouchSample(time: 1, phase: phase, type: "direct", touchID: touchID, object: ObjectIdentifier(object), moves: moves,
+    private func touchSample(phase: String, touchID: Int, object: AnyObject, moves: Int? = nil,
+                             time: Double = 1, point: CGPoint = .zero, down: Int = 1, bound: [String]? = nil) -> TouchSample {
+        TouchSample(time: time, phase: phase, type: "direct", touchID: touchID, object: ObjectIdentifier(object), moves: moves,
                     target: nil, targetClass: "none", hitClass: "StrokeCanvasView", role: "other", label: nil,
-                    depth: 0, resolution: "none", normalized: .zero, window: .zero, windowNormalized: .zero,
-                    concurrent: 1, isPencil: false, force: 0, maxForce: 0, altitude: 0, azimuth: 0,
-                    coalescedAway: nil, touchViewClass: nil, boundRecognizers: nil)
+                    depth: 0, resolution: "none", normalized: .zero, window: point, windowNormalized: .zero,
+                    concurrent: down, isPencil: false, force: 0, maxForce: 0, altitude: 0, azimuth: 0,
+                    coalescedAway: nil, touchViewClass: nil, boundRecognizers: bound)
     }
 
     /// A line as the recorder encodes it and a reader parses it — the encoder under test, not a
@@ -386,6 +387,176 @@ final class FlightRecorderLogicTests: XCTestCase {
                        "the saved flight's header names the repair count of the moment")
         XCTAssertEqual(lines.first?["trigger"] as? String, "test")
         return lines
+    }
+
+    // MARK: - Automatic navigation evidence
+
+    @MainActor
+    func testNavigationSnapshotReadsCurrentTransformAndRecognizerAttachment() throws {
+        let recorder = ActionRecorder.shared
+        let wasFlying = ActionRecorder.isFlying
+        defer { ActionRecorder.isFlying = wasFlying }
+        ActionRecorder.isFlying = true
+        let plane = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        let pinch = Driven()
+        plane.addGestureRecognizer(pinch)
+        let marker = "test-fresh-pose-" + UUID().uuidString
+        var delivery = Array(repeating: CanvasNavigationGesture.Delivery(), count: CanvasNavigationGesture.allCases.count)
+        recorder.canvasNavigationSnapshot(edge: marker + ":start", touch: 10, container: plane, writes: 0,
+                                          pan: nil, pinch: pinch, rotation: nil, delivery: delivery)
+        plane.transform = CGAffineTransform(rotationAngle: 0.5).scaledBy(x: 1.75, y: 1.75)
+        plane.center = CGPoint(x: 234, y: 187)
+        pinch.settle(in: .began)
+        pinch.held = 2
+        delivery[CanvasNavigationGesture.pinch.rawValue].changed = 1
+        delivery[CanvasNavigationGesture.pinch.rawValue].writes = 1
+        recorder.canvasNavigationSnapshot(edge: marker + ":moving", touch: 10, container: plane, writes: 1,
+                                          pan: nil, pinch: pinch, rotation: nil, delivery: delivery)
+        let lines = try savedFlightLines().filter { ($0["edge"] as? String)?.hasPrefix(marker) == true }
+        XCTAssertEqual(lines.count, 2)
+        let start = try XCTUnwrap(lines.first)
+        let moving = try XCTUnwrap(lines.last)
+        XCTAssertEqual(start["scale"] as? Double, 1)
+        XCTAssertEqual(start["cx"] as? Double, 200)
+        XCTAssertEqual(moving["scale"] as? Double, 1.75)
+        XCTAssertEqual(moving["rot"] as? Double, 0.5)
+        XCTAssertEqual(moving["cx"] as? Double, 234)
+        XCTAssertEqual(moving["cy"] as? Double, 187)
+        XCTAssertEqual(moving["canvas.pinch.state"] as? String, "began")
+        XCTAssertEqual(moving["canvas.pinch.touches"] as? Int, 2)
+        XCTAssertEqual(moving["canvas.pinch.view"] as? String, moving["canvas"] as? String)
+        XCTAssertEqual(moving["canvas.pinch.changed"] as? Int, 1)
+        XCTAssertEqual(moving["canvas.pinch.writes"] as? Int, 1)
+        XCTAssertTrue(moving["canvas.rotation.obj"] is NSNull)
+    }
+
+    func testNavigationMissDistinguishesCancelReissueFromComparableLiftAndHealthyReissue() throws {
+        XCTAssertNil(runReissue(interruption: "ended", lostNavigation: true, end: CGPoint(x: 851, y: 220.5)))
+        XCTAssertNil(runReissue(interruption: "cancelled", lostNavigation: false, end: CGPoint(x: 851, y: 220.5)))
+        XCTAssertNil(runReissue(interruption: "cancelled", lostNavigation: true, end: CGPoint(x: 708, y: 369)))
+        let miss = try XCTUnwrap(runReissue(interruption: "cancelled", lostNavigation: true, end: CGPoint(x: 851, y: 220.5)))
+        XCTAssertEqual(miss.kind, "cancelReissue")
+        XCTAssertEqual(miss.touch, 3694)
+        XCTAssertEqual(miss.cancelledTouch, 3693)
+        XCTAssertEqual(miss.survivor, 3692)
+        XCTAssertEqual(miss.lost, ["canvas.pinch", "canvas.rotation"])
+        XCTAssertEqual(miss.travel, hypot(149, 148.5), accuracy: 0.001)
+        XCTAssertEqual(miss.moves, 17)
+    }
+
+    func testFreshMissingContactThatGetsAHealthyPartnerDoesNotSave() {
+        let object = NSObject(), other = NSObject()
+        let counter = CanvasWedgeDetector.canvasMarker
+        var miss = CanvasNavigationMiss()
+        let first = touchSample(phase: "began", touchID: 1, object: object, bound: [counter])
+        let second = touchSample(phase: "began", touchID: 2, object: other, down: 2, bound: [counter, "canvas.pan"])
+        XCTAssertNil(miss.observe([first], startsSequence: true))
+        XCTAssertNil(miss.observe([second], startsSequence: false))
+        XCTAssertNil(miss.observe([touchSample(phase: "ended", touchID: 1, object: object, moves: 8)], startsSequence: false))
+    }
+
+    private func runReissue(interruption: String, lostNavigation: Bool, end: CGPoint) -> CanvasNavigationMiss.Finding? {
+        let survivor = NSObject(), cancelled = NSObject(), reissued = NSObject()
+        let counter = CanvasWedgeDetector.canvasMarker
+        let all = [counter, "canvas.pan", "canvas.pinch", "canvas.rotation", "stroke.test"]
+        let new = lostNavigation ? [counter, "canvas.pan"] : Array(all.dropLast())
+        var miss = CanvasNavigationMiss()
+        XCTAssertNil(miss.observe([
+            touchSample(phase: "began", touchID: 3692, object: survivor, time: 85.88, point: CGPoint(x: 701, y: 457), down: 2, bound: all),
+            touchSample(phase: "began", touchID: 3693, object: cancelled, time: 85.88, point: CGPoint(x: 702, y: 369), down: 2, bound: all)
+        ], startsSequence: true))
+        XCTAssertNil(miss.observe([
+            touchSample(phase: interruption, touchID: 3693, object: cancelled, moves: 0, time: 85.93, point: CGPoint(x: 702, y: 369))
+        ], startsSequence: false))
+        XCTAssertNil(miss.observe([
+            touchSample(phase: "began", touchID: 3694, object: reissued, time: 85.94, point: CGPoint(x: 702, y: 369), down: 2, bound: new)
+        ], startsSequence: false))
+        let finding = miss.observe([
+            touchSample(phase: "ended", touchID: 3694, object: reissued, moves: 17, time: 86.27, point: end)
+        ], startsSequence: false)
+        XCTAssertNil(miss.observe([
+            touchSample(phase: "ended", touchID: 3692, object: survivor, moves: 21, time: 86.27, point: CGPoint(x: 813, y: 574.5), down: 0)
+        ], startsSequence: false), "one episode contributes one finding")
+        return finding
+    }
+
+    @MainActor
+    func testNavigationMissesAutomaticallySaveBothFindingsWithoutManualRecording() throws {
+        let recorder = ActionRecorder.shared
+        let wasFlying = ActionRecorder.isFlying
+        let wasCapturing = ActionRecorder.isCapturing
+        ActionRecorder.isFlying = true
+        ActionRecorder.isCapturing = false
+        recorder.startFlight(canvasSize: CGSize(width: 300, height: 300), projectName: "navigation-test-source")
+        recorder.refreshRecordings()
+        let known = Set(recorder.recordings.map(\.url))
+        var created: [URL] = []
+        defer {
+            for url in created { try? FileManager.default.removeItem(at: url) }
+            recorder.refreshRecordings()
+            ActionRecorder.isFlying = wasFlying
+            ActionRecorder.isCapturing = wasCapturing
+        }
+        let marker = "test-no-motion-" + UUID().uuidString
+        let object = NSObject()
+        var miss = CanvasNavigationMiss()
+        let bound = [CanvasWedgeDetector.canvasMarker]
+        let plane = UIView(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
+        let delivery = Array(repeating: CanvasNavigationGesture.Delivery(), count: CanvasNavigationGesture.allCases.count)
+        var now = CACurrentMediaTime()
+
+        let began = touchSample(phase: "began", touchID: 1567, object: object, time: now, bound: bound)
+        recorder.touch(began)
+        XCTAssertNil(miss.observe([began], startsSequence: true))
+        recorder.canvasNavigationSnapshot(edge: marker + ":begin", touch: 1567, container: plane, writes: 0,
+                                          pan: nil, pinch: nil, rotation: nil, delivery: delivery)
+        now += 0.01
+        let ended = touchSample(phase: "ended", touchID: 1567, object: object, moves: 19, time: now,
+                                point: CGPoint(x: 120, y: 0), down: 0)
+        recorder.touch(ended)
+        let finding = try XCTUnwrap(miss.observe([ended], startsSequence: false))
+        recorder.canvasNavigationSnapshot(edge: marker + ":lift", touch: 1567, container: plane, writes: 0,
+                                          pan: nil, pinch: nil, rotation: nil, delivery: delivery)
+        recorder.canvasNavigationMissed(finding)
+        let second = touchSample(phase: "began", touchID: 1568, object: object, bound: bound)
+        XCTAssertNil(miss.observe([second], startsSequence: true))
+        XCTAssertNil(miss.observe([touchSample(phase: "ended", touchID: 1568, object: object, moves: 0)],
+                                 startsSequence: false), "consecutive fresh misses are one diagnostic episode")
+
+        let partial = try XCTUnwrap(runReissue(interruption: "cancelled", lostNavigation: true, end: CGPoint(x: 851, y: 220.5)))
+        recorder.canvasNavigationMissed(partial)
+        // Switching before the 200 ms diagnostic save still uses the outgoing context and keeps
+        // both observations in one file.
+        recorder.startFlight(canvasSize: CGSize(width: 200, height: 200), projectName: "navigation-test-next")
+        let saved = expectation(for: NSPredicate { _, _ in
+            Set(recorder.recordings.map(\.url)).subtracting(known).count == 1
+        }, evaluatedWith: recorder)
+        wait(for: [saved], timeout: 5)
+        created = Array(Set(recorder.recordings.map(\.url)).subtracting(known))
+        XCTAssertEqual(created.count, 1)
+        let url = try XCTUnwrap(created.first)
+        let data = try recordingBytes(at: url, containing: marker)
+        let lines = try String(decoding: data, as: UTF8.self).split(separator: "\n").map { try headerFields(String($0)) }
+        let missedLine = lines.first { $0["event"] as? String == "canvasNavigationMiss" && $0["touch"] as? Int == 1567 }
+        XCTAssertEqual(lines.first?["trigger"] as? String, "navigation")
+        XCTAssertEqual(lines.first?["project"] as? String, "navigation-test-source")
+        let reissue = lines.first { $0["event"] as? String == "canvasNavigationMiss" && $0["touch"] as? Int == 3694 }
+        XCTAssertEqual(reissue?["kind"] as? String, "cancelReissue")
+        XCTAssertEqual(reissue?["lost"] as? String, "canvas.pinch,canvas.rotation")
+        XCTAssertEqual(reissue?["survivor"] as? Int, 3692)
+        XCTAssertEqual(reissue?["moves"] as? Int, 17)
+        let snapshots = lines.filter { ($0["edge"] as? String)?.hasPrefix(marker) == true }
+        XCTAssertEqual(snapshots.count, 2)
+        for key in ["scale", "cx", "cy", "rot", "writes", "canvas.pan.changed", "canvas.pinch.changed", "canvas.rotation.changed"] {
+            let begin = try XCTUnwrap(snapshots.first?[key] as? Double, key)
+            XCTAssertEqual(snapshots.last?[key] as? Double, begin, key)
+        }
+        XCTAssertEqual(snapshots.last?["writes"] as? Int, 0)
+        XCTAssertEqual(missedLine?["event"] as? String, "canvasNavigationMiss")
+        XCTAssertEqual(missedLine?["kind"] as? String, "freshMissing")
+        XCTAssertEqual(missedLine?["touch"] as? Int, 1567)
+        XCTAssertEqual(missedLine?["travel"] as? Double, 120)
+        XCTAssertEqual(missedLine?["moves"] as? Int, 19)
     }
 
     // MARK: - The ring
