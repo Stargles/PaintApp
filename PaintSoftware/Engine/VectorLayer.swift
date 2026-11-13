@@ -5801,6 +5801,8 @@ final class VectorCanvas {
         fileprivate let suppressed: Set<UUID>
         fileprivate var known: [UUID: CGRect] = [:]
 
+        var isEmpty: Bool { elements.isEmpty }
+
         /// A held replacement reuses untouched footprints while invalidating only rewritten ink.
         /// Stream frames cross the worker boundary by value, exactly as live display freezing does.
         func replacingDisplayElements(_ replacement: [VectorElement], rewriting: Set<UUID>,

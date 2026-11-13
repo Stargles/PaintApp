@@ -268,4 +268,57 @@ final class LiveTransformEditUITests: PaintUITestCase {
         XCTAssertLessThan(left, 40, "one press of Undo puts the whole drag back — \(left) pixels of ink still "
                           + "differ from the picture before it")
     }
+
+    func testACelPoseNodeMovesOnlyInkWhileTheFingerIsDown() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-uiTestSeedEraserBacking", "-uiTestSlowBakeMillis",
+                                "\(Int(Self.bakeDelay * 1000))"]
+        let size = CGSize(width: 256, height: 256)
+        XCTAssertTrue(launchIntoEditor(app, size: size, orientationBeforeCreatingCanvas: .landscapeLeft))
+        app.buttons["timeline.graphEditorButton"].tap()
+        let band = app.otherElements["timeline.graphBand"]
+        XCTAssertTrue(band.waitForExistence(timeout: 5))
+        let channel = PoseChannelID.cel(.cel).parameterID(.x)
+        XCTAssertEqual(band.value as? String, "\(channel):0", "the seeded cel's X node is the only curve")
+        let canvas = app.otherElements["canvas.host"]
+        let paper = paperRect(in: canvas, canvasSize: size)
+        let redRow = 56.0 / size.height
+        let inkRow = 80.0 / size.height
+        assertAboveTheDock(app, canvas, dy: onHost(paper, 0, inkRow).dy, "The mixed cel's ink")
+        func point(x: Double, y: Double) -> CGPoint {
+            let fraction = onHost(paper, x / size.width, y)
+            let frame = canvas.frame
+            return CGPoint(x: frame.minX + frame.width * fraction.dx,
+                           y: frame.minY + frame.height * fraction.dy)
+        }
+        let points = [point(x: 104, y: redRow), point(x: 72, y: inkRow), point(x: 204, y: inkRow)]
+        func marks(_ pixels: [RGBA?]) -> [Bool] {
+            guard pixels.count == 3 else { return [] }
+            return [isRed(pixels[0]), isInk(pixels[1]), isInk(pixels[2])]
+        }
+        XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 40, "The seeded pose bakes"))
+        XCTAssertEqual(marks(readScreenNow(points)), [true, true, false], "red backing and original black ink")
+        attachScreenshot(app, "mixed-cel-before-graph-drag")
+
+        let rest = Double(size.width / 2)
+        let initial = rest + 32
+        let axis = TimelineGraphBand.anchoredRange(reference: rest,
+            minimumSpan: PoseComponents.Component.x.minimumAxisSpan, keyValues: [initial])
+        func y(_ value: Double) -> CGFloat {
+            TimelineGraphBand.y(ofValue: value, in: axis, bandHeight: band.frame.height)
+        }
+        let node = band.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: TimelineGraphBand.x(ofFrame: 0, pixelsPerFrame: TimelineKeyMarkers.basePixelsPerFrame),
+            dy: y(initial)))
+        let held = samplesDuring(points, "mixed cel X node") {
+            node.press(forDuration: 0.6, thenDragTo: node.withOffset(CGVector(dx: 0, dy: y(initial + 24) - y(initial))),
+                       withVelocity: XCUIGestureVelocity(40), thenHoldForDuration: 4)
+        }.map { marks($0.pixels) }
+        attachScreenshot(app, "mixed-cel-live-graph-result")
+        XCTAssertTrue(held.contains([true, false, true]), "red stayed while black moved: \(held)")
+        XCTAssertTrue(held.allSatisfy { $0.first == true }, "the red backing must stay through every held sample: \(held)")
+        XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 40, "The edited pose bakes"))
+        XCTAssertEqual(marks(readScreenNow(points)), [true, false, true], "the same placement after the bake")
+        attachScreenshot(app, "mixed-cel-settled-graph-result")
+    }
 }

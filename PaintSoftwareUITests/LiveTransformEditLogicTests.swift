@@ -439,34 +439,41 @@ final class LiveTransformEditLogicTests: XCTestCase {
                           xCurve(restX - 5), "the cel itself is untouched until the lift")
     }
 
-    func testCelPoseDragShowsStationaryBackingAndMovingInkBeforeAndAfterLift() throws {
+    private func mixedCel(backingRect: CGRect) throws -> (manager: CanvasManager, layer: Int) {
         let manager = CanvasFixture.manager(layerCount: 0)
         manager.isCanvasBackgroundVisible = false
         manager.addVectorLayer()
         let index = manager.currentLayerIndex
-        let target = KeyframeTarget.layer(id: manager.layers[index].id)
         let vector = try XCTUnwrap(manager.layers[index].cels[0].vector)
         vector.addFill(path: CGPath(rect: CGRect(x: 22, y: 6, width: 4, height: 4), transform: nil),
                        color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
-        let backing = CanvasFixture.solidImage(.blue, rect: CGRect(x: 6, y: 6, width: 4, height: 4))
+        let backing = CanvasFixture.solidImage(.blue, rect: backingRect)
         manager.layers[index].cels[0].bakedImage = try CanvasFixture.rasterSource(backing)
         manager.layers[index].cels[0].transformTracks = [
             TransformChannelID.cel.id: TransformTrack(box: canvasBox, curves: [.x: xCurve(canvasBox.midX)])
         ]
 
+        return (manager, index)
+    }
+
+    func testCelPoseDragShowsStationaryBackingAndMovingInkBeforeAndAfterLift() throws {
+        let (manager, index) = try mixedCel(backingRect: CGRect(x: 6, y: 6, width: 4, height: 4))
+        let target = KeyframeTarget.layer(id: manager.layers[index].id)
         let celX = PoseChannelID.cel(.cel).parameterID(.x)
         let edit = try XCTUnwrap(manager.graphBandEdit(target: target, parameterIDs: [celX]))
         manager.beginLiveTransformEdit(edit)
         let runs = manager.liveTransformRuns(edit, atFrame: 0)
         let recipe = try XCTUnwrap(manager.makeSandwichRecipe(atFrame: 0, runs: runs))
         let minted = try XCTUnwrap(manager.liveTransformMaps(edit, runs: runs, atFrame: 0).first)
-        let bands = try XCTUnwrap(recipe.compositeBands())
+        let bands = try XCTUnwrap(recipe.compositeMovingBands(for: edit))
+        let band = try XCTUnwrap(bands.cel)
+        XCTAssertNil(bands.images[1], "the two tier pictures replace the ordinary middle composite")
 
         manager.holdLivePose([celX: xCurve(canvasBox.midX + 8)], of: target)
         let held = try XCTUnwrap(manager.liveTransformMaps(edit, runs: runs, atFrame: 0,
                                                           holding: manager.liveEdit).first)
         let delta = try XCTUnwrap(minted.inverse?.concatenating(held).affine)
-        let shown = try XCTUnwrap(lay(bands, deltas: [1: delta]))
+        let shown = try XCTUnwrap(lay(band, inkDelta: delta))
         XCTAssertTrue(manager.commitLivePose(), "the lift wrote the held graph node")
         manager.endLiveTransformEdit()
         let settled = try XCTUnwrap(manager.makeRenderRequest(atFrame: 0, includeBackground: false)
@@ -482,12 +489,63 @@ final class LiveTransformEditLogicTests: XCTestCase {
         let blue: [UInt8] = [0, 0, 255, 255]
         let red: [UInt8] = [255, 0, 0, 255]
         let clear: [UInt8] = [0, 0, 0, 0]
-        XCTAssertEqual(try sampleRow(XCTUnwrap(lay(bands, deltas: [:]))), [blue, clear, red, clear],
+        XCTAssertEqual(try sampleRow(XCTUnwrap(lay(band, inkDelta: .identity))), [blue, clear, red, clear],
                        "the starting bands contain both tiers at their original positions")
         XCTAssertEqual(try sampleRow(settled), [blue, clear, clear, red],
                        "after lift only the red fill moves eight pixels")
         XCTAssertEqual(try sampleRow(shown), [blue, clear, clear, red],
                        "under the finger only the red fill moves eight pixels")
+    }
+
+    func testCelPoseDragClipsTheAssembledTiersInCanvasSpaceAndFadesThemOnce() throws {
+        let (manager, index) = try mixedCel(backingRect: CGRect(x: 24, y: 6, width: 12, height: 4))
+        let id = manager.layers[index].id
+        let folder = try XCTUnwrap(manager.addFolder(name: "Faded"))
+        manager.layers[index].parentFolderID = folder
+        manager.setFolderOpacity(folder, to: 0.5)
+        manager.addVectorLayer(name: "Mask source")
+        let maskIndex = manager.currentLayerIndex
+        let source = try XCTUnwrap(manager.layers[maskIndex].cels[0].vector)
+        source.addFill(path: CGPath(rect: CGRect(x: 26, y: 5, width: 6, height: 6), transform: nil),
+                       color: CodableColor(red: 1, green: 1, blue: 1, alpha: 1))
+        manager.layers[maskIndex].isVisible = false
+        manager.layers[index].alphaMask = AlphaMask(sources: [.layer(manager.layers[maskIndex].id)])
+        let edit = LiveTransformEdit.cel(layerID: id)
+        let runs = manager.liveTransformRuns(edit, atFrame: 0)
+        let recipe = try XCTUnwrap(manager.makeSandwichRecipe(atFrame: 0, runs: runs))
+        let band = try XCTUnwrap(recipe.compositeMovingBands(for: edit)?.cel)
+        XCTAssertEqual(band.opacity, 0.5)
+        XCTAssertNotNil(band.mask)
+        let shown = try XCTUnwrap(lay(band, inkDelta: CGAffineTransform(translationX: 8, y: 0)))
+        let target = KeyframeTarget.layer(id: id)
+        let celX = PoseChannelID.cel(.cel).parameterID(.x)
+        manager.beginLiveTransformEdit(edit)
+        manager.holdLivePose([celX: xCurve(canvasBox.midX + 8)], of: target)
+        XCTAssertTrue(manager.commitLivePose())
+        manager.endLiveTransformEdit()
+        let settled = try XCTUnwrap(manager.makeRenderRequest(atFrame: 0, includeBackground: false)
+            .flatMap(Compositor.composite))
+        XCTAssertLessThanOrEqual(maxChannelDelta(shown, settled), 1,
+            "the preview clips at x26…31: backing is visible at x28, and overlapping red has one 50% fade at x31")
+    }
+
+    /// Model the stationary band group's source-over assembly, opacity and alpha mask. The public
+    /// gesture test drives the real Core Animation band, including its ink-only transform.
+    private func lay(_ band: SandwichRecipe.CelBand, inkDelta: CGAffineTransform) -> CGImage? {
+        UIGraphicsImageRenderer(bounds: canvasBox, format: PixelOps.transparentFormat()).image { context in
+            let cg = context.cgContext
+            cg.setAlpha(band.opacity)
+            cg.beginTransparencyLayer(auxiliaryInfo: nil)
+            UIImage(cgImage: band.backing).draw(in: canvasBox)
+            cg.saveGState()
+            cg.concatenate(inkDelta)
+            UIImage(cgImage: band.ink).draw(in: canvasBox)
+            cg.restoreGState()
+            if let mask = band.mask {
+                UIImage(cgImage: mask).draw(in: canvasBox, blendMode: .destinationIn, alpha: 1)
+            }
+            cg.endTransparencyLayer()
+        }.cgImage
     }
 
     // MARK: - The Move box holds its pose too — TODO (164)

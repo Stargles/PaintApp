@@ -15,8 +15,13 @@ struct CelContentPlacement: Equatable {
 
 extension CanvasManager {
     func celContentPlacement(ofLayerAt index: Int, in walk: RenderWalk) -> CelContentPlacement {
-        CelContentPlacement(ink: inkPose(ofLayerAt: index, showing: walk.frames[index] ?? currentFrame,
-                                        inheriting: walk.poses[index], holding: liveEdit?.groupPose),
+        celContentPlacement(ofLayerAt: index, in: walk, atFrame: currentFrame, holding: liveEdit?.groupPose)
+    }
+
+    func celContentPlacement(ofLayerAt index: Int, in walk: RenderWalk, atFrame frame: Int,
+                             holding held: LivePose?) -> CelContentPlacement {
+        CelContentPlacement(ink: inkPose(ofLayerAt: index, showing: walk.frames[index] ?? frame,
+                                        inheriting: walk.poses[index], holding: held),
                             backing: walk.poses[index])
     }
 

@@ -27,6 +27,7 @@ struct LivePicture {
     /// host draws (a cut around the host composites only its two halves). One image for a cut over
     /// the hosts, so `above` is nil there.
     let bands: [UIImage?]
+    let celBand: SandwichRecipe.CelBand?
     /// A transform edit's bands only: the edit, and the map each run's ink was shown through
     /// at the mint (`CanvasManager.liveTransformMaps`) — what each moving band's transform is
     /// measured from.
@@ -105,6 +106,7 @@ struct LivePictureMint {
         /// All or none: a half-updated pair would put a `below` from this frame under an `above` from
         /// the last one. Nil only for a degenerate canvas.
         let bands: [CGImage?]?
+        let celBand: SandwichRecipe.CelBand?
         /// One per `active`, in order.
         let activeImages: [UIImage?]
     }
@@ -126,21 +128,101 @@ struct LivePictureMint {
         // refused by the GPU and re-rendered whole on the CPU reference for the duration of every
         // stroke. A document that fits takes the identical path it took before: one composite per
         // band, unwindowed, unchunked.
-        let bands: [CGImage?]? = PlaybackTrace.span(.sandwichComposite) {
+        let pictures: (images: [CGImage?]?, cel: SandwichRecipe.CelBand?) = PlaybackTrace.span(.sandwichComposite) {
             switch cut {
-            case .aroundRuns, .overHost: return recipe.compositeBands()
-            case .aroundHost: return recipe.compositeHalves().map { [$0.below, nil, $0.above] }
+            case .aroundRuns:
+                let bands = edit.flatMap { recipe.compositeMovingBands(for: $0) }
+                return (bands?.images, bands?.cel)
+            case .overHost: return (recipe.compositeBands(), nil)
+            case .aroundHost: return (recipe.compositeHalves().map { [$0.below, nil, $0.above] }, nil)
             }
         }
         // **The third picture of the pair, on the same queue and for the same key** — see
         // `LiveActivePicture`. After the halves, so a pair is never waiting on a half.
-        return Rendered(bands: bands, activeImages: active.map { $0.render() })
+        return Rendered(bands: pictures.images, celBand: pictures.cel,
+                        activeImages: active.map { $0.render() })
     }
 
     /// The live picture these bands make, wrapped as `UIImage` once (see `LivePicture`).
-    func picture(of bands: [CGImage?]) -> LivePicture {
+    func picture(of bands: [CGImage?], celBand: SandwichRecipe.CelBand?) -> LivePicture {
         LivePicture(key: key, cut: cut, frame: frame,
                     bands: bands.map { $0.map { UIImage(cgImage: $0, scale: 1, orientation: .up) } },
-                    edit: edit, mintMaps: mintMaps)
+                    celBand: celBand, edit: edit, mintMaps: mintMaps)
+    }
+}
+
+/// A middle band of the sandwich. The ordinary picture moves as a whole. A mixed cel keeps its
+/// backing here and moves the ink sublayer inside the same opacity and canvas-space mask.
+final class LiveBandView: UIImageView {
+    private var celInk: CALayer?
+    private var shownCel: SandwichRecipe.CelBand?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        alignCelLayers()
+    }
+
+    private func alignCelLayers() {
+        guard let celInk else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        celInk.bounds = bounds
+        celInk.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        layer.mask?.frame = bounds
+        CATransaction.commit()
+    }
+
+    func show(_ picture: UIImage?, cel: SandwichRecipe.CelBand?) {
+        if let cel {
+            guard shownCel !== cel else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            defer { CATransaction.commit() }
+            shownCel = cel
+            layer.transform = CATransform3DIdentity
+            image = UIImage(cgImage: cel.backing)
+            let ink = celInk ?? CALayer()
+            ink.contentsGravity = .resize
+            ink.minificationFilter = layer.minificationFilter
+            ink.magnificationFilter = layer.magnificationFilter
+            ink.contents = cel.ink
+            if celInk == nil { layer.addSublayer(ink) }
+            celInk = ink
+            layer.mask = cel.mask.map { image in
+                let mask = CALayer()
+                mask.contents = image
+                return mask
+            }
+            layer.allowsGroupOpacity = true
+            alpha = cel.opacity
+            alignCelLayers()
+        } else {
+            if let celInk {
+                celInk.removeFromSuperlayer()
+                self.celInk = nil
+                shownCel = nil
+                layer.mask = nil
+                alpha = 1
+            }
+            if image !== picture { image = picture }
+        }
+        let hidden = picture == nil && cel == nil
+        if isHidden != hidden { isHidden = hidden }
+    }
+
+    func magnify(with filter: CALayerContentsFilter) {
+        layer.magnificationFilter = filter
+        celInk?.magnificationFilter = filter
+    }
+
+    @discardableResult
+    func move(to transform: CATransform3D) -> Bool {
+        let moving = celInk ?? layer
+        guard !CATransform3DEqualToTransform(moving.transform, transform) else { return false }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        moving.transform = transform
+        CATransaction.commit()
+        return true
     }
 }

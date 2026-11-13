@@ -519,18 +519,27 @@ enum PixelOps {
         return completed ? output : nil
     }
 
+    enum CelTier { case combined, backing, ink }
+
+    /// The live cel band keeps these pictures only for the drag. The ordinary flatten memo holds
+    /// combined cels, so these two pictures never use its keys or occupy its budget.
+    static func rasterize(_ tier: CelTier, of cel: FrozenCel, canvasSize: CGSize,
+                          quality: RenderQuality) -> CGImage? {
+        rasterizeUncached(cel, canvasSize: canvasSize, quality: quality, tier: tier)?.cgImage
+    }
+
     private static func rasterizeUncached(_ cel: FrozenCel, canvasSize: CGSize,
-                                          quality: RenderQuality,
-                                          window: StripWindow? = nil) -> UIImage? {
+                                          quality: RenderQuality, window: StripWindow? = nil,
+                                          tier: CelTier = .combined) -> UIImage? {
         let bounds = CGRect(origin: .zero, size: canvasSize)
         let content = window.map {
             CGRect(origin: CGPoint(x: -$0.origin.x, y: -$0.origin.y), size: $0.frameSize)
         } ?? bounds
         var vectorImage: UIImage?
-        if cel.display?.replacingBase == nil, let derived = cel.derived {
+        if tier != .backing, cel.display?.replacingBase == nil, let derived = cel.derived {
             guard let rendered = derived.render(quality) else { return nil }
             vectorImage = rendered
-        } else if window == nil, cel.display == nil, let vector = cel.vector {
+        } else if tier != .backing, window == nil, cel.display == nil, let vector = cel.vector {
             guard let rendered = vector.render(quality: quality, fittingInto: content.size) else { return nil }
             vectorImage = rendered
         }
@@ -539,7 +548,7 @@ enum PixelOps {
         let replacingBase: UIImage?
         do {
             replacingBase = try cel.display?.replacingBase?.resolveImage().get()
-            if replacingBase == nil {
+            if tier != .ink, replacingBase == nil {
                 bakedImage = try cel.bakedImage?.resolveImage().get()
                 strokesImage = try cel.strokesImage?.resolveImage().get()
             } else { bakedImage = nil; strokesImage = nil }
@@ -549,7 +558,7 @@ enum PixelOps {
             let cg = context.cgContext
             if let replacement = replacingBase { replacement.draw(in: content) }
             else {
-                if let pose = cel.pose, !pose.isIdentity, cel.bakedImage != nil || cel.strokesImage != nil {
+                if let pose = cel.pose, !pose.isIdentity, bakedImage != nil || strokesImage != nil {
                     let source = CelPixelSnapshot(rasterSource: cel.strokesImage, bakedSource: cel.bakedImage, size: cel.size)
                     withCelWindow(footprint: CGPath(rect: CGRect(origin: .zero, size: cel.size), transform: nil),
                                   canvasSize: cel.size, into: cg, content: content, replacing: false) {
@@ -564,7 +573,7 @@ enum PixelOps {
                 }
                 // Native geometry keeps its existing renderer and independently resolved placement.
                 if let vectorImage { vectorImage.draw(in: content) }
-                else if let vector = cel.vector {
+                else if tier != .backing, let vector = cel.vector {
                     guard vector.draw(into: cg, frameRect: content, quality: quality) != nil else {
                         completed = false; return
                     }

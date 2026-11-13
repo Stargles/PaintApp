@@ -79,10 +79,10 @@ struct CanvasView: UIViewRepresentable {
         // with the active layer's own host between them. Added here so the *disengaged* z-order is
         // already `below < above < onionSkin < chrome`; `reconcileLayers` is what lifts `above` over
         // the layer hosts once the sandwich engages. See `updateSandwich`.
-        let sandwichBelow = Coordinator.makeSandwichView()
+        let sandwichBelow = Coordinator.makeSandwichView(UIImageView())
         container.addSubview(sandwichBelow)
 
-        let sandwichAbove = Coordinator.makeSandwichView()
+        let sandwichAbove = Coordinator.makeSandwichView(UIImageView())
         container.addSubview(sandwichAbove)
         context.coordinator.sandwichBelowView = sandwichBelow
         context.coordinator.sandwichAboveView = sandwichAbove
@@ -1585,7 +1585,7 @@ struct CanvasView: UIViewRepresentable {
         /// The views a transform edit's bands between `below` and `above` are drawn in — moving runs
         /// and the static bands between them — bottom-to-top, made on demand and lifted under the
         /// upper sandwich view. Hidden in every other presentation.
-        private var bandViews: [UIImageView] = []
+        private var bandViews: [LiveBandView] = []
 
         /// **How many updates a transform edit's picture has followed** — one per pass that re-posed
         /// a moving band to a map it was not already at while the finger is down, and one per
@@ -1637,8 +1637,7 @@ struct CanvasView: UIViewRepresentable {
         /// that a *dab* moves, and it moves nothing else: see `makeSandwichKey`.
         private var isSandwichStrokeLive = false
 
-        static func makeSandwichView() -> UIImageView {
-            let view = UIImageView()
+        static func makeSandwichView<View: UIImageView>(_ view: View) -> View {
             // The composite is exactly `canvasSize` and the container's bounds are too, so this is a
             // 1:1 blit and `.scaleToFill` cannot resample. Nearest-neighbor for the reason
             // `LayerHostView` gives for its image views: the whole
@@ -1865,7 +1864,7 @@ struct CanvasView: UIViewRepresentable {
                 belowView.isHidden = true
                 aboveView.image = nil
                 aboveView.isHidden = true
-                for view in bandViews { view.image = nil; view.isHidden = true }
+                for view in bandViews { view.show(nil, cel: nil) }
                 for host in layerHosts.values { host.setBlanked(false) }
                 livePicture = nil
                 sandwichKey = nil
@@ -1929,7 +1928,8 @@ struct CanvasView: UIViewRepresentable {
                 && composited != (canvasManager.canvasSize ?? composited)
             let filter: CALayerContentsFilter = isReduced ? .linear : .nearest
             if belowView.layer.magnificationFilter != filter {
-                for view in [belowView, aboveView] + bandViews { view.layer.magnificationFilter = filter }
+                for view in [belowView, aboveView] { view.layer.magnificationFilter = filter }
+                for view in bandViews { view.magnify(with: filter) }
             }
 
             // **Which picture, as one pure choice** — `SandwichPresentation.next`, where the rules and
@@ -2004,7 +2004,7 @@ struct CanvasView: UIViewRepresentable {
             // Hidden and emptied together: a band is a canvas-sized image, and one held by a hidden
             // view after its drag is memory nothing on screen justifies.
             if presentation != .moving {
-                for view in bandViews where view.image != nil { view.image = nil; view.isHidden = true }
+                for view in bandViews where view.image != nil { view.show(nil, cel: nil) }
             }
             if belowView.isHidden { belowView.isHidden = false }
             let showsAbove = (live || presentation == .moving) && aboveView.image != nil
@@ -2091,8 +2091,8 @@ struct CanvasView: UIViewRepresentable {
                   case .aroundRuns(let ids) = picture.cut else { return }
             let middle = Array(picture.bands.dropFirst().dropLast())
             while bandViews.count < middle.count {
-                let view = Self.makeSandwichView()
-                view.layer.magnificationFilter = sandwichBelowView?.layer.magnificationFilter ?? .nearest
+                let view = Self.makeSandwichView(LiveBandView())
+                view.magnify(with: sandwichBelowView?.layer.magnificationFilter ?? .nearest)
                 container.insertSubview(view, belowSubview: sandwichAboveView ?? view)
                 NSLayoutConstraint.activate([
                     view.topAnchor.constraint(equalTo: container.topAnchor),
@@ -2109,12 +2109,9 @@ struct CanvasView: UIViewRepresentable {
             let size = canvasManager.canvasSize ?? .zero
             var moved = false
             for (index, view) in bandViews.enumerated() {
-                guard index < middle.count, let image = middle[index] else {
-                    if !view.isHidden { view.isHidden = true; view.image = nil }
-                    continue
-                }
-                if view.image !== image { view.image = image }
-                if view.isHidden { view.isHidden = false }
+                let image = index < middle.count ? middle[index] : nil
+                view.show(image, cel: index == 0 ? picture.celBand : nil)
+                guard !view.isHidden else { continue }
                 // Band `index + 1` of the cut: odd bands are runs, run `index / 2`.
                 var transform = CATransform3DIdentity
                 if index % 2 == 0, index / 2 < maps.count, index / 2 < picture.mintMaps.count,
@@ -2123,10 +2120,7 @@ struct CanvasView: UIViewRepresentable {
                                                           inBoundsOfSize: size) {
                     transform = delta.catransform3D
                 }
-                if !CATransform3DEqualToTransform(view.layer.transform, transform) {
-                    view.layer.transform = transform
-                    moved = true
-                }
+                if view.move(to: transform) { moved = true }
             }
             if moved, editIsLive {
                 liveMoveCount += 1
@@ -2923,7 +2917,7 @@ struct CanvasView: UIViewRepresentable {
             let wanted = wantedLiveCut(for: movingBandsEdit)
             if let bands = rendered.bands, let wanted,
                mint.cut == wanted || (mint.key == sandwichKey && mint.cut.isSameKind(as: wanted)) {
-                livePicture = mint.picture(of: bands)
+                livePicture = mint.picture(of: bands, celBand: rendered.celBand)
                 for (picture, image) in zip(mint.active, rendered.activeImages) {
                     guard case .derived(let layerID, _, let covering) = picture else { continue }
                     guard let host = layerHosts[layerID],

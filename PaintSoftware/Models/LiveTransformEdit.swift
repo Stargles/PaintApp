@@ -42,7 +42,7 @@ enum LiveTransformEdit: Equatable {
     /// nodes dragged in the graph editor. Everything the layer poses moves.
     case container(layerID: UUID)
 
-    /// One cel's whole-drawing pose channel dragged in the graph editor: that layer's drawing moves.
+    /// One cel's pose channel dragged in the graph editor: the cel's editable ink moves.
     case cel(layerID: UUID)
 
     /// A Move box over a floating piece — lifted pixels, lassoed ink, a folder's contents, a Duplicate
@@ -220,8 +220,8 @@ extension CanvasManager {
             case .container, .floatingPiece:
                 return walk.poses[leaf] ?? .identity
             case .cel:
-                return inkPose(ofLayerAt: leaf, showing: walk.frames[leaf] ?? frame,
-                               inheriting: walk.poses[leaf], holding: held?.pose) ?? .identity
+                return celContentPlacement(ofLayerAt: leaf, in: walk, atFrame: frame,
+                                           holding: held?.pose).ink ?? .identity
             }
         }
     }

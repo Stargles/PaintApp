@@ -267,6 +267,74 @@ struct SandwichRecipe {
         return (below, above)
     }
 
+    final class CelBand {
+        let backing: CGImage
+        let ink: CGImage
+        let opacity: CGFloat
+        let mask: CGImage?
+
+        init(backing: CGImage, ink: CGImage, opacity: CGFloat, mask: CGImage?) {
+            self.backing = backing
+            self.ink = ink
+            self.opacity = opacity
+            self.mask = mask
+        }
+    }
+
+    struct MovingBands {
+        let images: [CGImage?]
+        /// When present, replaces the sole moving band at index 1.
+        let cel: CelBand?
+    }
+
+    /// Freeze the two parts of an ordinary mixed cel in the same sandwich mint. Layer and folder
+    /// coverage applies to their assembled result in canvas space, so the moving ink can cross the
+    /// same mask boundary as the stationary backing. A graded/blended band or Mix keeps the
+    /// compositor's existing full-band preview.
+    func compositeMovingBands(for edit: LiveTransformEdit) -> MovingBands? {
+        guard case .cel(let id) = edit, bands.count == 3,
+              let layer = Self.ordinaryCel(in: bands[1]), layer.id == id,
+              leaves.indices.contains(layer.index), case .cel(let cel)? = leaves[layer.index]?.content,
+              cel.display == nil, cel.vector?.isEmpty == false,
+              cel.bakedImage != nil || cel.strokesImage != nil else {
+            return compositeBands().map { MovingBands(images: $0, cel: nil) }
+        }
+        let pictureBytes = CompositorBudget.textureBytes(for: canvasSize)
+        guard CompositorBudget.hasHeadroom(for: pictureBytes * (layer.masks.isEmpty ? 3 : 4)) else {
+            MemoryPressure.signal(.allocationRefused)
+            return nil
+        }
+        let mask: CGImage?
+        if layer.masks.isEmpty { mask = nil }
+        else {
+            let recipe = frameRecipe(tree, background: paper)
+            guard case .success(let coverage) = MaskResolver.coverage(for: layer.masks, of: recipe)
+            else { return nil }
+            mask = coverage?.makeMaskImage()
+            if coverage != nil, mask == nil { return nil }
+        }
+        guard let backing = PixelOps.rasterize(.backing, of: cel, canvasSize: canvasSize, quality: quality),
+              let ink = PixelOps.rasterize(.ink, of: cel, canvasSize: canvasSize, quality: quality),
+              let images = compositeBands(skipping: 1) else { return nil }
+        return MovingBands(images: images, cel: CelBand(backing: backing, ink: ink,
+                                                       opacity: CGFloat(layer.opacity), mask: mask))
+    }
+
+    private static func ordinaryCel(in band: [RenderNode])
+    -> (index: Int, id: UUID, opacity: Double, masks: [AlphaMask])? {
+        guard band.count == 1, let node = band.first, node.isVisible, node.blendMode == .normal,
+              node.effect == nil else { return nil }
+        switch node.content {
+        case .leaf(let index):
+            return (index, node.id, node.opacity, node.masks)
+        case .node(.stack, let inputs):
+            guard inputs.count == 1, let leaf = ordinaryCel(in: inputs[0]) else { return nil }
+            return (leaf.index, leaf.id, node.opacity * leaf.opacity, node.masks + leaf.masks)
+        case .node(.mix, _):
+            return nil
+        }
+    }
+
     /// **Every band a transform edit draws, each composited under the memory ceiling** — the moving
     /// runs as well as the static bands between them, since nothing of the frame is drawn by a host
     /// while the edit is live (TODO (125)). `compositeHalves`' striped path, one band at a time.
@@ -275,10 +343,11 @@ struct SandwichRecipe {
     /// lowest, which carries the paper whatever it holds — and **all or none** otherwise, for
     /// `compositeHalves`' reason: a band from this mint beside one from the last is a
     /// coherent-looking picture that is wrong.
-    func compositeBands(budgetBytes: Int = CompositorBudget.textureBudgetBytes) -> [CGImage?]? {
+    func compositeBands(budgetBytes: Int = CompositorBudget.textureBudgetBytes,
+                        skipping skippedIndex: Int? = nil) -> [CGImage?]? {
         var images: [CGImage?] = []
         for (index, band) in bands.enumerated() {
-            guard !band.isEmpty || index == 0 else {
+            guard index != skippedIndex, !band.isEmpty || index == 0 else {
                 images.append(nil)
                 continue
             }
