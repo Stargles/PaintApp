@@ -188,7 +188,7 @@ final class TransformKeysSurviveUITests: PaintUITestCase {
         row.tap()
         let scale = app.switches["resizeCanvas.scaleToggle"]
         XCTAssertTrue(scale.waitForExistence(timeout: 5))
-        scale.tap()
+        scale.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
         XCTAssertEqual(scale.value as? String, "1")
         setField(app.textFields["resizeCanvas.widthField"], to: "2000")
         setField(app.textFields["resizeCanvas.heightField"], to: "2000")
