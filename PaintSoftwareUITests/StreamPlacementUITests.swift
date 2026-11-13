@@ -176,9 +176,8 @@ final class StreamPlacementUITests: StreamUITestCase {
         assertBounds(releasedPixels, match: movedHull, tolerance: 0.025,
                      message: "\(expectedPlacement): released stream pixels match the Move box")
 
-        // A newer blue frame arrives while Move is still up; blue distinguishes the stream from
-        // the Move box's green rotation handle. Set Down must leave this latest frame at the moved
-        // location. This does not claim that a frame was delivered after Set Down.
+        // Blue distinguishes a new live frame from the Move box's green rotation handle.
+        // Set Down must leave that frame at the moved location.
         XCTAssertNil(try streamPixelBounds(on: canvas, colour: .blue),
                      "PREMISE: no existing canvas or Move chrome matches the new-frame colour")
         laptop.show(.blue)
@@ -200,6 +199,18 @@ final class StreamPlacementUITests: StreamUITestCase {
                                    "Set Down leaves the newest computer frame on the canvas")
         assertBounds(landed, match: movedHull, tolerance: 0.025,
                      message: "\(expectedPlacement): Set Down leaves the picture where the box was")
+
+        attachScreenshot(XCUIScreen.main, "\(expectedPlacement) blue frame immediately after Set Down")
+
+        // The Live label is green. Return to red once the blue frame has replaced it on screen.
+        XCTAssertNil(try streamPixelBounds(on: canvas, colour: .red),
+                     "PREMISE: the previous red picture is no longer drawn")
+        laptop.show(.red)
+        let nextFrame = try waitForStreamBounds(.red, on: canvas, inside: movedHull)
+        attachScreenshot(XCUIScreen.main, "\(expectedPlacement) next live frame after Set Down")
+        let red = try XCTUnwrap(nextFrame, "the new red computer frame appears at the moved location after Set Down")
+        assertBounds(red, match: movedHull, tolerance: 0.025,
+                     message: "\(expectedPlacement): the next live frame keeps the committed Move position")
     }
 
     private func waitForStreamBounds(_ colour: Colour, on canvas: XCUIElement,
