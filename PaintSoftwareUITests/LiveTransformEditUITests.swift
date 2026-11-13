@@ -279,7 +279,7 @@ final class LiveTransformEditUITests: PaintUITestCase {
         let band = app.otherElements["timeline.graphBand"]
         XCTAssertTrue(band.waitForExistence(timeout: 5))
         let channel = PoseChannelID.cel(.cel).parameterID(.x)
-        XCTAssertEqual(band.value as? String, "\(channel):0", "the seeded cel's X node is the only curve")
+        XCTAssertEqual(band.value as? String, "\(channel)~0", "the seeded cel's X node is the only curve")
         let canvas = app.otherElements["canvas.host"]
         let paper = paperRect(in: canvas, canvasSize: size)
         let redRow = 56.0 / size.height
@@ -310,8 +310,11 @@ final class LiveTransformEditUITests: PaintUITestCase {
         let node = band.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
             dx: TimelineGraphBand.x(ofFrame: 0, pixelsPerFrame: TimelineKeyMarkers.basePixelsPerFrame),
             dy: y(initial)))
+        let bandHeight = band.frame.height
+        let destination = node.withOffset(CGVector(dx: 0,
+            dy: TimelineGraphBand.y(ofValue: initial + 24, in: axis, bandHeight: bandHeight) - y(initial)))
         let held = samplesDuring(points, "mixed cel X node") {
-            node.press(forDuration: 0.6, thenDragTo: node.withOffset(CGVector(dx: 0, dy: y(initial + 24) - y(initial))),
+            node.press(forDuration: 0.6, thenDragTo: destination,
                        withVelocity: XCUIGestureVelocity(40), thenHoldForDuration: 4)
         }.map { marks($0.pixels) }
         attachScreenshot(app, "mixed-cel-live-graph-result")
