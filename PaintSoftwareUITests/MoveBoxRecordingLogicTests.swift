@@ -666,6 +666,57 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
         }
     }
 
+    func testALateReportCannotReplaceATimelyOrdinaryMove() throws {
+        let (manager, clock) = movingDocument(frames: 16)
+        defer { manager.stopPlayback() }
+        manager.fps = 8
+        let base = try XCTUnwrap(manager.layers[moverIndex].layerTransform)
+        let undoCount = manager.history.undoStack.count
+        XCTAssertNil(manager.armRecording())
+        XCTAssertTrue(manager.beginContainerPoseMove())
+        manager.moveBoxTouched()
+        let deadline = try XCTUnwrap(manager.recordingPlaybackDeadline())
+        clock.now = deadline
+        reportBox(manager, to: CGVector(dx: 9, dy: 0))
+        clock.now = deadline + 0.03125
+        reportBox(manager, to: CGVector(dx: 32, dy: 0))
+
+        manager.tickPlayback()
+        let held = try XCTUnwrap(manager.shownFloatingPiece)
+        XCTAssertEqual(held.transform.position.x, canvasCentre.x + 9, accuracy: 1e-6)
+        XCTAssertEqual(manager.history.undoStack.count, undoCount, "The drag is still held")
+        manager.moveBoxLifted()
+
+        let after = try XCTUnwrap(manager.layers[moverIndex].layerTransform)
+        XCTAssertEqual(after.resolvedValues(atFrame: 0).x, Double(canvasCentre.x) + 9, accuracy: 1e-6)
+        XCTAssertEqual(after.track, base.track, "One timely report falls back to an ordinary Move")
+        XCTAssertEqual(manager.history.undoStack.count, undoCount + 1)
+        manager.undo()
+        XCTAssertEqual(manager.layers[moverIndex].layerTransform, base)
+    }
+
+    func testSettingDownAnOwnedMoveBoxCannotCommitALateReport() throws {
+        let (manager, clock) = movingDocument(frames: 16)
+        defer { manager.stopPlayback() }
+        manager.fps = 8
+        let base = try XCTUnwrap(manager.layers[moverIndex].layerTransform)
+        let undoCount = manager.history.undoStack.count
+        XCTAssertNil(manager.armRecording())
+        XCTAssertTrue(manager.beginContainerPoseMove())
+        manager.moveBoxTouched()
+        let deadline = try XCTUnwrap(manager.recordingPlaybackDeadline())
+        clock.now = deadline + 0.25
+        reportBox(manager, to: CGVector(dx: 24, dy: 0))
+        manager.moveBoxLifted()
+
+        XCTAssertTrue(manager.commitAnyFloatingPiece())
+
+        XCTAssertNil(manager.floatingPiece)
+        XCTAssertFalse(manager.isRecording)
+        XCTAssertEqual(manager.layers[moverIndex].layerTransform, base)
+        XCTAssertEqual(manager.history.undoStack.count, undoCount)
+    }
+
     // MARK: - The refusals
 
     /// **A box over lifted pixels is refused out loud, and the arm survives** — requirement 4, and the
@@ -865,7 +916,8 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
         XCTAssertTrue(manager.beginMoveBoxTake())
 
         let stranger = KeyframeTarget.layer(id: manager.layers[0].id)
-        XCTAssertFalse(manager.recordMoveBoxSample(stranger, pose: PoseQuad(restingIn: canvasBox)),
+        XCTAssertFalse(manager.recordMoveBoxSample(stranger, pose: PoseQuad(restingIn: canvasBox),
+                                                   at: manager.playbackNow()),
                        "A take is scoped to one target")
         XCTAssertTrue(try XCTUnwrap(manager.recordingTake).poses.isEmpty)
     }
@@ -875,7 +927,8 @@ final class MoveBoxRecordingLogicTests: XCTestCase {
     func testTheInterceptIsInertWithNoTakeRunning() {
         let (manager, _) = movingDocument()
         XCTAssertFalse(manager.recordMoveBoxSample(target(manager),
-                                                   pose: PoseQuad(restingIn: canvasBox)))
+                                                   pose: PoseQuad(restingIn: canvasBox),
+                                                   at: manager.playbackNow()))
         XCTAssertNil(manager.recordingTake)
     }
 

@@ -408,6 +408,12 @@ enum FloatingPieceKind {
 /// the lift — one SwiftUI pass a drag rather than one a tick. Setting the piece down mid-drag lands it
 /// where the box is (`commitFloatingPieceIfNeeded`).
 struct BoxNudge {
+    struct Report {
+        let time: TimeInterval
+        let transform: FloatingTransform
+        let distortQuad: Quad?
+    }
+
     /// The frame the gesture was made on — the frame its commit routes at, wherever the playhead is
     /// when it settles.
     let frame: Int
@@ -420,6 +426,10 @@ struct BoxNudge {
     /// when the gesture settles.
     var transform: FloatingTransform
     var distortQuad: Quad?
+
+    /// Exact box travel during the take, which may land as an ordinary Move if it yields no curve.
+    /// The recorded pose samples include the playhead's animation and cannot reconstruct this travel.
+    var takeReports: [Report] = []
 }
 
 /// A piece of pixel content lifted out for interactive move/resize/rotate, not yet committed back
@@ -1606,7 +1616,8 @@ extension CanvasManager {
     /// ants with it (`onHeldPictureMoved`), and the `@Published` piece is written once, so a drag is not
     /// a SwiftUI pass over the editor per tick.
     func updateFloatingPose(transform: FloatingTransform, distortQuad: Quad?) {
-        guard carryBoxNudge(to: transform, distortQuad: distortQuad) else {
+        let time = recordingOwnsMoveBox ? playbackNow() : nil
+        guard carryBoxNudge(to: transform, distortQuad: distortQuad, recordingAt: time) else {
             floatingPiece?.transform = transform
             floatingPiece?.distortQuad = distortQuad
             return
@@ -1616,14 +1627,15 @@ extension CanvasManager {
         // sample is timed to when the artist's finger reported the pose and not to whatever the preview
         // costs; and a no-op whenever no take is running, which is what keeps an unrecorded Move
         // byte-for-byte the gesture it was.
-        recordContainerPoseSample()
+        if let time { recordContainerPoseSample(at: time) }
         showBoxNudge()
     }
 
     /// **A press on the Move bar — Mirror, Rotate or Reset — is a whole gesture**: the piece goes to
     /// `transform`, a box's preview with it, and the box's gesture lands at once as one undo step.
     private func pressFloating(to transform: FloatingTransform, distortQuad: Quad?) {
-        guard carryBoxNudge(to: transform, distortQuad: distortQuad) else {
+        let time = recordingOwnsMoveBox ? playbackNow() : nil
+        guard carryBoxNudge(to: transform, distortQuad: distortQuad, recordingAt: time) else {
             floatingPiece?.transform = transform
             floatingPiece?.distortQuad = distortQuad
             return
@@ -1660,12 +1672,38 @@ extension CanvasManager {
 
     /// Carries the box's gesture — opened first if none is — to `transform`. False for a piece with no
     /// gesture to carry: a box whose target has stopped posing or grading.
-    private func carryBoxNudge(to transform: FloatingTransform, distortQuad: Quad?) -> Bool {
+    private func carryBoxNudge(to transform: FloatingTransform, distortQuad: Quad?,
+                               recordingAt time: TimeInterval?) -> Bool {
+        if time != nil, let nudge = boxNudge, nudge.takeReports.isEmpty {
+            // A take that starts with a nudge already open leaves its earlier travel eligible to land.
+            boxNudge?.takeReports.append(.init(time: -.infinity, transform: nudge.transform,
+                                               distortQuad: nudge.distortQuad))
+        }
         openBoxNudgeIfNeeded()
         guard boxNudge != nil else { return false }
+        if let time {
+            boxNudge?.takeReports.append(.init(time: time, transform: transform, distortQuad: distortQuad))
+        }
         boxNudge?.transform = transform
         boxNudge?.distortQuad = distortQuad
         return true
+    }
+
+    /// Restore the box travel the take can leave to an ordinary Move. A delayed tick can leave
+    /// the box on screen long enough for a report beyond the endpoint to reach its preview.
+    func finishMoveBoxTake(at deadline: TimeInterval) {
+        guard let latest = boxNudge?.takeReports.last else { return }
+        if latest.time <= deadline {
+            boxNudge?.takeReports = []
+        } else if let report = boxNudge?.takeReports.last(where: { $0.time <= deadline }) {
+            boxNudge?.takeReports = []
+            boxNudge?.transform = report.transform
+            boxNudge?.distortQuad = report.distortQuad
+            holdContainerBoxPose()
+        } else {
+            boxNudge = nil
+            holdLivePose(nil)
+        }
     }
 
     /// The box's preview at the gesture's travel — a transformation layer's pose or an effect box's
@@ -1758,13 +1796,13 @@ extension CanvasManager {
     /// what makes a take over an *already animated* container right: `containerPose(_:movedBy:in:)`
     /// composes the box's delta onto the pose in force at this frame, so the recorded curve carries the
     /// existing animation plus the drag — and the track it replaces is therefore not lost.
-    private func recordContainerPoseSample() {
-        guard isRecording, let piece = floatingPiece, piece.kind == .containerPose,
+    private func recordContainerPoseSample(at time: TimeInterval) {
+        guard let piece = floatingPiece,
               let target = piece.containerTarget, let nudge = boxNudge, let found = containerPose(of: target),
               let posed = Self.containerPose(found.resolvedPose(atFrame: currentFrame), movedBy: nudge,
                                              in: piece.localBox)
         else { return }
-        recordMoveBoxSample(target, pose: posed)
+        recordMoveBoxSample(target, pose: posed, at: time)
     }
 
     /// **The container box's preview: hold the pose the box is at, and let the canvas re-pose to it** —
@@ -2071,6 +2109,10 @@ extension CanvasManager {
     /// undoable step. No-op if there's nothing floating.
     @discardableResult
     func commitFloatingPieceIfNeeded() -> Bool {
+        if recordingOwnsMoveBox {
+            stopRecording()
+            if floatingPiece == nil { return true }
+        }
         guard var piece = floatingPiece, let canvasSize else { return false }
         // **The two boxes bake nothing and return here**, before a single line of the pixel path
         // below. Neither has a `pieceImage` worth rendering, a remainder to composite against or a cel

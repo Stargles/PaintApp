@@ -71,10 +71,14 @@ extension CanvasManager {
         /// about, reached by a new door.
         var caughtInk = false
 
-        mutating func discardLateSliderSamples(after deadline: TimeInterval) {
+        mutating func discardLateSamples(after deadline: TimeInterval) {
             for id in Array(channels.keys) {
                 channels[id]?.discardSamples(after: deadline)
                 if channels[id]?.isEmpty == true { channels.removeValue(forKey: id) }
+            }
+            for component in Array(poses.keys) {
+                poses[component]?.discardSamples(after: deadline)
+                if poses[component]?.isEmpty == true { poses.removeValue(forKey: component) }
             }
         }
     }
@@ -362,15 +366,8 @@ extension CanvasManager {
     /// **One pose the Move box reported** — §5.1 step 3's *"a quad surface needs its own intercept,
     /// because `ValueRecording` is scalar-only"*, and this is that intercept.
     ///
-    /// **It suppresses nothing, where `recordParameterSample` suppresses the caller's five arms.** A
-    /// slider has to be stopped from keying per tick, because its ordinary per-tick behaviour *is* a
-    /// routed keyframe write and 24 of those a second is the aliasing §5 forbids. A container float's
-    /// per-tick behaviour is a **preview** held off the document (`holdContainerBoxPose`) so the artist
-    /// can see the box move, and the only keyframe write on this path happens once, at the float's
-    /// commit. So there is nothing here to hold back, and the return value is informational.
-    ///
-    /// The timestamp is `playbackNow()`, the same injectable wall clock playback derives the playhead
-    /// from, so a test hands the recorder numbers instead of sleeping through a take.
+    /// `updateFloatingPose` supplies the playback timestamp it used for the box's own travel. At
+    /// stop the same deadline bounds both the curve and the ordinary Move an empty take may leave.
     ///
     /// - Returns: whether a take took the sample. `false` means nothing was recording, or the box is
     ///   posing something other than what the take is aimed at.
@@ -383,16 +380,15 @@ extension CanvasManager {
     /// path, so a local take/channel copy would share the sample array with the property and make each
     /// append copy the accumulated stream.
     @discardableResult
-    func recordMoveBoxSample(_ target: KeyframeTarget, pose: PoseQuad) -> Bool {
+    func recordMoveBoxSample(_ target: KeyframeTarget, pose: PoseQuad, at time: TimeInterval) -> Bool {
         guard isRecording, recordingTake?.target == target,
               let box = recordingTake?.basePose?.track.box,
               var values = PoseComponents.decompose(pose, inBox: box) else { return false }
         if let last = recordingTake?.poses[.rotation]?.samples.last {
             values = values.unwrappingRotation(near: last.value)
         }
-        let now = playbackNow()
         for component in PoseComponents.Component.allCases {
-            recordingTake?.poses[component, default: ValueRecording()].record(values[component], at: now)
+            recordingTake?.poses[component, default: ValueRecording()].record(values[component], at: time)
         }
         return true
     }
@@ -602,9 +598,9 @@ extension CanvasManager {
         recordingTake = nil
         if isPlaying { stopPlayback() }
 
-        // The slider may report a value before a delayed tick but after the final frame came due.
+        // A control may report a value before a delayed tick but after the final frame came due.
         // Trim the raw stream before it can affect interpolation, endpoint pinning or simplification.
-        if let deadline { take.discardLateSliderSamples(after: deadline) }
+        if let deadline { take.discardLateSamples(after: deadline) }
         let written = commitRecordingTake(take)
         // A slider still held when the scene ran out: what it showed of the take is on the curve now.
         releaseTakePreview(of: take.target)
@@ -647,7 +643,10 @@ extension CanvasManager {
             raise(.recordingRefused(outcome!))
         }
         // After the bracket has closed, so an ordinary Move the take leaves behind lands as its own step.
-        if ownedMoveBox { releaseMoveBoxAfterTake() }
+        if ownedMoveBox {
+            finishMoveBoxTake(at: deadline ?? .infinity)
+            releaseMoveBoxAfterTake()
+        }
         return outcome
     }
 
