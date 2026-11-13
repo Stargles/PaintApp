@@ -79,10 +79,10 @@ struct CanvasView: UIViewRepresentable {
         // with the active layer's own host between them. Added here so the *disengaged* z-order is
         // already `below < above < onionSkin < chrome`; `reconcileLayers` is what lifts `above` over
         // the layer hosts once the sandwich engages. See `updateSandwich`.
-        let sandwichBelow = Coordinator.makeSandwichView(UIImageView())
+        let sandwichBelow = Coordinator.makeSandwichView()
         container.addSubview(sandwichBelow)
 
-        let sandwichAbove = Coordinator.makeSandwichView(UIImageView())
+        let sandwichAbove = Coordinator.makeSandwichView()
         container.addSubview(sandwichAbove)
         context.coordinator.sandwichBelowView = sandwichBelow
         context.coordinator.sandwichAboveView = sandwichAbove
@@ -1637,7 +1637,13 @@ struct CanvasView: UIViewRepresentable {
         /// that a *dab* moves, and it moves nothing else: see `makeSandwichKey`.
         private var isSandwichStrokeLive = false
 
-        static func makeSandwichView<View: UIImageView>(_ view: View) -> View {
+        static func makeSandwichView() -> UIImageView {
+            let view = UIImageView()
+            configureSandwichView(view)
+            return view
+        }
+
+        private static func configureSandwichView(_ view: UIImageView) {
             // The composite is exactly `canvasSize` and the container's bounds are too, so this is a
             // 1:1 blit and `.scaleToFill` cannot resample. Nearest-neighbor for the reason
             // `LayerHostView` gives for its image views: the whole
@@ -1655,7 +1661,6 @@ struct CanvasView: UIViewRepresentable {
             view.isUserInteractionEnabled = false
             view.isHidden = true
             view.translatesAutoresizingMaskIntoConstraints = false
-            return view
         }
 
         /// The timing recorder's live trail — KEYFRAMES.md §7 stage 10.
@@ -2091,7 +2096,8 @@ struct CanvasView: UIViewRepresentable {
                   case .aroundRuns(let ids) = picture.cut else { return }
             let middle = Array(picture.bands.dropFirst().dropLast())
             while bandViews.count < middle.count {
-                let view = Self.makeSandwichView(LiveBandView())
+                let view = LiveBandView()
+                Self.configureSandwichView(view)
                 view.magnify(with: sandwichBelowView?.layer.magnificationFilter ?? .nearest)
                 container.insertSubview(view, belowSubview: sandwichAboveView ?? view)
                 NSLayoutConstraint.activate([
@@ -2903,9 +2909,10 @@ struct CanvasView: UIViewRepresentable {
         }
 
         private func finishSandwichRebuild(_ mint: LivePictureMint, _ rendered: LivePictureMint.Rendered) {
-            // All or none: a half-updated pair would put a `below` from this frame under an `above`
-            // from the last one, and a pair whose middle is older than its halves is the flash TODO
-            // (145) reported. `composite` returns nil only for a degenerate canvas.
+            // A refused rebuild leaves the current presentation in place. Reconciling it would
+            // request the same missing picture again. LatestWins can still start a request that
+            // arrived during the render, and later canvas changes can request another rebuild.
+            guard let bands = rendered.bands else { return }
             //
             // **Kept when it is for the cut the canvas wants, even if the key has moved on** — it is
             // still newer than anything the canvas holds, and `LivePairFit` calls it stale rather than
@@ -2915,8 +2922,7 @@ struct CanvasView: UIViewRepresentable {
             // a pair minted before a drag began lands at the drag's held key, and must not take the
             // bands' place.
             let wanted = wantedLiveCut(for: movingBandsEdit)
-            if let bands = rendered.bands, let wanted,
-               mint.cut == wanted || (mint.key == sandwichKey && mint.cut.isSameKind(as: wanted)) {
+            if let wanted, mint.cut == wanted || (mint.key == sandwichKey && mint.cut.isSameKind(as: wanted)) {
                 livePicture = mint.picture(of: bands, celBand: rendered.celBand)
                 for (picture, image) in zip(mint.active, rendered.activeImages) {
                     guard case .derived(let layerID, _, let covering) = picture else { continue }

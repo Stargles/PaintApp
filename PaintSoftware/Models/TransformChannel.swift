@@ -649,3 +649,8 @@ private struct PosedCelIdentity: Hashable {
     let canvasWidth: Int
     let canvasHeight: Int
 }
+
+extension DerivedCelContent {
+    /// A posed copy of stored geometry, with no evaluated in-between or decoded video frames.
+    var rendersPoseGeometry: Bool { identity.base is PosedCelIdentity }
+}

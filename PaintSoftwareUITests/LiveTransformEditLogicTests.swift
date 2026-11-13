@@ -497,7 +497,7 @@ final class LiveTransformEditLogicTests: XCTestCase {
                        "under the finger only the red fill moves eight pixels")
     }
 
-    func testCelPoseDragClipsTheAssembledTiersInCanvasSpaceAndFadesThemOnce() throws {
+    func testMaskedCelPoseDragUsesStripedBandsWithTransitiveMaskSources() throws {
         let (manager, index) = try mixedCel(backingRect: CGRect(x: 24, y: 6, width: 12, height: 4))
         let id = manager.layers[index].id
         let folder = try XCTUnwrap(manager.addFolder(name: "Faded"))
@@ -509,27 +509,56 @@ final class LiveTransformEditLogicTests: XCTestCase {
         source.addFill(path: CGPath(rect: CGRect(x: 26, y: 5, width: 6, height: 6), transform: nil),
                        color: CodableColor(red: 1, green: 1, blue: 1, alpha: 1))
         manager.layers[maskIndex].isVisible = false
+        manager.addVectorLayer(name: "Mask source's own clip")
+        let clipIndex = manager.currentLayerIndex
+        let clip = try XCTUnwrap(manager.layers[clipIndex].cels[0].vector)
+        clip.addFill(path: CGPath(rect: CGRect(x: 28, y: 5, width: 6, height: 6), transform: nil),
+                     color: CodableColor(red: 1, green: 1, blue: 1, alpha: 1))
+        manager.layers[clipIndex].isVisible = false
+        manager.layers[maskIndex].alphaMask = AlphaMask(sources: [.layer(manager.layers[clipIndex].id)])
         manager.layers[index].alphaMask = AlphaMask(sources: [.layer(manager.layers[maskIndex].id)])
         let edit = LiveTransformEdit.cel(layerID: id)
         let runs = manager.liveTransformRuns(edit, atFrame: 0)
         let recipe = try XCTUnwrap(manager.makeSandwichRecipe(atFrame: 0, runs: runs))
-        let band = try XCTUnwrap(recipe.compositeMovingBands(for: edit)?.cel)
-        XCTAssertEqual(band.opacity, 0.5)
-        XCTAssertNotNil(band.mask)
-        let shown = try XCTUnwrap(lay(band, inkDelta: CGAffineTransform(translationX: 8, y: 0)))
-        let target = KeyframeTarget.layer(id: id)
-        let celX = PoseChannelID.cel(.cel).parameterID(.x)
-        manager.beginLiveTransformEdit(edit)
-        manager.holdLivePose([celX: xCurve(canvasBox.midX + 8)], of: target)
-        XCTAssertTrue(manager.commitLivePose())
-        manager.endLiveTransformEdit()
-        let settled = try XCTUnwrap(manager.makeRenderRequest(atFrame: 0, includeBackground: false)
-            .flatMap(Compositor.composite))
-        XCTAssertLessThanOrEqual(maxChannelDelta(shown, settled), 1,
-            "the preview clips at x26…31: backing is visible at x28, and overlapping red has one 50% fade at x31")
+        let frameBytes = CompositorBudget.textureBytes(for: recipe.canvasSize)
+        let expected = try XCTUnwrap(recipe.compositeBands(budgetBytes: frameBytes * 4))
+        let rendered = try XCTUnwrap(recipe.compositeMovingBands(for: edit, budgetBytes: frameBytes * 4))
+        XCTAssertNil(rendered.cel, "the live cut uses its ordinary masked middle picture")
+        let middle = try XCTUnwrap(rendered.images[1])
+        XCTAssertEqual(maxChannelDelta(middle, try XCTUnwrap(expected[1])), 0)
+        let roomy = try XCTUnwrap(recipe.compositeMovingBands(for: edit, budgetBytes: frameBytes * 32))
+        XCTAssertNil(roomy.cel, "even ample headroom must not admit an unwindowed mask resolve")
+        XCTAssertEqual(maxChannelDelta(middle, try XCTUnwrap(roomy.images[1])), 0)
+        let pixels = try XCTUnwrap(CanvasFixture.rgbaBytes(middle))
+        func pixel(_ x: Int) -> [UInt8] {
+            let offset = (8 * middle.width + x) * 4
+            return Array(pixels[offset..<(offset + 4)])
+        }
+        XCTAssertEqual(pixel(27), [0, 0, 0, 0], "the mask source's own clip is visible")
+        XCTAssertEqual(pixel(29), [0, 0, 128, 128], "the backing keeps the folder's single 50% fade")
+        XCTAssertEqual(pixel(32), [0, 0, 0, 0], "the directly applied mask is also visible")
     }
 
-    /// Model the stationary band group's source-over assembly, opacity and alpha mask. The public
+    func testCelPoseDragPublishesOrdinaryBandsWhenSplitHeadroomRefuses() throws {
+        let (manager, index) = try mixedCel(backingRect: CGRect(x: 6, y: 6, width: 4, height: 4))
+        let edit = LiveTransformEdit.cel(layerID: manager.layers[index].id)
+        let runs = manager.liveTransformRuns(edit, atFrame: 0)
+        let recipe = try XCTUnwrap(manager.makeSandwichRecipe(atFrame: 0, runs: runs))
+        let previousHeadroom = CompositorBudget.availableMemoryOverrideBytes
+        defer { CompositorBudget.availableMemoryOverrideBytes = previousHeadroom }
+        let bytes = CompositorBudget.textureBytes(for: recipe.canvasSize)
+        CompositorBudget.availableMemoryOverrideBytes = bytes * 6
+        let fallback = try XCTUnwrap(recipe.compositeMovingBands(for: edit, budgetBytes: bytes * 32))
+        XCTAssertNil(fallback.cel, "the budget can fit the split, but current headroom refuses it")
+        let expected = try XCTUnwrap(recipe.compositeBands(budgetBytes: bytes * 32))
+        XCTAssertEqual(maxChannelDelta(try XCTUnwrap(fallback.images[1]), try XCTUnwrap(expected[1])), 0)
+        XCTAssertNotNil(fallback.images[0], "the fallback publishes a complete cut")
+        CompositorBudget.availableMemoryOverrideBytes = 0
+        XCTAssertNotNil(recipe.compositeMovingBands(for: edit, budgetBytes: bytes * 32)?.cel,
+                        "a later mint can split the same content when there is headroom")
+    }
+
+    /// Model the stationary band group's source-over assembly and opacity. The public
     /// gesture test drives the real Core Animation band, including its ink-only transform.
     private func lay(_ band: SandwichRecipe.CelBand, inkDelta: CGAffineTransform) -> CGImage? {
         UIGraphicsImageRenderer(bounds: canvasBox, format: PixelOps.transparentFormat()).image { context in
@@ -541,9 +570,6 @@ final class LiveTransformEditLogicTests: XCTestCase {
             cg.concatenate(inkDelta)
             UIImage(cgImage: band.ink).draw(in: canvasBox)
             cg.restoreGState()
-            if let mask = band.mask {
-                UIImage(cgImage: mask).draw(in: canvasBox, blendMode: .destinationIn, alpha: 1)
-            }
             cg.endTransparencyLayer()
         }.cgImage
     }

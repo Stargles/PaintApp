@@ -104,7 +104,7 @@ struct LivePictureMint {
     /// What `render` produced, for the main actor to adopt or discard.
     struct Rendered {
         /// All or none: a half-updated pair would put a `below` from this frame under an `above` from
-        /// the last one. Nil only for a degenerate canvas.
+        /// the last one. Nil when a complete picture could not be rendered.
         let bands: [CGImage?]?
         let celBand: SandwichRecipe.CelBand?
         /// One per `active`, in order.
@@ -152,7 +152,7 @@ struct LivePictureMint {
 }
 
 /// A middle band of the sandwich. The ordinary picture moves as a whole. A mixed cel keeps its
-/// backing here and moves the ink sublayer inside the same opacity and canvas-space mask.
+/// backing here and moves the ink sublayer inside the same opacity group.
 final class LiveBandView: UIImageView {
     private var celInk: CALayer?
     private var shownCel: SandwichRecipe.CelBand?
@@ -168,7 +168,6 @@ final class LiveBandView: UIImageView {
         CATransaction.setDisableActions(true)
         celInk.bounds = bounds
         celInk.position = CGPoint(x: bounds.midX, y: bounds.midY)
-        layer.mask?.frame = bounds
         CATransaction.commit()
     }
 
@@ -188,11 +187,6 @@ final class LiveBandView: UIImageView {
             ink.contents = cel.ink
             if celInk == nil { layer.addSublayer(ink) }
             celInk = ink
-            layer.mask = cel.mask.map { image in
-                let mask = CALayer()
-                mask.contents = image
-                return mask
-            }
             layer.allowsGroupOpacity = true
             alpha = cel.opacity
             alignCelLayers()
@@ -201,7 +195,6 @@ final class LiveBandView: UIImageView {
                 celInk.removeFromSuperlayer()
                 self.celInk = nil
                 shownCel = nil
-                layer.mask = nil
                 alpha = 1
             }
             if image !== picture { image = picture }

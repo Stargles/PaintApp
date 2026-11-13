@@ -312,9 +312,19 @@ final class LiveTransformEditUITests: PaintUITestCase {
     }
 
     func testACelPoseNodeMovesOnlyInkWhileTheFingerIsDown() throws {
+        try driveMixedCelPoseDrag()
+    }
+
+    func testACelPoseNodePublishesOneStripedPreviewWhenTheSplitExceedsBudget() throws {
+        let pictureBytes = 256 * 256 * 4
+        try driveMixedCelPoseDrag(textureBudget: pictureBytes * 4)
+    }
+
+    private func driveMixedCelPoseDrag(textureBudget: Int? = nil) throws {
         let app = XCUIApplication()
         app.launchArguments += ["-uiTestSeedEraserBacking", "-uiTestSlowBakeMillis",
                                 "\(Int(Self.bakeDelay * 1000))"]
+        if let textureBudget { app.launchArguments += ["-uiTestTextureBudgetBytes", String(textureBudget)] }
         let size = CGSize(width: 256, height: 256)
         XCTAssertTrue(launchIntoEditor(app, size: size, orientationBeforeCreatingCanvas: .landscapeLeft))
         app.buttons["timeline.graphEditorButton"].tap()
@@ -331,14 +341,18 @@ final class LiveTransformEditUITests: PaintUITestCase {
         func point(x: Double, y: Double) -> CGPoint {
             logicalAppPoint(in: canvasFrame, normalizedOffset: onHost(paper, x / size.width, y))
         }
-        let points = [point(x: 104, y: redRow), point(x: 72, y: inkRow), point(x: 204, y: inkRow)]
+        let points = [point(x: 104, y: redRow), point(x: 72, y: inkRow), point(x: 204, y: inkRow),
+                      point(x: 128, y: redRow)]
         func marks(_ pixels: [RGBA?]) -> [Bool] {
-            guard pixels.count == 3 else { return [] }
-            return [isRed(pixels[0]), isInk(pixels[1]), isInk(pixels[2])]
+            guard pixels.count == points.count else { return [] }
+            return [isRed(pixels[0]), isInk(pixels[1]), isInk(pixels[2]), isRed(pixels[3])]
         }
+        let settled = [true, false, true, false]
+        let expectedHeld = textureBudget == nil ? settled : [false, false, true, true]
         XCTAssertEqual(sandwichState(app), "off", "a lone cel draws through its ordinary host at rest")
-        XCTAssertEqual(marks(readScreenNow(points)), [true, true, false], "red backing and original black ink")
+        XCTAssertEqual(marks(readScreenNow(points)), [true, true, false, false], "red backing and original black ink")
         attachScreenshot(app, "mixed-cel-before-graph-drag")
+        let rebuildsBefore = try XCTUnwrap(Int(readField(app, "rebuilds:")))
 
         let rest = Double(size.width / 2)
         let initial = rest + 32
@@ -354,7 +368,7 @@ final class LiveTransformEditUITests: PaintUITestCase {
         let destination = node.withOffset(CGVector(dx: 0, dy: y(initial + 24) - y(initial)))
         var firstMoved: (time: CFAbsoluteTime, screenshot: XCUIScreenshot)?
         let sampler = MidGestureSampler(points: points) { sample, screenshot in
-            if firstMoved == nil, marks(sample.pixels) == [true, false, true] {
+            if firstMoved == nil, marks(sample.pixels) == expectedHeld {
                 firstMoved = (sample.finished, screenshot)
             }
         }
@@ -363,8 +377,15 @@ final class LiveTransformEditUITests: PaintUITestCase {
                    withVelocity: XCUIGestureVelocity(40), thenHoldForDuration: 4)
         let returned = CFAbsoluteTimeGetCurrent()
         let held = sampler.stop().filter { $0.finished < returned - 2 }.map { marks($0.pixels) }
-        XCTAssertTrue(held.contains([true, false, true]), "red stayed while black moved: \(held)")
-        XCTAssertTrue(held.allSatisfy { $0.first == true }, "the red backing must stay through every held sample: \(held)")
+        XCTAssertTrue(held.contains(expectedHeld), "the held picture reached the new ink position: \(held)")
+        if textureBudget == nil {
+            XCTAssertTrue(held.allSatisfy { $0.first == true },
+                          "the red backing must stay through every held sample: \(held)")
+        } else {
+            let rebuildsAfter = try XCTUnwrap(Int(readField(app, "rebuilds:")))
+            XCTAssertEqual(rebuildsAfter - rebuildsBefore, 1,
+                           "the complete striped fallback lands in one rebuild, even during the stationary hold")
+        }
         let witness = try XCTUnwrap(firstMoved, "capture both tiers at the new ink position")
         XCTAssertLessThan(witness.time, returned - 2, "capture the picture while the finger is still down")
         let attachment = XCTAttachment(screenshot: witness.screenshot)
@@ -372,7 +393,7 @@ final class LiveTransformEditUITests: PaintUITestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
         XCTAssertEqual(sandwichState(app), "off", "the ordinary host takes over after lift")
-        XCTAssertEqual(marks(readScreenNow(points)), [true, false, true], "the same placement after lift")
+        XCTAssertEqual(marks(readScreenNow(points)), settled, "only black ink has moved after lift")
         attachScreenshot(app, "mixed-cel-settled-graph-result")
     }
 }

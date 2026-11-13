@@ -271,13 +271,11 @@ struct SandwichRecipe {
         let backing: CGImage
         let ink: CGImage
         let opacity: CGFloat
-        let mask: CGImage?
 
-        init(backing: CGImage, ink: CGImage, opacity: CGFloat, mask: CGImage?) {
+        init(backing: CGImage, ink: CGImage, opacity: CGFloat) {
             self.backing = backing
             self.ink = ink
             self.opacity = opacity
-            self.mask = mask
         }
     }
 
@@ -287,49 +285,49 @@ struct SandwichRecipe {
         let cel: CelBand?
     }
 
-    /// Freeze the two parts of an ordinary mixed cel in the same sandwich mint. Layer and folder
-    /// coverage applies to their assembled result in canvas space, so the moving ink can cross the
-    /// same mask boundary as the stationary backing. A graded/blended band or Mix keeps the
-    /// compositor's existing full-band preview.
-    func compositeMovingBands(for edit: LiveTransformEdit) -> MovingBands? {
+    /// The split is optional within this mint. Unsupported art or a refused split still gets the
+    /// same key and cut through the ordinary striped preview.
+    func compositeMovingBands(for edit: LiveTransformEdit,
+                              budgetBytes: Int = CompositorBudget.textureBudgetBytes) -> MovingBands? {
+        if let split = autoreleasepool(invoking: { compositeSplitCel(for: edit, budgetBytes: budgetBytes) }) {
+            return split
+        }
+        return compositeBands(budgetBytes: budgetBytes).map { MovingBands(images: $0, cel: nil) }
+    }
+
+    private func compositeSplitCel(for edit: LiveTransformEdit, budgetBytes: Int) -> MovingBands? {
         guard case .cel(let id) = edit, bands.count == 3,
               let layer = Self.ordinaryCel(in: bands[1]), layer.id == id,
               leaves.indices.contains(layer.index), case .cel(let cel)? = leaves[layer.index]?.content,
-              cel.display == nil, cel.vector?.isEmpty == false,
-              cel.bakedImage != nil || cel.strokesImage != nil else {
-            return compositeBands().map { MovingBands(images: $0, cel: nil) }
-        }
-        let pictureBytes = CompositorBudget.textureBytes(for: canvasSize)
-        guard CompositorBudget.hasHeadroom(for: pictureBytes * (layer.masks.isEmpty ? 3 : 4)) else {
-            MemoryPressure.signal(.allocationRefused)
-            return nil
-        }
-        let mask: CGImage?
-        if layer.masks.isEmpty { mask = nil }
-        else {
-            let recipe = frameRecipe(tree, background: paper)
-            guard case .success(let coverage) = MaskResolver.coverage(for: layer.masks, of: recipe)
-            else { return nil }
-            mask = coverage?.makeMaskImage()
-            if coverage != nil, mask == nil { return nil }
-        }
+              cel.display == nil, cel.pose?.isIdentity != false,
+              cel.derived?.rendersPoseGeometry != false,
+              cel.vector?.hasOnlyPaintGeometry == true,
+              cel.bakedImage != nil || cel.strokesImage != nil else { return nil }
+        // The two UIKit output pictures can use RGBA16. The posed geometry is rendered at
+        // native size even at reduced preview detail, with up to two nested stroke buffers.
+        // Raster sources already account for their own resident pixels and decode work.
+        let outputBytes = CompositorBudget.textureBytes(for: canvasSize) * 4
+        let inkWorkingBytes = CompositorBudget.textureBytes(for: cel.size) * 3
+        let workingBytes = outputBytes + inkWorkingBytes
+        guard outputBytes > 0, workingBytes <= budgetBytes,
+              CompositorBudget.hasHeadroom(for: workingBytes) else { return nil }
         guard let backing = PixelOps.rasterize(.backing, of: cel, canvasSize: canvasSize, quality: quality),
               let ink = PixelOps.rasterize(.ink, of: cel, canvasSize: canvasSize, quality: quality),
-              let images = compositeBands(skipping: 1) else { return nil }
+              let images = compositeBands(budgetBytes: budgetBytes - outputBytes, skipping: 1) else { return nil }
         return MovingBands(images: images, cel: CelBand(backing: backing, ink: ink,
-                                                       opacity: CGFloat(layer.opacity), mask: mask))
+                                                       opacity: CGFloat(layer.opacity)))
     }
 
     private static func ordinaryCel(in band: [RenderNode])
-    -> (index: Int, id: UUID, opacity: Double, masks: [AlphaMask])? {
+    -> (index: Int, id: UUID, opacity: Double)? {
         guard band.count == 1, let node = band.first, node.isVisible, node.blendMode == .normal,
-              node.effect == nil else { return nil }
+              node.effect == nil, node.masks.isEmpty else { return nil }
         switch node.content {
         case .leaf(let index):
-            return (index, node.id, node.opacity, node.masks)
+            return (index, node.id, node.opacity)
         case .node(.stack, let inputs):
             guard inputs.count == 1, let leaf = ordinaryCel(in: inputs[0]) else { return nil }
-            return (leaf.index, leaf.id, node.opacity * leaf.opacity, node.masks + leaf.masks)
+            return (leaf.index, leaf.id, node.opacity * leaf.opacity)
         case .node(.mix, _):
             return nil
         }

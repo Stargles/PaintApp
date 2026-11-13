@@ -5801,7 +5801,14 @@ final class VectorCanvas {
         fileprivate let suppressed: Set<UUID>
         fileprivate var known: [UUID: CGRect] = [:]
 
-        var isEmpty: Bool { elements.isEmpty }
+        var hasOnlyPaintGeometry: Bool {
+            !elements.isEmpty && elements.allSatisfy { element in
+                switch element {
+                case .stroke, .fill: return true
+                case .image, .text, .video, .stream: return false
+                }
+            }
+        }
 
         /// A held replacement reuses untouched footprints while invalidating only rewritten ink.
         /// Stream frames cross the worker boundary by value, exactly as live display freezing does.

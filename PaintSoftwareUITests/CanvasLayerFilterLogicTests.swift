@@ -43,7 +43,7 @@ final class CanvasLayerFilterLogicTests: XCTestCase {
         ("PaintSoftware/Views/Canvas/LayerHostView.swift", 1),        // the baked tier; the fill's preview is a `WindowSurfaceView`
         ("PaintSoftware/Views/Canvas/StrokeCanvasView.swift", 3),     // the layer's picture, the live scratch, the float
         ("PaintSoftware/Views/UnlandedInk.swift", 2),                 // ordinary held picture and the transformed group's inner image
-        ("PaintSoftware/Views/CanvasView.swift", 3),                  // the sandwich pair, the onion-skin pair, the timing recorder's trail
+        ("PaintSoftware/Views/CanvasView.swift", 3),                  // the sandwich and onion-skin factories, the timing recorder's trail
         ("PaintSoftware/Views/FloatingPieceOverlayView.swift", 1)     // the lifted raster piece
     ]
 
@@ -84,6 +84,15 @@ final class CanvasLayerFilterLogicTests: XCTestCase {
                                + "`.trilinear` carries a mipmap chain, and the chain is the fix.")
             }
         }
+
+        // Moving bands subclass UIImageView and use the sandwich factory's filter. Their separate
+        // ink layer takes that same filter, so a cel pose drag keeps thin ink visible on both tiers.
+        let canvas = try code(at: root.appendingPathComponent("PaintSoftware/Views/CanvasView.swift"))
+        let configuredViews = canvas.map(\.text).joined(separator: "\n")
+        XCTAssertEqual(canvas.filter { $0.text.contains("LiveBandView(") }.count, 1)
+        XCTAssertTrue(configuredViews.contains("let view = LiveBandView()\n                Self.configureSandwichView(view)"))
+        let liveBand = try code(at: root.appendingPathComponent("PaintSoftware/Views/Canvas/LivePicture.swift"))
+        XCTAssertTrue(liveBand.contains { $0.text.contains("ink.minificationFilter = layer.minificationFilter") })
     }
 
     /// **The one deliberate exception, pinned so a sweep does not tidy it into agreement.**
