@@ -1,5 +1,4 @@
 import XCTest
-@testable import PaintSoftware
 
 /// Cold-start reachability and actual pixels, including the artist's rotoscoping gesture.
 final class StreamPlacementUITests: StreamUITestCase {
