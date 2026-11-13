@@ -371,6 +371,34 @@ struct AnimationCurve: Codable, Hashable {
         }, step: step)
     }
 
+    /// Apply a positive affine change of value units, preserving the curve's time and tangent modes.
+    func mappingValues(scale: Double, offset: Double) -> AnimationCurve {
+        var mapped = self
+        mapped.keys = keys.map { key in
+            var moved = key
+            moved.value = scale * key.value + offset
+            if scale != 1, key.tangentMode == .aligned, let direction = Self.alignedDirection(key) {
+                // Alignment averages unit vectors and preserves each raw handle's length. Rotate
+                // and scale both raw handles together so that alignment produces the old effective
+                // times and scaled effective values, even for stored handles that are not collinear.
+                let scaledValue = scale * direction.deltaValue
+                let real = direction.deltaFrames * direction.deltaFrames + direction.deltaValue * scaledValue
+                let imaginary = direction.deltaFrames * (scaledValue - direction.deltaValue)
+                func transport(_ handle: Handle) -> Handle {
+                    Handle(deltaFrames: real * handle.deltaFrames - imaginary * handle.deltaValue,
+                           deltaValue: imaginary * handle.deltaFrames + real * handle.deltaValue)
+                }
+                moved.inHandle = transport(key.inHandle)
+                moved.outHandle = transport(key.outHandle)
+            } else {
+                moved.inHandle.deltaValue *= scale
+                moved.outHandle.deltaValue *= scale
+            }
+            return moved
+        }
+        return mapped
+    }
+
     /// **The keys inside `0..<frameCount`, and the frames of the ones that were not** — TODO (62)'s
     /// rule: *keys beyond a cel's span are deleted, and shortening a cel crops the keys past its new
     /// end* — but **before** a key past an edge is removed, a key is inserted at the new edge carrying
@@ -593,14 +621,16 @@ struct AnimationCurve: Codable, Hashable {
     /// direction to agree on, and the stored handles are returned unchanged rather than snapped to an
     /// arbitrary axis.
     private static func aligned(_ key: Key) -> (inHandle: Handle, outHandle: Handle) {
-        guard let o = key.outHandle.unit, let i = key.inHandle.negated.unit else {
-            return (key.inHandle, key.outHandle)
-        }
-        let sum = Handle(deltaFrames: o.deltaFrames + i.deltaFrames, deltaValue: o.deltaValue + i.deltaValue)
-        guard let d = sum.unit else { return (key.inHandle, key.outHandle) }
+        guard let d = alignedDirection(key) else { return (key.inHandle, key.outHandle) }
         let inLength = key.inHandle.length, outLength = key.outHandle.length
         return (Handle(deltaFrames: -d.deltaFrames * inLength, deltaValue: -d.deltaValue * inLength),
                 Handle(deltaFrames: d.deltaFrames * outLength, deltaValue: d.deltaValue * outLength))
+    }
+
+    private static func alignedDirection(_ key: Key) -> Handle? {
+        guard let out = key.outHandle.unit, let reversedIn = key.inHandle.negated.unit else { return nil }
+        return Handle(deltaFrames: out.deltaFrames + reversedIn.deltaFrames,
+                      deltaValue: out.deltaValue + reversedIn.deltaValue).unit
     }
 
     // MARK: - Bezier arithmetic

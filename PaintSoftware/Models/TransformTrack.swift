@@ -71,8 +71,8 @@ enum TransformChannelID: Hashable {
 ///
 /// The components are read against `box` — X and Y are where its centre is shown, the two keystones
 /// are in its units — so it is stored with the curves rather than with each key. It is latched when
-/// the channel is first written and never moves: the map a pose describes is the same map from any
-/// box, so a later write measured against a different box is decomposed against this one
+/// the channel is first written and follows a change of canvas coordinates. The map a pose
+/// describes is the same map from any box, so a later write measured against a different box is decomposed against this one
 /// (`PoseComponents.decompose(_:inBox:)`) and means the same thing.
 struct TransformTrack: Equatable {
 
@@ -211,6 +211,17 @@ struct TransformTrack: Equatable {
         return (kept, discarded)
     }
 
+    /// Carry the rest box and its posed centre through the same uniform resize. The other
+    /// components use angles, ratios or normalised box units, so this gives P′(M(p)) = M(P(p)).
+    func rebased(through map: CanvasResizeMap) -> TransformTrack {
+        var rebased = self
+        rebased.box = box.applying(map.transform)
+        let scale = Double(map.scale)
+        rebased.curves[.x] = curves[.x]?.mappingValues(scale: scale, offset: Double(map.offset.x))
+        rebased.curves[.y] = curves[.y]?.mappingValues(scale: scale, offset: Double(map.offset.y))
+        return rebased
+    }
+
     // MARK: - Evaluation
 
     /// The values a resting pose holds against this channel's box — a cel channel's base, since its
@@ -293,6 +304,15 @@ struct KeyframeCrop: Equatable {
 }
 
 extension Cel {
+
+    /// Keep the cel and group poses in the same canvas coordinates as the resized drawing.
+    mutating func rebasePoseCoordinates(through map: CanvasResizeMap) {
+        transformTracks = transformTracks.mapValues { $0.rebased(through: map) }
+        let transform = map.transform
+        pendingPoseBaselines = pendingPoseBaselines.mapValues { pose in
+            PoseQuad(box: pose.box.applying(transform), corners: pose.corners.mapped(by: transform))
+        }
+    }
 
     /// **Removes every pose key outside this cel's span, from every channel, and says what went** —
     /// the one crop, which every verb that can leave a key outside a span calls (TODO 62).

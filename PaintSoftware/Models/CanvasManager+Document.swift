@@ -846,6 +846,7 @@ extension CanvasManager {
                 if let recipe = original.interpolation {
                     resizedLayers[layerIndex].cels[celIndex].interpolation = recipe.mapped(through: map)
                 }
+                resizedLayers[layerIndex].cels[celIndex].rebasePoseCoordinates(through: map)
             }
         }
         // This is the first live mutation. Every pixel output is durable and every identity still

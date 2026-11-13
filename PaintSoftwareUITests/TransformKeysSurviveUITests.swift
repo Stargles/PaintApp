@@ -140,6 +140,77 @@ final class TransformKeysSurviveUITests: PaintUITestCase {
         attachScreenshot(XCUIScreen.main, "repeat-move-authored-drag-key-b-committed")
     }
 
+    func testScaleArtworkKeepsTheDistanceBetweenTwoDrawnCelPoses() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 1000, height: 1000),
+                                       orientationBeforeCreatingCanvas: .landscapeLeft))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = paperRect(in: canvas, canvasSize: CGSize(width: 1000, height: 1000))
+        let scan = CGRect(x: paper.minX + 0.25 * paper.width, y: paper.minY + 0.26 * paper.height,
+                          width: 0.50 * paper.width, height: 0.16 * paper.height)
+        assertBelowTheToolbar(app, canvas, dy: scan.minY, "The top of the rectangle scan")
+        assertAboveTheDock(app, canvas, dy: scan.maxY, "The bottom of the rectangle scan")
+        placeFromTheAddMenu(app, row: "add.rectangleRow", primedName: "rectangle",
+                            from: onHost(paper, 0.41, 0.34), to: onHost(paper, 0.45, 0.37))
+        XCTAssertTrue(waitUntil(canvas, onHost(paper, 0.41, 0.34), isInk), "The rectangle is drawn")
+
+        addKeysAtThePlayhead(app, layer: 0, frame: 0)
+        goTo(app, frame: 4)
+        addKeysAtThePlayhead(app, layer: 0, frame: 4)
+        app.buttons["toolbar.moveButton"].tap()
+        let done = app.buttons["moveBar.doneButton"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        let box = try XCTUnwrap(settledMoveBox(app))
+        dragOnCanvas(app, from: CGVector(dx: box.midX, dy: box.midY),
+                     to: CGVector(dx: box.midX + 0.20 * paper.width, dy: box.midY))
+        done.tap()
+        XCTAssertEqual(markers(app, layer: 0), "0|4")
+
+        func rectangleLeft() throws -> CGFloat {
+            let probe = try settledProbe(canvas, window: scan)
+            let corner = try XCTUnwrap(try? inkTopLeft(probe, in: scan), "The rectangle is visible on exposed paper")
+            return (corner.x - paper.minX) / paper.width
+        }
+        let beforeB = try rectangleLeft()
+        goTo(app, frame: 0)
+        let beforeA = try rectangleLeft()
+        XCTAssertGreaterThan(beforeB - beforeA, 0.14, "The authored translation visibly moves the rectangle")
+        attachScreenshot(XCUIScreen.main, "keyed-resize-original-key-a")
+        goTo(app, frame: 4)
+        attachScreenshot(XCUIScreen.main, "keyed-resize-original-key-b")
+
+        let settings = app.buttons["toolbar.settingsButton"]
+        settings.tap()
+        let row = app.buttons["settings.resizeCanvasRow"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(row.label.contains("1000 × 1000"))
+        row.tap()
+        let scale = app.switches["resizeCanvas.scaleToggle"]
+        XCTAssertTrue(scale.waitForExistence(timeout: 5))
+        scale.tap()
+        XCTAssertEqual(scale.value as? String, "1")
+        setField(app.textFields["resizeCanvas.widthField"], to: "2000")
+        setField(app.textFields["resizeCanvas.heightField"], to: "2000")
+        app.buttons["resizeCanvas.applyButton"].tap()
+        let landed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == true AND label CONTAINS %@", "2000 × 2000"), object: row)
+        XCTAssertEqual(XCTWaiter.wait(for: [landed], timeout: 30), .completed)
+        settings.tap()
+        XCTAssertTrue(row.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(paperRect(in: canvas, canvasSize: CGSize(width: 2000, height: 2000)), paper)
+        XCTAssertEqual(markers(app, layer: 0), "0|4")
+
+        let afterB = try rectangleLeft()
+        attachScreenshot(XCUIScreen.main, "keyed-resize-enlarged-key-b")
+        goTo(app, frame: 0)
+        let afterA = try rectangleLeft()
+        attachScreenshot(XCUIScreen.main, "keyed-resize-enlarged-key-a")
+        XCTAssertEqual(afterA, beforeA, accuracy: 0.012, "The first pose keeps its position relative to the paper")
+        XCTAssertEqual(afterB - afterA, beforeB - beforeA, accuracy: 0.015,
+                       "Doubling the artwork doubles the translation in canvas points")
+    }
+
     func testAKeyedMoveKeepsItsKeysThroughItsBoxABakeBeneathItAndARelaunch() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-resetGallery", "-uiTestNoticeSeconds", "120"]

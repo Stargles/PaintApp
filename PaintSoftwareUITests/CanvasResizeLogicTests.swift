@@ -480,6 +480,100 @@ final class CanvasResizeLogicTests: XCTestCase {
     // that shipped. These two are the same claims made against `CanvasResizeMap` and
     // `VectorCanvas.resized(to:placing:)` themselves.
 
+    func testScalingArtworkScalesTheDrawnMovementThroughUndoRedoAndReopen() throws {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        let oldSize = CGSize(width: 100, height: 100)
+        let newSize = CGSize(width: 200, height: 200)
+        manager.canvasSize = oldSize
+        XCTAssertTrue(manager.addVectorLayer())
+        let vector = try XCTUnwrap(manager.layers[0].cels[0].vector)
+        vector.addFill(path: CGPath(rect: CGRect(x: 20, y: 20, width: 8, height: 6), transform: nil),
+                       color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        manager.layers[0].cels[0].transformTracks = [TransformChannelID.cel.id: TransformTrack(
+            box: CGRect(origin: .zero, size: oldSize), curves: [.x: AnimationCurve(keys: [
+                .init(frame: 0, value: 60, interpolation: .linear),
+                .init(frame: 10, value: 80)
+            ])])]
+
+        func drawnBounds(_ document: CanvasManager) throws -> [CGRect] {
+            let cel = document.layers[0].cels[0]
+            return try [0, 5, 10].map { frame in
+                let picture = try XCTUnwrap(document.posedCelContent(for: cel, atFrame: frame)?.render(.full))
+                return try XCTUnwrap(PixelOps.opaqueContentBounds(picture))
+            }
+        }
+
+        let before = try drawnBounds(manager)
+        XCTAssertEqual(before, [30, 40, 50].map { CGRect(x: $0, y: 20, width: 8, height: 6) },
+                       "The original rectangle visibly moves on the two keys and the frame between them")
+        let enlarged = [60, 80, 100].map { CGRect(x: $0, y: 40, width: 16, height: 12) }
+        XCTAssertTrue(manager.resizeCanvas(to: newSize, mode: .scaleToFit))
+        XCTAssertEqual(try drawnBounds(manager), enlarged, "The whole drawn motion doubles with the rectangle")
+
+        manager.undo()
+        XCTAssertEqual(manager.canvasSize, oldSize)
+        XCTAssertEqual(try drawnBounds(manager), before, "Undo restores the original drawing and movement")
+        manager.redo()
+        XCTAssertEqual(manager.canvasSize, newSize)
+        XCTAssertEqual(try drawnBounds(manager), enlarged, "Redo scales the movement again")
+
+        let url = ProjectStore.createNewProjectURL(name: "Resized Keyed Rectangle")
+        let saved = expectation(description: "Saved the resized keyed rectangle")
+        ProjectStore.save(manager, to: url) { savedURL in
+            XCTAssertEqual(savedURL, url)
+            saved.fulfill()
+        }
+        wait(for: [saved], timeout: 30)
+        let reloaded = try XCTUnwrap(ProjectStore.load(from: url))
+        XCTAssertEqual(try drawnBounds(reloaded), enlarged, "The reopened project draws the same scaled motion")
+    }
+
+    func testScalingArtworkCarriesAnOffsetGroupTrackAndItsHeldPoseTogether() throws {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.canvasSize = CGSize(width: 120, height: 120)
+        manager.canvasPadding = 10
+        XCTAssertTrue(manager.addVectorLayer())
+        let channel = TransformChannelID.group(UUID()).id
+        let box = CGRect(x: 25, y: 32, width: 48, height: 40)
+        let track = TransformTrack(box: box, curves: [
+            .x: AnimationCurve(keys: [
+                .init(frame: 0, value: 53, outHandle: .init(deltaFrames: 3, deltaValue: 15), tangentMode: .free),
+                .init(frame: 10, value: 75, inHandle: .init(deltaFrames: -4, deltaValue: -2), tangentMode: .free)
+            ]),
+            .y: AnimationCurve(keys: [.init(frame: 0, value: 56), .init(frame: 10, value: 62)]),
+            .rotation: AnimationCurve(keys: [.init(frame: 0, value: 14), .init(frame: 10, value: 9)]),
+            .perspectiveX: AnimationCurve(keys: [.init(frame: 0, value: 0.22), .init(frame: 10, value: -0.30)])
+        ])
+        let baseline = PoseQuad(box: CGRect(x: 12, y: 15, width: 20, height: 30),
+                                mappedBy: CGAffineTransform(translationX: -3, y: 7))
+        manager.layers[0].cels[0].transformTracks = [channel: track]
+        manager.layers[0].cels[0].pendingPoseBaselines = [channel: baseline]
+
+        // Fit 100×100 artwork into 200×250 with padding 10. M(x,y) = (2x−10, 2y+15).
+        func enlarged(_ point: CGPoint) -> CGPoint { CGPoint(x: 2 * point.x - 10, y: 2 * point.y + 15) }
+        XCTAssertTrue(manager.resizeCanvas(to: CGSize(width: 200, height: 250), mode: .scaleToFit))
+        let cel = manager.layers[0].cels[0]
+        let resized = try XCTUnwrap(cel.transformTracks[channel])
+        let held = try XCTUnwrap(cel.pendingPoseBaselines[channel])
+        XCTAssertEqual(resized.box, CGRect(x: 40, y: 79, width: 96, height: 80))
+        XCTAssertEqual(held.box, CGRect(x: 14, y: 45, width: 40, height: 60))
+        XCTAssertEqual(held.corners, try XCTUnwrap(Quad(baseline.corners.points.map(enlarged))))
+
+        for frame in [0, 3, 7, 10] {
+            let prior = try XCTUnwrap(track.mapping(atCelLocalFrame: frame))
+            let current = try XCTUnwrap(resized.mapping(atCelLocalFrame: frame))
+            for point in Quad.rect(box).points {
+                let expected = enlarged(try XCTUnwrap(prior.applied(to: point)))
+                let actual = try XCTUnwrap(current.applied(to: enlarged(point)))
+                XCTAssertEqual(actual.x, expected.x, accuracy: 1e-8, "Group X at frame \(frame)")
+                XCTAssertEqual(actual.y, expected.y, accuracy: 1e-8, "Group Y at frame \(frame)")
+            }
+        }
+        manager.undo()
+        XCTAssertEqual(manager.layers[0].cels[0].transformTracks[channel], track)
+        XCTAssertEqual(manager.layers[0].cels[0].pendingPoseBaselines[channel], baseline)
+    }
+
     /// **§2's first identity.** `M` maps `p` to `k·p + d`, and `.scaledBy` *after* `translationX:` is
     /// the spelling that means that.
     ///

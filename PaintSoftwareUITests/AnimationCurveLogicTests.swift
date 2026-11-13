@@ -412,6 +412,34 @@ final class AnimationCurveLogicTests: XCTestCase {
         XCTAssertEqual(handles.outHandle.deltaValue, 3, accuracy: 1e-12)
     }
 
+    func testChangingValueUnitsKeepsAlignedCurveTimingAndReversesItsStoredHandles() {
+        let bent = Key(frame: 10, value: 31,
+                       inHandle: Handle(deltaFrames: -15, deltaValue: 6),
+                       outHandle: Handle(deltaFrames: 5, deltaValue: 2), tangentMode: .aligned)
+        let authored = Key(frame: 20, value: 60,
+                           inHandle: Handle(deltaFrames: -3, deltaValue: -2),
+                           outHandle: Handle(deltaFrames: 6, deltaValue: 4), tangentMode: .aligned)
+        let curve = Curve(keys: [key(0, 10), bent, authored, key(30, 14)], step: 2)
+        let scale = 2.0, offset = -11.0
+        let resized = curve.mappingValues(scale: scale, offset: offset)
+        let restored = resized.mappingValues(scale: 1 / scale, offset: -offset / scale)
+        XCTAssertEqual(resized.step, curve.step)
+        XCTAssertEqual(resized.keys.map(\.tangentMode), curve.keys.map(\.tangentMode))
+        XCTAssertEqual(resized.keys.map(\.frame), curve.keys.map(\.frame))
+        XCTAssertEqual(resized.keys.map(\.interpolation), curve.keys.map(\.interpolation))
+        for time in 0...30 {
+            XCTAssertEqual(resized.evaluate(at: Double(time)), scale * curve.evaluate(at: Double(time)) + offset,
+                           accuracy: 1e-9, "The displayed curve at frame \(time)")
+        }
+        for (original, returned) in zip(curve.keys, restored.keys) {
+            XCTAssertEqual(returned.value, original.value, accuracy: 1e-12)
+            XCTAssertEqual(returned.inHandle.deltaFrames, original.inHandle.deltaFrames, accuracy: 1e-12)
+            XCTAssertEqual(returned.inHandle.deltaValue, original.inHandle.deltaValue, accuracy: 1e-12)
+            XCTAssertEqual(returned.outHandle.deltaFrames, original.outHandle.deltaFrames, accuracy: 1e-12)
+            XCTAssertEqual(returned.outHandle.deltaValue, original.outHandle.deltaValue, accuracy: 1e-12)
+        }
+    }
+
     /// A degenerate pair has no direction to agree on. Returning the stored handles is the only answer
     /// that does not invent an axis, and it keeps `effectiveHandles` total.
     func testAlignedWithADegenerateHandlePairReturnsWhatWasStored() {
