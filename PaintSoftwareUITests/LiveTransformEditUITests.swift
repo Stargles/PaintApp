@@ -14,6 +14,35 @@ final class LiveTransformEditUITests: PaintUITestCase {
     /// Long enough that every probe below lands before the result's bake does.
     private static let bakeDelay: TimeInterval = 4
 
+    private let upperMoveInkRow = 0.25
+    private let lowerMoveInkRow = 0.39
+
+    private func selectMoveInkBrush(_ app: XCUIApplication) {
+        openBrushLibrary(app)
+        tapWhenHittable(app.buttons["brushPanel.group.Basics"], "The Basics brush group")
+        let brush = app.buttons["brushPanel.brush.Opaque Round"]
+        tapWhenHittable(brush, "The Opaque Round brush")
+        XCTAssertTrue(brush.isSelected)
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5))
+    }
+
+    /// The turned ends put the horizontal run inside the Folder Move box's outline.
+    private func drawMoveInk(_ canvas: XCUIElement, paper: CGRect, row: Double) throws {
+        let host = canvas.frame
+        let points = [onHost(paper, 0.20, row - 0.035)]
+            + (0...12).map { onHost(paper, 0.20 + 0.10 * Double($0) / 12, row) }
+            + [onHost(paper, 0.30, row + 0.035)]
+        try fingerStroke(through: points.map { logicalAppPoint(in: host, normalizedOffset: $0) },
+                         interval: 0.04)
+    }
+
+    /// One window covers the original and translated spans and the rows around the ink scan.
+    private func moveInkWindow(_ paper: CGRect, row: Double) -> CGRect {
+        let topLeft = onHost(paper, 0.21, row - 0.015)
+        return CGRect(x: topLeft.dx, y: topLeft.dy, width: 0.28 * paper.width, height: 0.03 * paper.height)
+    }
+
     private func moves(_ app: XCUIApplication) -> Int {
         Int(readField(app, "moves:")) ?? -1
     }
@@ -61,11 +90,13 @@ final class LiveTransformEditUITests: PaintUITestCase {
     func testATransformLayersMoveIsDrawnUnderTheFingerOnEveryUpdate() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-uiTestSlowBakeMillis", "\(Int(Self.bakeDelay * 1000))"]
-        XCTAssertTrue(launchIntoEditor(app))
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let paper = paperRect(in: canvas)
-        dragOnCanvas(app, from: onHost(paper, 0.2, 0.6), to: onHost(paper, 0.3, 0.6))
+        let inkRow = upperMoveInkRow
+        selectMoveInkBrush(app)
+        try drawMoveInk(canvas, paper: paper, row: inkRow)
         openLayerPanel(app)
         addTransformLayerFromAddMenu(app)
         let row = app.staticTexts["layerPanel.row.1"]
@@ -76,15 +107,18 @@ final class LiveTransformEditUITests: PaintUITestCase {
         moveRow.tap()
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5), "Move raised the box")
 
+        let lifted = paperRect(in: canvas)
+        let window = moveInkWindow(lifted, row: inkRow)
+        XCTAssertTrue(visiblePaperRect(app, in: canvas).contains(window), "Both ink positions are above the Move dock")
+        attachScreenshot(XCUIScreen.main, "transform-layer-before-the-drag")
         let before = moves(app)
         let passesBefore = passes(app)
-        let lifted = paperRect(in: canvas)
-        dragAcross(canvas, from: onHost(lifted, 0.5, 0.5), paperDX: 0.2, paper: lifted)
+        dragAcross(canvas, from: onHost(lifted, 0.5, inkRow), paperDX: 0.2, paper: lifted)
         let followed = moves(app) - before
         let raised = passes(app) - passesBefore
         let state = sandwichState(app)
         let probe = try inkProbe(canvas)
-        attachScreenshot(canvas, "after-the-drag-before-its-bake")
+        attachScreenshot(XCUIScreen.main, "after-the-drag-before-its-bake")
         XCTContext.runActivity(named: "the picture followed \(followed) updates over \(raised) passes; "
                                + "canvas \(state)") { _ in }
         XCTAssertGreaterThan(followed, 10, "the picture should have followed the finger through the "
@@ -95,15 +129,14 @@ final class LiveTransformEditUITests: PaintUITestCase {
         XCTAssertTrue(["moving", "live"].contains(state),
                       "the drag's own bands, or the pair minted for its result — the bake was held "
                       + "for \(Self.bakeDelay) s and cannot be what is on screen (canvas: \(state))")
-        XCTAssertGreaterThan(inkColumnCount(probe, lifted, row: 0.6, span: 0.41...0.49), 50,
+        XCTAssertGreaterThan(inkColumnCount(probe, lifted, row: inkRow, span: 0.41...0.49), 50,
                              "the mark is drawn where the box carried it, before any bake of it")
-        XCTAssertEqual(inkColumnCount(probe, lifted, row: 0.6, span: 0.21...0.29), 0,
+        XCTAssertEqual(inkColumnCount(probe, lifted, row: inkRow, span: 0.21...0.29), 0,
                        "…and is gone from where it was")
 
         XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 40, "the result's bake lands"))
-        let settled = try settledProbe(canvas, window: CGRect(x: lifted.minX, y: lifted.minY + lifted.height * 0.5,
-                                                               width: lifted.width, height: lifted.height * 0.2))
-        XCTAssertGreaterThan(inkColumnCount(settled, lifted, row: 0.6, span: 0.41...0.49), 50,
+        let settled = try settledProbe(canvas, window: window)
+        XCTAssertGreaterThan(inkColumnCount(settled, lifted, row: inkRow, span: 0.41...0.49), 50,
                              "and the bake agrees with what the drag showed")
 
         app.buttons["sideToolbar.undoButton"].tap()
@@ -112,12 +145,12 @@ final class LiveTransformEditUITests: PaintUITestCase {
         var back = 0
         let deadline = Date().addingTimeInterval(40)
         while Date() < deadline, back <= 50 {
-            back = inkColumnCount(try inkProbe(canvas), lifted, row: 0.6, span: 0.21...0.29)
+            back = inkColumnCount(try inkProbe(canvas), lifted, row: inkRow, span: 0.21...0.29)
             if back <= 50 { Thread.sleep(forTimeInterval: 0.5) }
         }
-        attachScreenshot(canvas, "after-one-undo")
+        attachScreenshot(XCUIScreen.main, "transform-layer-after-one-undo")
         XCTAssertGreaterThan(back, 50, "one press of Undo puts the mark back where the drag found it")
-        XCTAssertEqual(inkColumnCount(try inkProbe(canvas), lifted, row: 0.6, span: 0.41...0.49), 0,
+        XCTAssertEqual(inkColumnCount(try inkProbe(canvas), lifted, row: inkRow, span: 0.41...0.49), 0,
                        "…the whole drag, not part of it")
         XCTAssertTrue(app.buttons["moveBar.doneButton"].exists, "…with the box still up")
     }
@@ -129,15 +162,16 @@ final class LiveTransformEditUITests: PaintUITestCase {
     /// count says it followed every update, and the ink of both layers lands where the box went.
     func testAFoldersMoveIsDrawnUnderTheFingerOnEveryUpdate() throws {
         let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let paper = paperRect(in: canvas)
-        dragOnCanvas(app, from: onHost(paper, 0.2, 0.4), to: onHost(paper, 0.3, 0.4))
+        selectMoveInkBrush(app)
+        try drawMoveInk(canvas, paper: paper, row: upperMoveInkRow)
         openLayerPanel(app)
         addVectorLayerFromOpenPanel(app)
         closeLayerRail(app)
-        dragOnCanvas(app, from: onHost(paper, 0.2, 0.6), to: onHost(paper, 0.3, 0.6))
+        try drawMoveInk(canvas, paper: paper, row: lowerMoveInkRow)
         openLayerPanel(app)
         addFolderFromAddMenu(app)
         XCTAssertTrue(app.staticTexts["layerPanel.folder.Folder 1"].waitForExistence(timeout: 5))
@@ -151,15 +185,23 @@ final class LiveTransformEditUITests: PaintUITestCase {
         moveRow.tap()
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5), "Move raised the box")
 
-        let before = moves(app)
         let lifted = paperRect(in: canvas)
-        dragAcross(canvas, from: onHost(lifted, 0.25, 0.5), paperDX: 0.2, paper: lifted)
+        let rows = [upperMoveInkRow, lowerMoveInkRow]
+        let visible = visiblePaperRect(app, in: canvas)
+        for row in rows {
+            XCTAssertTrue(visible.contains(moveInkWindow(lifted, row: row)),
+                          "Both ink positions on row \(row) are above the Move dock")
+        }
+        let box = try XCTUnwrap(settledMoveBox(app), "The folder Move box surrounds both marks")
+        attachScreenshot(XCUIScreen.main, "folder-before-the-drag")
+        let before = moves(app)
+        dragAcross(canvas, from: CGVector(dx: box.midX, dy: box.midY), paperDX: 0.2, paper: lifted)
         let followed = moves(app) - before
         let probe = try inkProbe(canvas)
-        attachScreenshot(canvas, "after-the-folder-drag")
+        attachScreenshot(XCUIScreen.main, "after-the-folder-drag")
         XCTContext.runActivity(named: "the picture followed \(followed) updates") { _ in }
         XCTAssertGreaterThan(followed, 10, "the folder's ink should have followed the finger, update by update")
-        for row in [0.4, 0.6] {
+        for row in rows {
             XCTAssertGreaterThan(inkColumnCount(probe, lifted, row: row, span: 0.41...0.49), 50,
                                  "the mark at \(row) went with the box — both layers are in the folder")
             XCTAssertEqual(inkColumnCount(probe, lifted, row: row, span: 0.21...0.29), 0,
