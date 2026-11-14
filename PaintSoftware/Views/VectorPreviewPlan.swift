@@ -121,6 +121,10 @@ struct VectorPreviewPlan: Equatable {
 /// `VectorPreviewPlan` for that type's own stated reason.
 enum DeferredVectorRender {
 
+    /// Canvas-sized renders and local edit previews take turns on one worker. The artist is
+    /// already looking at the result, so the queue runs at user-initiated priority.
+    static let queue = DispatchQueue(label: "com.paintapp.StrokeCanvasView.render", qos: .userInitiated)
+
     /// The display revision includes incoming stream frames. An On Top window can keep those
     /// pixels current independently of the host's committed base.
     struct Revision: Equatable {

@@ -37,6 +37,81 @@ final class StreamPlacementUITests: StreamUITestCase {
         attachScreenshot(XCUIScreen.main, "stream-on-top-after-host-installs")
     }
 
+    /// The old red reference stays on screen while the new blue window waits. Undo must replace
+    /// the settled ink above it before blue arrives, even though both pictures need a worker.
+    func testUndoDrawsWhileTheNextOnTopStreamWindowWaits() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-uiTestSlowWindowDrawMillis", "8000"]
+        let canvas = launchWithALiveStream(app, orientationBeforeCreatingCanvas: .landscapeLeft)
+        XCTAssertEqual(app.buttons["streamBar.placementButton"].value as? String, "onTop")
+        guard waitForPicture(.red, on: canvas, timeout: 20) else { return }
+
+        addVectorLayer(app)
+        openBrushLibrary(app)
+        tapWhenHittable(app.buttons["brushPanel.group.Basics"], "The public Basics group")
+        let brush = app.buttons["brushPanel.brush.Opaque Round"]
+        if !brush.isSelected { tapWhenHittable(brush, "Opaque Round") }
+        XCTAssertTrue(brush.isSelected)
+        app.buttons["toolbar.brushButton"].tap()
+        let size = app.sliders["sideToolbar.brushSizeSlider"]
+        XCTAssertTrue(size.waitForExistence(timeout: 5))
+        size.adjust(toNormalizedSliderPosition: 0.42)
+        setBrushColor(app, hex: "000000")
+
+        let paper = visiblePaperRect(app, in: canvas)
+        let target = onHost(paper, 0.50, 0.48)
+        let standing = onHost(paper, 0.50, 0.68)
+        let stream = CGVector(dx: 0.50, dy: 0.50)
+        XCTAssertNotNil(waitForPixel(canvas, at: target, matches: Colour.red.matches),
+                        "the reference occupies the ink probe before drawing")
+        drawLine(on: canvas, from: onHost(paper, 0.37, 0.68), to: onHost(paper, 0.63, 0.68))
+        drawLine(on: canvas, from: onHost(paper, 0.37, 0.48), to: onHost(paper, 0.63, 0.48))
+        XCTAssertNotNil(waitForPixel(canvas, at: target, matches: Colour.black.matches))
+        XCTAssertNotNil(waitForPixel(canvas, at: standing, matches: Colour.black.matches))
+        XCTAssertNotNil(waitForBakeBar(app) { $0.isEmpty }, "both strokes have settled before Undo")
+        XCTAssertEqual(readField(app, "sandwich:"), "off", "Undo draws in the exposed vector host")
+        XCTAssertNotNil(waitForPixel(canvas, at: stream, matches: Colour.red.matches))
+        attachScreenshot(XCUIScreen.main, "Settled ink over the red reference before Undo")
+
+        let undo = app.buttons["sideToolbar.undoButton"]
+        XCTAssertTrue(undo.isHittable)
+        let frame = canvas.frame
+        let points = [target, standing, stream].map {
+            CGPoint(x: frame.minX + frame.width * $0.dx, y: frame.minY + frame.height * $0.dy)
+        }
+        var undoWhileRed: XCUIScreenshot?
+        let sampler = MidGestureSampler(points: points) { sample, screenshot in
+            let pixels = sample.pixels
+            if undoWhileRed == nil,
+               pixels[0].map(Colour.red.matches) == true,
+               pixels[1].map(Colour.black.matches) == true,
+               pixels[2].map(Colour.red.matches) == true {
+                undoWhileRed = screenshot
+            }
+        }
+        sampler.start()
+        laptop.show(.blue)
+        // Let the frame reach the display worker, with several seconds of its injected wait left.
+        Thread.sleep(forTimeInterval: 0.6)
+        undo.tap()
+        let blueArrived = waitForPicture(.blue, on: canvas, timeout: 20)
+        let samples = sampler.stop()
+
+        if let undoWhileRed {
+            let attachment = XCTAttachment(screenshot: undoWhileRed)
+            attachment.name = "Undo exposed red before the next frame landed"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        attachScreenshot(XCUIScreen.main, "Blue reference after Undo")
+        XCTAssertTrue(blueArrived, "the stream resumes presenting after the delay")
+        XCTAssertNotNil(waitForPixel(canvas, at: target, matches: Colour.blue.matches),
+                        "the newer frame shows through the erased stroke")
+        XCTAssertTrue(isInk(rgbaPixel(of: canvas, at: standing)), "the earlier stroke stays visible")
+        XCTAssertNotNil(undoWhileRed,
+                        "Undo must reveal the previous red window before the next stream frame lands (\(samples.count) samples)")
+    }
+
     /// The test laptop sends one solid-colour frame, so the edge of that colour is the stream's
     /// actual drawn rectangle. Read it from the canvas screenshot in the same unit square as
     /// `moveBox(_:)`; this deliberately compares the artist-visible picture with the published

@@ -418,17 +418,6 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// The background rasterize this host is waiting for, always about `vectorCanvas`.
     private var pendingVectorRender: DeferredVectorRender.Revision?
 
-    /// Where the committed render is rasterized — RENDER.md §2.13, and stage 2's second half.
-    ///
-    /// **Serial, and static.** Serial because the work is canvas-sized and there is no gain in
-    /// running two of them at once; static because exactly one layer is being drawn on at a time, so
-    /// a queue per view would be a queue per layer with one of them ever busy.
-    ///
-    /// `.userInitiated` rather than `.utility`: the artist is looking at the result, and it is
-    /// racing the next stroke.
-    private static let renderQueue = DispatchQueue(label: "com.paintapp.StrokeCanvasView.render",
-                                                   qos: .userInitiated)
-
     /// **The ink that is on screen but not in the base slot** — every stroke committed since the
     /// base was rasterized, shown above it until a render that contains them lands. See
     /// `UnlandedInk`, which is where the invariant and the reasoning live.
@@ -807,7 +796,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         if let existing = streamSurfaces[elementID] {
             surface = existing
         } else {
-            surface = WindowSurfaceView(queue: Self.renderQueue)
+            surface = WindowSurfaceView(queue: WindowSurfaceView.onTopStreamQueue)
             if ids != nil {
                 floatView.addSubview(surface)
             } else {
@@ -871,7 +860,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         let surface: WindowSurfaceView
         if let existing = heldEditSurface { surface = existing }
         else {
-            surface = WindowSurfaceView(queue: Self.renderQueue)
+            surface = WindowSurfaceView(queue: DeferredVectorRender.queue)
             insertSubview(surface, belowSubview: poseSpace)
             heldEditSurface = surface
         }
@@ -965,7 +954,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         if let existing = heldDerivationSurface {
             surface = existing
         } else {
-            surface = WindowSurfaceView(queue: Self.renderQueue)
+            surface = WindowSurfaceView(queue: DeferredVectorRender.queue)
             insertSubview(surface, belowSubview: poseSpace)
             heldDerivationSurface = surface
         }
@@ -1200,7 +1189,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         return true
     }
 
-    /// Rasterizes the requested base on `renderQueue` and hands the result back on main.
+    /// Rasterizes the requested base on `DeferredVectorRender.queue` and hands the result back on main.
     ///
     /// The required revision makes a superseded request cheap: a drag that invalidates faster
     /// than this can rasterize gets one lock acquisition per abandoned request. When a stream
@@ -1214,7 +1203,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                                    streamHasWindow: Bool) {
         let coverage = contentRevisions.committed(canvas)
         let requirement = revision.requirement(streamHasWindow: streamHasWindow)
-        Self.renderQueue.async { [weak self] in
+        DeferredVectorRender.queue.async { [weak self] in
             // **Zero on every ordinary launch** — `-uiTestSlowVectorRenderMillis` and nothing else,
             // simulator only. See `UITestSeeds.slowVectorRenderDelay` for why the defect this file's
             // `unlandedInk` closes needs a seam to be reachable from a test at all.

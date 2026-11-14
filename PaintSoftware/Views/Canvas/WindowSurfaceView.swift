@@ -29,6 +29,11 @@ import UIKit
 /// picture's shape can change between frames (a nudge in the Move box) and the pixels outside the
 /// new shape must be transparent, not last frame's.
 final class WindowSurfaceView: UIView {
+    /// A reference frame can wait for Core Animation to release its back surface. Keep that
+    /// wait off the edit queue, with one worker shared by all On Top stream windows.
+    static let onTopStreamQueue = DispatchQueue(label: "com.paintapp.WindowSurfaceView.onTopStream",
+                                                qos: .userInitiated)
+
     typealias SurfaceFactory = (_ width: Int, _ height: Int) -> IOSurface?
 
     static func makeSurface(width: Int, height: Int) -> IOSurface? {
@@ -124,8 +129,7 @@ final class WindowSurfaceView: UIView {
     /// The window whose pixels reached the front, including an older front during a resize.
     var presentedWindow: CGRect? { isHidden ? nil : presented?.window }
 
-    /// `queue` is where every picture is drawn — serial, so the draws of every view sharing it
-    /// take turns (`StrokeCanvasView.renderQueue`).
+    /// `queue` is where every picture is drawn. Views sharing a serial queue take turns.
     init(queue: DispatchQueue, surfaceFactory: @escaping SurfaceFactory = WindowSurfaceView.makeSurface) {
         draws = LatestWins(queue: queue)
         self.surfaceFactory = surfaceFactory

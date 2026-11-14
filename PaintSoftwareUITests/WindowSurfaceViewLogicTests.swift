@@ -154,6 +154,37 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
         XCTAssertGreaterThan(Int(bytes[2]), Int(bytes[1]) + 100, "the newest frame (red) is what is on the layer")
     }
 
+    func testAWaitingOnTopStreamFrameDoesNotHoldTheCommittedRenderQueue() {
+        let view = WindowSurfaceView(queue: WindowSurfaceView.onTopStreamQueue)
+        let window = CGRect(x: 0, y: 0, width: 8, height: 4)
+        present(view, window: window, count: 1)
+
+        let streamStarted = expectation(description: "the second stream frame is on its worker")
+        let streamLanded = expectation(description: "the stream frame lands after release")
+        let releaseStream = DispatchSemaphore(value: 0)
+        view.present(window: window, placement: .identity, draw: { cg in
+            streamStarted.fulfill()
+            releaseStream.wait()
+            UIColor.red.setFill()
+            cg.fill(window)
+            return window
+        }, finished: { shown in
+            XCTAssertTrue(shown)
+            streamLanded.fulfill()
+        })
+        wait(for: [streamStarted], timeout: 2)
+
+        // The gate stands in for the wait before drawStreamWindow takes the canvas lock.
+        let committedRenderRan = expectation(description: "a committed render can run while the stream waits")
+        DeferredVectorRender.queue.async { committedRenderRan.fulfill() }
+        wait(for: [committedRenderRan], timeout: 2)
+        XCTAssertEqual(view.presentedCount, 1, "the prior frame stays up while the next frame waits")
+
+        releaseStream.signal()
+        wait(for: [streamLanded], timeout: 2)
+        XCTAssertEqual(view.presentedCount, 2)
+    }
+
     /// **A surface the render server still holds is not drawn into** — `WindowSurfaceView.present`'s
     /// wait, the cure for the owner's flicker of 2026-10-12 (*"Lots of flickering"* recolouring a
     /// filled selection). The draw for a frame is minted in the turn the last one landed, and the swap
