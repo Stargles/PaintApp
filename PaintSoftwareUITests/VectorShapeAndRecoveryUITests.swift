@@ -110,10 +110,14 @@ final class GalleryRecoveryUITests: PaintUITestCase {
 
         openLayerPanel(app)
         let node = app.otherElements["layerPanel.folder.Mix 1.compositor"]
-        attachScreenshot(XCUIScreen.main, "mix-recovery-05-B-recovered-mix")
         XCTAssertTrue(node.waitForExistence(timeout: 5), "Recovered B exposes a Mix node rather than a plain folder")
         XCTAssertEqual(node.value as? String, "node,multiply", "The Mix row still exposes Multiply")
         XCTAssertEqual(app.otherElements["layerPanel.row.0.compositor"].value as? String, "input,0")
+        app.buttons["layerPanel.folder.Mix 1.options"].tap()
+        let operation = app.buttons["layerOptions.mixModeButton"]
+        XCTAssertTrue(operation.waitForExistence(timeout: 5))
+        XCTAssertEqual(operation.value as? String, "multiply")
+        attachScreenshot(XCUIScreen.main, "mix-recovery-05-B-recovered-mix")
     }
 
     private func launchColdMixRecoveryGallery() throws -> XCUIApplication {
