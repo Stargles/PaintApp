@@ -58,6 +58,27 @@ final class TopBarMenusUITests: PaintUITestCase {
         attachScreenshot(app, "actions-menu-six-rows")
     }
 
+    func testActionsFlipHorizontalMirrorsEditableVectorInk() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = paperRect(in: canvas)
+        let original = onHost(paper, 0.34, 0.40)
+        let mirrored = onHost(paper, 0.66, 0.40)
+        assertAboveTheDock(app, canvas, dy: Double(original.dy), "Both Flip probes")
+        placeFromTheAddMenu(app, row: "add.rectangleRow", primedName: "rectangle",
+                            from: original, to: onHost(paper, 0.39, 0.45))
+        XCTAssertTrue(waitUntil(canvas, original, isInk))
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: mirrored)))
+        app.buttons["toolbar.actionsButton"].tap()
+        tapWhenHittable(app.buttons["actions.flipHorizontalRow"], "Horizontal Flip")
+        if app.buttons["actions.flipHorizontalRow"].exists { app.buttons["toolbar.actionsButton"].tap() }
+        XCTAssertTrue(waitUntil(canvas, mirrored, isInk), "The vector rectangle moves to its reflected position")
+        XCTAssertTrue(isWhitish(rgbaPixel(of: canvas, at: original)), "The old position is cleared")
+        attachScreenshot(XCUIScreen.main, "horizontal-flip-mirrored-vector")
+    }
+
     /// TODO (143) — the owner: *"rearrange the icons into this order from left to right: gallery,
     /// settings, actions, add, select, move. Then in the middle top should be the canvas name (to the
     /// right of all those icons)."* (It sat at the top left under TODO (102), above the canvas rather

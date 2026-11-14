@@ -201,6 +201,103 @@ struct CanvasResizeMap: Equatable {
     }
 }
 
+/// Reflection across the centre of the artwork and its symmetric padding.
+private struct CanvasReflection {
+    let horizontal: Bool
+    let size: CGSize
+
+    var transform: CGAffineTransform {
+        horizontal
+            ? CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: size.width, ty: 0)
+            : CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: size.height)
+    }
+
+    func pose(_ pose: PoseQuad) -> PoseQuad {
+        let reflected = pose.corners.mapped(by: transform)
+        let corners = horizontal
+            ? Quad(reflected.p1, reflected.p0, reflected.p3, reflected.p2)
+            : Quad(reflected.p3, reflected.p2, reflected.p1, reflected.p0)
+        return PoseQuad(box: pose.box.applying(transform), corners: corners)
+    }
+
+    func track(_ track: TransformTrack) -> TransformTrack {
+        var reflected = track
+        reflected.box = track.box.applying(transform)
+        let position: PoseComponents.Component = horizontal ? .x : .y
+        let perspective: PoseComponents.Component = horizontal ? .perspectiveX : .perspectiveY
+        let extent = Double(horizontal ? size.width : size.height)
+        reflected.setCurve(track.curves[position]?.mappingValues(scale: -1, offset: extent), for: position)
+        for component in [.rotation, .skew, perspective] {
+            reflected.setCurve(track.curves[component]?.mappingValues(scale: -1, offset: 0), for: component)
+        }
+        return reflected
+    }
+
+    /// Reverse the reflected axis of the implicit, positive-step rest grid. An interpolation
+    /// lattice's output shares document coordinates, while a Liquify capture outputs into the
+    /// frozen space of the original brush field.
+    func lattice(_ lattice: Lattice, mapVertices: Bool) -> Lattice {
+        func reversedIndex(_ index: Int, columns: Int, rows: Int) -> Int {
+            let column = index % columns
+            let row = index / columns
+            return horizontal ? row * columns + (columns - 1 - column) : (rows - 1 - row) * columns + column
+        }
+
+        let farCorner = lattice.vertexIndex(col: horizontal ? lattice.cols : 0,
+                                           row: horizontal ? 0 : lattice.rows)
+        let map = transform
+        let vertices = lattice.vertices.indices.map { index in
+            let source = lattice.vertices[reversedIndex(index, columns: lattice.cols + 1, rows: lattice.rows + 1)]
+            return mapVertices ? source.applying(map) : source
+        }
+        let activeCells = Set(lattice.activeCells.map {
+            reversedIndex($0, columns: lattice.cols, rows: lattice.rows)
+        })
+        return Lattice(cols: lattice.cols, rows: lattice.rows,
+                       restOrigin: lattice.restVertex(at: farCorner).applying(map),
+                       restCellSize: lattice.restCellSize, vertices: vertices, activeCells: activeCells)
+    }
+
+    func recipe(_ recipe: InterpolationRecipe) -> InterpolationRecipe {
+        var reflected = recipe
+        for index in reflected.groups.indices {
+            reflected.groups[index].lattices = reflected.groups[index].lattices.map { lattice($0, mapVertices: true) }
+        }
+        for index in reflected.deformations.indices {
+            let captures = reflected.deformations[index].captures
+            reflected.deformations[index].captures = captures.map { original in
+                var capture = original
+                capture.lattice = lattice(capture.lattice, mapVertices: false)
+                return capture
+            }
+        }
+        for index in reflected.localEdits.indices {
+            let edit = reflected.localEdits[index]
+            if case .stroke(let stroke) = VectorCanvas.mapping(.stroke(edit.stroke), throughSimilarity: transform) {
+                reflected.localEdits[index].stroke = stroke
+            }
+        }
+        return reflected
+    }
+
+    func reflectPose(in layer: inout Layer) {
+        guard var layerPose = layer.transform else { return }
+        layerPose.pose = pose(layerPose.pose)
+        layerPose.track = track(layerPose.track)
+        layerPose.baseline = layerPose.baseline.map(pose)
+        layer.transform = layerPose
+
+        // Rotation changes handedness. Shake uses signed amplitudes with the same noise seed.
+        layer.rotateSpeed.negate()
+        layer.shakeRotation.negate()
+        if horizontal { layer.shakeX.negate() } else { layer.shakeY.negate() }
+        for channel in [TargetChannel.rotateSpeed, .shakeRotation, horizontal ? .shakeX : .shakeY] {
+            layer.channelTracks[channel.id] = layer.channelTracks[channel.id]?.mappingValues(scale: -1, offset: 0)
+            layer.channelBaselines[channel.id] = layer.channelBaselines[channel.id].map { -$0 }
+        }
+    }
+}
+
 extension InterpolationRecipe {
 
     /// This recipe with every piece of geometry it owns carried through `M` — CANVAS_RESIZE.md §1's
@@ -936,6 +1033,8 @@ extension CanvasManager {
 
     func flipCanvas(horizontal: Bool, preparedPixels: CanvasPixelTransformInput.Prepared? = nil) {
         guard let canvasSize, commitAllInteractiveState() else { return }
+        let audit = auditDocumentForResize()
+        guard audit.canProceed else { raise(.flipRefused(audit.refusal)); return }
         let prepared: CanvasPixelTransformInput.Prepared
         if let preparedPixels { prepared = preparedPixels }
         else {
@@ -945,20 +1044,49 @@ extension CanvasManager {
             }
         }
         guard prepared.input.stillMatches(self) else { raise(.drawingSourceUnavailable); return }
+        let reflection = CanvasReflection(horizontal: horizontal, size: canvasSize)
         var flipped = layers
+        var hasContent = audit.inkedCels > 0 || !guideStrokes.isEmpty
         let replacements = Dictionary(uniqueKeysWithValues: prepared.cels.map { ($0.celID, $0) })
         for layerIndex in flipped.indices {
             for celIndex in flipped[layerIndex].cels.indices {
-                let original = flipped[layerIndex].cels[celIndex]
-                guard let pixels = replacements[original.id], pixels.layerID == flipped[layerIndex].id else {
+                var cel = flipped[layerIndex].cels[celIndex]
+                guard let pixels = replacements[cel.id], pixels.layerID == flipped[layerIndex].id else {
                     raise(.drawingSourceUnavailable); return
                 }
-                flipped[layerIndex].cels[celIndex].raster = RasterLayerTexture(size: canvasSize,
-                    source: pixels.raster, strokeCount: pixels.strokeCount, residency: original.raster.residency)
-                flipped[layerIndex].cels[celIndex].bakedImage = pixels.baked
+                cel.raster = RasterLayerTexture(size: canvasSize, source: pixels.raster,
+                                               strokeCount: pixels.strokeCount, residency: cel.raster.residency)
+                cel.bakedImage = pixels.baked
+                if let vector = cel.vector, !vector.isEmpty {
+                    hasContent = true
+                    cel.vector = vector.mapped(to: canvasSize, throughSimilarity: reflection.transform)
+                }
+                if let recipe = cel.interpolation {
+                    hasContent = true
+                    cel.interpolation = reflection.recipe(recipe)
+                }
+                cel.transformTracks = cel.transformTracks.mapValues(reflection.track)
+                cel.pendingPoseBaselines = cel.pendingPoseBaselines.mapValues(reflection.pose)
+                flipped[layerIndex].cels[celIndex] = cel
             }
+            reflection.reflectPose(in: &flipped[layerIndex])
         }
+        guard hasContent else { return }
+        let map = reflection.transform
+        let flippedGuides = guideStrokes.map { original in
+            var guide = original
+            for index in guide.samples.indices {
+                let point = guide.samples[index].point.applying(map)
+                guide.samples[index].x = point.x
+                guide.samples[index].y = point.y
+            }
+            return guide
+        }
+
+        selection = nil
+        copiedCel = nil
         layers = flipped
+        guideStrokes = flippedGuides
         for layerIndex in layers.indices {
             for celIndex in layers[layerIndex].cels.indices { clearThumbnail(layerIndex: layerIndex, celIndex: celIndex) }
         }
@@ -1251,7 +1379,9 @@ extension CanvasManager {
             let live = layers[layerIndex].cels[celIndex]
             // Already filled in by a debounced regen that beat this pass, or edited since the capture
             // — either way this image is not the newest answer and must not overwrite one that is.
-            guard live.thumbnail == nil, LayerContentVersion(cel: live) == entry.version else { continue }
+            guard live.thumbnail == nil else { continue }
+            let derived = derivedCelContent(for: live, atFrame: live.startFrame)
+            guard LayerContentVersion(cel: live, derived: derived?.identity) == entry.version else { continue }
             installThumbnail(image, layerIndex: layerIndex, celIndex: celIndex)
         }
     }

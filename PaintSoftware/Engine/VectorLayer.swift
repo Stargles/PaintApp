@@ -2354,15 +2354,18 @@ final class VectorCanvas {
     ///
     /// Placement is baked into each element so the next render stamps geometry at its new size.
     func resized(to newSize: CGSize, placing content: CGRect) -> VectorCanvas {
-        lock.lock()
-        defer { lock.unlock() }
         let k = size.width > 0 ? content.width / size.width : 1
         assert(size.height <= 0 || abs(content.height / size.height - k) < 1e-9,
                "resized(to:placing:) takes a uniform placement — `mapping(_:throughSimilarity:)` asserts a similarity, and a per-axis stretch has no correct stroke size (CANVAS_RESIZE.md §3)")
         // `.scaledBy` after `translationX:` means *scale first, then translate* — the order §2 pins,
         // and the other one reads identically and is wrong.
         let placement = CGAffineTransform(translationX: content.minX, y: content.minY).scaledBy(x: k, y: k)
-        let moved = placement.isIdentity ? _elements : _elements.map { Self.mapping($0, throughSimilarity: placement) }
+        return mapped(to: newSize, throughSimilarity: placement)
+    }
+
+    func mapped(to newSize: CGSize, throughSimilarity map: CGAffineTransform) -> VectorCanvas {
+        let elements = self.elements
+        let moved = map.isIdentity ? elements : elements.map { Self.mapping($0, throughSimilarity: map) }
         return VectorCanvas(size: newSize, elements: moved)
     }
 

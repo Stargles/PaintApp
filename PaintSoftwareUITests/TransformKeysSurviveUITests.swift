@@ -233,6 +233,52 @@ final class TransformKeysSurviveUITests: PaintUITestCase {
                        "Doubling the artwork doubles the translation in canvas points")
     }
 
+    func testTheTimelineShowsAPosedDrawingAfterAColdGalleryReopen() throws {
+        let app = XCUIApplication()
+        app.launchArguments.append("-resetGallery")
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        drawMoveStroke(app)
+        // A held block is wide and only displays the middle strip of the square tile.
+        dragOnCanvas(app, from: CGVector(dx: 0.59, dy: 0.40), to: CGVector(dx: 0.63, dy: 0.54))
+        let original = try moveStrokeInk(app, canvas, in: moveStrokeInterior)
+
+        addKeysAtThePlayhead(app, layer: 0, frame: 0)
+        goTo(app, frame: 4)
+        addKeysAtThePlayhead(app, layer: 0, frame: 4)
+        app.buttons["toolbar.moveButton"].tap()
+        let done = app.buttons["moveBar.doneButton"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        let box = try XCTUnwrap(settledMoveBox(app))
+        dragOnCanvas(app, from: CGVector(dx: box.midX, dy: box.midY),
+                     to: CGVector(dx: box.midX, dy: box.midY + 0.12))
+        done.tap()
+        XCTAssertEqual(markers(app, layer: 0), "0|4")
+        let moved = try moveStrokeInk(app, canvas, in: moveStrokeInterior)
+        XCTAssertGreaterThan(moved.y - original.y, 0.07, "The later key moves the drawing")
+
+        // The first keyed Move bakes its destination as the stored drawing. The first frame now
+        // uses a pose to show the ink back at its original position.
+        goTo(app, frame: 0)
+        let posed = try moveStrokeInk(app, canvas, in: moveStrokeInterior)
+        XCTAssertEqual(posed.y, original.y, accuracy: 0.006)
+
+        saveEditorAndReturnToGallery(app)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "-resetGallery" }
+        app.launch()
+        rotateDevice(app, to: .landscapeLeft)
+        let project = app.staticTexts.matching(NSPredicate(format: "label == %@", "Untitled")).firstMatch
+        XCTAssertTrue(project.waitForExistence(timeout: 10))
+        project.tap()
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+        XCTAssertEqual(try moveStrokeInk(app, canvas, in: moveStrokeInterior).y, posed.y, accuracy: 0.006)
+        let filled = waitForTile(app, layerIndex: 0, celIndex: 0)
+        attachScreenshot(XCUIScreen.main, "posed-cel-timeline-after-cold-reopen")
+        XCTAssertTrue(filled, "The timeline should show the reopened posed drawing's picture")
+    }
+
     func testAKeyedMoveKeepsItsKeysThroughItsBoxABakeBeneathItAndARelaunch() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-resetGallery", "-uiTestNoticeSeconds", "120"]

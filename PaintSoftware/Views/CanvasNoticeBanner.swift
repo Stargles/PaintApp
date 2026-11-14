@@ -97,7 +97,7 @@ struct CanvasNoticeBanner: View {
         // The two cases in this switch where something genuinely has gone wrong — a save that did not
         // land, and a resize that found an element it could not read — so they get the warning
         // triangle none of the others use.
-        case .saveFailed, .resizeRefused: return "exclamationmark.triangle"
+        case .saveFailed, .resizeRefused, .flipRefused: return "exclamationmark.triangle"
         // Not a warning: the resize did what was asked and this is the honest footnote about what
         // undoing it will and will not give back. The canvas glyph, because that is what changed.
         case .resizeResampled:  return "square.resize"

@@ -806,7 +806,7 @@ struct DrawingView: View {
         case .noDrawingSurface, .nodeInputLimit, .historyUndo, .historyRedo, .nothingToPick, .nothingPaintedThere, .nothingEnclosed,
              .nothingWhollyInside, .nothingToSubtractFrom, .nothingTappedToSubtractFrom, .cannotMoveDerivedFrame, .cannotEditDerivedSelection, .editShownOnRelease,
              .onlyPartOfAnAnimationGroup,
-             .animationGroupNotAlone, .saveFailed, .resizeRefused, .resizeResampled,
+             .animationGroupNotAlone, .saveFailed, .resizeRefused, .flipRefused, .resizeResampled,
              .mergedAsPixels, .fillNeedsMoreMemory, .fillsMended, .noFillGapsToMend,
              .fillMendingExceedsBudget, .outOfMemoryToDraw, .drawingSourceUnavailable, .videoBakeRefused, .videoTimingRefused, .repeatPeriodRefused, .streamBakeRefused,
              .poseBakeRefused, .bakeRefused, .bakedWithLeftovers, .mergeNeedsADrawingBelow,

@@ -43,6 +43,132 @@ final class CanvasResizeLogicTests: XCTestCase {
         root = nil
     }
 
+    func testCanvasFlipsTheSameVectorGeometryAcrossBothAxes() throws {
+        let manager = Self.documentWithEveryTierPopulated()
+        let size = try XCTUnwrap(manager.canvasSize)
+        let original = try XCTUnwrap(manager.layers[2].cels[0].vector?.strokes.first)
+        let points = original.samples.positions
+        XCTAssertEqual(points, [CGPoint(x: 10, y: 10), CGPoint(x: 40, y: 40)])
+
+        manager.flipCanvas(horizontal: true)
+        let horizontal = try XCTUnwrap(manager.layers[2].cels[0].vector?.strokes.first)
+        XCTAssertEqual(horizontal.id, original.id)
+        XCTAssertEqual(horizontal.samples.positions,
+                       points.map { CGPoint(x: size.width - $0.x, y: $0.y) },
+                       "Horizontal Flip reflects the vector samples that the raster tiers share a cel with")
+
+        manager.flipCanvas(horizontal: false)
+        let vertical = try XCTUnwrap(manager.layers[2].cels[0].vector?.strokes.first)
+        XCTAssertEqual(vertical.samples.positions,
+                       points.map { CGPoint(x: size.width - $0.x, y: size.height - $0.y) },
+                       "Vertical Flip uses the same editable mapping about the other axis")
+    }
+
+    func testCanvasFlipReflectsAnimatedPoseAndItsPendingBaseline() throws {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.canvasSize = CGSize(width: 120, height: 96)
+        XCTAssertTrue(manager.addVectorLayer())
+        let cel = try XCTUnwrap(manager.layers.first?.cels.first)
+        let vector = try XCTUnwrap(cel.vector)
+        vector.addStroke(Self.stroke(at: [CGPoint(x: 31, y: 27), CGPoint(x: 49, y: 52)],
+                                     size: 4, brush: manager.toolProfiles.brush.preset))
+        let box = CGRect(x: 24, y: 18, width: 30, height: 44)
+        let track = TransformTrack(box: box, curves: [
+            .x: AnimationCurve(keys: [
+                .init(frame: 0, value: 52, outHandle: .init(deltaFrames: 3, deltaValue: 15), tangentMode: .aligned),
+                .init(frame: 8, value: 70, inHandle: .init(deltaFrames: -2, deltaValue: -3), tangentMode: .aligned)
+            ]),
+            .rotation: AnimationCurve(keys: [.init(frame: 0, value: 23), .init(frame: 8, value: -14)]),
+            .skew: AnimationCurve(keys: [.init(frame: 0, value: -9), .init(frame: 8, value: 10)]),
+            .perspectiveX: AnimationCurve(keys: [.init(frame: 0, value: 0.18), .init(frame: 8, value: -0.13)]),
+            .perspectiveY: AnimationCurve(keys: [.init(frame: 0, value: -0.15), .init(frame: 8, value: 0.10)])
+        ])
+        let baseline = PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 13, y: -7))
+        let channel = TransformChannelID.cel.id
+        manager.layers[0].cels[0].transformTracks[channel] = track
+        manager.layers[0].cels[0].pendingPoseBaselines[channel] = baseline
+
+        manager.flipCanvas(horizontal: true)
+        let moved = manager.layers[0].cels[0]
+        let reflected = try XCTUnwrap(moved.transformTracks[channel])
+        let reflectedBaseline = try XCTUnwrap(moved.pendingPoseBaselines[channel])
+        func flip(_ point: CGPoint) -> CGPoint { CGPoint(x: 120 - point.x, y: point.y) }
+        let probes = Quad.rect(box).points + [CGPoint(x: box.midX, y: box.midY)]
+        func assertReflection(_ before: PoseMap, _ after: PoseMap) throws {
+            for point in probes {
+                let expected = flip(try XCTUnwrap(before.applied(to: point)))
+                let actual = try XCTUnwrap(after.applied(to: flip(point)))
+                XCTAssertEqual(actual.x, expected.x, accuracy: 1e-8)
+                XCTAssertEqual(actual.y, expected.y, accuracy: 1e-8)
+            }
+        }
+
+        try assertReflection(XCTUnwrap(baseline.map), XCTUnwrap(reflectedBaseline.map))
+        for frame in [0, 2, 5, 8] {
+            try assertReflection(XCTUnwrap(track.mapping(atCelLocalFrame: frame)),
+                                 XCTUnwrap(reflected.mapping(atCelLocalFrame: frame)))
+        }
+    }
+
+    func testCanvasFlipKeepsTheLinkedLiquifyBrushFieldInItsCaptureSpace() throws {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.canvasSize = CGSize(width: 160, height: 128)
+        XCTAssertTrue(manager.addVectorLayer())
+        var lattice = Lattice(cols: 3, rows: 2, restOrigin: CGPoint(x: 24, y: 32),
+                              restCellSize: 24, activeCells: [0, 4])
+        lattice.vertices[5].x += 4
+        let capture = LiquifyDeformation.Capture(groupID: UUID(), lattice: lattice)
+        let field = LiquifyDeformation(brush: TestBrushes.hardRound, size: 54, power: 0.6,
+            mode: .expand, seed: 42, samples: [VectorSample(x: 64, y: 64, pressure: 1)],
+            selection: CGPath(rect: CGRect(x: 40, y: 42, width: 48, height: 44), transform: nil),
+            captures: [capture])
+        var recipe = InterpolationRecipe(t: 0.5, groups: [
+            MotionGroupBinding(groupID: UUID(), lattices: [lattice])
+        ])
+        recipe.deformations = [field]
+        manager.layers[0].cels[0].interpolation = recipe
+
+        manager.flipCanvas(horizontal: false)
+        let reflected = try XCTUnwrap(manager.layers[0].cels[0].interpolation)
+        let movedGrid = try XCTUnwrap(reflected.groups.first?.lattices.first)
+        let movedField = try XCTUnwrap(reflected.deformations.first)
+        let movedCapture = try XCTUnwrap(movedField.captures.first)
+        XCTAssertEqual(movedGrid.activeCells, [3, 1])
+        XCTAssertEqual(movedCapture.lattice.activeCells, movedGrid.activeCells)
+        var native = movedField
+        native.captures = field.captures
+        XCTAssertEqual(native, field, "The frozen brush field and selection are not mirrored twice")
+
+        func flip(_ point: CGPoint) -> CGPoint { CGPoint(x: point.x, y: 128 - point.y) }
+        let points = [CGPoint(x: 71, y: 66), CGPoint(x: 83, y: 70), CGPoint(x: 49, y: 51)]
+        let before = field.mapRest(points, capture: capture, using: LiquifyField(field))
+        XCTAssertGreaterThan(hypot(before[0].x - points[0].x, before[0].y - points[0].y), 0.01)
+        let after = movedField.mapRest(points.map(flip), capture: movedCapture, using: LiquifyField(movedField))
+        for (actual, original) in zip(after, before) {
+            let expected = flip(original)
+            XCTAssertEqual(actual.x, expected.x, accuracy: 1e-7)
+            XCTAssertEqual(actual.y, expected.y, accuracy: 1e-7)
+        }
+    }
+
+    func testCanvasFlipRefusesAnUnreadableFillWithoutClearingHistory() throws {
+        let manager = Self.documentWithEveryTierPopulated()
+        let canvas = try XCTUnwrap(manager.layers[2].cels[0].vector)
+        var fill = VectorFillElement(path: CGPath(rect: CGRect(x: 8, y: 9, width: 6, height: 6), transform: nil),
+                                     color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+        fill.pathData = Data([0xDE, 0xAD, 0xBE, 0xEF])
+        canvas.elements = canvas.elements + [.fill(fill)]
+        let backing = manager.layers[0].cels[0].raster
+        manager.recordUndo(label: .brushStroke, undo: {}, redo: {})
+
+        manager.flipCanvas(horizontal: true)
+
+        XCTAssertTrue(manager.layers[0].cels[0].raster === backing)
+        XCTAssertTrue(manager.layers[2].cels[0].vector === canvas)
+        XCTAssertEqual(manager.history.undoStack.last?.label, .brushStroke)
+        XCTAssertEqual(manager.notice?.kind, .flipRefused(CanvasResizeRefusal(kinds: ["fill"])))
+    }
+
     // MARK: - 1. The map
 
     /// At `k == 1` the map is a translation and nothing else: unit scale, whole-point offset, and a

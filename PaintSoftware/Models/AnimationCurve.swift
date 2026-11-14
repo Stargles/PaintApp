@@ -371,13 +371,13 @@ struct AnimationCurve: Codable, Hashable {
         }, step: step)
     }
 
-    /// Apply a positive affine change of value units, preserving the curve's time and tangent modes.
+    /// Apply an affine change of value units, preserving the curve's time and tangent modes.
     func mappingValues(scale: Double, offset: Double) -> AnimationCurve {
         var mapped = self
         mapped.keys = keys.map { key in
             var moved = key
             moved.value = scale * key.value + offset
-            if scale != 1, key.tangentMode == .aligned, let direction = Self.alignedDirection(key) {
+            if abs(scale) != 1, key.tangentMode == .aligned, let direction = Self.alignedDirection(key) {
                 // Alignment averages unit vectors and preserves each raw handle's length. Rotate
                 // and scale both raw handles together so that alignment produces the old effective
                 // times and scaled effective values, even for stored handles that are not collinear.

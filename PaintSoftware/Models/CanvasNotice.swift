@@ -167,6 +167,7 @@ struct CanvasNotice: Identifiable, Equatable {
         /// Carries the refusal rather than a rendered sentence for `Kind`'s stated reason: the
         /// wording lives in `message`, and a test asserts on the case.
         case resizeRefused(CanvasResizeRefusal)
+        case flipRefused(CanvasResizeRefusal)
         /// A canvas resize ran, and undoing it will not bring the *pixels* back exactly —
         /// CANVAS_RESIZE.md §5 rule 10 and §6 Q2, which the owner settled as *undo it anyway, and
         /// say so*.
@@ -416,6 +417,8 @@ struct CanvasNotice: Identifiable, Equatable {
         case .saveFailed:       return "Couldn't save — your changes are still open, but not on disk yet."
         case .resizeRefused(let refusal):
             return "Couldn't resize — \(refusal.phrase) on this canvas can't be moved. Nothing was changed."
+        case .flipRefused(let refusal):
+            return "Couldn't flip the canvas. Some artwork couldn't be reflected (\(refusal.phrase))."
         case .resizeResampled:  return "Resized. Undo puts it back — drawn strokes exactly, painted layers approximately."
         case .mergedAsPixels:   return "Merged as pixels — the upper layer's blend mode, opacity, mask or eraser marks can't be carried as strokes."
         case .fillNeedsMoreMemory: return "Not enough memory to fill right now — close other apps and try again."
@@ -542,7 +545,7 @@ struct CanvasNotice: Identifiable, Equatable {
         // Nor either resize notice. The refusal's fix is to find the damaged fill, which is a look
         // rather than a tap; the resample one reports what already happened, and undo is on the top
         // toolbar where it always is.
-        case .resizeRefused, .resizeResampled: return nil
+        case .resizeRefused, .flipRefused, .resizeResampled: return nil
         // Nor this one. It reports what already happened, and the one thing a button could offer —
         // undo — is on the top toolbar where it always is.
         case .mergedAsPixels:   return nil
@@ -617,6 +620,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .animationGroupNotAlone: return "animationGroupNotAlone"
         case .saveFailed:       return "saveFailed"
         case .resizeRefused:    return "resizeRefused"
+        case .flipRefused:      return "flipRefused"
         case .resizeResampled:  return "resizeResampled"
         case .mergedAsPixels:   return "mergedAsPixels"
         case .fillNeedsMoreMemory: return "fillNeedsMoreMemory"

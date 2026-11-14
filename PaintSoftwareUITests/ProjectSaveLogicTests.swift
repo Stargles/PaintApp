@@ -1427,6 +1427,62 @@ final class ProjectSaveLogicTests: XCTestCase {
         }
     }
 
+    func testTheGalleryOpenBackfillsThePictureOfAPosedCel() async throws {
+        let manager = makeManager()
+        let box = CGRect(x: 0, y: 0, width: 64, height: 64)
+        manager.layers[2].cels[0].transformTracks[TransformChannelID.cel.id] = TransformTrack(
+            box: box, curves: [.x: AnimationCurve(keys: [.init(frame: 0, value: 44)])])
+        let url = projectURL()
+        let written = expectation(description: "ProjectStore.save completion")
+        ProjectStore.save(manager, to: url) { _ in written.fulfill() }
+        await fulfillment(of: [written], timeout: 120)
+
+        let loaded = await ProjectStore.loadInBackground(from: url)
+        let opened = try XCTUnwrap(loaded)
+        let cel = opened.layers[2].cels[0]
+        let size = try XCTUnwrap(opened.canvasSize)
+        let derived = try XCTUnwrap(opened.derivedCelContent(for: cel, atFrame: cel.startFrame))
+        let expected = try XCTUnwrap(CanvasManager.celThumbnailImage(for: cel, canvasSize: size, derived: derived))
+        let unposed = try XCTUnwrap(CanvasManager.celThumbnailImage(for: cel, canvasSize: size))
+        let posedBounds = try XCTUnwrap(PixelOps.opaqueContentBounds(expected))
+        let unposedBounds = try XCTUnwrap(PixelOps.opaqueContentBounds(unposed))
+        XCTAssertGreaterThan(posedBounds.minX, unposedBounds.minX, "The pose moves the rendered ink")
+
+        let backfill = try XCTUnwrap(opened.thumbnailBackfillTask)
+        await backfill.value
+        let installed = try XCTUnwrap(cel.thumbnail, "The posed cel's picture should reach the timeline")
+        XCTAssertEqual(PixelOps.opaqueContentBounds(installed), posedBounds)
+    }
+
+    func testBackfillDiscardsThePictureOfAPoseThatChangedAfterCapture() async throws {
+        let manager = makeManager()
+        let layerIndex = 2
+        _ = manager.duplicateCel(layerIndex: layerIndex, celIndex: 0)
+        _ = manager.takePendingThumbnailRegens()
+        let layer = manager.layers[layerIndex]
+        let first = try XCTUnwrap(layer.cels.first)
+        let second = try XCTUnwrap(layer.cels.dropFirst().first)
+        let box = CGRect(x: 0, y: 0, width: 64, height: 64)
+        let track = TransformChannelID.cel.id
+        manager.layers[layerIndex].cels[1].transformTracks[track] = TransformTrack(
+            box: box, curves: [.x: AnimationCurve(keys: [.init(frame: 0, value: 44)])])
+
+        // The first install notification is synchronous. Both images in this batch have already
+        // rendered when it arrives, and the second image cannot install until it returns.
+        var edited = false
+        let observer = manager.thumbnailInstalled.sink { location in
+            guard location.layerID == layer.id, location.celID == first.id else { return }
+            edited = true
+            manager.layers[layerIndex].cels[1].transformTracks[track] = TransformTrack(
+                box: box, curves: [.x: AnimationCurve(keys: [.init(frame: 0, value: 52)])])
+        }
+        defer { observer.cancel() }
+        await manager.backfillMissingThumbnails()
+
+        XCTAssertTrue(edited, "The first image must land to drive the later cel's pose edit")
+        XCTAssertNil(second.thumbnail, "The second cel must reject the picture of its superseded pose")
+    }
+
     /// The pass leaves alone anything that already has a thumbnail — the half of the staleness guard
     /// that can be pinned without racing it.
     ///
