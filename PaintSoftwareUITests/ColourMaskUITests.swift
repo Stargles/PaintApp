@@ -98,11 +98,12 @@ final class ColourMaskUITests: PaintUITestCase {
                        withVelocity: XCUIGestureVelocity(75), thenHoldForDuration: 0)
         }
         XCTAssertEqual(readField(app, "shape:"), "none", "The gesture stayed an ordinary brush stroke")
-        XCTAssertTrue(held.contains { sample in
-            guard sample.pixels.count == 2, let inner = sample.pixels[0], let outer = sample.pixels[1]
-            else { return false }
-            return inner.b > 180 && inner.r < 100 && isWhitish(outer)
-        }, "The drawn live stroke must already be blue inside and clipped outside while the touch is still down")
+        let lastHeld = try XCTUnwrap(held.last)
+        let inner = try XCTUnwrap(lastHeld.pixels[0])
+        let outer = try XCTUnwrap(lastHeld.pixels[1])
+        XCTAssertTrue(inner.b > 180 && inner.r < 100 && isWhitish(outer),
+                      "Before lift the live ink must already be blue inside and clipped outside. "
+                      + "Inside: \(inner). Outside: \(outer).")
         XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.strokes, 1,
                        "An ordinary masked stroke is admitted and reaches its drawing surface")
         XCTAssertGreaterThan(try XCTUnwrap(Int(readField(app, "entries:"))), entries,
