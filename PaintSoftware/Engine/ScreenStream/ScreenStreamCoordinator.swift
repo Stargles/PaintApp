@@ -140,7 +140,23 @@ final class ScreenStreamCoordinator: ObservableObject {
     /// is the frame rate the tick actually delivered to the canvas. Costs one string a second.
     private static let log = Logger(subsystem: "PaintSoftware", category: "ScreenStream")
     private static let signposter = OSSignposter(subsystem: "PaintSoftware", category: "ScreenStream")
-    private var tickDurationsSinceSummary: [TimeInterval] = []
+    /// Off-frame ticks can run for an entire editing session without a presented picture.
+    /// Keep the three statistics the next summary needs rather than retaining each tick.
+    struct TickMeasurements {
+        private(set) var count = 0
+        private var total: TimeInterval = 0
+        private(set) var peak: TimeInterval = 0
+
+        var mean: TimeInterval { count == 0 ? 0 : total / Double(count) }
+
+        mutating func record(_ duration: TimeInterval) {
+            count += 1
+            total += duration
+            peak = max(peak, duration)
+        }
+    }
+
+    private var tickMeasurements = TickMeasurements()
 
     /// The last log line's numbers, published on the same cadence, for the one reader
     /// that cannot open the unified log: an XCUITest on a device (`log collect --device` needs
@@ -757,18 +773,17 @@ final class ScreenStreamCoordinator: ObservableObject {
             }
         }
         lastTickDuration = CFAbsoluteTimeGetCurrent() - started
-        tickDurationsSinceSummary.append(lastTickDuration)
+        tickMeasurements.record(lastTickDuration)
         if presentedAFrame, started - lastSummary >= Self.summaryInterval {
-            let elapsed = started - lastSummary
-            let durations = tickDurationsSinceSummary
-            let mean = durations.reduce(0, +) / Double(max(durations.count, 1))
-            let worst = durations.max() ?? 0
             if lastSummary > 0 {
-                lastTickSummary = String(format: "%d/%.2fs mean:%.3f max:%.3f",
-                                         durations.count, elapsed, mean * 1000, worst * 1000)
-                Self.log.notice("tick \(durations.count) in \(elapsed, format: .fixed(precision: 2)) s (\(Double(durations.count) / max(elapsed, 0.001), format: .fixed(precision: 1)) /s): mean \(mean * 1000, format: .fixed(precision: 3)) ms, max \(worst * 1000, format: .fixed(precision: 3)) ms on the main actor")
+                let elapsed = started - lastSummary
+                let count = tickMeasurements.count
+                let mean = tickMeasurements.mean * 1000
+                let peak = tickMeasurements.peak * 1000
+                lastTickSummary = String(format: "%d/%.2fs mean:%.3f max:%.3f", count, elapsed, mean, peak)
+                Self.log.notice("tick \(count) in \(elapsed, format: .fixed(precision: 2)) s (\(Double(count) / max(elapsed, 0.001), format: .fixed(precision: 1)) /s): mean \(mean, format: .fixed(precision: 3)) ms, max \(peak, format: .fixed(precision: 3)) ms on the main actor")
             }
-            tickDurationsSinceSummary.removeAll(keepingCapacity: true)
+            tickMeasurements = TickMeasurements()
             lastSummary = started
         }
     }

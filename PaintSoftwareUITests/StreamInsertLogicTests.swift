@@ -237,6 +237,17 @@ final class StreamInsertLogicTests: XCTestCase {
         XCTAssertEqual(pixel((try XCTUnwrap(fixture.vector.render())), 2, 2).a, 0, "and nothing outside the rect")
     }
 
+    func testTheStreamTimingSummaryKeepsAnEarlyPeakAndAllOffFrameTicks() {
+        var measurements = ScreenStreamCoordinator.TickMeasurements()
+        measurements.record(0.5)
+        for _ in 0..<4_094 { measurements.record(1.0 / 1_024) }
+        measurements.record(0.25)
+
+        XCTAssertEqual(measurements.count, 4_096)
+        XCTAssertEqual(measurements.mean, (0.75 + 4_094.0 / 1_024) / 4_096)
+        XCTAssertEqual(measurements.peak, 0.5)
+    }
+
     /// A second tick on the same frame index does nothing: no write, no present.
     func testATickOnAnUnchangedFrameIsFree() {
         let fixture = tickFixture(image: solidImage(.green))
