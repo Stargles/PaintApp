@@ -75,6 +75,7 @@ struct TouchSample {
 @MainActor
 protocol CanvasNavigationSnapshotSource: AnyObject {
     var recordNavigationSnapshot: ((String, Int?, ActionRecorder) -> Void)? { get }
+    var navigationActivity: ((UIView?) -> CanvasNavigationMiss.Activity?)? { get }
 }
 
 /// Intercepts `UIWindow.sendEvent(_:)` for as long as either of `ActionRecorder`'s sinks is on — the
@@ -82,9 +83,8 @@ protocol CanvasNavigationSnapshotSource: AnyObject {
 ///
 /// **Two depths.** While a recording runs (`recordsInFull`) every touch sample is written and a
 /// touch-began's target is resolved against the accessibility tree too. For the flight recorder alone
-/// a `.moved` or `.stationary` touch is skipped before anything is looked up, and a touch-began is
-/// resolved by the cheap `UIView` walk only — so the per-event cost is a phase check per touch and the
-/// post-dispatch recognizer sweep.
+/// normal moves are skipped before target resolution. Intact pairs can contribute a sparse position
+/// sample to the navigation detector. Touch-began resolves by the cheap `UIView` walk only.
 ///
 /// **Why `sendEvent`.** It is the single funnel every touch in the app passes through, before
 /// hit-testing, before any gesture recognizer, before any view's `touchesBegan`. Tapping it once
@@ -240,10 +240,17 @@ protocol CanvasNavigationSnapshotSource: AnyObject {
     @MainActor
     private func willSend(_ event: UIEvent, window: UIWindow?) -> NavigationEdge? {
         guard event.type == .touches, let window, let touches = event.allTouches else { return nil }
-        // A move costs one increment, so the touch's end line can say how many it had; nothing is
-        // looked up or written for it unless a recording is running.
+        // Every move contributes to the touch's lift count. Only an eligible intact pair also
+        // takes a position sample, and only at the recorder's existing sparse move cadence.
         for touch in touches where touch.phase == .moved { tracks[ObjectIdentifier(touch)]?.moves += 1 }
-        guard recordsInFull || touches.contains(where: { Self.isSequenceEdge($0.phase) }) else { return nil }
+        let hasEdge = touches.contains { Self.isSequenceEdge($0.phase) }
+        if !hasEdge, navigationMiss.shouldSampleBoundPair(at: event.timestamp, interval: Self.moveMinInterval),
+           touches.contains(where: { $0.phase == .moved }),
+           let pair = boundPairPositions(in: touches, window: window) {
+            navigationMiss.sampleBoundPair(pair.first, pair.second, at: event.timestamp,
+                                           activity: pair.host.navigationActivity?(nil))
+        }
+        guard recordsInFull || hasEdge else { return nil }
         let recorder = ActionRecorder.shared
         // Counted from the whole event, not from the touches we end up writing: "how many fingers
         // are down" is the thing that separates a two-finger pan from a one-finger draw, and it has
@@ -255,6 +262,7 @@ protocol CanvasNavigationSnapshotSource: AnyObject {
         let freshSequence = touches.allSatisfy { $0.phase == .began }
         var startsSequence = freshSequence
         var edgeSamples: [TouchSample] = []
+        var plainLandings: Set<Int> = []
         var phases: EventPhases = []
         var firstCanvasTouch: (host: any CanvasNavigationSnapshotSource, id: Int)?
         var wedge = false
@@ -265,8 +273,11 @@ protocol CanvasNavigationSnapshotSource: AnyObject {
             if Self.isSequenceEdge(touch.phase) {
                 edgeSamples.append(sample)
                 phases.formUnion(EventPhases(touch.phase))
-                if firstCanvasTouch == nil, let host = Self.canvasHost(of: touch.view) {
-                    firstCanvasTouch = (host, sample.touchID)
+                if let host = Self.canvasHost(of: touch.view) {
+                    if firstCanvasTouch == nil { firstCanvasTouch = (host, sample.touchID) }
+                    if touch.phase == .began, touch.type == .direct, host.navigationActivity?(touch.view) != nil {
+                        plainLandings.insert(sample.touchID)
+                    }
                 }
             }
             if touch.phase == .began, let bound = sample.boundRecognizers {
@@ -277,7 +288,13 @@ protocol CanvasNavigationSnapshotSource: AnyObject {
         }
         guard !edgeSamples.isEmpty else { return nil }
         let wasWatching = navigationMiss.isWatching
-        let miss = navigationMiss.observe(edgeSamples, startsSequence: freshSequence)
+        let activity = navigationMiss.isWatchingBoundPair ? firstCanvasTouch?.host.navigationActivity?(nil) : nil
+        let miss = navigationMiss.observe(edgeSamples, startsSequence: freshSequence,
+                                          plainLandings: plainLandings, activity: activity)
+        if navigationMiss.canStartBoundPair, let pair = boundPairPositions(in: touches, window: window),
+           let activity = pair.host.navigationActivity?(nil) {
+            navigationMiss.startBoundPair(pair.first, pair.second, at: event.timestamp, activity: activity)
+        }
         if let firstCanvasTouch, wasWatching || navigationMiss.isWatching || wedge {
             let id = miss?.touch ?? firstCanvasTouch.id
             firstCanvasTouch.host.recordNavigationSnapshot?("before:" + phases.tag, id, recorder)
@@ -285,6 +302,18 @@ protocol CanvasNavigationSnapshotSource: AnyObject {
         }
         guard miss != nil || wedge else { return nil }
         return NavigationEdge(host: nil, touch: nil, phases: phases, miss: miss, wedge: wedge)
+    }
+
+    @MainActor
+    private func boundPairPositions(in touches: Set<UITouch>, window: UIWindow) ->
+        (first: CanvasNavigationMiss.Position, second: CanvasNavigationMiss.Position, host: any CanvasNavigationSnapshotSource)? {
+        guard touches.count == 2, let first = touches.first, let second = touches.first(where: { $0 !== first }),
+              first.type == .direct, second.type == .direct,
+              let host = Self.canvasHost(of: first.view), host === Self.canvasHost(of: second.view),
+              let firstID = tracks[ObjectIdentifier(first)]?.touchID,
+              let secondID = tracks[ObjectIdentifier(second)]?.touchID else { return nil }
+        return (.init(id: firstID, point: first.location(in: window)),
+                .init(id: secondID, point: second.location(in: window)), host)
     }
 
     private static func canvasHost(of hitView: UIView?) -> (any CanvasNavigationSnapshotSource)? {

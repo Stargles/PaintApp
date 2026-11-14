@@ -108,8 +108,8 @@ enum CanvasNavigationGesture: Int, CaseIterable {
     }
 }
 
-/// The contacts used by the automatic diagnostic come from the window tap's edge samples. Keeping
-/// the suspected replacement's origin lets its lift establish raw travel without recording moves.
+/// Watches window contact edges for missing bindings and samples an intact pair's motion without
+/// writing normal moves into the ring.
 struct CanvasNavigationMiss {
     private static let reissueInterval: TimeInterval = 0.10
     private static let reissueRadius: CGFloat = 24
@@ -123,6 +123,49 @@ struct CanvasNavigationMiss {
         let lost: [String]
         let travel: CGFloat
         let moves: Int
+        var motion: Motion? = nil
+    }
+
+    struct Motion {
+        let partner: Int
+        let centroidTravel: CGFloat
+        let relativeTravel: CGFloat
+        let samples: Int
+    }
+
+    /// One coordinator's actual navigation writes and explicit policy refusals. Unrelated
+    /// layout writes cannot make a broken pair look healthy.
+    struct Activity: Equatable {
+        let source: ObjectIdentifier
+        let writes: Int
+        let refusals: Int
+    }
+
+    struct Position {
+        let id: Int
+        let point: CGPoint
+    }
+
+    private struct Contact {
+        let binding: Set<String>
+        let plainLandingAt: TimeInterval?
+    }
+
+    private struct BoundPair {
+        let first: Position
+        let second: Position
+        let activity: Activity
+        var lastSampleAt: TimeInterval
+        var lastMotion: (first: CGPoint, second: CGPoint)?
+        var motionSamples = 0
+        var centroidTravel: CGFloat = 0
+        var relativeTravel: CGFloat = 0
+
+        func travel(first a: CGPoint, second b: CGPoint, from x: CGPoint, and y: CGPoint) -> (centroid: CGFloat, relative: CGFloat) {
+            let dx = a.x - x.x, dy = a.y - x.y
+            let ex = b.x - y.x, ey = b.y - y.y
+            return (hypot(dx + ex, dy + ey) / 2, hypot(dx - ex, dy - ey))
+        }
     }
 
     private struct Interruption {
@@ -137,7 +180,9 @@ struct CanvasNavigationMiss {
         let lost: [String]
     }
 
-    private var contacts: [Int: Set<String>] = [:]
+    private var contacts: [Int: Contact] = [:]
+    private var mayStartBoundPair = false
+    private var boundPair: BoundPair?
     private var interruption: Interruption?
     private var replacement: Replacement?
     private var missedStart: TouchSample?
@@ -146,10 +191,67 @@ struct CanvasNavigationMiss {
 
     var isWatching: Bool { contacts.count >= 2 || replacement != nil || missedStart != nil }
 
-    mutating func observe(_ samples: [TouchSample], startsSequence: Bool) -> Finding? {
+    var canStartBoundPair: Bool { mayStartBoundPair && contacts.count == 2 }
+    var isWatchingBoundPair: Bool { boundPair != nil }
+
+    mutating func startBoundPair(_ first: Position, _ second: Position, at time: TimeInterval, activity: Activity) {
+        guard canStartBoundPair,
+              let firstLanding = contacts[first.id]?.plainLandingAt,
+              let secondLanding = contacts[second.id]?.plainLandingAt,
+              abs(firstLanding - secondLanding) <= CanvasTouchSettle.window else { return }
+        mayStartBoundPair = false
+        boundPair = BoundPair(first: first, second: second, activity: activity, lastSampleAt: time)
+    }
+
+    func shouldSampleBoundPair(at time: TimeInterval, interval: TimeInterval) -> Bool {
+        guard let pair = boundPair else { return false }
+        return time - pair.lastSampleAt >= interval
+    }
+
+    mutating func sampleBoundPair(_ first: Position, _ second: Position, at time: TimeInterval, activity: Activity?) {
+        guard var pair = boundPair else { return }
+        let a = first.id == pair.first.id ? first : second
+        let b = first.id == pair.first.id ? second : first
+        guard a.id == pair.first.id, b.id == pair.second.id, activity == pair.activity else {
+            boundPair = nil
+            return
+        }
+        pair.lastSampleAt = time
+        defer { boundPair = pair }
+        let travel = pair.travel(first: a.point, second: b.point, from: pair.first.point, and: pair.second.point)
+        guard max(travel.centroid, travel.relative) >= Self.movementThreshold else { return }
+        if let previous = pair.lastMotion {
+            let step = pair.travel(first: a.point, second: b.point, from: previous.first, and: previous.second)
+            guard max(step.centroid, step.relative) >= 2 else { return }
+        }
+        pair.lastMotion = (a.point, b.point)
+        pair.motionSamples += 1
+        pair.centroidTravel = max(pair.centroidTravel, travel.centroid)
+        pair.relativeTravel = max(pair.relativeTravel, travel.relative)
+    }
+
+    mutating func observe(_ samples: [TouchSample], startsSequence: Bool,
+                          plainLandings: Set<Int> = [], activity: Activity? = nil) -> Finding? {
         var finding: Finding?
+        // Only a fresh, uninterrupted pair qualifies. Take the final activity reading before
+        // dispatching the first lift, while the evidence still describes movement with two down.
+        if let pair = boundPair {
+            boundPair = nil
+            if samples.allSatisfy({ $0.phase == "ended" && ($0.touchID == pair.first.id || $0.touchID == pair.second.id) }),
+               let lift = samples.first, pair.motionSamples >= 2, activity == pair.activity {
+                let partner = lift.touchID == pair.first.id ? pair.second.id : pair.first.id
+                finding = Finding(kind: "boundWithoutApplication", touch: lift.touchID, cancelledTouch: nil,
+                                  survivor: nil, lost: [], travel: max(pair.centroidTravel, pair.relativeTravel),
+                                  moves: lift.moves ?? 0, motion: Motion(partner: partner, centroidTravel: pair.centroidTravel,
+                                                                        relativeTravel: pair.relativeTravel, samples: pair.motionSamples))
+            }
+        }
+        if startsSequence { mayStartBoundPair = true }
+        if samples.contains(where: { $0.phase != "began" || $0.type != "direct" || !plainLandings.contains($0.touchID) }) {
+            mayStartBoundPair = false
+        }
         for sample in samples where sample.phase == "ended" || sample.phase == "cancelled" {
-            guard let binding = contacts.removeValue(forKey: sample.touchID) else { continue }
+            guard let binding = contacts.removeValue(forKey: sample.touchID)?.binding else { continue }
             if let origin = missedStart, origin.touchID == sample.touchID {
                 finding = Finding(kind: "freshMissing", touch: sample.touchID, cancelledTouch: nil, survivor: nil,
                                   lost: CanvasNavigationGesture.allCases.map(\.name),
@@ -182,7 +284,9 @@ struct CanvasNavigationMiss {
         let beginnings = samples.filter { $0.phase == "began" && $0.boundRecognizers?.contains(CanvasWedgeDetector.canvasMarker) == true }
         for sample in beginnings {
             let binding = Set(sample.boundRecognizers ?? []).intersection(CanvasWedgeDetector.transformRecognizers)
-            contacts[sample.touchID] = binding
+            let plainLandingAt = plainLandings.contains(sample.touchID) && binding == CanvasWedgeDetector.transformRecognizers
+                ? sample.time : nil
+            contacts[sample.touchID] = Contact(binding: binding, plainLandingAt: plainLandingAt)
             if let old = interruption {
                 interruption = nil
                 let elapsed = sample.time - old.contact.time
@@ -193,7 +297,7 @@ struct CanvasNavigationMiss {
                 }
             }
         }
-        if beginnings.contains(where: { contacts[$0.touchID]?.isEmpty == false }) {
+        if beginnings.contains(where: { contacts[$0.touchID]?.binding.isEmpty == false }) {
             // A later bound contact can reveal a healthy start. Only use the consecutive-miss
             // guard on a fresh start so unrelated joined contacts do not re-arm an older run.
             missedStart = nil

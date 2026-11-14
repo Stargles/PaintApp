@@ -7,6 +7,7 @@ import UIKit
 final class CanvasHostView: UIView, CanvasNavigationSnapshotSource {
     var onLayout: (() -> Void)?
     var recordNavigationSnapshot: ((String, Int?, ActionRecorder) -> Void)?
+    var navigationActivity: ((UIView?) -> CanvasNavigationMiss.Activity?)?
     /// Set once by `CanvasView.makeUIView`. `UndoManager` no longer backs undo/redo (see
     /// `CanvasManager.history`), so hardware-keyboard Cmd-Z/Cmd-Shift-Z needs an explicit
     /// `UIKeyCommand` pair instead of relying on the responder chain's built-in undo-manager

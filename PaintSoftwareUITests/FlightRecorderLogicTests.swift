@@ -207,8 +207,9 @@ final class FlightRecorderLogicTests: XCTestCase {
     // MARK: - What a stranded canvas's flight carries (BUGS.md, "The canvas's recognizers strand…")
 
     private func touchSample(phase: String, touchID: Int, object: AnyObject, moves: Int? = nil,
-                             time: Double = 1, point: CGPoint = .zero, down: Int = 1, bound: [String]? = nil) -> TouchSample {
-        TouchSample(time: time, phase: phase, type: "direct", touchID: touchID, object: ObjectIdentifier(object), moves: moves,
+                             time: Double = 1, point: CGPoint = .zero, down: Int = 1, bound: [String]? = nil,
+                             type: String = "direct") -> TouchSample {
+        TouchSample(time: time, phase: phase, type: type, touchID: touchID, object: ObjectIdentifier(object), moves: moves,
                     target: nil, targetClass: "none", hitClass: "StrokeCanvasView", role: "other", label: nil,
                     depth: 0, resolution: "none", normalized: .zero, window: point, windowNormalized: .zero,
                     concurrent: down, isPencil: false, force: 0, maxForce: 0, altitude: 0, azimuth: 0,
@@ -480,8 +481,79 @@ final class FlightRecorderLogicTests: XCTestCase {
         return finding
     }
 
+    func testBoundPairNeedsRepeatedIntentionalMotionWithoutNavigationWritesOrPolicyRefusals() throws {
+        let pan = try XCTUnwrap(runBoundPair())
+        XCTAssertEqual(pan.kind, "boundWithoutApplication")
+        XCTAssertEqual(pan.touch, 11)
+        XCTAssertEqual(pan.lost, [])
+        XCTAssertEqual(pan.motion?.partner, 12)
+        XCTAssertEqual(pan.motion?.centroidTravel, 45)
+        XCTAssertEqual(pan.motion?.relativeTravel, 0)
+        XCTAssertEqual(pan.motion?.samples, 2)
+        XCTAssertEqual(pan.moves, 13)
+        let pinch = try XCTUnwrap(runBoundPair(deltas: [(0, 0), (-15, 15), (-24, 24)]))
+        XCTAssertEqual(pinch.motion?.centroidTravel, 0)
+        XCTAssertEqual(pinch.motion?.relativeTravel, 48)
+
+        XCTAssertNil(runBoundPair(deltas: [(0, 0), (1, 1), (2, 2)]), "ordinary taps stay quiet")
+        XCTAssertNil(runBoundPair(deltas: [(0, 0), (28, 28), (28, 28)]), "a held position is only one motion sample")
+        XCTAssertNil(runBoundPair(writes: 1), "a real navigation write before lift is sufficient")
+        XCTAssertNil(runBoundPair(refusals: 1), "an intentional policy refusal is sufficient")
+        XCTAssertNil(runBoundPair(plainLandings: [12]), "an overlay or menu at either landing precludes diagnosis")
+        XCTAssertNil(runBoundPair(secondType: "pencil"), "a Pencil is not the second finger")
+        XCTAssertNil(runBoundPair(secondDelay: 0.12), "a late arrival is not a fresh pair")
+        XCTAssertNil(runBoundPair(interveningPhase: "began"), "a third contact on or off the canvas invalidates the pair")
+        XCTAssertNil(runBoundPair(interveningPhase: "cancelled"), "a cancelled and reissued contact takes the other path")
+    }
+
+    private func runBoundPair(deltas: [(Double, Double)] = [(0, 0), (28, 28), (45, 45)],
+                              writes: Int = 0, refusals: Int = 0, plainLandings: Set<Int> = [11, 12],
+                              secondType: String = "direct", secondDelay: Double = 0.02,
+                              interveningPhase: String? = nil) -> CanvasNavigationMiss.Finding? {
+        let host = NSObject(), first = NSObject(), second = NSObject(), other = NSObject()
+        let source = ObjectIdentifier(host)
+        let bound = [CanvasWedgeDetector.canvasMarker] + CanvasNavigationGesture.allCases.map(\.name)
+        let before = CanvasNavigationMiss.Activity(source: source, writes: 10, refusals: 3)
+        var detector = CanvasNavigationMiss()
+        XCTAssertNil(detector.observe([
+            touchSample(phase: "began", touchID: 11, object: first, time: 1, bound: bound)
+        ], startsSequence: true, plainLandings: plainLandings.intersection([11])))
+        XCTAssertNil(detector.observe([
+            touchSample(phase: "began", touchID: 12, object: second, time: 1 + secondDelay, down: 2, bound: bound, type: secondType)
+        ], startsSequence: false, plainLandings: plainLandings.intersection([12])))
+        func positions(_ a: Double, _ b: Double) -> (CanvasNavigationMiss.Position, CanvasNavigationMiss.Position) {
+            (.init(id: 11, point: CGPoint(x: 70 + a, y: 100)), .init(id: 12, point: CGPoint(x: 160 + b, y: 100)))
+        }
+        let initial = positions(0, 0)
+        detector.startBoundPair(initial.0, initial.1, at: 1.03, activity: before)
+        for (index, delta) in deltas.enumerated() {
+            let points = positions(delta.0, delta.1)
+            let time = 1.1 + Double(index) * 0.06
+            if detector.shouldSampleBoundPair(at: time, interval: 0.05) {
+                detector.sampleBoundPair(points.1, points.0, at: time, activity: before)
+            }
+        }
+        if let interveningPhase {
+            let id = interveningPhase == "cancelled" ? 12 : 13
+            XCTAssertNil(detector.observe([
+                touchSample(phase: interveningPhase, touchID: id, object: other, time: 1.31)
+            ], startsSequence: false, activity: before))
+            if interveningPhase == "cancelled" {
+                XCTAssertNil(detector.observe([
+                    touchSample(phase: "began", touchID: 13, object: other, time: 1.32, down: 2, bound: bound)
+                ], startsSequence: false, plainLandings: [13]))
+                detector.startBoundPair(initial.0, .init(id: 13, point: initial.1.point), at: 1.32, activity: before)
+                XCTAssertFalse(detector.isWatchingBoundPair, "even a fully bound replacement cannot rearm this detector")
+            }
+        }
+        let after = CanvasNavigationMiss.Activity(source: source, writes: 10 + writes, refusals: 3 + refusals)
+        return detector.observe([
+            touchSample(phase: "ended", touchID: 11, object: first, moves: 13, time: 1.45)
+        ], startsSequence: false, activity: after)
+    }
+
     @MainActor
-    func testNavigationMissesAutomaticallySaveBothFindingsWithoutManualRecording() throws {
+    func testNavigationMissesAutomaticallySaveWithoutManualRecording() throws {
         let recorder = ActionRecorder.shared
         let wasFlying = ActionRecorder.isFlying
         let wasCapturing = ActionRecorder.isCapturing
@@ -537,6 +609,7 @@ final class FlightRecorderLogicTests: XCTestCase {
 
         let partial = try XCTUnwrap(runReissue(interruption: "cancelled", lostNavigation: true, end: CGPoint(x: 851, y: 220.5)))
         recorder.canvasNavigationMissed(partial)
+        recorder.canvasNavigationMissed(try XCTUnwrap(runBoundPair()))
         // The pending item itself writes the first flight. There is no project switch, manual
         // Save Last 90 Seconds, or repair callback to land it for the recorder.
         let first = try waitForFlight(count: 1)
@@ -562,6 +635,11 @@ final class FlightRecorderLogicTests: XCTestCase {
         XCTAssertEqual(reissue?["lost"] as? String, "canvas.pinch,canvas.rotation")
         XCTAssertEqual(reissue?["survivor"] as? Int, 3692)
         XCTAssertEqual(reissue?["moves"] as? Int, 17)
+        let boundMiss = try XCTUnwrap(lines.first { $0["kind"] as? String == "boundWithoutApplication" })
+        XCTAssertEqual(boundMiss["partner"] as? Int, 12)
+        XCTAssertEqual(boundMiss["centroidTravel"] as? Double, 45)
+        XCTAssertEqual(boundMiss["relativeTravel"] as? Double, 0)
+        XCTAssertEqual(boundMiss["motionSamples"] as? Int, 2)
 
         recorder.canvasNavigationMissed(partial)
         // Switching before the diagnostic delay preserves the outgoing project context.

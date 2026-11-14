@@ -214,15 +214,20 @@ final class ActionRecorder: ObservableObject {
     }
 
     func canvasNavigationMissed(_ finding: CanvasNavigationMiss.Finding) {
-        emit("canvasNavigationMiss", [
+        var fields: [(String, JSONValue)] = [
             ("kind", .str(finding.kind)), ("touch", .int(finding.touch)),
             ("cancelledTouch", finding.cancelledTouch.map(JSONValue.int) ?? .null),
             ("survivor", finding.survivor.map(JSONValue.int) ?? .null),
             ("lost", .str(finding.lost.joined(separator: ","))),
             ("travel", .num(finding.travel)), ("moves", .int(finding.moves))
-        ])
+        ]
+        if let motion = finding.motion {
+            fields += [("partner", .int(motion.partner)), ("centroidTravel", .num(motion.centroidTravel)),
+                       ("relativeTravel", .num(motion.relativeTravel)), ("motionSamples", .int(motion.samples))]
+        }
+        emit("canvasNavigationMiss", fields)
         // Let the existing 100 ms repair include this finding in its own flight if it runs.
-        // A diagnostic alone is silent: missing bindings can still leave working navigation.
+        // A diagnostic alone is silent. Only the actual repair announces itself.
         guard pendingNavigationFlight == nil else { return }
         let work = DispatchWorkItem { [weak self] in self?.saveFlight(trigger: "navigation") }
         pendingNavigationFlight = work

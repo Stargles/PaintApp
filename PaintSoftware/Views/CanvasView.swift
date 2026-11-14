@@ -332,6 +332,9 @@ struct CanvasView: UIViewRepresentable {
         host.recordNavigationSnapshot = { [weak coordinator = context.coordinator] edge, touch, recorder in
             coordinator?.recordNavigationSnapshot(edge: edge, touch: touch, recorder: recorder)
         }
+        host.navigationActivity = { [weak coordinator = context.coordinator] hitView in
+            coordinator?.navigationActivity(hitView: hitView)
+        }
         context.coordinator.onionSkinView = onionSkin
         context.coordinator.paperView = paper
         context.coordinator.transformOverlay = transformOverlay
@@ -4437,6 +4440,20 @@ struct CanvasView: UIViewRepresentable {
         private var navigationTransformWrites = 0
         private var navigationDelivery = Array(repeating: CanvasNavigationGesture.Delivery(),
                                                count: CanvasNavigationGesture.allCases.count)
+
+        func navigationActivity(hitView: UIView?) -> CanvasNavigationMiss.Activity? {
+            guard let container = containerView, canvasManager.openPresentations.isEmpty, !assistedDragIsLive else { return nil }
+            // Only a plain landing qualifies. Overlays own their hit tests, including live text,
+            // selection and floating pieces. They can take input before our navigation handlers.
+            if let hitView, hitView !== container, !(hitView is StrokeCanvasView) { return nil }
+            var writes = 0
+            var refusals = 0
+            for delivery in navigationDelivery {
+                writes += delivery.writes
+                refusals += delivery.refused
+            }
+            return .init(source: ObjectIdentifier(container), writes: writes, refusals: refusals)
+        }
 
         func recordNavigationSnapshot(edge: String, touch: Int?, recorder: ActionRecorder) {
             guard let container = containerView else { return }
