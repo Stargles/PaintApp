@@ -153,6 +153,15 @@ final class FillFootprintBench: XCTestCase {
         ]
     }
 
+    private func configureMendBucket(_ manager: CanvasManager, mendsGaps: Bool) {
+        manager.fillSettings.threshold = 0.15
+        manager.fillSettings.bucketEdgeOverlap = 0
+        manager.fillSettings.gapClosing = 0
+        manager.fillSettings.mendReach = 12
+        manager.setFillMendsGaps(mendsGaps)
+        manager.brushColor = Self.red
+    }
+
     private func interactiveMendTrial(mend: Bool, measured: Bool) throws -> MendImage {
         let size = CGSize(width: 64, height: 64)
         let manager = CanvasFixture.manager(layerCount: 0)
@@ -165,11 +174,7 @@ final class FillFootprintBench: XCTestCase {
         XCTAssertTrue(manager.addVectorLayer(), "fixture creates its vector fill layer")
         let fillLayer = manager.currentLayerIndex
         let fillCanvas = try XCTUnwrap(manager.layers[fillLayer].cels[0].vector)
-        manager.fillSettings.bucketEdgeOverlap = 0
-        manager.fillSettings.gapClosing = 0
-        manager.fillSettings.mendReach = 12
-        manager.setFillMendsGaps(mend)
-        manager.brushColor = Self.red
+        configureMendBucket(manager, mendsGaps: mend)
         _ = reference.render()
         _ = fillCanvas.render()
 
@@ -213,16 +218,24 @@ final class FillFootprintBench: XCTestCase {
         let layerIndex: Int
         let vectors: [VectorCanvas]
         let originalPathData: [Data]
+        let reference: VectorCanvas
     }
 
     private func fillPathData(_ vectors: [VectorCanvas]) -> [Data] {
         vectors.compactMap { $0.elements.first?.fill?.pathData }
     }
 
-    private func warmBatchMendEngine() async throws {
+    private func warmBatchMendEngine() async throws -> Bool {
         let fixture = try batchMendFixture(celCount: 3)
+        try attachBatchMendPicture(fixture.vectors[0], name: "mend-all-before")
         let result = await fixture.manager.mendAllFills(layerIndex: fixture.layerIndex)
-        XCTAssertEqual(result, .changed(3), "the small warm-up batch reaches the ordinary mend path")
+        guard result == .changed(3) else {
+            XCTFail("the small warm-up batch expected 3 mended cels; got \(result)")
+            return false
+        }
+        try checkBatchMendPicture(fixture.vectors[0], fillIndex: 0, phase: "Warm-up")
+        try attachBatchMendPicture(fixture.vectors[0], name: "mend-all-after")
+        return true
     }
 
     /// A deliberately light, explicit scene: one 72² canonical vector line-art reference and one
@@ -235,35 +248,55 @@ final class FillFootprintBench: XCTestCase {
         XCTAssertTrue(manager.addVectorLayer(), "batch fixture creates its vector reference layer")
         let referenceLayer = manager.currentLayerIndex
         CanvasFixture.setCelLayout(manager, layerIndex: referenceLayer, [(start: 0, length: celCount)])
-        manager.layers[referenceLayer].cels[0].vector = VectorCanvas(size: size,
-            strokes: mendReferenceStrokes())
+        let reference = VectorCanvas(size: size, strokes: mendReferenceStrokes())
+        manager.layers[referenceLayer].cels[0].vector = reference
         manager.setFillReference(layerIndex: referenceLayer, isReference: true)
         XCTAssertTrue(manager.addVectorLayer(), "batch fixture creates its vector fill layer")
         let fillLayer = manager.currentLayerIndex
+        manager.setFillReference(layerIndex: fillLayer, isReference: false)
+        configureMendBucket(manager, mendsGaps: false)
+        // Commit one ordinary bucket fill so the open pixels beside the ink come from the
+        // same reference and fill settings used by Mend All. A drawn notch can leave bare
+        // paper around the true brush footprint, which Mend All must preserve.
+        manager.beginInteractiveFill(at: CGPoint(x: 16, y: 16))
+        manager.endInteractiveFill()
+        manager.fillQueue.sync {}
+        XCTAssertTrue(manager.commitInteractiveFill(), "the ordinary bucket fill commits")
+        let sample = try XCTUnwrap(manager.layers[fillLayer].cels[0].vector)
+        let fill = try XCTUnwrap(sample.elements.first?.fill, "the bucket creates a stored vector fill")
+        let image = try XCTUnwrap(sample.render()?.cgImage)
+        let bytes = try XCTUnwrap(CanvasFixture.rgbaBytes(image))
+        XCTAssertTrue(red(bytes, side: image.width, x: 16, y: 16), "the bucket paints the seed red")
+        for (x, y, name) in [(34, 24, "detached stroke"), (20, 44, "attached stroke"),
+                              (24, 24, "square paper hole"), (5, 36, "exterior paper")] {
+            XCTAssertEqual(alpha(bytes, side: image.width, x: x, y: y), 0,
+                           "the committed bucket leaves the \(name) clear")
+        }
+        let path = try XCTUnwrap(fill.cgPath)
+
         CanvasFixture.setCelLayout(manager, layerIndex: fillLayer,
             (0..<celCount).map { (start: $0, length: 1) })
-        let field = CGRect(x: 10, y: 10, width: 44, height: 44)
-        let hole = CGRect(x: 20, y: 20, width: 8, height: 8)
-        let holePath = CGPath(rect: hole, transform: nil)
-        let bodyGap = CGPath(rect: CGRect(x: 32, y: 16, width: 4, height: 16), transform: nil)
-        let attachedGap = CGPath(rect: CGRect(x: 8, y: 42, width: 28, height: 4), transform: nil)
-        let initialPath = CGPath(rect: field, transform: nil).subtracting(holePath, using: .winding)
-            .subtracting(bodyGap, using: .winding).subtracting(attachedGap, using: .winding)
         var vectors: [VectorCanvas] = []
-        var originals: [Data] = []
-        vectors.reserveCapacity(celCount); originals.reserveCapacity(celCount)
+        vectors.reserveCapacity(celCount)
         for index in 0..<celCount {
-            let fill = VectorFillElement(path: initialPath,
-                color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1), evenOddFill: true)
-            let vector = VectorCanvas(size: size, elements: [.fill(fill)])
+            let copy = VectorFillElement(path: path, paint: fill.paint, opacity: fill.opacity,
+                                         evenOddFill: fill.evenOddFill)
+            let vector = VectorCanvas(size: size, elements: [.fill(copy)])
             manager.layers[fillLayer].cels[index].vector = vector
             vectors.append(vector)
-            originals.append(fill.pathData)
         }
-        manager.fillSettings.threshold = 0.15
-        manager.fillSettings.mendReach = 12
-        return BatchMendFixture(manager: manager, layerIndex: fillLayer,
-                                vectors: vectors, originalPathData: originals)
+        // The source commit's undo closures address the original cel, which the copies replaced.
+        manager.history.removeAll()
+        return BatchMendFixture(manager: manager, layerIndex: fillLayer, vectors: vectors,
+                                originalPathData: fillPathData(vectors), reference: reference)
+    }
+
+    private func attachBatchMendPicture(_ vector: VectorCanvas, name: String) throws {
+        let image = try XCTUnwrap(vector.render())
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func checkBatchMendPicture(_ vector: VectorCanvas, fillIndex: Int, phase: String) throws {
@@ -431,20 +464,23 @@ final class FillFootprintBench: XCTestCase {
                           "explicit batch Mend All cost and footprint run")
         _ = try XCTUnwrap(MetalFillEngine.shared, "the shared Metal fill engine is required")
         // Warm the serial contour/Metal path before the per-population measurements.
-        try await warmBatchMendEngine()
+        guard try await warmBatchMendEngine() else { return }
 
         for count in [300, 1000] {
             let fixture = try batchMendFixture(celCount: count)
             // Only the active reference/fill pictures are resident at the measurement baseline;
             // off-screen cels retain vector data but are not pre-rendered into a canvas-sized cache.
-            _ = fixture.manager.layers[0].cels[0].vector?.render()
+            _ = fixture.reference.render()
             _ = fixture.vectors[0].render()
             let baselineUndo = fixture.manager.history.undoStack.count
             let started = try startPeakSampler()
             let begin = CACurrentMediaTime()
             let result = await fixture.manager.mendAllFills(layerIndex: fixture.layerIndex)
             let measurement = try finishPeakSampler(started, seconds: CACurrentMediaTime() - begin)
-            XCTAssertEqual(result, .changed(count), "every prepared target cel contributes one accepted fill")
+            guard result == .changed(count) else {
+                XCTFail("expected \(count) mended target cels; got \(result)")
+                return
+            }
             let mendedPaths = fillPathData(fixture.vectors)
             XCTAssertEqual(mendedPaths.count, count)
             XCTAssertTrue(zip(fixture.originalPathData, mendedPaths).allSatisfy { $0.0 != $0.1 },
@@ -475,29 +511,33 @@ final class FillFootprintBench: XCTestCase {
             for index in probeIndices { try checkBatchMendPicture(fixture.vectors[index], fillIndex: index, phase: "redo") }
 
             report("Mend All \(count) target cels", [
-                ("result", "changed \(count); refused 0"),
-                ("previewUndoRedo", "one undo; one redo; all \(count) path payloads verified"),
+                ("result", "\(result)"),
                 ("MendAllElapsedMs", String(format: "%.1f", measurement.seconds * 1000)),
                 ("physFootprintBaseline", mb(Int(measurement.baseline))),
                 ("physFootprintPeakDelta", mb(Int(measurement.peak &- measurement.baseline))),
                 ("peakSampleInterval", "2ms; task_vm_info.phys_footprint"),
                 ("transientBudget", mb(MetalFillEngine.fillBudgetBytes / 2)),
                 ("undoBudget", mb(fixture.manager.history.maxCost)),
-                ("fixture", "one 72x72 vector line-art cel; \(count) light vector fill cels; 1 fill per target cel")
+                ("fixture", "one 72x72 vector line-art cel; \(count) light cels with the same bucket contour")
             ])
 
             let refused = try batchMendFixture(celCount: count)
             refused.manager.history.maxCost = 1
             let originalSteps = refused.manager.history.undoStack.count
             let refusal = await refused.manager.mendAllFills(layerIndex: refused.layerIndex)
-            XCTAssertEqual(refusal, .exceedsBudget, "the same batch honors the existing undo-payload budget")
+            guard refusal == .exceedsBudget else {
+                XCTFail("expected undo-payload budget refusal; got \(refusal)")
+                return
+            }
             XCTAssertEqual(fillPathData(refused.vectors), refused.originalPathData,
                            "a refused request changes zero of \(count) cels")
             XCTAssertEqual(refused.manager.history.undoStack.count, originalSteps,
                            "a refused plan creates no partial undo step")
             report("Mend All refusal \(count) target cels", [
-                ("result", "exceedsBudget; changed 0; refused plan leaves \(count) original paths"),
-                ("undoSteps", "unchanged at \(originalSteps)")
+                ("result", "\(refusal)"),
+                ("unchangedCels", "\(zip(fillPathData(refused.vectors), refused.originalPathData).filter { $0.0 == $0.1 }.count)"),
+                ("undoStepsBefore", "\(originalSteps)"),
+                ("undoStepsAfter", "\(refused.manager.history.undoStack.count)")
             ])
         }
     }
