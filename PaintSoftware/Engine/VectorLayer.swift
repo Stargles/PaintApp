@@ -6017,7 +6017,7 @@ final class VectorCanvas {
         ///
         /// 1 for a degenerate size, so a zero-width canvas takes the native path it has always taken
         /// rather than a scale of zero or infinity.
-        private static func resolution(of size: CGSize, filling destination: CGSize) -> CGFloat {
+        static func resolution(of size: CGSize, filling destination: CGSize) -> CGFloat {
             guard size.width > 0, size.height > 0,
                   destination.width > 0, destination.height > 0 else { return 1 }
             return min(destination.width / size.width, destination.height / size.height)

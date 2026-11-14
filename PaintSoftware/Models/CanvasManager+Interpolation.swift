@@ -1428,10 +1428,10 @@ extension CanvasManager {
             canvasWidth: Int(canvasSize.width.rounded()),
             canvasHeight: Int(canvasSize.height.rounded()))
 
-        return DerivedCelContent(identity: AnyHashable(identity)) { quality in
+        return DerivedCelContent(identity: AnyHashable(identity)) { quality, resolution in
             InterpolationEvaluator.render(recipe: recipe, at: t, size: canvasSize,
                                           content: content, subject: subject, guides: guideStrokes,
-                                          quality: quality, options: options)
+                                          quality: quality, options: options, resolution: resolution)
         }
     }
 
@@ -1507,7 +1507,7 @@ extension CanvasManager {
             canvasHeight: Int(canvasSize.height.rounded()))
 
         let source = videoFrames
-        return DerivedCelContent(identity: AnyHashable(identity)) { quality in
+        return DerivedCelContent(identity: AnyHashable(identity)) { quality, resolution in
             var resolved: [VectorElement] = []
             for element in elements.withoutReference {
                 guard case .video(var video) = element, let time = times[video.id] else {
@@ -1525,7 +1525,7 @@ extension CanvasManager {
             }
             return VectorCanvas(size: canvasSize,
                                 elements: Self.posed(resolved, through: mappings,
-                                                     inheriting: container)).render(quality: quality)
+                                                     inheriting: container)).render(quality: quality, resolution: resolution)
         }
     }
 

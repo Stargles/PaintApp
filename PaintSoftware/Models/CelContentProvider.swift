@@ -45,7 +45,8 @@ struct DerivedCelContent {
     /// `InterpolationPreviewKey` came to be wrong four times.
     let identity: AnyHashable
 
-    /// The derived pixels, at `quality`. **Called only on a memo miss**, which is why it is a thunk
+    /// The derived pixels, at a given quality and resolution. **Called only on a memo miss** when
+    /// used by a cached flatten, which is why it is a thunk
     /// and not an image: resolving a provider is on every rasterize of every cel, and evaluating an
     /// in-between is two lattice embeddings, an ARAP solve and two canvas-sized renders.
     ///
@@ -53,20 +54,22 @@ struct DerivedCelContent {
     /// value is created; only an absent provider uses the cel's stored content. A genuinely empty
     /// drawing returns a transparent image.
     ///
-    /// **Renders at canvas size, always**, with no size parameter: derived geometry is in canvas
-    /// coordinates, so a smaller render would *clip* rather than scale. A caller that wants a
-    /// reduced image (the onion skin) draws this into its own smaller context, exactly as
-    /// `PixelOps.rasterizeUncached` already does with `cel.vector`'s render.
+    /// Geometry stays in canvas coordinates. Resolution is raster pixels per canvas point,
+    /// with one pixel per point for the native render.
     ///
     /// **Must be pure and thread-safe.** `CanvasManager.leafSnapshots` resolves providers on the main
     /// actor and `FrameRecipe.resolveSources` then calls this from `PixelOps.parallelMap`'s workers,
     /// on whatever queue resolved the recipe, so an implementation has to capture the values it needs
     /// rather than reach back into `@Published` document state.
-    let render: (RenderQuality) -> UIImage?
+    private let renderer: (RenderQuality, CGFloat) -> UIImage?
 
-    init(identity: AnyHashable, render: @escaping (RenderQuality) -> UIImage?) {
+    init(identity: AnyHashable, render: @escaping (RenderQuality, CGFloat) -> UIImage?) {
         self.identity = identity
-        self.render = render
+        self.renderer = render
+    }
+
+    func render(_ quality: RenderQuality, resolution: CGFloat = 1) -> UIImage? {
+        renderer(quality, resolution)
     }
 }
 

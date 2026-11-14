@@ -3807,15 +3807,10 @@ final class CanvasManager: ObservableObject {
             // PixelOps.rasterize folds bakedImage/raster/vector into one image already —
             // into `celThumbnailRasterBound` rather than the whole canvas, which is what keeps its
             // memo entry out of the compositor's way (see the constant).
-            // Two rows, because the two halves scale with different things and only one of them is
-            // bounded: `celThumbnailRasterBound` fixed the *tile* at 480² whatever the canvas is,
-            // but the flatten inside it still walks every element the cel holds, so this half is
-            // O(ink) — which is the first term of the owner's *"no matter how many strokes"*.
+            let size = RenderRequest.renderSize(fitting: canvasSize, within: celThumbnailRasterBound)
             let flattened = PlaybackTrace.span(.thumbnailFlatten) {
-                PixelOps.rasterize(cel: cel,
-                                   canvasSize: RenderRequest.renderSize(fitting: canvasSize,
-                                                                        within: celThumbnailRasterBound),
-                                   derived: derived)
+                PixelOps.rasterize(cel: cel, canvasSize: size, derived: derived,
+                                   fittingDerivedFrom: canvasSize)
             }
             guard let flattened else { return nil }
             return PlaybackTrace.span(.thumbnailDownsample) {

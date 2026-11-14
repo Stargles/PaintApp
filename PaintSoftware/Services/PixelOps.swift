@@ -138,21 +138,37 @@ enum PixelOps {
     /// Required native or raster rendering may refuse its private picture. Callers preserve prior state.
     static func rasterize(cel: Cel, canvasSize: CGSize, quality: RenderQuality = .full,
                           memoize: Bool = true, derived: DerivedCelContent? = nil,
-                          pose: PoseMap? = nil) -> UIImage? {
+                          pose: PoseMap? = nil, fittingDerivedFrom derivedCanvasSize: CGSize? = nil) -> UIImage? {
+        let derivedResolution: CGFloat
+        if derived != nil, let derivedCanvasSize {
+            let scale = VectorCanvas.Frozen.resolution(of: derivedCanvasSize, filling: canvasSize)
+            // UIKit rounds raster dimensions up. A quotient can multiply back a fraction over
+            // the bounding pixel due to floating-point rounding.
+            if derivedCanvasSize.width * scale > canvasSize.width ||
+                derivedCanvasSize.height * scale > canvasSize.height {
+                derivedResolution = scale.nextDown
+            } else {
+                derivedResolution = scale
+            }
+        } else {
+            derivedResolution = 1
+        }
         let identity = FrozenCel.Identity(cel: cel, derived: derived?.identity, pose: pose)
         guard memoize else {
             return rasterizeUncached(FrozenCel(cel: cel, identity: identity, derived: derived,
                                                pose: pose, quality: quality),
-                                     canvasSize: canvasSize, quality: quality)
+                                     canvasSize: canvasSize, quality: quality,
+                                     derivedResolution: derivedResolution)
         }
-        let key = RasterizeKey(cel: identity, canvasSize: canvasSize, quality: quality, window: nil)
+        let key = RasterizeKey(cel: identity, canvasSize: canvasSize, quality: quality,
+                               window: nil, derivedResolution: derivedResolution)
         if let hit = rasterizeCache.value(for: key) { return hit }
         // Frozen only after the memo has missed, so a hit never touches either tier — the tiers'
         // own memos are not free to fill (`RasterLayerTexture.renderToUIImage` pins the context's
         // buffer copy-on-write) and a warm flatten has no business filling them.
         let image = rasterizeUncached(FrozenCel(cel: cel, identity: identity, derived: derived,
                                                 pose: pose, quality: quality),
-                                      canvasSize: canvasSize, quality: quality)
+                                      canvasSize: canvasSize, quality: quality, derivedResolution: derivedResolution)
         if let image { rasterizeCache.store(image, for: key) }
         return image
     }
@@ -312,9 +328,13 @@ enum PixelOps {
         /// the same family as the memo trap KEYFRAMES §4.5 names (a pose key the memo cannot see),
         /// reached through the one field nobody thought a flatten needed.
         let window: StripWindow?
+        /// A timeline tile can ask the provider for a reduced intermediate while another
+        /// consumer fits the native intermediate into the same output dimensions.
+        let derivedResolution: CGFloat
 
         init(cel: FrozenCel.Identity, canvasSize: CGSize, quality: RenderQuality,
-             window: StripWindow?) {
+             window: StripWindow?, derivedResolution: CGFloat = 1) {
+            self.derivedResolution = derivedResolution
             self.cel = cel
             width = Int(canvasSize.width.rounded())
             height = Int(canvasSize.height.rounded())
@@ -530,14 +550,14 @@ enum PixelOps {
 
     private static func rasterizeUncached(_ cel: FrozenCel, canvasSize: CGSize,
                                           quality: RenderQuality, window: StripWindow? = nil,
-                                          tier: CelTier = .combined) -> UIImage? {
+                                          tier: CelTier = .combined, derivedResolution: CGFloat = 1) -> UIImage? {
         let bounds = CGRect(origin: .zero, size: canvasSize)
         let content = window.map {
             CGRect(origin: CGPoint(x: -$0.origin.x, y: -$0.origin.y), size: $0.frameSize)
         } ?? bounds
         var vectorImage: UIImage?
         if tier != .backing, cel.display?.replacingBase == nil, let derived = cel.derived {
-            guard let rendered = derived.render(quality) else { return nil }
+            guard let rendered = derived.render(quality, resolution: derivedResolution) else { return nil }
             vectorImage = rendered
         } else if tier != .backing, window == nil, cel.display == nil, let vector = cel.vector {
             guard let rendered = vector.render(quality: quality, fittingInto: content.size) else { return nil }

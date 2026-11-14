@@ -670,11 +670,11 @@ enum InterpolationEvaluator {
     /// The local-edit pass reuses the ordinary renderer rather than reaching into it: the blended
     /// image goes in as a `.image` element with the edits above it, so an `.erase` local edit punches
     /// through *both* keyframes' ink exactly as rule 3 says an eraser should, with no new drawing
-    /// code and no change to the walk. It costs one extra canvas-sized render and only happens when
-    /// there are edits to draw.
+    /// code and no change to the walk. It costs one extra render at the requested resolution
+    /// and only happens when there are edits to draw.
     static func composite(_ evaluation: Evaluation, size: CGSize,
-                          quality: RenderQuality = .full) -> UIImage? {
-        compositeResult(evaluation, size: size, window: nil, quality: quality)
+                          quality: RenderQuality = .full, resolution: CGFloat = 1) -> UIImage? {
+        compositeResult(evaluation, size: size, window: nil, quality: quality, resolution: resolution)
     }
 
     static func composite(_ evaluation: Evaluation, size: CGSize, window: CGRect,
@@ -683,15 +683,15 @@ enum InterpolationEvaluator {
     }
 
     private static func compositeResult(_ evaluation: Evaluation, size: CGSize, window requested: CGRect?,
-                                        quality: RenderQuality) -> UIImage? {
+                                        quality: RenderQuality, resolution: CGFloat = 1) -> UIImage? {
         let bounds = CGRect(origin: .zero, size: size)
         let window = requested?.integral.intersection(bounds) ?? bounds
         let local = CGRect(origin: .zero, size: window.size)
-        let format = PixelOps.transparentFormat()
+        let format = PixelOps.transparentFormat(scale: resolution)
         format.preferredRange = .standard
         func render(_ elements: [VectorElement]) -> UIImage? {
             let canvas = VectorCanvas(size: size, elements: elements)
-            if requested == nil { return canvas.render(quality: quality) }
+            if requested == nil { return canvas.render(quality: quality, resolution: resolution) }
             let frozen = canvas.freeze(quality: quality)
             var completed = false
             let image = UIGraphicsImageRenderer(size: window.size, format: format).image { ctx in
@@ -795,11 +795,11 @@ enum InterpolationEvaluator {
                        content: ContentProvider, subject: [VectorElement] = [],
                        guides: [GuideStroke] = [],
                        quality: RenderQuality = .full,
-                       options: Options = Options()) -> UIImage? {
+                       options: Options = Options(), resolution: CGFloat = 1) -> UIImage? {
         guard let evaluation = evaluate(recipe: recipe, at: t, content: content, subject: subject,
                                         guides: guides, options: options) else {
             return nil
         }
-        return composite(evaluation, size: size, quality: quality)
+        return composite(evaluation, size: size, quality: quality, resolution: resolution)
     }
 }

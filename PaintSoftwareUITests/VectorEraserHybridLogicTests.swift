@@ -1240,7 +1240,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         XCTAssertFalse(scratch.hasCurrentReplacementWindow(covering: unrelatedDamage),
                        "A window is not current for pixels outside its admitted bounds")
         XCTAssertFalse(scratch.replaceCelContent(
-            ink: .derived(DerivedCelContent(identity: "mode3-refused-growth", render: { _ in nil }), .full),
+            ink: .derived(DerivedCelContent(identity: "mode3-refused-growth", render: { _, _ in nil }), .full),
             damage: CGRect(x: 112, y: 48, width: 8, height: 32)),
             "A failed later window draw must not publish over the last valid picture")
         XCTAssertTrue(scratch.windowRect.contains(damage), "A refused growth retains the last admitted window")
@@ -1342,7 +1342,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
             celContent: StrokeScratch.CelContent(backing: nil,
                 ink: .rendered(UIImage()), placement: .identity))
         let refused = scratch.replaceCelContent(
-            ink: .derived(DerivedCelContent(identity: "refused-source", render: { _ in nil }), .full),
+            ink: .derived(DerivedCelContent(identity: "refused-source", render: { _, _ in nil }), .full),
             damage: CGRect(x: 8, y: 8, width: 8, height: 8))
         XCTAssertFalse(refused, "A refused source must not publish a partial replacement window")
         XCTAssertTrue(scratch.windowRect.isNull, "A refused backdrop must not publish a partial window")

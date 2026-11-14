@@ -234,6 +234,90 @@ final class CelContentProviderLogicTests: XCTestCase {
         XCTAssertFalse(isBlank(thumbnail))
     }
 
+    /// Observe the intermediate returned to the actual thumbnail flatten. The finished tile
+    /// alone would be 120 pixels wide even if the provider first allocated a canvas-sized picture.
+    func testTimelineTilesRenderDerivedInkAtTheBoundedResolution() throws {
+        let size = CGSize(width: 960, height: 480)
+        let manager = CanvasFixture.manager()
+        manager.canvasSize = size
+        manager.addVectorLayer()
+        let layerID = manager.layers[1].id
+        let cels = (0..<4).map { index in
+            Cel(id: UUID(), startFrame: index * 4, frameCount: 4,
+                raster: .empty(size: size), vector: .empty(size: size))
+        }
+        manager.layers[1].cels = cels
+        var bar = stroke([CGPoint(x: 310, y: 240), CGPoint(x: 740, y: 240)])
+        bar.size = 88
+        cels[0].vector?.addStroke(bar)
+        cels[2].vector?.addStroke(bar)
+        manager.layers[1].cels[0].transformTracks[TransformChannelID.cel.id] = TransformTrack(
+            box: CGRect(x: 0, y: 0, width: 100, height: 100),
+            curves: [.x: AnimationCurve(keys: [.init(frame: 0, value: 140)])])
+
+        let rest = Lattice(covering: [.zero, CGPoint(x: size.width, y: size.height)],
+                           targetCellSize: 160, padding: 1)
+        var eraser = stroke([CGPoint(x: 480, y: 240), CGPoint(x: 550, y: 240)])
+        eraser.size = 140
+        eraser.composite = .erase
+        manager.layers[1].cels[1].interpolation = InterpolationRecipe(
+            references: [InterpolationReference(cels: [CelRef(layerID: layerID, celID: cels[0].id)]),
+                         InterpolationReference(cels: [CelRef(layerID: layerID, celID: cels[2].id)])],
+            t: 0.5, mode: .generate,
+            groups: [MotionGroupBinding(groupID: UUID(), lattices: [rest, rest])],
+            localEdits: [LocalEdit(stroke: eraser)])
+
+        // A missing asset still produces a real video derivation and a placeholder in its own rect.
+        let asset = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
+        cels[3].vector?.elements = [.video(VectorVideoElement(
+            assetURL: asset, assetFileName: asset.lastPathComponent,
+            naturalSize: CGSize(width: 220, height: 160), sourceStart: .zero,
+            sourceEnd: SourceTime(value: 1, timescale: 1),
+            transform: LayerTransform(position: CGPoint(x: 620, y: 240), scale: 1, rotation: 0)))]
+
+        func alpha(_ image: CGImage, x: Int) throws -> UInt8 {
+            let pixel = try XCTUnwrap(image.cropping(to: CGRect(x: x, y: image.height / 2,
+                                                              width: 1, height: 1)))
+            return try XCTUnwrap(CanvasFixture.rgbaBytes(pixel)?.last)
+        }
+
+        // The probe positions are in tile pixels, in the centre of wide painted and clear areas.
+        let fixtures = [(0, "pose", 100, 42), (1, "interpolation", 87, 64), (3, "video", 76, 110)]
+        for (index, name, inkX, clearX) in fixtures {
+            let cel = manager.layers[1].cels[index]
+            let derived = try XCTUnwrap(manager.derivedCelContent(for: cel, atFrame: cel.startFrame))
+            let native = try XCTUnwrap(derived.render(.full)?.cgImage)
+            XCTAssertEqual(native.width, 960, name)
+            XCTAssertEqual(native.height, 480, name)
+            let flattenSize = CGSize(width: 480, height: 240)
+            let nativeFlatten = try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: flattenSize,
+                                                                derived: derived))
+            let nativeTile = try XCTUnwrap(ThumbnailRenderer.render(
+                nativeFlatten, canvasSize: size, thumbnailSize: CanvasManager.celThumbnailSize).cgImage)
+
+            var intermediate: CGImage?
+            let observed = DerivedCelContent(identity: derived.identity) { quality, resolution in
+                let result = derived.render(quality, resolution: resolution)
+                intermediate = result?.cgImage
+                return result
+            }
+            let tile = try XCTUnwrap(CanvasManager.celThumbnailImage(
+                for: cel, canvasSize: size, derived: observed)?.cgImage)
+            let raster = try XCTUnwrap(intermediate, name)
+            XCTAssertEqual(raster.width, 480, name)
+            XCTAssertEqual(raster.height, 240, name)
+            XCTAssertEqual(tile.width, 120, name)
+            XCTAssertEqual(tile.height, 60, name)
+            let legacy = try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: flattenSize,
+                                                         derived: derived))
+            XCTAssertTrue(legacy === nativeFlatten, "\(name) must preserve the existing native-source memo")
+            for picture in [nativeTile, tile] {
+                XCTAssertGreaterThan(try alpha(picture, x: inkX), 100, "\(name) must cover its landmark")
+                XCTAssertLessThan(try alpha(picture, x: clearX), 10, "\(name) must leave its landmark clear")
+            }
+        }
+    }
+
     /// The composite — the path an export walks. `makeRenderRequest` is already frame-parametric, so
     /// this is the whole of what was the model-side gap blocking TODO (29).
     @MainActor

@@ -606,7 +606,7 @@ extension CanvasManager {
             canvasWidth: Int(canvasSize.width.rounded()),
             canvasHeight: Int(canvasSize.height.rounded()))
 
-        return DerivedCelContent(identity: AnyHashable(identity)) { quality in
+        return DerivedCelContent(identity: AnyHashable(identity)) { quality, resolution in
             // Built inside the thunk, on whatever queue resolved it, from values nothing else can
             // reach — `VectorCanvas.Frozen.render`'s detached-canvas branch, which is the atomicity
             // guarantee this seam is for.
@@ -621,7 +621,7 @@ extension CanvasManager {
             // follows. `livePreview` asks on every pass, which is what makes the difference visible.
             VectorCanvas(size: canvasSize,
                          elements: Self.posed(elements.withoutReference, through: mappings,
-                                              inheriting: container)).render(quality: quality)
+                                              inheriting: container)).render(quality: quality, resolution: resolution)
         }
     }
 }
