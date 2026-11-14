@@ -61,8 +61,7 @@ final class ColourMaskUITests: PaintUITestCase {
         try exercise(XCUIApplication())
     }
 
-    func testArtistDrawsANewStrokeThroughAnExistingMaskFromColdStart() throws {
-        let app = XCUIApplication()
+    private func openMaskedStrokeFixture(_ app: XCUIApplication) -> (canvas: XCUIElement, paper: CGRect) {
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         let paper = paperRect(in: canvas)
@@ -78,6 +77,12 @@ final class ColourMaskUITests: PaintUITestCase {
         XCTAssertEqual(readVectorMarker(app, layerIndex: 1)?.strokes, 0)
         closeLayerRail(app)
         setBrushColor(app, hex: "0000FF")
+        return (canvas, paper)
+    }
+
+    func testArtistDrawsANewStrokeThroughAnExistingMaskFromColdStart() throws {
+        let app = XCUIApplication()
+        let (canvas, paper) = openMaskedStrokeFixture(app)
         let entries = try XCTUnwrap(Int(readField(app, "entries:")))
         let inside = onHost(paper, 0.15, 0.35), outside = onHost(paper, 0.40, 0.35)
         let points = [inside, outside].map { point in
@@ -110,6 +115,38 @@ final class ColourMaskUITests: PaintUITestCase {
         shot.name = "New masked stroke — whole screen"
         shot.lifetime = .keepAlways
         add(shot)
+    }
+
+    func testArtistSeesMaskedShapeInkBeforeCommittingTheEditableLine() throws {
+        let app = XCUIApplication()
+        let (canvas, paper) = openMaskedStrokeFixture(app)
+        let start = onHost(paper, 0.08, 0.35)
+        let end = onHost(paper, 0.45, 0.35)
+        try drawAndHoldShape(on: canvas, from: start, to: end)
+        attachScreenshot(app, "Editable masked line with handles")
+
+        // Sample four screen points beside the guide, within the width of the painted line.
+        let inkRow = 0.35 + 4 / Double(canvas.frame.height * paper.height)
+        let inside = onHost(paper, 0.15, inkRow)
+        let outside = onHost(paper, 0.40, inkRow)
+        XCTAssertNotNil(waitForPixel(canvas, at: inside) { isBlue($0) },
+                        "The editable line paints inside the mask")
+        XCTAssertNotNil(waitForPixel(canvas, at: outside) { isWhitish($0) },
+                        "The editable line's paint is clipped outside the mask")
+
+        commitPendingShape(on: app)
+        XCTAssertEqual(readField(app, "shape:"), "none")
+        XCTAssertEqual(vectorMarkerViaPanel(app, layerIndex: 1)?.strokes, 1)
+        XCTAssertNotNil(waitForPixel(canvas, at: inside) { isBlue($0) })
+        XCTAssertNotNil(waitForPixel(canvas, at: outside) { isWhitish($0) })
+
+        openLayerPanel(app)
+        addVectorLayerFromOpenPanel(app)
+        closeLayerRail(app)
+        try drawAndHoldShape(on: canvas, from: onHost(paper, 0.08, 0.50), to: onHost(paper, 0.45, 0.50))
+        let unmaskedInk = onHost(paper, 0.40, inkRow + 0.15)
+        XCTAssertNotNil(waitForPixel(canvas, at: unmaskedInk) { isBlue($0) },
+                        "The next editable line on an unmasked layer paints beyond the previous clip")
     }
 
     func testMaskTuningDrawsHeldFramesWhileTheFingerIsStillOnItsSlider() throws {

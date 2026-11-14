@@ -4310,10 +4310,14 @@ struct CanvasView: UIViewRepresentable {
             }
             guard let shape else { return }
 
+            let mask = liveMaskImage
             // Revert the partial stroke painted during the hold period.
             host.strokeView.discardStrokeInProgress()
 
             canvasManager.beginInteractiveShape(shape, samples: samples)
+            if canvasManager.shapeGestureActive, let mask, let canvasSize = canvasManager.canvasSize {
+                shapeOverlay?.setInkMask(mask, canvasSize: canvasSize)
+            }
             updateShapeOverlay()
             // Whatever is on the glass *now* is the hand that drew the shape, not a request to snap
             // it. This is the moment a finger that lands becomes a hold (`ModifierHold`), so it is

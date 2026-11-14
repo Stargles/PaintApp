@@ -289,6 +289,19 @@ final class ShapeOverlayView: CanvasPlaneView {
 
     // MARK: - The preview
 
+    /// Carry the source stroke's canvas-space clip through the draft, including after lift.
+    /// The guide and handles live outside the ink host and keep their full editing geometry.
+    func setInkMask(_ image: CGImage, canvasSize: CGSize) {
+        let mask = CALayer()
+        mask.contents = image
+        mask.frame = CGRect(origin: .zero, size: canvasSize)
+        mask.magnificationFilter = .nearest
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        previewHost.layer.mask = mask
+        CATransaction.commit()
+    }
+
     /// **Asks for a picture of the shape's ink.** The first of a shape is drawn in this turn
     /// (`WindowSurfaceView.presentFirst`): it replaces the freehand stroke the hold reverted, so a turn
     /// with neither would blink. Every later one is minted when the surface is free, from the newest
@@ -325,6 +338,7 @@ final class ShapeOverlayView: CanvasPlaneView {
     /// The shape is gone: its picture and its surfaces with it.
     private func takeDownPreview() {
         preview?.removeFromSuperview()
+        previewHost.layer.mask = nil
         preview = nil
         ink = nil
         requestedShape = nil

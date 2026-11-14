@@ -622,6 +622,10 @@ Four things the build settled that the paragraph above does not imply:
   layer's own transform is baked into the rendered pixels rather than applied to the view, so it
   does not reach this question either.
 
+When Shape Hold replaces a stroke with editable geometry, the shape's preview ink inherits the
+same canvas-space mask image. It keeps that clip while the artist adjusts the shape. The guide and
+handles keep their full geometry so they remain visible and draggable beyond the mask.
+
 **`MaskResolver.apply` is the cost to watch**, measured at 2048² by
 `PerfBaselineTests.testMaskedCompositeCostAtCanvasResolution` (gated behind `PAINT_PERF_HEAVY`; it is
 36 s and a 615 MB peak). ~32 ms per clipped node per composite optimised, and ~62x that at `-Onone`
