@@ -1606,7 +1606,13 @@ final class FillMendLogicTests: XCTestCase {
             let off = try bucket(reach: 0)
             XCTAssertTrue(off.isRed(tap.x, tap.y), "the ordinary bucket reaches the recorded seed")
             XCTAssertTrue(lineProbes.allSatisfy { off.isBare($0.x, $0.y) }, "the pressure line occupies two bare probes")
+            let started = ProcessInfo.processInfo.systemUptime
             let on = try bucket(reach: reach)
+            let firstMend = ProcessInfo.processInfo.systemUptime
+            _ = try bucket(reach: reach - 1)
+            let adjusted = ProcessInfo.processInfo.systemUptime
+            print("Recorded Mend \(width) px: first \((firstMend - started) * 1000) ms, "
+                  + "Reach edit \((adjusted - firstMend) * 1000) ms")
             let (light, heavy) = (lineProbes[0], lineProbes[1])
             XCTAssertTrue(on.isRed(heavy.x, heavy.y), "Mend Reach covers the heavy line body at brush size \(width)")
             if width == 12 {
