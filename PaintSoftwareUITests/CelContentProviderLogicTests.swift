@@ -237,7 +237,9 @@ final class CelContentProviderLogicTests: XCTestCase {
     /// Observe the intermediate returned to the actual thumbnail flatten. The finished tile
     /// alone would be 120 pixels wide even if the provider first allocated a canvas-sized picture.
     func testTimelineTilesRenderDerivedInkAtTheBoundedResolution() throws {
-        let size = CGSize(width: 960, height: 480)
+        // This odd canvas both rounds the fitted height and exercises a width quotient that
+        // multiplies back to slightly over 480 before guarding the UIKit allocation.
+        let size = CGSize(width: 959, height: 479)
         let manager = CanvasFixture.manager()
         manager.canvasSize = size
         manager.addVectorLayer()
@@ -287,8 +289,8 @@ final class CelContentProviderLogicTests: XCTestCase {
             let cel = manager.layers[1].cels[index]
             let derived = try XCTUnwrap(manager.derivedCelContent(for: cel, atFrame: cel.startFrame))
             let native = try XCTUnwrap(derived.render(.full)?.cgImage)
-            XCTAssertEqual(native.width, 960, name)
-            XCTAssertEqual(native.height, 480, name)
+            XCTAssertEqual(native.width, 959, name)
+            XCTAssertEqual(native.height, 479, name)
             let flattenSize = CGSize(width: 480, height: 240)
             let nativeFlatten = try XCTUnwrap(PixelOps.rasterize(cel: cel, canvasSize: flattenSize,
                                                                 derived: derived))

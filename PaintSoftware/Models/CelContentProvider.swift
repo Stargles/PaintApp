@@ -45,10 +45,9 @@ struct DerivedCelContent {
     /// `InterpolationPreviewKey` came to be wrong four times.
     let identity: AnyHashable
 
-    /// The derived pixels, at a given quality and resolution. **Called only on a memo miss** when
-    /// used by a cached flatten, which is why it is a thunk
-    /// and not an image: resolving a provider is on every rasterize of every cel, and evaluating an
-    /// in-between is two lattice embeddings, an ARAP solve and two canvas-sized renders.
+    /// The derived pixels, at a given quality and resolution. A cached flatten calls this only on
+    /// a memo miss. Resolving a provider is cheap, while evaluating an in-between includes lattice
+    /// embeddings, an ARAP solve and two raster passes.
     ///
     /// Nil means this required render refused. Provider availability is resolved before this
     /// value is created; only an absent provider uses the cel's stored content. A genuinely empty
