@@ -37,11 +37,12 @@ final class StreamPlacementUITests: StreamUITestCase {
         attachScreenshot(XCUIScreen.main, "stream-on-top-after-host-installs")
     }
 
-    /// The old red reference stays on screen while the new blue window waits. Undo must replace
+    /// The old green reference stays on screen while the new blue window waits. Undo must replace
     /// the settled ink above it before blue arrives, even though both pictures need a worker.
     func testUndoDrawsWhileTheNextOnTopStreamWindowWaits() throws {
         let app = XCUIApplication()
-        app.launchArguments += ["-uiTestSlowWindowDrawMillis", "8000"]
+        let windowDelay: TimeInterval = 8
+        app.launchArguments += ["-uiTestSlowWindowDrawMillis", "\(Int(windowDelay * 1000))"]
         let canvas = launchWithALiveStream(app, orientationBeforeCreatingCanvas: .landscapeLeft)
         XCTAssertEqual(app.buttons["streamBar.placementButton"].value as? String, "onTop")
         guard waitForPicture(.red, on: canvas, timeout: 20) else { return }
@@ -71,7 +72,15 @@ final class StreamPlacementUITests: StreamUITestCase {
         XCTAssertNotNil(waitForBakeBar(app) { $0.isEmpty }, "both strokes have settled before Undo")
         XCTAssertEqual(readField(app, "sandwich:"), "off", "Undo draws in the exposed vector host")
         XCTAssertNotNil(waitForPixel(canvas, at: stream, matches: Colour.red.matches))
-        attachScreenshot(XCUIScreen.main, "Settled ink over the red reference before Undo")
+        // A fresh picture sent while the UI is idle proves the visible front belongs to the
+        // delayed window. The native base can also show the initial red connection frame.
+        let greenRequested = ProcessInfo.processInfo.systemUptime
+        laptop.show(.green)
+        guard waitForPicture(.green, on: canvas, timeout: 20) else { return }
+        let greenObserved = ProcessInfo.processInfo.systemUptime - greenRequested
+        XCTAssertGreaterThanOrEqual(greenObserved, windowDelay - 1,
+            "the new green picture took the injected window delay (observed \(greenObserved)s)")
+        attachScreenshot(XCUIScreen.main, "Settled ink over the green window before Undo")
 
         let undo = app.buttons["sideToolbar.undoButton"]
         XCTAssertTrue(undo.isHittable)
@@ -79,14 +88,14 @@ final class StreamPlacementUITests: StreamUITestCase {
         let points = [target, standing, stream].map {
             CGPoint(x: frame.minX + frame.width * $0.dx, y: frame.minY + frame.height * $0.dy)
         }
-        var undoWhileRed: XCUIScreenshot?
+        var undoWhileGreen: XCUIScreenshot?
         let sampler = MidGestureSampler(points: points) { sample, screenshot in
             let pixels = sample.pixels
-            if undoWhileRed == nil,
-               pixels[0].map(Colour.red.matches) == true,
+            if undoWhileGreen == nil,
+               pixels[0].map(Colour.green.matches) == true,
                pixels[1].map(Colour.black.matches) == true,
-               pixels[2].map(Colour.red.matches) == true {
-                undoWhileRed = screenshot
+               pixels[2].map(Colour.green.matches) == true {
+                undoWhileGreen = screenshot
             }
         }
         sampler.start()
@@ -97,9 +106,9 @@ final class StreamPlacementUITests: StreamUITestCase {
         let blueArrived = waitForPicture(.blue, on: canvas, timeout: 20)
         let samples = sampler.stop()
 
-        if let undoWhileRed {
-            let attachment = XCTAttachment(screenshot: undoWhileRed)
-            attachment.name = "Undo exposed red before the next frame landed"
+        if let undoWhileGreen {
+            let attachment = XCTAttachment(screenshot: undoWhileGreen)
+            attachment.name = "Undo exposed green before the next frame landed"
             attachment.lifetime = .keepAlways
             add(attachment)
         }
@@ -108,8 +117,8 @@ final class StreamPlacementUITests: StreamUITestCase {
         XCTAssertNotNil(waitForPixel(canvas, at: target, matches: Colour.blue.matches),
                         "the newer frame shows through the erased stroke")
         XCTAssertTrue(isInk(rgbaPixel(of: canvas, at: standing)), "the earlier stroke stays visible")
-        XCTAssertNotNil(undoWhileRed,
-                        "Undo must reveal the previous red window before the next stream frame lands (\(samples.count) samples)")
+        XCTAssertNotNil(undoWhileGreen,
+                        "Undo must reveal the previous green window before the next stream frame lands (\(samples.count) samples)")
     }
 
     /// The test laptop sends one solid-colour frame, so the edge of that colour is the stream's
