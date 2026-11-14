@@ -1,185 +1,277 @@
 # Handoff
 
+## Current checkpoint — November 14, 2026, Toronto
 
-## Current checkpoint — 2026-11-12
+TODO.md tracks outstanding work and owner rulings. Prior evidence and milestones are in canonical
+`git show 0ff0a1f0:HANDOFF.md`. The detailed audit follows the owner queue in TODO.md.
 
-Kevin resumed on November 12. Priority is the whole-iPad black screen during rapid drawing/Undo or repeated Fill
-while a stream is running, plus severe Undo latency. TODO.md holds the reports and recording paths.
+### November 14 evening continuation
 
-- November 12, 18:59 Toronto: owner checked whether work had stopped. The profile still
-  expires at 02:06:03 on November 13. Independent settled Undo review found a known full-image
-  copy (about 95 MiB at 5000²) even for a clipped repair, not an extra render. The existing
-  measurements do not identify it as the reported delay. `UndoRepairBench` tracks clipped work
-  without a stream or screen timing. Use matched Action Recorder and screen footage for the
-  physical comparison in TODO. No change to the qualified release.
+- The iPad was paired but locked at 17:21 Toronto. Read-only inventory at 17:22 found the same
+  two recordings and all 197 crash paths unchanged. No new failure flight or system report.
+  Signed `00cb237b` is ready; asked for saved Gallery and unlock. Continue the current-source
+  rendering and brush audit while physical access is pending.
+- The recorder can currently miss a moving pair with intact bindings and zero view writes.
+  Track the automatic evidence gap in TODO. Undo's existing two-second aggregate
+  also cannot distinguish a slow raster from a late base picture. Scope a correlated
+  accepted-picture event before changing either production workflow.
+- Source confirmed a separate unbounded stream timing array between displayed frames.
+  Preserve its exact count/mean/max output using fixed-size accumulation.
+- Exact evening batch passed 12/13, including all playback/bake and Liquify cases, brush
+  curve drag, and the other three mask workflows. Colour Mask's held new stroke failed
+  before lift. The video shows the ordinary stroke clipped, then editable Shape Hold paint
+  extending beyond the mask. The ordinary continuously moving Brush control passed on unchanged
+  production code at `3992374b`, with the held samples and final visible pixels inspected.
+  `31e66383` transfers the same resolved brush mask to the editable shape's ink host and clears
+  it with the draft. All 53 focused checks passed. Inspected the clipped editable line
+  with the guide and endpoint visible outside the mask. Missing clip and stale clip each failed
+  their intended native pixel checks. Restored green and a separate 1080×810 pt landscape
+  witness passed. All component simulators have been deleted.
+  Evidence: `~/PaintWork/nov14-bounded-thumbnail-evidence/evening-ui/mask-triage/`.
+- Combined exact source `01fb0fe7` is in the owned test lane. This includes masked Shape Hold,
+  the stream/edit worker split, bounded tick summary, extra automatic freeze evidence, and the
+  already qualified damaged-text and Mend All fixture changes. All 19 cold workflows passed,
+  with no missing methods. Inspected clipped edit handles, the recorded red fill with its
+  reference hidden, and green-stream Undo. Both fast tiers are in the native lane, followed
+  by a build-only signing job if green. The exact project has 1,335 unique top-level PBX objects
+  and zero compiler warnings on changed app lines. Static fast selection is 5,651 cases.
+  The canonical repo has the exact isolated ref `tmp/nov14-evening-gate`. Evidence: `~/PaintWork/nov14-evening-evidence/`.
+- Stream timing summary `3c939109` passed 26 focused Debug checks, including visible On Top
+  stream placement. It stores count, sum and peak instead of the sample array. The deliberate
+  peak fault reached its native assertion and passed restored. The other two counters also
+  have source-level fault witnesses. The automatic capture component `9b20cd04` passed 25
+  Debug checks, and a cold healthy pinch visibly moved the ink with 24 navigation writes
+  and no false miss. With intact bindings and deliberate zero writes, the same cold path
+  silently saved four qualifying samples and 40 pt relative travel before manual save.
+  Exact stream/Undo `ad1d6160` visibly removed the newest stroke while the next On Top frame
+  was still waiting. The old alias failed the edit-admission logic test, and the cold UI
+  passed in both layouts. Physical Undo timing stays open. The iPad still required its passcode
+  at 18:19 and its recording list was unchanged at 18:01.
 
-- November 12, 19:10 Toronto: Kevin reiterated to keep working through the queue.
-  The exact candidate stays pinned. Verified already present in that build: dead Fill field
-  and all three writes gone (`c80a545e`); image Redo preserves order and source identity
-  (`2fc0fc10`); seven split callers refuse atomically and refused crop preserves actual gesture
-  history (`a95a699a`). Exact Debug and Release covered all four. Repeated Fill/clip/stream
-  UI also passed on unchanged Fill source at `cee6a049`. Removed these completed audit entries.
-  Fresh freeze inventory matches the old one; comparison details are in TODO. Loop endpoint
-  is fixed (`3a38bcd6`): both fast tiers and 4/4 cold UI passed. Old behavior failed the
-  expected endpoint and recording/transport stop assertions while ordinary looping passed.
-  Source restored and simulator deleted. See `crash-20261111/loop-recording-endpoint/` for
-  results and inspected slider and Move screenshots. A distinct late-control hypothesis is
-  in TODO. Keyed resize has a confirmed coordinate-space gap and its own branch. A read-only
-  crash inventory refresh returned no new relevant reports.
+### November 14 active work
 
-- Owner asked at 19:14 why the connected iPad did not have the done build. Current device
-  readiness was confirmed. Exact `6c0b37e6` device Release built and passed strict signature
-  verification at 19:18. Artifact is `~/PaintWork/crash-20261111/device-qualified-Release/Build/Products/Release-iphoneos/PaintSoftware.app`
-  (executable UUID `A186AF1F-08F4-3E20-93FF-DD6A84416C39`). Apple reused the profile expiring
-  02:06:03 Toronto November 13, under seven hours from the check. The five-day gate stopped
-  installation. Owner was asked about a one-time exception while other work continues. The
-  manual expiry example now uses UTC, matching the renewer. It was verified across four
-  timezones and both sides of the five-day cutoff.
-  The installed line already includes the older features named in TODO. A separate branch
-  owns the missing fresh-stream-frame-after-Set-Down check.
+- Recovered the owner's November 14 circle/line Mend Gaps recording. It confirms the cross-layer
+  Pencil workflow on installed `8214421f`, with varied line pressure and the reference hidden
+  after Fill. Fill settings and brush width are absent. The owner's active scene is in Files
+  outside the app container. Reproduced a 12 px pressure-stroke failure using the trace geometry:
+  repeated same-dab support checks used the entire work budget. Candidate `a6ae7c6c` passed
+  32 focused logic checks and all five earlier cold Mend cases. The recorded-layout cold workflow
+  passed at `bb307723`; inspected the owner-size landscape picture with the line layer hidden.
+  The first 12 px fix still refused 20 px and cost 218 ms in optimized Release.
+  The refined source replaces repeated walks with support-row unions and exact contact runs.
+  The trace fixture used 10.6M work at 12 px and 24.1M at 20 px (previous cap 64M). The
+  main line fills at both widths, outside stays identical and a wide ambiguous turn stays clear.
+  Assembly `69b6b5c9` adds the verified Gallery tests and measures both widths in its Release gate.
+  Focused exact source passed 32 logic checks and the landscape cold replay. The old scan,
+  an exterior leak and a protected-turn leak failed their intended assertions. All seven
+  combined cold workflows passed, including the recorded Mend, open-lasso Move and five
+  compatibility paths. Exact fast Debug and Release both passed 5637 tests with four opt-in skips and
+  reconciled method IDs. Release Mend measured ~68 ms at 12 px and ~122 ms at 20 px, with
+  ~2 ms for a Reach edit, on the simulator. Signed arm64 Release `69b6b5c9` is ready,
+  UUID `CA7C86DB-0149-3D91-86A7-5F402604F13A`. Profile expires Nov 20 02:09:17 Toronto.
+  The connected iPad is locked; asked the owner for saved Gallery readiness. No install yet.
+  The 02:58 listing showed no new automatic freeze flight. Physical acceptance remains open.
+  The 15-test Fill Object class and drawn keyed Canvas Resize passed on the same SHA.
+  Inspected the gradient after Freeform and the posed drawing after resize. See
+  `~/PaintWork/nov14-release-evidence/additional-cold-69b6b5c9a574a71610be2ce17d34e2591a4762d3/`.
+- The iPad's November 14 listing showed no new automatic flight since `8214421f` was installed.
+  A November 13 03:31 SystemMemoryReset names no killed process; the app was suspended.
+  Details and original report are in TODO.
+- Mac had no stale test runner or booted simulator at the initial check and reported 63% available
+  memory. Left the owner's open software untouched.
 
-- Follow-through: the fresh post-Set-Down frame stayed at the committed placement in both
-  stream modes (2/2 cold simulator tests at `3ed772aa`). Inspected owner-size images in
-  `~/PaintWork/stream-set-down-frame/focused-look/` show matching blue/red rectangle bounds.
-  The deliberate wrong-pose witness is running; whole class remains queued. Keyed resize
-  candidate `5f3fbefd` passed three Debug logic tests and one cold owner-size pixel test.
-  Visible positions and bounds matched before and after scaling; Undo/Redo/reopen passed.
-  Artifacts are in `~/PaintWork/keyed-canvas-resize-evidence/`. Its deliberate fault and full
-  gate still remain. Late scalar recording and exact clipboard cold checks are queued in TODO.
-  Canonical reconciliation: the local main line's 52 pre-reconciliation commits touch only
-  AGENTS, CLAUDE, TODO and HANDOFF. The exact tested source contains 629 commits after the
-  common remote ancestor, including 606 already in installed d4. Reconcile those records onto
-  an isolated qualified source line and assess the resulting history before any shared merge;
-  preserve existing main and remote refs in the meantime.
+- The documented Flip vector omission was reproduced in sample geometry and the public
+  Actions editor. `393fa256` passed all 62 in the touched classes, including reflected stored
+  poses, the native Liquify field, malformed Fill refusal and drawn pixels. Inspected the
+  reflected rectangle. The old mapping/refusal fault failed all five new checks and was restored.
+- Missing derived timeline thumbnails were reproduced after real save/load. `98e94d9f`
+  passed both new logic tests and public cold reopen. The old guard failed the actual tile
+  test; using captured identity wrongly installed a stale pose, as expected. Inspected the
+  difference in the drawn timeline thumbnail. The full Project Save class passed on identical
+  production source. Combined audit candidate `f1ee828e` passed all eight exact cold workflows;
+  inspected the Flip and restored ink/tile screenshots. Exact Debug and Release each passed
+  5,643 plus four opt-in skips, with all method IDs reconciled. Both UI linters and 1,308 unique
+  PBX declarations passed. The test simulator was deleted. Retain the complete isolated source
+  at canonical `tmp/audit-flip-thumbnail-20261114`. Successful Flip retains the old history clear
+  and canvas-relative live styling, plus the shared vector mirror behavior. The newer signed
+  `f1ee828e` Release includes Mend/Lasso, Flip and restored timeline tiles. Strict codesign, same
+  team/device set, and profile until Nov 20 02:09:17 Toronto verified, UUID
+  `99BF68D9-D346-38F6-B36F-1D566BF331AA`. The iPad is still on `8214421f`, pending saved Gallery
+  and unlock. Both signed candidates remain pinned. Shared-main transfer is a separate open item.
 
-- Latest verified code `6c0b37e6` is in `~/PaintWork/PaintApp-vector-liquify-live` and
-  canonical local branch `tmp/qualified-live-liquify-20261112`. It adds continuous vector Liquify,
-  a fence on canceled In Place previews, unique recorder filenames and the separate watchdog
-  deadline fix. Vector/raster Liquify logic and UI passed **100/100** before the surface fence;
-  the exact combined candidate passed **43/43** focused checks including streamed Liquify.
-  Starvation and stale surface faults reproduced the intended failures and were restored.
-  Root inspected held and Undo pictures in `liquify-live-look/`. The exact Debug and Release
-  fast tiers each passed **5612**, with 0 failures and 4 opt-in skips out of **5616**.
-  Owned simulator `4725E0DC-18B8-4985-960E-B55E530B6D80` deleted. Keep this source pinned.
-  Next release: build signed Release from this exact worktree once Apple can mint a new profile.
-  Last checked at 18:55 Toronto Nov 12. Current profile expires 02:06:03 Nov 13. No device build
-  for this SHA, no install, and no change to renewal state. Earlier `cee6a049` device artifact
-  verified but has the expiring profile. Check saved/unlocked readiness for installation.
-- Retrieved five size-verified canvas flights with six distinct repairs from installed d4.
-  Evidence and hashes: `~/PaintWork/crash-20261111/freeze-flights/comparison.md`. Nov 11 recorded
-  a new gesture whose touches lacked all navigation and ink recognizers before they reset during
-  that same gesture. Four late-third taps correlate with repair, but a healthy late-third tap
-  disproves sufficiency. A Nov 8 check ran ~20 ms after a newer lift because the older callback
-  stayed armed. That is a separate watchdog sequencing defect, not the navigation root cause.
-  Replay the late-third touch batches with existing XCUITest synthesis on an owned simulator.
-  `tmp/freeze-touch-sequence-20261112` from `cee6a049` is isolated. Treat green old-code replay
-  as continuity only and avoid an unproven change to gesture admission. The owner reiterated
-  that a timer fix is not closure. Prove the input path works without replacement, then delete
-  the superseded recovery path cleanly once unnecessary.
-  `freeze_replay` owns the temporary baseline witness and `freeze_watchdog_sequence` owns the
-  proven timing bug, both isolated from the exact qualified device build. Recorder filename
-  commits `0057a848` and `da6169eb` were imported as `32a245b1` and `3859d255` on the replay
-  branch. Recorder logic/UI passed 22/22 in `freeze-baseline-replay`. Temporary replay `17ad7ff9`
-  failed both visible fixture assumptions. Simulator compressed the intended 90 ms gap and
-  introduced tap movement/pinch. Both follow-up pans bound and moved 84 pt, with zero repairs.
-  Do not interpret the fixture failures as reproducing the iPad freeze or merge that test.
-  `b53c54ad` fixes the separate stale deadline, passed standalone 3/3 and six deliberate faults,
-  and is integrated in the diagnostic lane as `37260c6e`. Touch settle and recorder logic passed on the owned iPad 9 simulator.
-  Physical input evidence with corroborating touch bindings is required for the reset root cause.
-  Owner reports the iPad is on and available for tests, and the freeze is intermittent and notoriously
-  hard to reproduce. Capture ordinary use where practical. A short clean run cannot prove resolution.
-  No change to the exact qualified device build. See current owner-facing queue in TODO.
-- The crash recording is Test1 at 5000 × 5000 and ends without a stop at 22:16:08 Toronto on Nov 7.
-  Matching `~/PaintWork/crash-20261111/JetsamEvent-2026-11-07-221608.ips` kills `backboardd` at its
-  process limit, about 1859 MiB. PaintSoftware held about 967 MiB and `videocodecd` about 20 MiB.
-  Five nearby terminations restarted the interface while the OS stayed up. The exact installed
-  executable UUID is `7639BBB7-8740-3CA1-A138-313C09A203B5`, Release `d4d59f6b` in `~/PaintApp`.
-  This establishes the failure mode. It does not identify the memory allocation owner or verify
-  the later Fill incident. Keep the reports and recordings; no scene/device mutation was made.
-- The recording's Undo handler took 6.58 ms. Background vector rasterizations took up to 1.11 s.
-  Undo patch `722b8ee3` (`08bedb8c` in integration) reuses the exact pre-append picture when a
-  stroke is undone before the new render lands. Independent source review accepted the invariants.
-  Debug `UndoRepairLogicTests` plus `UnlandedInkUITests` passed **47/47**. Root inspected the
-  landscape screenshot in `~/PaintWork/crash-20261111/undo-look/`: second stroke gone and first
-  retained. The two deliberate faults reached and failed the intended assertions (2/2 and 1/1);
-  source was restored. Settled Undo’s full-image copy remains a separate cost to measure.
-- Stream patch `d0c9eeb0` (`ac74b97e` in integration) closes the On Top refresh bypass only
-  when the current stream window is shown. No In Place change. Combined Debug passed **81/81**
-  including real H.264 stream colors across layer changes with zero extra native rasterizations,
-  and rapid Undo pixels. Root inspected both owner-size screenshots in `crash-20261111/stream-look/`
-  and `undo-look/`. Stream faults red as intended: 2/2 for base reuse (3 extra rasterizations in
-  the UI) and 4/4 for coverage/landing. Clean source restored.
-- Mend Gaps: exact freehand circle + short 6 px line on another vector layer, 12 px Reach and
-  zero Edge Overlap, passed 1/1 at `a883be6b`. Root inspected Off and committed target-only
-  pictures in `~/PaintWork/crash-20261111/mend-look/`. New possible failure for a densely sampled
-  snapped circle: a conservative quadratic work charge can discard the support for all strokes.
-  Baseline `2d5dfb96` reached the intended ON short-line pixel assertion and failed 1/1, with
-  the surrounding and exterior premises passing. Fix commits `c2be8d2b` and `f6586212` on
-  `tmp/mend-work-budget` are ready to integrate. They conservatively bound actual adjacent-neighbour
-  scans, including stationary runs, and retain 64M work and existing bytes/pixel guards. No brush
-  output or mending rules change. The exact shape and settings on the iPad are unknown.
-  Integrated Mend source `2c26812a` passed both focused tests (2/2), including the formerly red
-  long circle. The source-only branch commits are `c2be8d2b` and `f6586212`.
-- Both touched stream/Undo UI classes and compatibility checks passed **17/17**, including playback,
-  surround pan, Move/release and a stroke on a streamed canvas. November 12 running Debug also
-  passed **5/5** Mend UI and **1/1** Graph drag through the actual gesture class, with zero failures.
-- All **31/31** Mend logic tests passed on clean `2c26812a`. The deliberate work-bound
-  fault failed its intended assertion and was restored.
-  Both UI policy checkers passed. Exact Debug completed 5607 passed, 2 failed, 4 skipped out of
-  5613, matching static selection. Only two Undo pricing assertions failed (MoveToNewLayer and
-  PoseBake). The clipboard extraction `341d45d1`, already in d4, dropped Duplicate's unchanged
-  source from pricing. Release did not start. Integrated `cee6a049` now includes cost repair,
-  Fill surface reuse, and a test-only UInt8 literal correction after the first compile refused it.
-  Exact `cee6a049` passed **79/79** in `resume-followup-focused-v2`, including both formerly
-  red pricing suites, editable vector clipboard, Fill window/owner logic, and three cold Fill UI
-  checks. Root inspected the selection, successive fills and In Place opacity attachments.
-  Three Fill handoff fault builds failed their intended assertions and were restored clean.
-  Exact `cee6a049` Debug passed **5610**, failed **0**, skipped **4** opt-in benchmarks out of
-  **5614** (5608 static fast plus 6 UI). Exact Release passed **5604**, failed **0**, skipped the
-  same **4** opt-in benchmarks out of **5608**. Both results reconcile with static counts. The
-  owned simulator was deleted after verification. Exact code is also retained in the canonical
-  repo as `tmp/qualified-rapid-edit-20261112`. Leave canonical main unchanged: it is not on the
-  candidate ancestry, and fast-forwarding it would also promote 606 earlier audit/clipboard
-  commits from the currently installed line without their separate qualification and merge.
-  Device Release for `cee6a049` built clean and passed strict signature verification. Artifact
-  `~/PaintWork/crash-20261111/device-Release/Build/Products/Release-iphoneos/PaintSoftware.app`,
-  UUID `6FB924AE-6BFC-346B-95DC-8916DEF16946`. Apple reused the profile expiring Nov 13 at 02:06:03
-  Toronto. Do not install with that profile. The existing install and renewer state are untouched.
-  Rebuild with the fresh profile once available, verify again, and get fresh saved/unlocked iPad
-  readiness. November 12 17:36 lock-state check reached the iPad and showed it locked.
-- November 12 read-only preflight: iPad reachable but locked. Stable d4 artifact verifies and
-  its signing profile expires Nov 13 at 02:06:03 Toronto. Check for a renewed profile before
-  install; the current profile is below the five-day requirement. Fresh device readiness is
-  needed for a saved-scene-preserving install and physical gesture checks. A later lock-state
-  request could not establish its connection. Comparable stress uses a disposable 5000² scene,
-  Apple Pencil rapid drawing/Undo and repeated Fill with the stream off and visibly running On Top.
-  For settled Undo measure tap to ink disappearance after the base has landed in both conditions.
-- Code worktrees `tmp/undo-before-land`, `tmp/stream-base-refresh`, and
-  `tmp/rapid-edit-integration-20261111` are in `~/PaintApp`'s Git repository. Installed source
-  `d4d59f6b` includes the prior audit and media import changes. Desktop main is older and must not
-  be built as a substitute. The previous integration `cee6a049` is superseded by the pinned
-  device candidate above. Canonical Desktop main holds records only.
-- Fill investigation is source-only: native stream references may flatten a full canvas for a
-  small fill window. A separate commit path uploads a preview image even when the fill's existing
-  IOSurface already shows the exact render. In Place stream ticks reuse a surface pair while the
-  window dimensions stay stable. Keep these findings distinct from the confirmed device report.
-  Fill handoff `72fa2455` is integrated at `cee6a049`. It reuses the exact presented front on
-  eligible vector Fill commits and keeps the prepared bitmap fallback for pending, failed, or
-  mismatched previews. The preflight bitmap is still constructed. This avoids a duplicate display
-  upload when eligible; there is no measured physical memory reduction yet.
-  The crash-report viewer and interpolation overhaul stay deferred.
-- Windows November 12: laptop answered SSH, configured key rejected. Desktop Commander
-  lists the same laptop offline. No remote changes or tests. Real Blender/source/clipboard/link
-  validation is in TODO and needs the actual Windows session.
+### iPad update
+
+- Latest signed arm64 candidate `00cb237bff09c9dca3c762637b11b04351bc9bfd` passed exact
+  Debug/Release and 13 cold controls. Includes Mend, open Lasso, vector Flip, restored timeline
+  thumbnails and smaller intermediates. All 13 in the touched Mend and open-lasso classes
+  passed, plus four additional cold checks for off-frame Undo thumbnails, menu pan, Lens Blur,
+  and export Cancel returning to drawing. Total 30 exact cold checks. The outline replay
+  screenshot and source receipt are in `~/PaintWork/nov14-bounded-thumbnail-evidence/final-mend-ui/`.
+  Strict codesign verified, UUID `72E591F6-B10B-3FA4-BAD4-29616CD4665B`; Apple
+  profile through Nov 20 02:09:17 Toronto. Evidence and app path:
+  `~/PaintWork/nov14-bounded-thumbnail-evidence/exact-00cb237bff09c9dca3c762637b11b04351bc9bfd/device-build.txt`.
+  At 06:02 Toronto the iPad was locked and its recordings contained the old flight and the
+  circle/line recording, with no newer automatic flight. It still runs the older build below.
+  Wait for saved Gallery and unlock before install. No app data changed.
+
+- Installed release adds recorder commit `8214421f8cd8425b48368d638346629fc8eec8f8`;
+  qualified source is held by both repositories. The pre-recorder fallback
+  `4dec214579125fb1ff55f4399be799cef9b7d71f` is pinned at canonical
+  `tmp/qualified-device-20261113` and `~/PaintWork/PaintApp-qualified-followthrough-20261112`.
+  Debug and Release each passed 5629 with 4 opt-in skips and no failures. Nine touched UI and
+  five exact compatibility checks passed, with inspected owner-size pictures and exact result IDs.
+  Results: `~/PaintWork/qualified-followthrough-evidence/exact-4dec214579125fb1ff55f4399be799cef9b7d71f/`.
+- Includes live vector Liquify, cross-layer Mend, rapid Undo and stream/Fill display improvements,
+  bounded native Fill references, keyed resize, slider and Move recording, and bounded graph
+  backing preview. Masked, constrained and complex graph previews keep the existing striped path.
+- Installed and normal-launched `8214421f` at 02:12 Toronto November 13. Strict signature
+  verified, iPad connected/unlocked and work saved in Gallery. Profile expires November 20
+  at 02:09:17 Toronto. CoreDevice verified the installed bundle path and live PID 2196;
+  local executable UUID `F18D399E-AC10-3B76-ADE6-5CCD61D92AE7`. Renewal state updated after
+  install to exact SHA, signed artifact, and UTC profile dates. Evidence files
+  `~/PaintWork/crash-20261111/device-fresh-8214421f-*`. No artwork or settings touched.
+- Owner's original Test one-tap Move case still needs physical confirmation. Exact old recording
+  is gone; preserved Git reports show lifts that quickly canceled. The image-ownership fix is
+  installed and had a cold one-tap regression with a failing old guard. TODO has the safe
+  zero-nudge cancel procedure. Physical workload checks remain for rapid edit/stream, settled
+  Undo, Mend and Apple Pencil Liquify. Preserve artwork and brush library.
+
+### Freeze and crash
+
+- No more manual freeze reproduction or recording requests to Kevin. Read-only repair #23 from
+  00:13:33 Toronto shows UIKit canceled and reissued one moving finger, losing pinch, rotation
+  and stroke bindings. A previous similar event kept pan; fresh-start misses have a distinct
+  reset pattern. The trace's transform labels are cached and cannot show applied movement or
+  whether handlers ran. Timer timing fix is separate. No root fix is established yet.
+- Automatic recorder `8214421f` passed automatic same-editor save, exact #23 replay, and
+  three cold recorder workflows. A healthy pinch logged 29 writes and changed scale/center
+  with manual capture off. Debug/Release each passed 5633 and skipped 4 on identical app
+  source `d4ac2754`, and five exact preinstall checks passed. Test-only descendant passed
+  the added timer witness and intended timer-disabled failure. Restored clean, simulator
+  deleted. Evidence: `~/PaintWork/automatic-freeze-recorder-evidence/readout.md`.
+  Installed at 02:12. Retrieve fresh automatic evidence independently. Root cause remains open.
+  Installed ancestor `45e067a5` gives automatic and manual files unique same-second names.
+- Freeze evidence: `~/PaintWork/crash-20261111/freeze-flights/readout-20261113-0014.md`.
+  Keep recovery until the underlying input failure is fixed and verified.
+- The Nov 7 black-screen recording matches a display-service memory termination (`backboardd`
+  at about 1859 MiB). It does not identify allocation ownership or explain later Fill. Candidate
+  avoids known redundant 5000² stream and Fill pictures; no physical memory result yet.
+  Settled Undo retains one ~95 MiB full-image copy to preserve exterior pixels. The incident
+  recording cannot associate its delay with that copy. Compare the same workload stream off
+  versus moving On Top before closing either report. Matched 5000² simulator control
+  `b73829b0` passed six settled Undos, retaining the earlier stroke. Raster deltas were 1/0/1
+  in each arm. Pictures inspected. This test does not measure physical Pencil/UI latency.
+  Evidence: `nov14-release-evidence/undo-control-final/` and `crash-20261111/nov14-readout.md`.
+
+### Remaining checks
+
+- Installed ancestry and exact tests confirm the late slider fix (`07ea65a0`), late Move
+  fix (`ca1e7041`) and bounded graph preview (`4dec2145`) shipped in `8214421f`. Their
+  earlier promotion-only checklist entries are closed.
+- Cold Gallery qualification is complete at test-only `5eb893c3` on qualified `ef335c4b`.
+  A damaged scene with no backup showed No Backup and kept the exact original. A second scene
+  reopened with the exact backup, visible Multiply Mix and its original damaged file in Trash.
+  Restoring the former silent fallback made both cases fail the intended assertions.
+  Evidence: `~/PaintWork/cold-gallery-mix-recovery-evidence/`.
+- Cold simultaneous pan/pinch worked with the active Brush layer both visible and hidden on
+  unchanged app code. The earlier staggered attempt failed on the visible control first.
+  No gesture behavior was changed.
+- Open-lasso Move is qualified at exact `ef335c4bc79dd6d3f8767cc1593b2be2cbeeae56`
+  (canonical `tmp/qualified-open-lasso-20261113`). It closes the U through existing lasso
+  rules and lifts only enclosed ink. Both combined fast tiers passed 5636 with 4 opt-in
+  skips and no failures. The unchanged feature patch passed 19 logic and eight cold UI
+  checks, and the old ordering failed four intended assertions. Inspected full landscape
+  pictures in `~/PaintWork/open-lasso-move-evidence/owner-size/`. Awaiting the next iPad update.
+- Reclaimed 6.8 GiB of inactive compiler caches in PaintWork. Kept signed builds, test results,
+  screenshots and diagnostic files.
+- Bake residency is proven on test-only `e6598ef3`: 13 Debug, full cold class, six frames with
+  zero resident native source bytes at publication and 49,152-byte peak. Fault independently
+  failed both byte limits. Results in `~/PaintWork/video-bake-residency-evidence/`.
+- Closed historical duplicate TODO summaries: the point-only vector Liquify conversion was
+  owner-confirmed and the temporary converter was removed in installed `ec62d712`; live Pencil
+  acceptance remains open. High-density To Cross erasing is closed at the owner's instruction;
+  keep the newer rapid-edit/stream restart open as a separate incident. The newest-backup
+  policy is installed. The old seven-day copy-only APFS controlled workload found 12,562,432
+  additional allocated bytes for nine retained points with repeated saves. That historical
+  measure covers the copied fixture, not the whole original library or iPad. The evidence
+  directory was lost in the earlier cleanup; retained-source receipt is the October 23 saving
+  section at `~/PaintApp` branch commit `e17cb8fb`. No new physical measurement is pending for
+  that closed behavior.
+- Reclaimed a further ~1.59 GiB of inactive compiler intermediates; kept the built products,
+  both signed releases and test evidence. The 03:40 read-only recording list showed no newer
+  automatic freeze flight.
+- Windows SSH key rejected; Desktop Commander offline. UDP discovery silence is inconclusive.
+  The TCP accept replaces any active iPad connection. Keep real Windows-link verification queued.
+- Canonical main and installed-code history diverge after `afd2030c`. Canonical local changes
+  are records-only, while the qualified code includes the existing installed lineage. Preserve
+  both refs and remote state. Joining both histories conflicts with the no-merge-commit rule.
+  November 14 preview shows three document conflicts and 656 candidate commits since the base.
+  The iPad renewer refuses unrelated histories. TODO records a linear continuation of the release
+  with the canonical record content and a named preservation ref for canonical local commits.
+  Local review branch `tmp/nov14-promotion-review` at `646402f8` has the signed `00cb237b` app tree,
+  agreed documents and the two separately qualified test-only revisions. The remote remains at
+  `afd2030c`; the existing local main and renewer settings were preserved.
+- `07b61ce5` already transfers the matching presented Fill surface into held ink. The fallback
+  uses the prepared bitmap. Exact `f1ee828e` passed all 12 follow-up tests: the full Tap selection
+  and Glare classes, textured eraser Undo/Redo, the moving-stream Fill and one translucent coat
+  retained through commit. Static IDs reconciled.
+  Evidence: `~/PaintWork/nov14-audit-evidence/exact-f1ee828e865e68fcb8eda4a7f7c772a39f6e9a21/follow-up/`.
+  Physical crash attribution remains open.
+- `244dec55` passed five iPad 9 brush tests. The three new test-only cases draw in both
+  landscape directions and portrait, with correct pictures inspected. Existing Hook tests ran
+  after replacing the narrow title-bar setup tap with the public Brush toggle. Bypassing rotation
+  failed both landscapes at the intended pixel assertions; translating touches failed the portrait
+  path. Restored the tests and removed the owned simulator. No shared helper or app code changed.
+  Source pinned on canonical `tmp/verified-touch-orientation-20261114`. Evidence:
+  `~/PaintWork/touch-orientation-control-evidence/`. This scope did not replay the old held Shape.
+- Corrected test-only `17603799` ran the existing optimized Mend benchmark from a real bucket
+  contour on identical app source. Both tests passed. Mend All repaired 300 light 72×72 cels
+  in 1.769 s (+1.5 MiB sampled process footprint) and 1,000 in 6.183 s (+1.8 MiB). The three-cel
+  warm-up and first/middle/last drawn probes passed; one Undo/Redo restored every path, and the
+  one-byte Undo budget left each cel/history untouched. The old hand-notched fixture left bare
+  contacts outside actual ink, so it correctly returned unchanged. These timings and footprint
+  deltas are simulator fixture measurements only.
+  The associated interactive 64×64 trial was ~4/63 ms with Mend off/on. The earlier same-app
+  separate point-only Liquify path check mapped 2,560 stored points, changing 12 of 81 strokes
+  with fixed width and exact pixels at an independent distant control; warm median 138 ms under
+  that simulator setup. Do not present this as physical Apple Pencil latency.
+  Results: `~/PaintWork/mend-all-cost-fixture-evidence/` and the previous audit opt-in bundle.
+- Damaged-text save and restore passed at test-only `4da0c314`, with identical app source to
+  signed `f1ee828e`. Used the committed actual old writer package and removed only its text
+  string in a disposable copy. Both original blue strokes and new red ink survived the
+  Cancel/Versions/Restore route, and all four pre-restore package bytes matched the copy in
+  Recently Deleted. Inspected the warning and restored ink. The first run stopped at the
+  brush size fixture; the test-only 3-point setup granularity kept all drawn checks intact.
+  Existing storage logic independently asserts original bytes before restore. Neither
+  old-code mutation nor physical iPad were repeated for this check.
+  Evidence: `~/PaintWork/nov14-audit-evidence/exact-4da0c314b01c4be087dd74298d1aafa6619b9fdf/strict-text/`.
+- Derived-thumbnail sizing is the next separate memory seam. The live provider currently
+  has no output bounds for its posed/video/interpolation callers, although the thumbnail
+  consumer already requests a 480-pixel box. Candidate `12354add` reuses that request end to
+  end. Focused normal 20/20, including odd-sized pose, interpolation and video output,
+  unaffected native interpolation and two save/backfill controls. All four deliberate
+  faults reached their intended assertions, and the restored test passed. Public cold tile
+  passed with a visible posed drawing in the timeline and on the canvas. The combined
+  `00cb237b` gate (source plus test-only orientation controls) passed all 13 exact cold
+  workflows. Exact Debug and Release each passed 5,644 plus four opt-in skips, with all IDs
+  reconciled. The owned simulator was deleted. This bounds intermediates to 480×240 in the
+  959×479 fixture for pose, video and interpolation and preserves the old final tile extent.
+  Minor edge antialiasing can differ inside the tile; artwork and full-size rendering use
+  the original path. No physical footprint measurement. The updated signed build is listed
+  above. See `~/PaintWork/nov14-bounded-thumbnail-evidence/`.
+- Current native work is complete on the signed candidate. The broad audit and full UI suite
+  are not finished. The high-priority remaining evidence is physical Mend/Liquify/Undo and
+  rapid-edit behavior with a real stream, a new automatic flight for the intermittent touch
+  loss, and Windows host access. The archive/current-library and deferred interpolation
+  items remain on the detailed queue.
+- About 49 GiB free after deleting only owned inactive compiler caches. No owned simulator
+  remains booted. No personal applications closed.
+- See TODO for the remaining audit scope and deferred feature requests.
+  Preserve primary results and signed builds. Remove owned generated caches when inactive.
 
 ## Resume rules
 
-- Read AGENTS.md, CLAUDE.md, and TODO.md in order. TODO.md holds every outstanding task and ruling.
-  Keep this file current before handing off. Older checkpoints remain in Git history.
-- Delegate investigation, implementation and focused verification to fresh agents with short
-  briefs. Root owns priorities, acceptance, the shared native lane and release decisions. Send
-  active agents only relevant updates. Use one native lane and bounded disposable PaintWork output.
-- Focus the reported crash and Undo workflow before broader audit items. Do not claim device
-  resolution until the comparable stream/edit workflow is checked on the iPad. The read-only
-  diagnostics are in `~/PaintWork/crash-20261111/correlation.md`. Do not use old deleted PaintWork
-  paths as runnable evidence. Keep the existing signed app and renewer state until a verified install.
+Read AGENTS.md, CLAUDE.md and TODO.md. Keep this checkpoint current and keep tasks in TODO.
+Use task-appropriate model and effort. Delegate coherent work through verification where it saves
+effort. Run quick checks directly and avoid redundant handoffs or reviewer agents. Root owns
+priorities, acceptance, the shared native lane and release decisions.

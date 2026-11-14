@@ -16,6 +16,32 @@ HANDOFF.md is a navigation/checkpoint document, never the only record of an outs
   attribute the owner's delay to this copy. On iPad, wait until the stroke lands and measure
   a single Undo per quiet interval, stream off versus a moving On Top stream, counting rasters
   and timing tap to ink disappearance. Only change the renderer if that comparison supports it.
+  November 14 readout of the earlier Test1 footage: the last crash interval records a 6.58 ms Undo
+  press next to three off-main vector rasters (up to 1038 ms). The separate latency recording
+  has five brief Undo presses (max 1.82 ms) and four off-main rasters (max 567 ms). Rollups
+  cannot map a raster or visible landing to one action. The available device Probe reports
+  predate the current build. Cold 5000² simulator control `b73829b0` on unchanged app code
+  verified three settled Undos per condition, always retaining the earlier stroke. Hidden and
+  moving stream each recorded 1/0/1 raster increments; no stream-only excess in this fixture.
+  The observed 570–827 ms includes XCTest tap and screenshot overhead and is not a physical
+  latency measurement. Screens and results: `~/PaintWork/nov14-release-evidence/undo-control-final/`.
+  Existing recording spans aggregate two seconds of work and lack the exact content identity
+  and successful view update. Use the existing recorder to pair an Undo press with the actual
+  vector replacement and accepted base picture for the edited cel, including cached and
+  deferred paths. These timestamps reach the app's layer assignment, before physical screen
+  presentation. Keep overhead low, unrelated edits separate, and compare stream and
+  canvas-size controls before changing the renderer. Current source shows a stronger testable
+  lead: On Top stream surface work and vector rendering use the same serial queue. A stream
+  job can wait for a reusable IOSurface (up to 500 ms) ahead of a settled Undo render. Isolate
+  that by controlling a held stream draw. Exact `ad1d6160` keeps one stream worker separate
+  from the shared edit worker. A staged cold iPad 9 test shows two strokes over an already
+  presented green stream, then Undo leaving one stroke over green while the next frame is
+  still waiting, and finally the same drawing over blue. All 25 window logic tests passed.
+  The shared-queue fault failed the controlled edit-admission test, while the cold UI also
+  passed with the old queue and therefore proves drawn continuity only. Use the physical
+  comparison to check whether the shared-worker delay was the one Kevin saw.
+  Old traces:
+  `~/PaintWork/crash-20261111/nov14-readout.md`.
 - [ ] **Resolve intermittent whole-iPad failures during rapid edits.** Owner reports a black screen
   and brief restart during drawing → Undo → drawing. On November 11 he also reported a crash after
   repeated Fill. The observed crashes coincided with rapid activity and a running background stream.
@@ -28,15 +54,70 @@ HANDOFF.md is a navigation/checkpoint document, never the only record of an outs
   the verified correlation. Check native stream-host rebuilds first. Follow up on Fill's separate
   full-size reference image and preview-to-base handoff costs through the existing render owners.
   Preserve exact Fill pixels and measure before treating either path as the cause of a restart.
-  Focused follow-up: check whether a committed vector Fill can transfer its exact displayed
-  surface through the existing UnlandedInk owner instead of uploading another image. The already
-  rendered clip and opacity must match, and pending/failed display needs the existing fallback.
+  Exact `6c0b37e6` source confirms a marked vector reference containing a stream (either
+  placement) flattens a detached 5000² bitmap before drawing the actual small Fill window.
+  This is about 95 MiB per source and pass; enlarging the bucket search can repeat it. The
+  temporary bitmap is scoped to that pass and is not retained across Fills. Prove with an
+  existing reference pixel fixture and total raster count, then reuse the clipped drawing
+  seam with per-cel isolation and identical final pixels. `1893d84f` passed 34/34 including
+  repeated cold Fill; both stream modes have exact bytes and no extra native raster. Faults
+  reproduced the full-copy, eligibility, missing-stream and refusal failures. Integrated on
+  follow-through `03831f79`; qualify its exact fast tiers and stream class next. No crash attribution.
+  Displayed Fill surface reuse already shipped in `07b61ce5`: an exact presented render and clip
+  transfer through UnlandedInk, while pending/mismatched fronts use the prepared bitmap. The
+  native logic check asserts surface identity, clip, opacity, fallback and counted front bytes.
+  This eliminates a duplicate upload when eligible, while the prepared bitmap still exists.
+  No physical memory or crash attribution follows from that change.
+  November 14 device inventory found a Nov 13 03:31 Toronto SystemMemoryReset report.
+  The same PaintSoftware PID from the verified install was suspended at 153 MiB (430 MiB
+  lifetime max). The report records reclaimable memory at 63% against a 65% threshold and names
+  no killed process; it does not identify an editing crash or its cause. Original report:
+  `~/PaintWork/crash-20261111/SystemMemoryReset-2026-11-13-033106.ips`.
   Retrieved, size-verified evidence (no investigation performed):
   `/Users/juliapark/PaintWork/recordings/2026-11-07/recording-20261107-221600.jsonl`, 192674 bytes,
   SHA256 `a667509c30962d5a7b54e012bef9f500f2f7bcb7d19c7e75f136baf971ed5590`.
   Earlier drawing/erasing-latency recording:
   `/Users/juliapark/PaintWork/recordings/2026-11-07/recording-20261107-202427.jsonl`, 145173 bytes,
   SHA256 `a479de0d1ccfb562408e89e25c01a2cf5e54ddbee50293aec1556cb3aad2ace1`.
+- [ ] **Reproduce and fix the owner's cross-layer Mend Gaps case (November 11).** On the iPad,
+  draw a circle and a short line inside it on one layer, then switch to another layer and Fill
+  inside the circle. The fill leaves the line's footprint uncovered. With Mend Gaps on and Reach
+  sufficient for that line, the same fill must cover beneath it while preserving the circle's
+  outer boundary. Check the installed source and actual tool workflow before assuming a missing
+  feature or building a second mending path. Keep real-time feedback and uncertain joins protected.
+  Cold freehand circle and 6 px mark passed with Reach 12 and Edge Overlap 0 on the iPad 9
+  simulator, including Mend Off/On and target-only pixels. A dense snapped outline reproduced
+  the failure because the work estimate abandoned mending for the whole reference. Candidate
+  `2c26812a` bounds the actual neighbour search within the existing safety budget. All 31 Mend
+  logic tests and five cold UI workflows passed. Installed in `8214421f`.
+  November 14: Kevin reproduced the circle-and-interior-line failure on the installed build
+  and saved a recording. Recovered it read-only from the iPad:
+  `~/PaintWork/mend-20261114/recording-20261114-011250-8B46A3AB-A1B8-46BD-B086-FB7DF742C06E.jsonl`.
+  It confirms the installed build, Pencil circle then pressure-varying interior line, different
+  target layer, fill tap and reference hidden afterward. Brush width and Fill settings are absent.
+  The recorded paths with a 12 px pressure-varying Opaque Round brush reproduced the gap on
+  `8214421f`: the per-dab neighbourhood scan exhausted the 64-million work limit before it could
+  return support for any interior ink. Candidate `a6ae7c6c` avoids duplicate checks using the same
+  coverage and work limits and passed 32 Mend logic tests, including untouched pixels away from
+  the interior line, attached marks and uncertain joins. Five original cold routes passed. The
+  new cold replay passed at `bb307723` and shows a solid fill with the reference hidden.
+  In optimized Release, 12 px passed at Reach 12 with 39M bounded work and 4.45 MB charged.
+  First Mend took roughly 218 ms; changing Reach reused the result (roughly 5 ms). The 20 px
+  version exhausted 64M even at Reach 40. A work breakdown showed repeated contributor
+  closure walks cost most. Querying once per support growth and deriving contacts from the
+  same packed rows reduced charged work to 10.6M (12 px) and 24.1M (20 px), with 3.1/4.1 MB
+  charged. Cut colours were identical outside the stroke. At 20 px the trace's early turn
+  overlaps both valid and protected support, so it deliberately stays bare while the unambiguous
+  main body is covered. Exact focused `479252be` passed 32 logic and one cold UI. Old scan,
+  exterior leak and protected-turn leak each failed the intended assertion. Combined
+  `69b6b5c9` passed seven cold workflows and both fast tiers (5637 passed, 4 opt-in skips each).
+  Simulator Release first Mend was 68/122 ms at 12/20 px, with 1.8/2.0 ms for a reused Reach
+  update. Latest signed `00cb237b` includes this exact fix, open-lasso Move, editable vector
+  Flip and restored and smaller timeline thumbnails. Both mandatory fast tiers and 30 cold
+  checks passed, including all 13 in the touched Mend/lasso classes and the actual recorded
+  outline. Signature verified, profile through Nov 20 02:09 Toronto. The iPad was locked at
+  the last check. Await saved Gallery and unlock. Real iPad confirmation remains open.
+  Evidence: `~/PaintWork/mend-20261114/results/`.
 - [ ] **Show vector Liquify while the stroke is still held (November 12).** Owner says the
   installed iPad only shows the reshaping after lift. The points should follow the gesture live.
   Preserve point-only vector deformation through the normal brush renderer, fixed exterior ink,
@@ -44,11 +125,12 @@ HANDOFF.md is a navigation/checkpoint document, never the only record of an outs
   visible pixels before lift, after commit and after Undo, with a bounded work window. The live
   starvation fix now passes the focused on-screen gesture and its old-behavior fault check.
   Vector and raster Liquify passed 100 simulator checks. The combined release candidate
-  `6c0b37e6` includes the In Place cancellation fix and passed both fast tiers. Physical Pencil
-  confirmation and installation remain open.
-  Fence an In Place stream's delayed held-picture swap at presentation so cancellation or a
-  different cel cannot show outgoing Liquify pixels. Preserve the existing front while the
-  current frame is prepared, and allow ready intermediate pictures from the same gesture.
+  `6c0b37e6` includes the In Place cancellation fix and passed both fast tiers. Installed in
+  `8214421f`; physical Pencil confirmation is open.
+  This builds on the shipped point-only vector rewrite: ordinary brush rendering retained,
+  vector material transport removed, old packages repaired and owner-confirmed, and the
+  temporary converter removed in installed ancestor `ec62d712`. Real-pencil confirmation
+  remains the open owner workflow; preserve exact exterior, raster and linked behavior.
 - [ ] **Find and fix the cause of recurring canvas freezes (November 12).** The iPad still reports
   freeze repairs and records flights. The watchdog is recovery. Compare recent flights with known
   healthy touch sequences and earlier false repair reports. Establish where touch ownership or
@@ -58,6 +140,28 @@ HANDOFF.md is a navigation/checkpoint document, never the only record of an outs
   cleanly. Preserve independent diagnostics. A repair notice alone does not prove a visible freeze. Owner says the
   failure is intermittent and difficult to reproduce. Use captured failures and raw touch binding
   as evidence, and avoid treating a short clean device run as resolution.
+  November 13 at 00:14 Toronto: Kevin reports another canvas freeze caught by PaintApp.
+  Retrieved repair #23, `flight-20261113-001333.jsonl`, 391086 bytes, in the existing
+  freeze-flights folder. During a moving two-finger gesture UIKit canceled one contact and
+  reissued it at the same location ~10 ms later. The replacement lacked pinch, rotation
+  and stroke bindings. Both contacts traveled substantially. This is separate from the
+  old timer's premature checks. The recorded transform label is cached at touch start and
+  cannot prove that pan never moved. See `freeze-flights/readout-20261113-0014.md`.
+  Kevin explicitly wants the freeze fixed from existing evidence if possible, otherwise
+  the automatic recorder must gather decisive evidence without asking him to reproduce,
+  start Record My Actions, save another flight, or run more manual tests. The existing
+  synthetic gesture supports lift/restart as a control, but cannot generate UIKit cancellation.
+  Use the same flight ring to capture applied transforms and handler delivery at bounded
+  contact/episode edges. Prove the automatic trigger stores a moving partial reissue like
+  #23, as well as the earlier missing-admission case, while healthy movement stays quiet.
+  If current evidence supports a corrective input ownership change, test it with a replay
+  of raw contact events and uninterrupted/ordinary recontact controls. Otherwise use the
+  automatic capture to distinguish lost recognition from unchanged or unpublished motion.
+  Keep instrumentation separate from the root fix and remove recovery after the fix is proven.
+  Automatic recorder `8214421f` now saves both qualifying patterns and records real transform
+  and delivery. Replay #23, actual healthy pinch, same-editor automatic save, and faults passed.
+  App-source Debug/Release 5633 per tier and exact five compatibility checks passed.
+  Installed and launched at 02:12 Toronto. Retrieve subsequent automatic evidence independently.
   Five retrieved flights record six repairs. One Nov 11 sequence loses all pan/pinch/rotation/ink
   bindings on the next three-finger gesture before UIKit resets mid-gesture. Reproduce the late
   third-finger sequence and trace that reset/ownership failure. A separate Nov 8 sequence proves
@@ -68,87 +172,149 @@ HANDOFF.md is a navigation/checkpoint document, never the only record of an outs
   recorded recognizer identities. In the failure, pinch and rotation enter failed at lift,
   all four recognizers are absent on the next admission, and the stroke resets during that
   next gesture. The existing recorder does not expose live attachment and state at admission.
-  See `~/PaintWork/crash-20261111/freeze-flights/refresh-20261112.md`. Capture visible failed
-  motion with Save Last 90 Seconds first. A separate one-event diagnostic probe remains an
-  option if the next capture cannot distinguish delayed reset from missing binding.
-  Preserve same-second recordings with existing UUID filename commits `0057a848` and
-  `da6169eb` from canonical `tmp/s55-recorder-filenames`. The missing standalone repair #20 is
-  consistent with the installed second-resolution path collision, and survives in overlapping flights.
+  See `~/PaintWork/crash-20261111/freeze-flights/refresh-20261112.md`. The installed automatic
+  capture now handles this evidence request without a manual recording. No new automatic file
+  was present on November 14.
+  November 14 evening: the original detector requires missing navigation bindings.
+  A moving pair with sound bindings and no applied navigation can escape a diagnostic
+  save. Extend the existing automatic recorder only for that concrete evidence gap. Qualify
+  real motion, intact admission and unchanged view across samples, and suppress intentional
+  blocks and stationary/tap cases. Reuse existing samples and silent flight storage.
+  A gesture root fix remains open until a captured failure identifies it.
+  Exact `9b20cd04` passed 25 Debug checks. A cold healthy pinch moved and grew the visible ink,
+  recording 24 real navigation writes and no false miss. In a separate simulator-only fault,
+  both contacts kept all three bindings and UIKit reached changed, but the view stayed
+  unchanged with zero writes. The app saved the automatic file before any manual save.
+  The file records four qualifying samples and 40 pt of relative travel. Source restored.
+  Device evidence and the gesture root cause remain open.
+  See `~/PaintWork/bound-freeze-capture-evidence/`.
+  Checked the potential hidden-layer dependency before changing gesture ownership. Cold
+  simultaneous pan/pinch passed both visible and hidden on unchanged `ef335c4b` app code
+  (`86a96b18` test), including the hidden-layer brush notice. The first probe's staggered
+  gesture failed its visible premise. This result does not establish the cancellation/reissue cause.
+  The earlier same-second filename collision was fixed in installed `45e067a5`. Both
+  recorder actions append unique UUIDs through their shared filename helper, covered by
+  FlightRecorderLogicTests. Repair #20 survives in overlapping flights from the old build.
 - [ ] **Deferred: view previous crash reports in the app**, similarly to recordings. Owner asked
   “at some point if it is possible.” Keep deferred until requested.
 
 Other outstanding requests remain below. Historical status/proof paths may refer to the PaintWork
 folders the owner deleted during the emergency cleanup; verify availability before relying on them.
 
-## Remaining work as of November 12
+## Remaining work as of November 13
 
 Kevin reiterated that a blocked release must not stop the other open work. Run independent tasks
 in parallel and keep the exact simulator-qualified iPad candidate isolated until signing.
 
-
-- [ ] **Check a late control event while recording animation.** Separate from loop endpoint
-  handling, a slider callback might arrive beyond the final frame before a delayed playback
-  tick. Verify through existing fake-clock recording tests whether it can write a key beyond
-  the take range. A source observation only. Preserve legitimate held values and ordinary looping.
-
 - [ ] **Reconcile the tested installed source with the canonical repository.** The qualified
   device build descends from the installed code, and canonical local main has separate recent
   records. Establish a clean integration plan from exact ancestry and an actual change inventory.
-  Preserve the owner's queue, qualified source, both remotes' state and all unqualified branches.
-  Do not promote unrelated changes without evidence or rewrite shared history.
+  Preserve the owner's queue, qualified source, remote state and all unqualified branches.
+  The November 14 comparison at `afd2030c` finds canonical local changes in four policy/queue
+  documents and 473 changed paths across 656 commits on the current candidate. A three-way
+  preview conflicts in AGENTS, HANDOFF and TODO; no app-source conflict is involved. Keep the
+  installed lineage available in its own branch. A transfer that retains both branch histories
+  in main would require the repository's prohibited merge commit. A single-parent import on
+  canonical local main would leave the iPad renewer unable to choose between the two source
+  histories. A linear continuation of the tested release with the canonical document content
+  replayed keeps the iPad lineage and fast-forwards the current remote, while preserving
+  canonical local commits on `tmp/nov14-canonical-before-promotion`. Prepared local review
+  branch `tmp/nov14-promotion-review` at `646402f8` with identical production tree to signed
+  `00cb237b`, two verified test owners and reconciled documents. Both Git ancestry checks passed.
+  The local-main migration decision remains open; no remote refs or renewer files changed.
+  Ref and conflict receipt:
+  `~/PaintWork/nov14-audit-evidence/integration/`.
 
-- [ ] **Verify vector Copy/Paste through both menus on the exact release.** Run the existing
-  Actions Copy/Paste and Select Copy-left-of-Duplicate cold tests. They must paste a new layer
-  and verify editable strokes by widening the pasted ink. The feature is installed and both
-  fast tiers pass; the current cold menu outcomes still lack a preserved result.
 
-- [ ] **Verify stream placement after the next live frame.** Extend the existing Set Down
-  simulator workflows for On Top and In Place with a contrasting H.264 frame after release.
-  Assert the new pixels stay at the Move box's committed pose. The existing passing tests
-  cover the held frame and continuity during Set Down. Keep this distinct from the real-link check.
+- [ ] **Bound stream timing measurement storage between displayed pictures.** In the current
+  stream coordinator a tick may decode or update off-frame content without presenting a
+  picture. The timing array accumulates every tick until it next presents, and the summary
+  then walks the array. Retain only count, total duration and maximum in the existing
+  measurement owner. Preserve its presentation cadence and log/marker output. This is
+  bounded telemetry, separate from finding a device restart cause. Exact `3c939109` passed
+  26 Debug checks including visible On Top stream placement. Extracted production behavior
+  and existing assertion expressions distinguish lost count, sum and peak. The native
+  peak fault failed as expected, then passed restored. Await assembled qualification.
 
-1. **iPad update and real use.** Candidate `6c0b37e6` passed Debug and Release. It includes live
-   Liquify and recorder fixes as well as five earlier fixes:
-   fewer stream redraws, quick Undo before a stroke lands, cross-layer Mend Gaps, repeated Fill
-   display reuse, and Duplicate Undo memory accounting. Install with a renewed profile. Compare
-   rapid drawing, Undo after ink has landed, erasing and repeated Fill with a moving stream and
-   with it off. Confirm the reported crash and latency before closing them.
+- [ ] **Reconcile the remaining on-screen rendering and brush audit controls.** On signed
+  `00cb237b`, drive the existing masking, playback bake, live/linked Liquify, brush curve
+  drag, and brush preview restoration tests. Compare visible pixels and selection outcomes
+  with the audit's earlier component results. If a check fails, identify the actual product
+  or fixture cause before editing. Keep physical pressure and startup evidence separate.
+  Exact `00cb237b` failed the held-stroke assertion in Colour Mask. This test stops on
+  first failure, so its later stroke-admission and final drawn checks were not reached.
+  Inspect the timed sample and failure recording to distinguish delayed mask preview from
+  screenshot/fixture conditions. Video shows the ordinary moving stroke clipped by red,
+  then the blue paint outside the mask when Shape Hold displays its editable straight
+  line. Run ordinary continuously moving Brush as a separate control, without removing
+  its sampled on-screen/pixel assertions. Verify the editable shape's paint respects
+  the same existing layer mask while its handles stay accessible; inspect the spec and
+  reuse the layer's mask owner before choosing a fix. Evening batch finished 12/13:
+  playback/bake, brush-curve, all four live/linked Liquify checks and the other three mask
+  workflows passed. The ordinary Brush control on unchanged app source `3992374b` passed:
+  during motion it covered the outside probe while only paint inside the mask was visible,
+  then committed one correctly clipped stroke. The Shape Hold draft takes over the visible ink
+  and had lost that mask. Candidate `31e66383` passes the exact admitted clip to the draft's
+  paint host and keeps its guide and handles independent. All 53 focused checks passed,
+  including the new cold draft through commit, a subsequent unmasked shape, and unmasked
+  live corner drag. Inspected clipped paint with the exterior guide and endpoint visible.
+  Suppressing the clip red-lined the outside-preview pixel, and retaining it at teardown
+  red-lined the next unmasked shape. Restored green and an inspected 1080×810 pt landscape
+  witness both passed. The exact production SHA remains `31e66383`.
+  Combined `01fb0fe7` passed all 19 visible workflows. That includes brush preview restoration,
+  the opacity control, the recorded Mend Gaps motion and open-lasso Move. Inspected the same
+  run's clipped draft, solid red fill with its reference hidden, and settled Undo with the
+  earlier stroke over a green stream. Both fast tiers and final signing remain in progress.
+
+1. **iPad update and real use.** Signed Release `8214421f` installed and normal-launched at
+   02:12 Toronto November 13, with a profile through November 20. It includes live Liquify,
+   Mend, stream/Fill/Undo fixes, resize, recording, bounded graph preview and new automatic
+   freeze evidence. App-source fast Debug/Release each passed 5633, plus targeted cold and
+   exact compatibility checks. Compare rapid editing with a moving stream and with it off.
+   Physical crash and settled Undo latency verification remain open. The later open-lasso
+   Move change is qualified at `ef335c4b` and awaits the next deployment.
 2. **Canvas freezes.** The candidate fixes the recovery timer and preserves recordings of
    close-together repairs. Capture or reproduce the separate recognizer reset failure and
    fix it before removing the recovery code.
 3. **Older iPad behavior.** The installed Release includes editable vector Copy/Paste,
    Copy to the left of Duplicate, small Move boxes, Set Down display continuity and stream
    position, Undo thumbnails, Mend All Fills, and newest-version backup retention. Existing
-   simulator checks cover those mechanisms. The public clipboard tests lack a retained
-   current-source result. Confirm the one-tap Move report in Test and verify these workflows
-   on real scenes, including saving and recovery.
+   simulator checks cover those mechanisms. Both clipboard menus passed cold, including
+   widened pasted ink and width Undo. Confirm the one-tap Move report in Test and verify
+   remaining physical workflows on real scenes, including saving and recovery.
+   The October recording is no longer on the Mac or in iPad Recordings. Preserved Git
+   evidence shows the lift began and then canceled on all three taps. The image-ownership
+   fix is installed and prior cold one-tap evidence survived. The actual Test scene remains
+   unverified. On a saved scene, tap Move once after lassoing visible vector ink. Verify
+   the untouched box stays up, then use one Undo to cancel the zero-nudge lift before
+   reopening Settings. Use a disposable copy for a drag or Set Down.
 4. **Architecture and performance audit.** Close the remaining concrete rendering, input, media,
    and saved-data issues and test their existing implementations. Keep development storage bounded.
-   The full audit and follow-through checklist is in `~/PaintApp/TODO.md` in the installed-source repo.
+   The detailed audit and follow-through checklist follow the owner queue.
 5. **Windows streaming.** Verify Blender, source switching, reconnects, clipboard, bake and latency
-   on the real link. November 12 read-only check reached the laptop, but the existing SSH key
-   was rejected. The alternate Desktop Commander connection lists the same laptop offline.
-   Verify through the real desktop with Kevin when available. Avoid launching test hosts that
+   on the real link. November 14 Tailscale sees the laptop online and SSH responds, but it
+   still rejects the configured key. Desktop Commander lists the laptop offline. A read-only discovery
+   packet on Tailscale got no reply. The stream service's TCP accept can replace an active
+   iPad, so leave that probe to the real desktop session with Kevin. Avoid test hosts that
    prompt repeatedly for firewall access.
 6. **Deferred.** In-app crash history, interpolation redesign, multi-cel selection, linear-light
    blending and audio/video editing. Brush preset importers remain dropped.
 
-## New audit findings — recorded October 29 before implementation
+The owner's asks. [BUGS.md](BUGS.md) is for what *we* find.
 
-- [ ] Remove measured avoidable cost in the unshipped small-dab candidate before final qualification.
-  Identical Release5×4000 batches: old/candidate1pt boundary0.517/1.344µs, center0.503/0.776;
-  5.9pt0.687/11.444 (~16.66×);20pt2.127/2.208 (small difference not attributed beyond noise).
-  Source265 andoldb3d eachpassed1/rootstrict731. Probe a narrower smooth area-to-native transition
-  covering only the undersampled footprint; keep existing energy/geometry/thin-axis/pixel tests
-  strict, add the actual new handoff boundary, no radius inflation/cache/state/flags or pixel-oracle
-  relaxation. A1–1.5device-pixel transition is a hypothesis for measurement, not a fixed product rule.
-**Small-dab boundary premise checked, October29:** TEMP69 probe passed1/rootstrict731. All six
-new failed anisotropic rows match native CoreGraphics byte-for-byte at identical radii, including
-both sides of the original near-boundary pair. Native itself jumps0.0706–0.0745 there; the new
-absolute continuity assertion assumed a guarantee the original renderer does not have. Preserve
-failed471 and replace only this new assertion with a per-pixel bound on additional profile change
-relative to the exact native pair. Keep exact endpoint equality and all67 previous tests unchanged.
-No production guesses or global tolerance relaxation; this is a corrected test premise.
+**Session 49 (2026-10-14):** the owner asked to continue through every actionable item, stopping only
+for genuinely required input or context degradation. Agent count is unrestricted for now; usage
+conservation and output quality take priority over speed. Use focused delegation and cheaper models
+for routine work, with occasional queue reports. The owner asked to work independently while asleep
+until 10 a.m. Toronto time. Raster scope and fixed exterior pixels for vector selections are ruled below.
+
+**Checkpoint 2026-10-23:** three active asks below remain unfinished. Point-only Liquify and newest
+backup retention are integrated on an unmerged branch; repair 75/75 and runtime 302/302 are green,
+but combined 303, runtime 13mutants, fast tiers and current UI remain unqualified. Test1 erasing has
+memory evidence but no proven cause or fix. Previous normal Release bcd7a6af remains the installed
+build; no physical device operation occurred this pass. See HANDOFF for the current native owner.
+
+## New audit findings — recorded October 29 before implementation
 
 - [ ] Resolve the valid fractional-projective Parallax resize blocker before qualifying52424454.
   Independent review proves Fit100²→400×200, share0.5, perspective quad gives a point~20pt too far
@@ -161,49 +327,10 @@ No production guesses or global tolerance relaxation; this is a corrected test p
   packages and Projects/Backups/Trash/order; remove corresponding decoder branches/flags only once
   migrated and confirmed. This is separate from strict current-node payload validation, whose17
   actual historical encoders always emitted required op/Mix mode. No new permissive decoder route.
-- [ ] Video-time numeric ruling: preserve existing working-timescale selection, once-per-frame
-  fractional rounding and finite90k fallback. Use checked wide comparison/span/tick expansion and
-  safe endpoint clamping; reject truly unrepresentable required map/inverse through existing recovery
-  and atomic live-edit refusal. Do not introduce an exact-rational speed engine, coarser new policy,
-  arbitrary caps, huge saturated framecounts or scans. Retain all prior nontrapping current cases.
-
-- [ ] Correct/calibrate the shared private touch synthesizer's screen coordinate contract. Combined409
-  passed407; the held-Shape workflow reached adjustable state but the actual final video shows a
-  vertical clipped line where the test requested a horizontal line in landscape. The common
-  fingerStroke helper transforms screenPoint to portrait and submits a portrait event record; public
-  recorded taps have a landscape1080×810 parent window. Possible extra conversion is a hypothesis,
-  not a product bug. Prove the shared coordinate route in both landscape directions and portrait,
-  compare intended drawn positions, then fix the single helper seam. Keep artist pixel assertions,
-  use existing UI classes/helpers and no app hook. Current evidence: combined409 root-shape-look.
-- [ ] Tighten current node op/mixMode payload validation after actual-writer evidence. All17 historic
-  LayerFolder encoders explicitly wrote op and Mix mode; missing/unknown op→stack and absent Mix
-  mode→normal are decoder inventions, separate from real retired-slot migration. Preserve valid
-  writers and fail loudly on malformed current nodes; prove finite full-manifest/package behavior.
-  Keep any known-slot migration retirement/current-library repair as a separate audited format task.
 
 The combined409 native baseline remains frozen atd798 in the integration worktree. This records-only
 branch is the live queue so new root-cause work can proceed independently; merge these records back
 only after the native/source extraction boundary. None of these findings is physical crash proof.
-
-- [ ] Simplify the fresh-fragment eraser correction before final qualification. Source review proves
-  a cut piece emits a subset of the same original dab lattice, including recursively cut pieces:
-  no re-anchoring or extra endpoint/cap dabs. Keep measured fresh-ID insertion in the existing map,
-  remove redundant arriving-bounds union/flags/new-child fallback branches, and retain the existing
-  departing-bound/unknown-victim fallback. An unseeded child uses that same fallback on its next cut.
-  Trim duplicated scratch/window/Undo test work already covered by the existing component; retain
-  consecutive cuts without an interim render and final full-picture parity. The union mutant has no
-  valid sensitivity and earns no credit. Evidence: root-next-gates + eraser source proof messages.
-- [ ] Reject malformed current compositor-node metadata through the existing manifest error/recovery owner. Source d798 FolderManifest catches current node/mix decode errors into an ordinary folder, bypassing full-manifest recovery and omitting the role on resave. Add finite wrong-type op/mixMode and actual-package preservation/recovery regressions beside valid stack/mix. Preserve absent-role and known retired-slot semantics as explicit separate cases; do not infer a new future-format policy. Source-only finding; no native reproduction or implementation yet.
-- [ ] Bound accepted video timing arithmetic at the existing VideoFrameMap/VideoRef boundary. Positive-timescale decoding and finite saved Double speed do not guarantee Int64 tick products/sums or Double-to-integer conversion fit; source d798 can trap before its crop clamp. Add finite current-decode-to-map rows for extreme ticks, large/small finite speeds and exact valid boundary neighbors, preserving ordinary fractional/frame-for-frame/held-end semantics. No owner crash attribution, large allocation or new timing policy; source-only until root records and grants proof.
-- [ ] Preserve independent backing and ink placement during a cel-pose graph drag. At d798 LiveTransformEdit selects the whole leaf as a moving band but applies the cel ink delta to it; that band also holds stored raster/baked pixels, whose normal renderer follows only the container. Add a finite blue-backing/red-vector-fill drawn comparison through the actual live-band owner and a cold public mixed-tier graph witness. Prefer existing CelContentPicture/Placement ownership; no parallel cache/state or special transform. Source facts confirmed, visible release jump inferred/unrun; separate from Move/stream fixes.
-- [ ] Bound Bake to Images’ retained output through the existing source/residency owners. Current `bakeVideoToCels` keeps a source-sized UIImage for every distinct decoded frame in the document; the64MiB decoder ring’s eviction/close cannot reclaim those image aliases. The public count/save-time confirmation and import’s initial scene-length clamp impose no output byte budget. This narrows the existing placed-image/video ownership exclusion. Record a small distinct-frame ownership/pixel witness, then reuse existing RasterSource/checkpoint/package-serializer seams where appropriate; do not add a parallel cache or flatten/change placement. No RSS measurement, device crash cause or qualification claimed.
-- [ ] Preserve keyed movement when Resize Canvas → Scale artwork changes coordinate space. `applyCanvasResize` maps vector geometry but retains cel TransformTrack.box/curves/baselines in old canvas coordinates. For resize M and pose P, require P_new·M=M·P at the drawn frames. A100→200 canvas with a10pt keyed translation currently gives a50pt position where the scaled original is60pt. Prove with an opaque rectangle, then root-cause transport through existing pose/resize owners, Undo/Redo and save/reopen; crop/rotation/container cases retain separate limits. Move’s Keep Stroke Width is unrelated to this translation witness. No native reproduction yet; this is separate from the older held-Move/padding issue. Resize uses one uniform Fit/Fill factor, and no broader affine design is authorized by this report.
-- [ ] Delete uncalled TransformKeyframes.clearPoseKeys whole and its obsolete KeyframeControl
-  comment. The existing poseDeltaClearing undo owner is the only live path; repository symbol search
-  finds no invocation of the old in-place clearer. Reuse existing clear-key tests; add no helper/state.
-- [ ] Reconcile the already documented Flip Canvas vector omission/history clear and derived-thumbnail
-  backfill identity mismatch against existing rulings/queue. Do not duplicate the separate derived
-  thumbnail full-size-render cost issue or reopen owner-deferred behavior without checking its ruling.
 
 ### Current evidence and decisions
 
@@ -376,54 +503,6 @@ Detailed task sections below remain unchanged. Technical authority: HANDOFF.md a
 
 <!-- Status-preamble compaction only. Original bytes retained at ~/PaintWork/s55-recorded-regressions/status-preamble-compaction-17c00484/TODO-before.md and in Git. No task was closed. -->
 
-## How to read and keep this file
-
-Every item is a **status**, a short **description** a future session can pick up cold, and **what is
-left** as a checklist. Items are in **queue order** — the top of the list is what to do next.
-
-**An item leaves this file when it is merged, not when a branch exists**, and it leaves *whole* rather
-than being marked done: `git log` and the spec documents are the history. The owner, 2026-09-06:
-*"Basically I want to be able to read the tasks on TODO clearly without already finished tasks."*
-
-**Three in flight at once** unless the extras need no simulator — the cap is about the machine, not the
-plan (`tools/simlock.sh`).
-
-**Before adding an item, check whether an existing one already covers it in different words.** A
-restatement filed as a new item is how one feature came to be specified in six documents at three
-scopes before a line of it was written. This file has since carried two live duplicates for weeks.
-
-**Record an ask in the owner's own words, and fold a ruling into the item it rules on.** A quote is
-cheaper to keep than a decision is to rebuild. But an item reads as *one current description*, not as
-the transcript of the argument that produced it — what happened this pass belongs in
-[HANDOFF.md](HANDOFF.md) and in `git log`.
-
-**Cite a symbol, not a line number.** A 2026-09-06 audit found ~10 of one item's 15 `FILE:LINE`
-citations and 5 of another's 11 no longer resolved — every named fact still true, every anchor wrong,
-two of them because a file moved directory. A symbol name survives a refactor and a line does not.
-
-**A bare item number in a spec or a code comment may name an item that has already left this file.**
-That is the merge rule working, not a dangling reference: `git log` and the spec documents are where a
-completed number resolves. Two are cited often enough to name here — **(10a)**, the Oklab colour ramps,
-and **(38)**, the graph editor's bezier tangent handles and their tap grammar. Do not re-add a finished
-item to this file to make a citation resolve.
-
-**Verify a status before trusting it, including this file's own.** That same audit found fifteen
-assertions here that the code contradicted — features called unbuilt that shipped weeks ago, a blocker
-called live that had lifted, and two commit shas that are not on `main`.
-
-**Old files are repaired once, never read forever.** The owner, 2026-10-10, retiring the earlier "no
-document has to survive" permission now that real scenes live in the app: *"I will still keep the rule of
-no legacy code. If an update causes existing files to be outdated, then they should be automatically
-repaired by a throwaway script the session makes."* So a format change ships with a **one-shot repair**
-that rewrites the owner's existing files (Projects, Backups, Trash) to the new format at launch, and the
-app's decoder knows only the current format. The repair is deleted, whole, once the owner confirms
-their files are repaired. Build `2974b33` broke this rule and lost the owner's keys (TODO (153)).
-
-**The measurement baseline is [PERFORMANCE.md](PERFORMANCE.md) §1, not here**: the owner works at
-2048x1024, and every figure taken before 2026-08-17 was at 4096², eight times the pixels.
-
----
-
 ## Reclaim accumulated development and test storage — 2026-10-26
 
 October29 continuation: bounded inventories locate most growth in retained test results and video
@@ -456,32 +535,6 @@ obsolete owned outputs/devices; do not touch unrelated personal files or other s
       Keep820782758bytes of archives/manifests. RequiredProducts/shared/ambiguous devices remain held.
 - [x] Bound storage checks at native phase boundaries in CLAUDE.md. This item remains until merge;
       no global/personal cleanup, mutable hardlinks or app background-cleanup service was added.
-
----
-
-## Keep the edited cel's thumbnail correct after Undo — 2026-10-26
-
-Actual whole CuttingModes4 atb60 is3pass/1intended thumbnail failure, with inspected whole
-landscape pictures. Undo restores A while current-view callback resolves B, leaving A's tile cut.
-Source1c99512c reuses existing cel ID, lookup and registerVectorElementsUndo; duplicate view
-closures are removed and the generic helper moves +Text→+Undo. No new state/service/renderer or
-respring attribution. Independent peer accepted source. Normallogic70 and public4 passed70/70 and4/4. The3logic/1public
-controls qualify6 application contracts; root inspected all4 whole landscape pictures. Exact4-path
-source is harvested d7090060. Separate B fixture premise control and final integrated gates remain.
-
-The completed CuttingModes4 run atb60 reached the intended public failure at526 after CutA and
-scrubbingB. All earlier ink/tile/history premises passed; ReturnA/Redo/B outcomes were unreached.
-Before code, root accepts reusing registerVectorElementsUndo with the actual gesture canvas's
-existing layer/cel identity, same label/VectorUndoCost/changed-ink rectangle. Remove the view-owned
-duplicate restore/current-view callback closures whole; move the existing generic ElementSwap and
-registration block from +Text to +Undo. No new state/service/renderer or current-playhead lookup at
-undo time. Extend the existing shared thumbnail logic workflow across a frame change, preserving its
-drawn/cold-render assertions; existing public repro retains all Redo/B checks. Commit before faults.
-
-- [x] Actual reproduction, independent owner review and minimal existing-owner correction; component
-      logic/UI/controls passed at their recorded pins. Retain whole item until merged.
-- [ ] Verify actual edited/restored drawing and thumbnail across frame changes, Undo/Redo, cold UI and
-      meaningful controls; final fast Debug/Release and touched-class gates before merge.
 
 ---
 
@@ -526,187 +579,6 @@ review found no concrete remaining defect; final-source fast/UI/device gates are
 
 ---
 
-## Vector Liquify must move points only — 2026-10-23
-
-**Implemented, installed6fb and owner-confirmed, unmerged.** Finish retirement and final gates on resume.
-The owner's point-only instruction below is authoritative; no unwanted material path or compatibility
-flag may return during integration. Independent review and passing controls supplement drawn proof.
-
-Owner reports that Liquify stretches strokes horizontally on vector layers and rules:
-“All that you had to do was to change the position of the points in the stroke, not apply
-transformations to them. I remember EXPLICITLY telling you this.”
-Audit the actual vector path and original brief/history against point-position editing through the
-normal stroke renderer. Identify and remove unnecessary vector-only deformation/material machinery
-rather than adding another mode or patch. No implementation cause is assumed from the observation.
-If prior appearance rulings conflict with point-only behavior, show the concrete difference and ask
-one plain-language decision; do not silently retain the unwanted transformation path. Raster Liquify
-and linked in-between support keep their existing rulings unless the new correction affects them.
-
-Owner calls this a “significant failure” and makes **very thorough architectural cleanup** an explicit
-requirement. Trace every vector-specific field/module/render/archive/test dependency and its real
-consumers; remove obsolete machinery and redundant abstraction, not just the visible stretch. Verify
-saved-scene conversion/round-trip, focused mutation-backed tests and real workflows, with an independent
-final architecture review. Do not claim certainty from passing tests alone or retain this path behind
-a compatibility flag. The new point-only vector instruction is authoritative over implementation
-interpretations made earlier. Record any actual behavior conflict with evidence before asking.
-
-The implementation removes native vector material transport whole and retains genuine Distort/exact
-bake, raster Liquify, linked source following and the temporary saved-file repair. At earlier point-only
-checkpoint47d7079c, independent review found no concrete architecture defect and328 app files were
-byte-identical to that tested point-only baseline. This is historical proof, not a current-head claim.
-Repair75/75,13 repair mutants and copy-only242-survivor real-library gate qualify at their recorded pins.
-That earlier point-only runtime338/338 and17 runtime mutants qualify (16automatic+one exact manual native-assertion review).
-At that earlier point-only source, affected UI9/9 and required old workflows10/10 passed. The final old-code control widens the dot
-1.918×; current code keeps it round. Root inspected the actual pictures. No held-path helper remains.
-
-At that earlier point-only checkpoint47d7079c, Debug AND Release each5259=5255passed+4known skips,
-zero failures/expected, all method identities/255 classes reconcile. Corrected classes33/33 before and after2 assertion-red faults;
-723 bytes/modes restored, lints/plutil/PBX1317 unique clean. The corrections remove obsolete placement
-and oldest-plus3 expectations only; production and earlier338/17/UI proof remain exact.
-
-- [ ] Qualify whole one-shot repair removalec62d712 and retained permanent owners: fresh250-package preservation,
-      signed6fb install/normal launch and owner “Looks right” confirmation are complete. Preserve
-      permanent maintenance/readiness/current-format validation; finish final qualification/merge.
-
----
-
-## Verify smart document saving and reconcile outstanding asks — 2026-10-23
-
-Owner asks whether the father–grandfather saving scheme was implemented; if not, implement it too.
-Trace the actual retention/save behavior and tests before claiming completion. Audit earlier owner
-requests and queue history for other missing or incorrectly completed tasks, and restore actionable
-ones to TODO before working on them. Previous notes claim age-thinned backup generations and a4GB
-cap; those are evidence to verify, not proof. Continue all actionable work without an unnecessary pause.
-
-Audit confirmed the 44-slot 3/6/24/7/4 schedule, install-burst protection and 4GB cap. The mismatch was
-oldest-per-bucket versus TODO(161)'s newest policy. Owner ruled 2026-10-23 to use the usual newest
-clock-bucket policy, preserving age tiers, pre-save copies, update protection and cap; no oldest exception.
-The correction is integrated but unmerged. Actual standalone retention 14/14 passed, reverse-order
-mutation 8/14 was assertion-red and exact restore 14/14 passed. Integrated retention 14 and backup 21
-also passed in runtime338 at earlier point-only checkpoint47d7079c; Debug/Release each5259
-qualified at that source, not the broader current integration.
-
-The bounded Session47–51 audit found no other concrete dropped actionable ask. The controlled copy-only
-week storage measurement below is qualified; preserved228 backups/522461597 logical bytes alone do not
-measure APFS shared-block cost. Evidence: `~/PaintWork/s52-saving-audit/audit.md`.
-
-The adjacent corrupted-manifest recovery guard is implemented: same-basename fallback accepts exactly
-one backup ID, preserving the live package on ambiguity. Regression and mutation are qualified in the
-repair gate; this safety change is also unmerged.
-
-The declared copy-only APFS workload passed1/1:7 daily reopens×4 real saves,9 retained versions,
-182 encodes/462 reuse operations. Initial RW remount control differed8192bytes and was rejected.
-Three byte-identical retained-image forks then used matched RW cycles and strictly RO measurements;
-both no-op controls agreed16,207,872 bytes, deletion treatment3,645,440, **delta12,562,432 bytes**.
-All24 stable readings/RO remount controls, Library hashes and original hashes qualify; every image
-is detached. Includes APFS/delete metadata; NOT historical iPad or300–1000-cel extrapolation.
-Evidence: `~/PaintWork/s52-saving-audit/week-cost/storage-forks-47d7079c/review.md`.
-
----
-
-## Erasing strokes crashes on iPad — 2026-10-23
-
-Owner: “a crash just happened on the ipad when i was tryiong to erase some strokes.” Test1, no
-Liquify applied; black screen/loading spinner then Home Screen after normal Release bcd7a6af install.
-Preserve the scene/backups. Diagnose the actual eraser/rendering cause before changing production.
-
-Two matching-build system reports are now preserved: October23 at18:47 and23:03 Toronto time.
-Both kill backboardd at1850MiB, with PaintSoftware active and no app kill reason. App memory/peak is
-730.4/922.6MiB in the first and768.0/1248.6MiB in the second; both use installedF6102F9A UUID.
-The owner recalls only one observed failure and cannot identify its time, so neither report is chosen
-as its confirmed match. Allocation origin remains unproved. Existing flights end27–30minutes before
-the earlier event and establish no causal link. New read-only device inventory/copies did not restart,
-launch or install the app. Evidence: `~/PaintWork/s52-erase-crash/device-diagnostics/`.
-
-A separate October24 disk-write diagnostic for the same build reports1.074GB dirtied over8h09,
-**action taken:none**. Matching binary/dSYM symbolication points the dominant captured stack samples
-to FrameBaker/FrameBakeStore; ordinary saves also appear.505samples were lost and sampling covers only
-part of the interval: these are not byte shares, backup physical-storage cost or crash causation.
-Preserve this evidence for measured follow-up; do not speculate a cache/backup fix from it.
-
-Preserved Test1 has 4096², 527 strokes and no material data. Its To Cross eraser is Mode3: successful cuts
-update the canvas base without a scratch preview. **Raw size 7.962 means canvas points, not 7.96% or 326px.**
-Repeated canvas-sized UIImage/CoreAnimation handoff is a hypothesis to test, not a proven cause.
-Mode3 capture1 passed1/1 with3 successful cuts and3 full4096RGBA assignments, footprint854–985MiB;
-root inspected2 pictures. Capture2 stopped before gestures at an added dark-pixel premise. Capture3
-passed1/1 but its temporary clone disappeared before recorder collection, so exact cut/render counts
-are unavailable. Simulator footprint does not prove backboardd behavior. Original scene and source
-hashes are preserved. Evidence: `~/PaintWork/s52-erase-crash/mode3-diagnostic/`.
-
-- [ ] Correct the reproduction premise and trace successful Mode3 cut/image ownership with bounded
-      diagnostics; preserve actual geometry and avoid a speculative production fix.
-- [ ] Establish the allocation cause and reproducing regression, then run the required gates.
-
----
-
-## Mend fill gaps beneath interior brushstrokes; apply across a layer — 2026-10-24
-
-- [ ] **Reproduce and fix the owner's cross-layer Mend Gaps case (November 11).** On the iPad,
-  draw a circle and a short line inside it on one layer, then switch to another layer and Fill
-  inside the circle. The fill leaves the line's footprint uncovered. With Mend Gaps on and Reach
-  sufficient for that line, the same fill must cover beneath it while preserving the circle's
-  outer boundary. Check the installed source and actual tool workflow before assuming a missing
-  feature or building a second mending path. Keep real-time feedback and uncertain joins protected.
-  Cold freehand circle and 6 px mark passed with Reach 12 and Edge Overlap 0 on the iPad 9
-  simulator, including Mend Off/On and target-only pixels. A dense snapped outline reproduced
-  the failure because the work estimate abandoned mending for the whole reference. Candidate
-  `2c26812a` bounds the actual neighbour search within the existing safety budget. All 31 Mend
-  logic tests and five cold UI workflows passed. The installed build still needs this fix.
-
-**Latest scope ruling, 2026-10-25:** “All i know is that the mend gaps stuff is only required for
-vector if that helps.” Kevin says this implementation choice does not require approval and asks us
-to continue while he sleeps. Use current vector brush geometry for interior mending, protect uncertain
-joins and keep fast feedback; unknown flattened content remains conservative. Preserve the existing
-neighbor seam. Do not ask this capability question again.
-
-**Implemented and installed; final performance/merge gates remain.** Shared brush-renderer support
-replaces the tiny-cap path whole. At83380, Fill126, wholeFillMendUI4 and29 deliberate controls qualify;
-root inspected6 actual whole owner-size pictures, including attached/detached/full caps and batch
-Undo/Redo. Outer outline/uncertain joins remain protected. No new raster storage is introduced. Owner reports: “when I fill
-stuff, the fill leaves white in places where brushstrokes were.” An enclosed filled region can contain
-an internal brushstroke whose footprint stays unfilled. Extend the **same Mend Gaps setting** to cover
-those interior stroke-shaped gaps as well as its current behavior. Preserve the actual original outer
-edge: a naive expansion that crosses the fill boundary is explicitly rejected. Reuse the existing fill
-geometry, retained source and mending calculation rather than adding a parallel fill mechanism.
-
-Owner also asks for **a new layer action that applies Mend Gaps to all fills in all cels of that layer**.
-**Owner ruling2026-10-24: include interior strokes attached to the outside outline, while preserving
-the outside edge and avoiding side effects.** The fully-enclosed-components-only restriction is
-rejected; do not silently ship it as full coverage. **Further owner ruling: protect uncertain joins**;
-do not infer the hidden covered outline. Attached stems still mend; ambiguous overlap can remain.
-**Performance requirement:** filling must retain real-time, quick visual feedback. Reuse cached
-preparation and bound any new work; avoid expensive full-image CPU analysis on each interactive tick. Scope illustration: `~/PaintWork/s53-fill-mend/design/connected-stroke-scope.png`.
-
-**Owner ruling2026-10-24: this action is vector layers only.** Raster fills are flattened into paint and
-are not individually identifiable; no raster storage redesign is authorized. The per-fill mending
-correction still uses the shared raster/vector fill pipeline. Use the same setting/semantics as an
-individual fill; inspect existing batch edit/undo/save patterns.
-Core, vector batch and compact shared contours are implemented. Default-Overlap sampling, Reach-after-
-Overlap, refused-rebuild invalidation and exact own-fill reference exclusion are fixed and qualified.
-At265e588e, focused206 passed before/after22 assertion-red faults with exact723-source restoration;
-preserved earlier faults bring distinct qualified recipes to35. Debug AND Release each5278 reconcile.
-Old/new masks match six fixtures×five widths;12 Reach stress cases and fragmented archive gate pass.
-New fill and Mend All Fills cold UI2/2 pass at6bc20170, with owner-size whole-screen pictures inspected.
-Ten other current workflows pass. The corrected full FillMend class passed4/4 at071c7eb2, followed
-an actual visibility assertion-red control, then restored normal4/4;723 files+modes exact and five
-owner-size whole-screen pictures inspected by root. The old driver failures are resolved, not product
-layout defects. Worktree `~/PaintWork/PaintApp-s53-fill-mend` retains the exact earlier evidence.
-
-- [ ] Final integrated regression/performance gates; preserve qualified83380 drawn/control evidence.
-- [ ] Resolve the uncertain inside-press timing difference with paired baseline runs; no device extrapolation.
-      Targeted follow-up `tmp/s54-fill-demand-map` now defers unused exact open-feature work until
-      enabled Reach, retains one map per Structure and invalidates before independent mend writes.
-      Its three normal regressions are included in root's500/500 at59d69f12 (724 files unchanged).
-      Lazy-fill normal regressions and base49 controls are qualified in the dependency; final fast
-      tiers and paired old/lazy Release ABBA still remain. Sixteen earlier paired trials passed, with
-      inside paired median delta+5.1ms; this is simulator evidence, not device timing or attribution.
-- [ ] Qualify permanent startup/gallery readiness after removing the now-owner-confirmed temporary converter.
-      Retire its obsolete old-library converter gate; preserve pre-conversion exports and current-format tests.
-- [ ] Final qualification/merge; current250-package export, signed6fb install/normal launch and owner
-      artwork confirmation are complete. Any further device restart requires fresh saved-scene readiness.
-
----
-
 ## Repository-wide architecture, cleanliness and performance audit — 2026-10-24
 
 **Active, source consolidated; final qualification and file-review gaps remain.** Owner asks for a
@@ -741,17 +613,6 @@ Inventory-only files are not reviewed code. New source is not called complete be
       is larger and no runtime defect is proved. Keep the source triage; the two dead-local
       deletions are harvested alone ate88a25ab. Finish drawn-workflow gates before considering a wider isolation migration.
       No automatic cascade, blanket namespace opt-out, new locks or actor hops.
-- [ ] Finish current-source Tap combined checks. The canonical correction3219c8b4 is integrated;
-      historical logic37 and UI6+benchmark1 passed at75607279, root inspected three pictures,
-      and17 actual mutations exposed23 accepted logic assertions. Release evidence is one benchmark,
-      not a whole tier. Later relevant files changed; current normal/Release gates remain. Do not
-      rerun the historical15-control proposal as though it never executed. Reconciliation:
-      `~/PaintWork/s55-recorded-regressions/menu-card-and-tap-status-20261029.md`.
-- [ ] Qualify source-integrated removalec62d712 of geometry repair and converter-only UI/tests/fixtures/PBX paths: Kevin
-      confirmed current scenes “Looks right” after the preserved250-package export and signed6fb
-      install/normal launch. Keep permanent startup maintenance scheduling, truthful gallery readiness
-      and strict current-model validation. Retire obsolete converter-specific cold-library gates;
-      retain current-format package/startup coverage. Whole source removal and permanent-owner regressions are integrated; native qualification remains pending.
 - [ ] Bake recovery/close: existing baker/store/read demands share one authoritative source and checked
       admission; corrupt/missing/zero-byte derived files recover without permanent retry. Keep final
       headroom refusal and actual unlink failure coverage. Derived cache bytes are separate from source pixels.
@@ -785,16 +646,13 @@ Inventory-only files are not reviewed code. New source is not called complete be
       completion correction passed within normal1cf422/422, zero skips; final35 stream/fit/walk
       controls qualify at their selected mapped assertions; remaining assertion gaps and final-source/UI
       gates stay pending. Windows fake transcripts return synchronized snapshots. Real-link stage5 remains owner-waiting; no deploy.
-- [ ] Bound discovery-name decoding at its existing Windows DnsName.Decode owner. Source72885a50
-      lacks RFC1035's255-octet expanded-name/63-octet-label bound; compressed repeated questions can
-      amplify work despite physical packet checks. Record finite255/256 and compression/Consumed
-      regression before a minimal guard; preserve valid discovery/QU and the existing20jump limit.
-      No giant exhaustion attempt, protocol service/cache/rate limiter or unrelated socket rewrite.
-      Windows old19 completed15pass/4intended refusal failures; root originalTRX reviewf069c555
-      accepts3canonical refusal sites and exactsource/IDs. Native exit capture remains unknown;
-      no green/exit1 claim. Minimal existing Decode correction is source-authorized; normal whole
-      Debug/Release/meaningful controls and exact-child closure remain. Actual attack/latency/RSS
-      is unmeasured; no giant resource test or live malformed packet is needed.
+- [ ] **Qualify bounded Windows discovery on the real host.** Current integrated
+  `526312a3` already rejects DNS names beyond 255 expanded octets or a 63-octet label
+  before allocation, preserving valid compression and QU. Exact production blobs
+  match the earlier isolated DNS/clipboard fixes. Git records prior targeted failure
+  controls and a later 188/188-per-tier isolated Windows run; the old raw TRX is not
+  available. Finish exact Debug/Release, the deliberate refusal controls and the real
+  streaming link on Windows. No native SDK or WPF host exists on this Mac.
 - [ ] Brush/editor: bounded8MiB actual-image preview LRU and keyed row result replace unbounded/unkeyed
       retention. Final823e proof distinguishes exact2 vs2.25 scale within one old rounded bucket and
       checks actual requested600×120 pixels. Shared PaletteColor rejects malformed persisted hex rather
@@ -823,13 +681,6 @@ Inventory-only files are not reviewed code. New source is not called complete be
       claimed; landscape menu-continuity fixture remains separate.
 - [ ] Resolve actual current graph gesture delivery and landscape menu continuity without
       weakening product oracles, then fresh whole-class runs and whole owner pictures.
-- [ ] Current saved text omission/null defaults: source reportb6582fb1/receipt133f2e95 shows a
-      required string can become empty without existing text-damage/save gating. Peer/scope accepted;
-      remove saved required-field fallbacks through existing owners, preserve API defaults/explicit
-      empty/legitimate nils. Current writer equals previousafd; no invented blank repair/schema.
-      Actual previous-writer four-file46680B package provenance and strict-decoder controls are
-      qualified. Temporary capture changes are removed; the original export contains no text.
-      Cold Cancel→Versions→UnsavedRestore and exact displaced Trash bytes remain to qualify.
 - [ ] Graph/capacity: shared resolved-destination/net-child admission is integrated at8e80; actual155
       normal and original42 deliberately broken contracts qualify. Capacity24follow-on qualifies all41 further contracts; public cold6ef
       remains open and four further outcome limits stay recorded. Keep proper-descendant semantics and
@@ -838,15 +689,58 @@ Inventory-only files are not reviewed code. New source is not called complete be
       13safecontrols; exact root harvests retain original CPU/oracles/tolerances/global flags. Curve
       narrowing8272 passed94/94+6safecontrols and is harvested868. Final assembled Release/cold UI/
       paired output-verified cost remain; no unsafe old cast or Test1-cause claim.
-- [ ] Correct confirmed affine-gradient colour-field transport through existing transformed(by:).
-      Actual9dd native Freeform/independentCTM mismatch39 exceeds predeclared2; all other outcomes/
-      premises pass, rootLOOK2. Retain two points/API/schema, ordinary/singular/coincident contracts
-      and separate projective/lattice approximation. Commit, meaningful controls and public drawn
-      stretch/Undo/Redo/whole class before qualification; no new gradient subsystem.
 - [ ] Finish file-level/independent review, new affected zero-skip baseline, actual assertion mutants,
       exact final fast Debug/Release, lints/PBX/graph, cold workflows/pictures and paired performance.
       Then fresh owner save/unlock/export, signed clean Release/device checks and actual eraser cause.
       Owner now permits review installs at agent discretion; preservation/signing/actualdevice gates remain.
+
+---
+
+## How to read and keep this file
+
+Every item is a **status**, a short **description** a future session can pick up cold, and **what is
+left** as a checklist. Items are in **queue order** — the top of the list is what to do next.
+
+**An item leaves this file when it is merged, not when a branch exists**, and it leaves *whole* rather
+than being marked done: `git log` and the spec documents are the history. The owner, 2026-09-06:
+*"Basically I want to be able to read the tasks on TODO clearly without already finished tasks."*
+
+**Three in flight at once** unless the extras need no simulator — the cap is about the machine, not the
+plan (`tools/simlock.sh`).
+
+**Before adding an item, check whether an existing one already covers it in different words.** A
+restatement filed as a new item is how one feature came to be specified in six documents at three
+scopes before a line of it was written. This file has since carried two live duplicates for weeks.
+
+**Record an ask in the owner's own words, and fold a ruling into the item it rules on.** A quote is
+cheaper to keep than a decision is to rebuild. But an item reads as *one current description*, not as
+the transcript of the argument that produced it — what happened this pass belongs in
+[HANDOFF.md](HANDOFF.md) and in `git log`.
+
+**Cite a symbol, not a line number.** A 2026-09-06 audit found ~10 of one item's 15 `FILE:LINE`
+citations and 5 of another's 11 no longer resolved — every named fact still true, every anchor wrong,
+two of them because a file moved directory. A symbol name survives a refactor and a line does not.
+
+**A bare item number in a spec or a code comment may name an item that has already left this file.**
+That is the merge rule working, not a dangling reference: `git log` and the spec documents are where a
+completed number resolves. Two are cited often enough to name here — **(10a)**, the Oklab colour ramps,
+and **(38)**, the graph editor's bezier tangent handles and their tap grammar. Do not re-add a finished
+item to this file to make a citation resolve.
+
+**Verify a status before trusting it, including this file's own.** That same audit found fourteen
+assertions here that the code contradicted — features called unbuilt that shipped weeks ago, a blocker
+called live that had lifted, and two commit shas that are not on `main`.
+
+**Old files are repaired once, never read forever.** The owner, 2026-10-10, retiring the earlier "no
+document has to survive" permission now that real scenes live in the app: *"I will still keep the rule of
+no legacy code. If an update causes existing files to be outdated, then they should be automatically
+repaired by a throwaway script the session makes."* So a format change ships with a **one-shot repair**
+that rewrites the owner's existing files (Projects, Backups, Trash) to the new format at launch, and the
+app's decoder knows only the current format. The repair is deleted, whole, once the owner confirms
+their files are repaired. Build `2974b33` broke this rule and lost the owner's keys (TODO (153)).
+
+**The measurement baseline is [PERFORMANCE.md](PERFORMANCE.md) §1, not here**: the owner works at
+2048x1024, and every figure taken before 2026-08-17 was at 4096², eight times the pixels.
 
 ---
 
@@ -974,61 +868,3 @@ against a transcript this audit does not have.
 - **The raster Move's undo half.** `finalizePendingGesturesForHistoryAction` has fill, shape and text
   arms and no raster-float arm.
 - **Freeform text's minimum-size exemption** is still unruled.
-
-**Recording-cost audit follow-up — source hypothesis, October29:** raw input-rate history is an
-explicit recording requirement; linear sample retention alone is not a bug. The current scalar and
-Move-box capture methods copy the `RecordingTake` value, mutate its dictionaries/arrays and write it
-back, which may force a full sample-buffer copy per event. Investigate actual backing-buffer changes
-at unchanged capacity with the existing injected clock before any optimization. Preserve source-rate
-capture, timestamps, eight pose channels, rotation unwrapping and target/stop ownership; no frame-rate
-downsampling, new cache/counter/service or latency/crash attribution without evidence.
-
-**Fresh owner readiness and stream timing, October28 evening:** owner confirms current work saved
-and iPad unlocked NOW, authorizing restart/export of affected Test through installed PaintApp's
-existing ProjectExport. Prioritize this unlocked window; no install/build is requested by this
-readiness. Owner clarifies streamed picture separates after release or Set Down, matching the
-prepared placement-correction timing. Record export provenance and preserve all originals.
-
-**Conditional OnTop Move handoff, October28:** source trace finds a mixed-lifetime risk, not yet a
-measured visible failure. Successful vector Move commit holds the already-shown float together with
-its OnTop stream surface; the vector base can land without that stream, retire the held picture by
-revision, and precede the next host surface's successful draw. Add one cold public OnTop Move-to-Brush
-continuity witness using the existing 5000 ms window-draw seam and normal vector rendering. Keep In
-Place's global composite ownership unchanged. No runtime lifetime change until the witness proves a
-gap; then reuse the surface's existing presentation completion/ownership boundary rather than a
-global acknowledgement cache.
-
-**On Top reference handoff boundary — October29:** source tracing shows the new held Move group
-contains both vector ink and frozen On Top stream windows, while its retirement currently follows
-the reference-free ink base alone. A fresh host stream surface may still be drawing when that base
-lands. In Place has its own retained global display and is outside this path. Add one cold existing-
-stream-helper witness with a fixed5000ms window draw seam and normal vector base; require real red
-pixels at the moved hull before tool exit, capture every phase before asserting, and require final
-green. No periodic fake-frame loop. The test-only source373 is prepared/unrun; no new runtime fix or
-global acknowledgement state before actual evidence. Prefer retaining each original window's front
-through its existing presentation completion rather than mixing two retirement lifetimes.
-
-**Current qualification snapshot — October29, integration `0d4b2b3e`.** The recording four-path
-harvest is integrated; Debug75/Release75, two intended copy controls, and `RecordingUITests` 4/4
-passed at their component pins, with both landscape captures reviewed. Stream placement and Move-exit
-corrections are integrated; `StreamPlacementUITests` 9/9 and the normal1 rebuild passed at the
-recorded component pin. Assembled-source and device confirmation remain for both.
-
-The private Export/Resize/Gradient candidate `219790247dc684df1ec1182a7a45c0c2cd3daa95` has a
-strict731-source baseline of179/179 and nine root-reviewed pictures. Controls1–6 have been reviewed;
-the remaining eight controls are active under the root native lease. No harvest or assembled-green
-claim yet. Follow the live lease and grant files; do not repeat completed component gates.
-
-The fresh Test diagnostic is being repinned after source494. Until the root updates it, use
-`/Users/juliapark/PaintWork/s54-final-qualification/root-next-gates.json` as the locator for the
-current diagnostic map; do not freeze an older diagnostic pin as latest. Keep the fresh Test and older
-Test1 inputs immutable and preserve the copy-flight evidence before teardown. Test1/Mode3 physical
-cause remains unproved and needs fresh readiness.
-
-The historical Mend-cap result is superseded by the connected-stroke/Mend All Fills work. Exact
-canonical square-hole verification remains pending; do not credit the older cap pictures as proof of
-that case. Disk maintenance recovered3.116GB with12,578 archived app-data entries preserved.
-
-October29 source cleanup: ordered image history leaves approximateImageCost with only a benchmark
-caller. Retire that production helper and stale comments; its finite cropped-RGBA fixture uses the
-existing checked pixel byte count/addition directly. Existing PerfBaseline/final fast gates pending.

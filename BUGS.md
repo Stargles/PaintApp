@@ -1091,28 +1091,6 @@ that breaks it is the one they said they would accept: canvas size.
 Raising the ring budget is the obvious lever and is a memory decision on a 3 GB device — 274 MB of
 ring for two 6000² frames — so it is filed rather than taken.
 
-## A *derived* cel's thumbnail still renders at canvas size (2026-09-08)
-
-The debounced thumbnail regen's own half of this is fixed: `PixelOps.rasterizeUncached` now asks the
-vector tier for a picture at the resolution of the buffer it is filling
-(`VectorCanvas.Frozen.render(quality:fittingInto:)`), so a 480-point thumbnail box no longer draws a
-6000-point intermediate — PERFORMANCE.md §11.11c has the table.
-
-**The other branch of that same line is untouched.** `cel.derived?.render(quality)` renders at canvas
-size always, so a thumbnail of an **interpolated in-between, a posed cel, or a cel holding video**
-still costs the canvas on the main thread, 400 ms after every stroke and every undo on that cel.
-
-`DerivedCelContent.render` is `(RenderQuality) -> UIImage?` and its own doc says why it takes no
-*size*: derived geometry is in canvas coordinates, so a smaller render would **clip** rather than
-scale. A *resolution* does not clip — it is the raster's scale, not the drawing's — so the same fix is
-available. Two of the three thunks that mint one end in `VectorCanvas(…).render(quality:)`
-(`TransformChannel.posedCelContent` and the video arm of `CanvasManager+Interpolation`) and are one
-argument each; the third goes through `InterpolationEvaluator.render(recipe:at:size:…)`, which renders
-two canvases and blends them, and is not.
-
-Reached only by a document using interpolation, keyframes or video, which is why it did not fire on
-the `Test1` trace that opened this.
-
 ## A cel's own pose channel still rasterizes a posed picture on the main thread every frame (2026-09-06)
 
 **MEASURED at 73.6 ms a frame, a 13.6 fps ceiling, on a 2048² document of 63 strokes** —

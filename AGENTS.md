@@ -40,6 +40,13 @@ own branch, so `main`'s HANDOFF.md can be behind.
   both after every merge. A session can end at any moment; conversation-only tasks are lost.
 - **His usage budget is set per session** (how many agents, which models). Ask if it was not stated;
   put cheap models on mechanical work.
+  Set model and effort explicitly for routine delegation. Use a low-cost model at low
+  effort for known test commands, log checks and simple record reconciliation. Use Sol
+  low/medium for scoped implementation and review. Raise effort only for the specific
+  problem that needs it; never inherit Ultra across the queue by default.
+  Minimize total calls as well as model cost. Give an agent one coherent task through
+  verification. Handle routine checks directly when a handoff would cost more, and avoid
+  extra reviewer agents unless a specific unresolved risk warrants independent review.
   For new subtasks, spawn fresh agents with short briefs. Restarting a finished agent replays its
   old context and costs usage. Send active agents only updates that affect their current task.
   The root agent acts as project manager: delegate investigation, implementation and focused
