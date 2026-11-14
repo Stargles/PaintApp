@@ -85,11 +85,14 @@ final class ColourMaskUITests: PaintUITestCase {
                     y: canvas.frame.minY + canvas.frame.height * point.dy)
         }
         let held = samplesDuring(points, "New masked stroke held on screen") {
+            // Keep drawing past the outer probe long enough for a screen sample before lift.
+            // Parking the finger changes the freehand stroke into an editable line.
             canvas.coordinate(withNormalizedOffset: onHost(paper, 0.08, 0.35))
                 .press(forDuration: 0.05,
-                       thenDragTo: canvas.coordinate(withNormalizedOffset: onHost(paper, 0.45, 0.35)),
-                       withVelocity: .slow, thenHoldForDuration: 6)
+                       thenDragTo: canvas.coordinate(withNormalizedOffset: onHost(paper, 0.80, 0.35)),
+                       withVelocity: XCUIGestureVelocity(75), thenHoldForDuration: 0)
         }
+        XCTAssertEqual(readField(app, "shape:"), "none", "The gesture stayed an ordinary brush stroke")
         XCTAssertTrue(held.contains { sample in
             guard sample.pixels.count == 2, let inner = sample.pixels[0], let outer = sample.pixels[1]
             else { return false }
