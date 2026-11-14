@@ -225,6 +225,7 @@ final class FillFootprintBench: XCTestCase {
         vectors.compactMap { $0.elements.first?.fill?.pathData }
     }
 
+    @MainActor
     private func warmBatchMendEngine() async throws -> Bool {
         let fixture = try batchMendFixture(celCount: 3)
         try attachBatchMendPicture(fixture.vectors[0], name: "mend-all-before")
@@ -240,6 +241,7 @@ final class FillFootprintBench: XCTestCase {
 
     /// A deliberately light, explicit scene: one 72² canonical vector line-art reference and one
     /// small fill with a detached and an attached gap in each target cel.
+    @MainActor
     private func batchMendFixture(celCount: Int) throws -> BatchMendFixture {
         _ = try XCTUnwrap(MetalFillEngine.shared, "the shared Metal fill engine is required")
         let size = CGSize(width: 72, height: 72)
@@ -459,6 +461,7 @@ final class FillFootprintBench: XCTestCase {
         }
     }
 
+    @MainActor
     func testOptInMendAllCostsAndAtomicAdmissionAtThreeHundredAndOneThousandCels() async throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["PAINTAPP_BENCH"] == "1",
                           "explicit batch Mend All cost and footprint run")
