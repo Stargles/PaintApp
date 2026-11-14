@@ -83,7 +83,9 @@ final class GalleryRecoveryUITests: PaintUITestCase {
         XCTAssertTrue(sheet.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Mix Recovery B"].waitForExistence(timeout: 5),
                       "B’s displaced damaged package is still listed in Recently Deleted")
-        XCTAssertFalse(app.staticTexts["Mix Recovery A"].exists)
+        let trashRestores = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "gallery.trashRestore."))
+        XCTAssertEqual(trashRestores.count, 1, "Only B was moved to Recently Deleted")
         attachScreenshot(XCUIScreen.main, "mix-recovery-03-B-displaced-in-trash")
     }
 
