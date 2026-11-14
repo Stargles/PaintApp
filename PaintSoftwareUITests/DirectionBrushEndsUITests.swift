@@ -30,6 +30,72 @@ final class DirectionBrushEndsUITests: PaintUITestCase {
         try drawAHookedStroke(onARasterLayer: true)
     }
 
+    func testSyntheticStrokeLandsInPortrait() throws {
+        try assertSyntheticStrokePlacement(in: .portrait, named: "portrait")
+    }
+
+    func testSyntheticStrokeLandsInLandscapeLeft() throws {
+        try assertSyntheticStrokePlacement(in: .landscapeLeft, named: "landscape-left")
+    }
+
+    func testSyntheticStrokeLandsInLandscapeRight() throws {
+        try assertSyntheticStrokePlacement(in: .landscapeRight, named: "landscape-right")
+    }
+
+    /// Pin the shared synthetic touch route to the displayed pixels. A long horizontal run,
+    /// a short descent and a diagonal turn each leave ink where the finger passed.
+    private func assertSyntheticStrokePlacement(in orientation: UIDeviceOrientation, named name: String) throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: orientation))
+        let window = app.windows.firstMatch.frame
+        XCTAssertEqual(window.width > window.height, orientation.isLandscape)
+        XCTAssertEqual(XCUIDevice.shared.orientation, orientation)
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        openBrushLibrary(app)
+        let brush = app.buttons["brushPanel.brush.Opaque Round"]
+        tapWhenHittable(brush, "Opaque Round")
+        XCTAssertTrue(brush.isSelected)
+        tapAway(app)
+
+        let host = canvas.frame
+        let paper = visiblePaperRect(app, in: canvas)
+        let corners = [(0.27, 0.24), (0.65, 0.24), (0.65, 0.48), (0.57, 0.60)]
+        let points = zip(corners, corners.dropFirst()).flatMap { segment in
+            (0..<24).map { step in
+                let t = Double(step) / 24
+                let ((x0, y0), (x1, y1)) = segment
+                return onHost(paper, x0 + t * (x1 - x0), y0 + t * (y1 - y0))
+            }
+        } + [onHost(paper, 0.57, 0.60)]
+        let checkpoints = stride(from: 0, to: points.count, by: 3).map { points[$0] }
+        let clear = [(0.27, 0.48), (0.46, 0.42), (0.65, 0.60), (0.57, 0.70)].map {
+            onHost(paper, $0.0, $0.1)
+        }
+        let before = try pixelProbe(canvas)
+        XCTAssertTrue((checkpoints + clear).allSatisfy { isWhitish(before($0.dx, $0.dy)) },
+                      "The intended path and the surrounding control points start on blank paper")
+
+        try fingerStroke(through: points.map { logicalAppPoint(in: host, normalizedOffset: $0) })
+        _ = waitUntil(canvas, points[12], isInk, timeout: 5)
+        attachScreenshot(XCUIScreen.main, "synthetic-stroke-\(name)")
+
+        let after = try pixelProbe(canvas)
+        let offsets: [CGFloat] = [-4, 0, 4]
+        let misses = checkpoints.enumerated().compactMap { index, point in
+            let inkNearPoint = offsets.contains { x in
+                offsets.contains { y in
+                    isInk(after(point.dx + x / host.width, point.dy + y / host.height))
+                }
+            }
+            return inkNearPoint ? nil : index
+        }
+        XCTAssertTrue(misses.isEmpty, "Missing ink along the intended stroke in \(name) at checkpoints \(misses)")
+        XCTAssertTrue(clear.allSatisfy { isWhitish(after($0.dx, $0.dy)) },
+                      "Paper beside the horizontal run and hook stays clear in \(name)")
+    }
+
     private func drawAHookedStroke(onARasterLayer raster: Bool) throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
