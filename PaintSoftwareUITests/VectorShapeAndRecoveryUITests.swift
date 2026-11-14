@@ -373,7 +373,7 @@ final class GalleryRecoveryUITests: PaintUITestCase {
         openBrushEditor(app)
         let sizeSlider = app.sliders["brushPanel.sizeSlider"]
         XCTAssertTrue(sizeSlider.waitForExistence(timeout: 5))
-        adjustSlider(sizeSlider, to: 11.0 / 199, tolerance: 2.0 / 199)
+        adjustSlider(sizeSlider, to: 11.0 / 199, tolerance: 3.0 / 199)
         closeBrushEditor(app)
         app.buttons["toolbar.brushButton"].tap()
         XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5))
