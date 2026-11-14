@@ -17,6 +17,114 @@ import XCTest
 /// these classes for runtime, move the fast tests around them, not these.
 final class GalleryRecoveryUITests: PaintUITestCase {
 
+    /// Selected on a fresh, disposable simulator by the host staging script. Save through the
+    /// editor so the cold tests receive actual current-writer Projects and Backups.
+    func testSaveMixRecoveryPackagePair() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["PAINTAPP_MIX_RECOVERY_COLD_UI"] == "seed",
+                          "Requires a fresh owned simulator for the Mix recovery fixture")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertEqual(rotateDevice(app, to: .landscapeLeft).size, CGSize(width: 1080, height: 810))
+
+        for (name, mode) in [("Mix Recovery A", "screen"), ("Mix Recovery B", "multiply")] {
+            XCTAssertTrue(openNewCanvas(app))
+            let title = app.textFields["timeline.projectNameField"]
+            title.tap()
+            title.typeText("\(name)\n")
+            XCTAssertEqual(title.value as? String, name)
+            let canvas = app.otherElements["canvas.host"]
+            XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+            let paper = paperRect(in: canvas)
+            let start = onHost(paper, 0.35, 0.32), end = onHost(paper, 0.65, 0.32)
+            dragOnCanvas(app, from: start, to: end)
+            openLayerPanel(app)
+            XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1)
+
+            addMixNodeFromAddMenu(app)
+            let mixRow = app.staticTexts["layerPanel.folder.Mix 1"]
+            XCTAssertTrue(mixRow.waitForExistence(timeout: 5))
+            dragRow(layerCell(app, layerIndex: 0), onto: folderCell(app, named: "Mix 1"), dropDY: 0.5)
+            XCTAssertEqual(app.otherElements["layerPanel.row.0.compositor"].value as? String, "input,0")
+            app.buttons["layerPanel.folder.Mix 1.options"].tap()
+            app.buttons["layerOptions.mixModeButton"].tap()
+            app.buttons["layerOptions.mixMode.\(mode)"].tap()
+            XCTAssertEqual(app.otherElements["layerPanel.folder.Mix 1.compositor"].value as? String, "node,\(mode)")
+            app.buttons["layerOptions.close"].tap()
+            app.buttons["toolbar.layersButton"].tap()
+            saveEditorAndReturnToGallery(app, named: name)
+        }
+        app.terminate()
+    }
+
+    /// Both live projects have the same invalid current Mix mode. Only B has a valid version.
+    func testMalformedMixWithoutBackupStaysDamagedAndDisplacedMixIsListedInTrash() throws {
+        let app = try launchColdMixRecoveryGallery()
+        let a = app.staticTexts["Mix Recovery A"]
+        XCTAssertTrue(a.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Mix Recovery B"].exists)
+        attachScreenshot(XCUIScreen.main, "mix-recovery-01-cold-gallery")
+        XCTAssertEqual(app.staticTexts.matching(identifier: "Damaged — tap to recover").count, 1,
+                       "Only A should remain damaged after the cold backup sweep")
+
+        a.tap()
+        let noBackup = app.alerts["No Backup Available"]
+        XCTAssertTrue(noBackup.waitForExistence(timeout: 10),
+                      "A must show the recovery refusal instead of opening as a plain folder")
+        XCTAssertTrue(noBackup.staticTexts[
+            "This project is damaged and no intact backup of it exists to restore from."].exists)
+        XCTAssertFalse(app.staticTexts["timeline.frameLabel"].exists)
+        attachScreenshot(XCUIScreen.main, "mix-recovery-02-A-no-backup")
+        noBackup.buttons["OK"].tap()
+        XCTAssertTrue(a.waitForExistence(timeout: 5))
+
+        app.buttons["gallery.recentlyDeletedButton"].tap()
+        let sheet = app.navigationBars["Recently Deleted"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Mix Recovery B"].waitForExistence(timeout: 5),
+                      "B’s displaced damaged package is still listed in Recently Deleted")
+        XCTAssertFalse(app.staticTexts["Mix Recovery A"].exists)
+        attachScreenshot(XCUIScreen.main, "mix-recovery-03-B-displaced-in-trash")
+    }
+
+    func testMalformedMixWithBackupReopensWithItsMultiplyNode() throws {
+        let app = try launchColdMixRecoveryGallery()
+        let b = app.staticTexts["Mix Recovery B"]
+        XCTAssertTrue(b.waitForExistence(timeout: 10))
+        b.tap()
+        XCTAssertTrue(app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 15),
+                      "The restored project opens from its ordinary Gallery tile")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = paperRect(in: canvas)
+        let core = onHost(paper, 0.50, 0.32)
+        let bare = onHost(paper, 0.50, 0.27)
+        let visible = visiblePaperRect(app, in: canvas)
+        XCTAssertTrue(visible.contains(CGPoint(x: core.dx, y: core.dy))
+                      && visible.contains(CGPoint(x: bare.dx, y: bare.dy)))
+        XCTAssertTrue(waitUntil(canvas, core, isInk), "The backup’s saved stroke appears on the paper")
+        XCTAssertTrue(waitUntil(canvas, bare, isWhitish), "The paper above the stroke is bare")
+        attachScreenshot(XCUIScreen.main, "mix-recovery-04-B-recovered-ink")
+
+        openLayerPanel(app)
+        let node = app.otherElements["layerPanel.folder.Mix 1.compositor"]
+        attachScreenshot(XCUIScreen.main, "mix-recovery-05-B-recovered-mix")
+        XCTAssertTrue(node.waitForExistence(timeout: 5), "Recovered B exposes a Mix node rather than a plain folder")
+        XCTAssertEqual(node.value as? String, "node,multiply", "The Mix row still exposes Multiply")
+        XCTAssertEqual(app.otherElements["layerPanel.row.0.compositor"].value as? String, "input,0")
+    }
+
+    private func launchColdMixRecoveryGallery() throws -> XCUIApplication {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["PAINTAPP_MIX_RECOVERY_COLD_UI"] == "recovery",
+                          "Requires externally staged malformed current-writer Mix packages")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertEqual(rotateDevice(app, to: .landscapeLeft).size, CGSize(width: 1080, height: 810))
+        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 15))
+        return app
+    }
+
     /// The critical safety net: a project damaged by an update/crash must come back on its own.
     /// Saves a project with drawn ink, then relaunches with `-simulateProjectCorruption` — the launch
     /// hook corrupts a real saved recent-colour field while leaving the JSON shape intact. This
