@@ -57,7 +57,8 @@ final class DirectionBrushEndsUITests: PaintUITestCase {
         let brush = app.buttons["brushPanel.brush.Opaque Round"]
         tapWhenHittable(brush, "Opaque Round")
         XCTAssertTrue(brush.isSelected)
-        tapAway(app)
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5))
 
         let host = canvas.frame
         let paper = visiblePaperRect(app, in: canvas)
@@ -110,7 +111,8 @@ final class DirectionBrushEndsUITests: PaintUITestCase {
         XCTAssertTrue(square.isSelected, "PREMISE: Square is the brush in hand")
         // Wide enough that a dab turned off the stroke is tall against the pixel grid.
         setBrushSize(app, normalized: 0.3)
-        tapAway(app)
+        app.buttons["toolbar.brushButton"].tap()
+        XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5))
 
         // **Every coordinate below is screen points on the paper**, for `KeepStrokeWidthUITests`' reason:
         // the paper is letterboxed in a black host and a darkness probe reads the letterbox as ink.
