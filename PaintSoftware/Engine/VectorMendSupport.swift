@@ -233,6 +233,36 @@ enum VectorMendSupport {
             return (low.map { s >= $0 - halo } ?? true)
                 && (high.map { s <= $0 + halo } ?? true)
         }
+
+        /// A horizontal span intersects a projected strip in a single interval. Search the
+        /// transitions using the same projection as contains, including rounding at its edges.
+        func clip(_ row: Range<Int>, width: Int, halo: CGFloat = 0, meter: inout Meter) throws(Failure) -> Range<Int> {
+            guard let axis, !row.isEmpty else { return row }
+            let descending = axis.x < 0
+            let from = descending ? high : low
+            let to = descending ? low : high
+            func firstIndex(in indices: Range<Int>, where predicate: (CGFloat) -> Bool,
+                            meter: inout Meter) throws(Failure) -> Int {
+                var low = indices.lowerBound, high = indices.upperBound
+                while low < high {
+                    try meter.visit(1)
+                    let mid = low + (high - low) / 2
+                    if predicate(dot(pixelCenter(mid, width: width), axis)) { high = mid }
+                    else { low = mid + 1 }
+                }
+                return low
+            }
+            var start = row.lowerBound, end = row.upperBound
+            if let from {
+                let bound = descending ? from + halo : from - halo
+                start = try firstIndex(in: row, where: { descending ? $0 <= bound : $0 >= bound }, meter: &meter)
+            }
+            if let to {
+                let bound = descending ? to - halo : to + halo
+                end = try firstIndex(in: start..<end, where: { descending ? $0 < bound : $0 > bound }, meter: &meter)
+            }
+            return start..<end
+        }
     }
 
     private struct Address { let group: Int, dab: Int }
@@ -535,10 +565,136 @@ enum VectorMendSupport {
         return first..<max(first, end)
     }
 
+    /// The exact union of clipped dab rows. A word handles up to 64 adjacent cells, so
+    /// overlap, insertion and cleanup are bounded by the rows the certificate actually visits.
+    private struct SupportRows {
+        let width: Int
+        let stride: Int
+        var words: [UInt64]
+
+        init(width: Int, height: Int, meter: inout Meter) throws(Failure) {
+            self.width = width
+            stride = (width + 63) / 64
+            let count = stride * height
+            try meter.retainArray(UInt64.self, count: count)
+            try meter.visit(count)
+            words = [UInt64](repeating: 0, count: count)
+            try meter.checkCapacity(words, chargedCount: count)
+        }
+
+        private func wordIndices(_ row: Range<Int>) -> ClosedRange<Int> {
+            let y = row.lowerBound / width
+            let x = row.lowerBound % width
+            return (y * stride + (x >> 6))...(y * stride + ((x + row.count - 1) >> 6))
+        }
+
+        private func mask(_ index: Int, in row: Range<Int>) -> UInt64 {
+            let wordX = (index % stride) << 6
+            let lower = max(0, (row.lowerBound % width) - wordX)
+            let upper = min(64, (row.lowerBound % width) + row.count - wordX)
+            return (UInt64.max << lower) & (UInt64.max >> (64 - upper))
+        }
+
+        mutating func insert(_ row: Range<Int>, meter: inout Meter) throws(Failure) -> Bool {
+            guard !row.isEmpty else { return false }
+            let indices = wordIndices(row)
+            try meter.visit(indices.count)
+            var changed = false
+            for index in indices {
+                let before = words[index]
+                words[index] |= mask(index, in: row)
+                changed = changed || words[index] != before
+            }
+            return changed
+        }
+
+        func intersects(_ row: Range<Int>, meter: inout Meter) throws(Failure) -> Bool {
+            guard !row.isEmpty else { return false }
+            let indices = wordIndices(row)
+            try meter.visit(indices.count)
+            for index in indices where words[index] & mask(index, in: row) != 0 { return true }
+            return false
+        }
+
+        func touches(_ row: Range<Int>, height: Int, meter: inout Meter) throws(Failure) -> Bool {
+            guard !row.isEmpty else { return false }
+            let y = row.lowerBound / width, offset = row.lowerBound % width
+            let left = max(0, offset - 1), right = min(width, offset + row.count + 1)
+            for otherY in max(0, y - 1)...min(height - 1, y + 1) {
+                let start = otherY * width
+                if try intersects((start + left)..<(start + right), meter: &meter) { return true }
+            }
+            return false
+        }
+
+        mutating func clear(_ box: CGRect, meter: inout Meter) throws(Failure) {
+            let first = Int(box.minX) >> 6, last = (Int(box.maxX) - 1) >> 6
+            try meter.visit(last - first + 1, times: Int(box.height))
+            for y in Int(box.minY)..<Int(box.maxY) {
+                let base = y * stride
+                for x in first...last { words[base + x] = 0 }
+            }
+        }
+
+        /// A contact word has core support or an 8-neighbour of core support. Halo
+        /// members may carry ink; all other boundary cells must be open and SOURCE.
+        func forEachContact(in box: CGRect, chart: Chart, height: Int, meter: inout Meter,
+                            _ body: (Contact) -> Void) throws(Failure) {
+            let firstX = Int(box.minX) >> 6, lastX = (Int(box.maxX) - 1) >> 6
+            let firstY = Int(box.minY), lastY = Int(box.maxY) - 1
+            func coreWord(x: Int, y: Int, meter: inout Meter) throws(Failure) -> UInt64 {
+                guard x >= 0, x < stride, y >= 0, y < height else { return 0 }
+                try meter.visit(1)
+                let value = words[y * stride + x]
+                guard value != 0 else { return 0 }
+                let row = y * width
+                let wordX = x << 6
+                let domain = (row + wordX)..<(row + min(width, wordX + 64))
+                let clipped = try chart.clip(domain, width: width, meter: &meter)
+                return clipped.isEmpty ? 0 : value & mask(y * stride + x, in: clipped)
+            }
+            for y in firstY...lastY {
+                // Rolling OR of the three rows around y. Adjacent words supply the
+                // two carry bits for the horizontal dilation.
+                func vertical(_ x: Int, meter: inout Meter) throws(Failure) -> UInt64 {
+                    let middle = try coreWord(x: x, y: y, meter: &meter)
+                    let above = try coreWord(x: x, y: y - 1, meter: &meter)
+                    let below = try coreWord(x: x, y: y + 1, meter: &meter)
+                    return middle | above | below
+                }
+                var current: UInt64 = 0
+                var next = try vertical(firstX, meter: &meter)
+                for x in firstX...lastX {
+                    let previous = current
+                    current = next
+                    next = try vertical(x + 1, meter: &meter)
+                    let first = x << 6
+                    let valid = UInt64.max >> max(0, first + 64 - width)
+                    let dilated = (current | (current << 1) | (current >> 1)
+                        | (previous >> 63) | (next << 63)) & valid
+                    var required = dilated & ~words[y * stride + x]
+                    var remaining = dilated
+                    while remaining != 0 {
+                        try meter.visit(1)
+                        let low = remaining.trailingZeroBitCount
+                        let isOpen = required & (1 << low) != 0
+                        let role = (isOpen ? required : remaining & ~required) >> low
+                        let length = (~role).trailingZeroBitCount
+                        let run = (UInt64.max >> (64 - length)) << low
+                        let start = UInt32(y * width + first + low) | (isOpen ? Contact.openBit : 0)
+                        body(Contact(start: start, count: UInt32(length)))
+                        remaining &= ~run
+                        required &= ~run
+                    }
+                }
+            }
+        }
+    }
+
     private static func certify(_ captured: [Captured], addresses: [Address], spans: [Span],
                                 unknownCoverage: [Span], width: Int, height: Int,
                                 patches: inout [Patch], contacts: inout [Contact],
-                                support: inout [UInt8], meter: inout Meter,
+                                meter: inout Meter,
                                 isCurrent: () -> Bool) throws(Failure) {
         try meter.retainArray(Trace?.self, count: captured.count)
         var traces: [Trace?] = []; traces.reserveCapacity(captured.count)
@@ -548,9 +704,8 @@ enum VectorMendSupport {
         try meter.retainArray(CGRect.self, count: entryCount)
         try meter.retainArray(UInt32.self, count: entryCount)
         try meter.retainArray(UInt32.self, count: addresses.count)
-        try meter.retainArray(Int.self, count: addresses.count)
         var bounds: [CGRect] = []; bounds.reserveCapacity(entryCount)
-        let index = StrokeSpatialIndex()
+        let index = StrokeSpatialIndex(cellSize: 16)
         for patch in patches {
             try meter.visit(Int(patch.spanCount))
             bounds.append(spanBounds(spans[Int(patch.spanStart)..<Int(patch.spanStart + patch.spanCount)], width: width))
@@ -569,23 +724,18 @@ enum VectorMendSupport {
         }
         var seen = [UInt32](repeating: 0, count: entryCount)
         var included = [UInt32](repeating: 0, count: addresses.count)
-        var queue: [Int] = []; queue.reserveCapacity(addresses.count)
         var queryToken: UInt32 = 0
         try meter.retain(1, stride: 128) // memo header + capacity rounding, before first insertion
         var memo: [GroupPair: Int8] = [:]
         // Contacts start empty with one prepaid container allowance. Paid slots, rather than
         // allocator capacity or logical count, own each amortized reservation below.
         var paidContactCapacity = 0
+        var members = try SupportRows(width: width, height: height, meter: &meter)
         var dirty = CGRect.null
         for target in addresses.indices {
             guard isCurrent() else { throw .cancelled }
-            if !dirty.isNull {
-                try meter.visit(Int(dirty.width), times: Int(dirty.height))
-                for y in Int(dirty.minY)..<Int(dirty.maxY) {
-                    for x in Int(dirty.minX)..<Int(dirty.maxX) { support[y * width + x] = 0 }
-                }
-            }
-            dirty = .null; queue.removeAll(keepingCapacity: true)
+            if !dirty.isNull { try members.clear(dirty, meter: &meter) }
+            dirty = .null
             let token = UInt32(target + 1)
             let address = addresses[target], old = patches[target]
             let targetSpans = spans[Int(old.spanStart)..<Int(old.spanStart + old.spanCount)]
@@ -596,24 +746,36 @@ enum VectorMendSupport {
             let halo = chart.axis.map { 2 * (abs($0.x) + abs($0.y)) } ?? 0
             // Every component of C seeds the same support queue. An admitted neighbouring bound
             // contributes its entire intersection with the strip/halo, not just the overlap found.
-            func include(_ candidate: Int, meter: inout Meter) throws(Failure) {
+            func include(_ candidate: Int, meter: inout Meter) throws(Failure) -> Bool {
                 included[candidate] = token
                 let patch = patches[candidate]
+                var minX = width, maxX = 0, minY = height, maxY = 0
+                var changed = false
                 for span in spans[Int(patch.spanStart)..<Int(patch.spanStart + patch.spanCount)] {
-                    try meter.visit(Int(span.count))
-                    for i in Int(span.start)..<Int(span.start + span.count) {
-                        let point = pixelCenter(i, width: width)
-                        guard chart.contains(point, halo: halo) else { continue }
-                        support[i] = chart.contains(point) ? 1 : 2
-                        dirty = dirty.union(CGRect(x: i % width, y: i / width, width: 1, height: 1))
-                    }
+                    try meter.visit(1)
+                    let start = Int(span.start)
+                    let row = start..<(start + Int(span.count))
+                    let accepted = try chart.clip(row, width: width, halo: halo, meter: &meter)
+                    guard !accepted.isEmpty else { continue }
+                    if try members.insert(accepted, meter: &meter) { changed = true }
+                    let x = accepted.lowerBound % width, y = start / width
+                    minX = min(minX, x); maxX = max(maxX, x + accepted.count)
+                    minY = min(minY, y); maxY = max(maxY, y + 1)
                 }
-                queue.append(candidate)
+                if minX < maxX {
+                    dirty = dirty.union(CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY))
+                }
+                return changed
             }
-            try include(target, meter: &meter)
-            var unknown = false, head = 0
-            while head < queue.count && !unknown {
-                let candidate = queue[head]; head += 1
+            guard try include(target, meter: &meter) else { continue }
+            var unknown = false
+            var grew = true
+            // One query per support expansion sweep, not one query for each overlapping dab.
+            // Revisit candidates if the exact union gains cells, including growth inside the
+            // same rectangle. At a fixed point every contributor touching the union was checked.
+            while grew && !unknown {
+                grew = false
+                let search = dirty.insetBy(dx: -1, dy: -1)
                 if queryToken == UInt32.max {
                     try meter.visit(seen.count)
                     for i in seen.indices { seen[i] = 0 }
@@ -621,19 +783,18 @@ enum VectorMendSupport {
                 }
                 queryToken += 1
                 let query = queryToken
-                try index.forEachCandidate(near: bounds[candidate].insetBy(dx: -1, dy: -1),
+                try index.forEachCandidate(near: search,
                     visitCell: { () throws(Failure) in try meter.visit(1) }) { (ref) throws(Failure) in
                     try meter.visit(1)
                     let i = ref.elementIndex
                     guard !unknown, seen[i] != query else { return }
                     seen[i] = query
                     if i < addresses.count && included[i] == token { return }
-                    guard bounds[i].intersects(dirty.insetBy(dx: -1, dy: -1)) else { return }
+                    guard bounds[i].intersects(search) else { return }
                     if i >= addresses.count {
                         let span = unknownCoverage[i - addresses.count]
                         let local = intersection(span, with: dirty, width: width)
-                        try meter.visit(local.count)
-                        if local.contains(where: { support[$0] != 0 }) { unknown = true }
+                        if try members.intersects(local, meter: &meter) { unknown = true }
                         return
                     }
                     let other = addresses[i]
@@ -643,23 +804,22 @@ enum VectorMendSupport {
                     let mapped = parameter.map { match < 0 ? trace.end - $0 : $0 }
                     let cohort = match != 0 && (mapped.map { trace.range.contains($0) } ?? false)
                     let patch = patches[i]
-                    var touches = false, overlaps = false
-                    for span in spans[Int(patch.spanStart)..<Int(patch.spanStart + patch.spanCount)] {
-                        let local = intersection(span, with: cohort ? dirty.insetBy(dx: -1, dy: -1) : dirty, width: width)
-                        try meter.visit(local.count, times: cohort ? 9 : 1)
-                        for p in local {
-                            guard chart.contains(pixelCenter(p, width: width), halo: halo) else { continue }
-                            if support[p] != 0 { overlaps = true }
-                            if cohort {
-                                let x = p % width, y = p / width
-                                for dy in -1...1 { for dx in -1...1 {
-                                    let qx = x + dx, qy = y + dy
-                                    if qx >= 0, qy >= 0, qx < width, qy < height,
-                                       support[qy * width + qx] != 0 { touches = true }
-                                } }
-                            }
+                    let candidateSpans = spans[Int(patch.spanStart)..<Int(patch.spanStart + patch.spanCount)]
+                    var overlaps = false
+                    for span in candidateSpans {
+                        try meter.visit(1)
+                        let local = intersection(span, with: dirty, width: width)
+                        if try members.intersects(local, meter: &meter) { overlaps = true; break }
+                    }
+                    var touches = overlaps
+                    if cohort && !touches {
+                        let expanded = dirty.insetBy(dx: -1, dy: -1)
+                        for span in candidateSpans {
+                            try meter.visit(1)
+                            let local = intersection(span, with: expanded, width: width)
+                            let clipped = try chart.clip(local, width: width, halo: halo, meter: &meter)
+                            if try members.touches(clipped, height: height, meter: &meter) { touches = true; break }
                         }
-                        if overlaps && (touches || !cohort) { break }
                     }
                     guard cohort, touches, let mapped else {
                         if overlaps { unknown = true }
@@ -682,64 +842,34 @@ enum VectorMendSupport {
                             admitted = try otherTrace.isRegular(in: range, along: direction, meter: &meter)
                         }
                     }
-                    if admitted { try include(i, meter: &meter) }
-                    else if overlaps { unknown = true }
+                    if admitted {
+                        if try include(i, meter: &meter) { grew = true }
+                    } else if overlaps { unknown = true }
                 }
             }
             if unknown || dirty.isNull { continue }
             for span in targetSpans {
-                try meter.visit(Int(span.count), times: 9)
-                for i in Int(span.start)..<Int(span.start + span.count) {
-                    let x = i % width, y = i / width
-                    for dy in -1...1 { for dx in -1...1 {
-                        if !chart.contains(pixelCenter(x: x + dx, y: y + dy)) { unknown = true }
-                    } }
+                let start = Int(span.start)
+                let left = start % width - 1, right = left + Int(span.count) + 1, y = start / width
+                try meter.visit(4)
+                if !chart.contains(pixelCenter(x: left, y: y - 1))
+                    || !chart.contains(pixelCenter(x: right, y: y - 1))
+                    || !chart.contains(pixelCenter(x: left, y: y + 1))
+                    || !chart.contains(pixelCenter(x: right, y: y + 1)) {
+                    unknown = true
+                    break
                 }
             }
             if unknown { continue }
             let contactStart = contacts.count
             let contactBounds = dirty.insetBy(dx: -1, dy: -1)
                 .intersection(CGRect(x: 0, y: 0, width: width, height: height))
-            try meter.visit(Int(dirty.width) * Int(dirty.height), times: 9)
-            for y in Int(dirty.minY)..<Int(dirty.maxY) {
-                for x in Int(dirty.minX)..<Int(dirty.maxX) {
-                    let i = y * width + x
-                    guard support[i] & 3 == 1 else { continue }
-                    support[i] |= 8
-                    for dy in -1...1 { for dx in -1...1 where dx != 0 || dy != 0 {
-                        let qx = x + dx, qy = y + dy
-                        guard qx >= 0, qy >= 0, qx < width, qy < height else { unknown = true; continue }
-                        let q = qy * width + qx
-                        if support[q] & 3 == 1 { continue }
-                        // Halo support has the same full contributor closure as T. Keep its low
-                        // membership bits while accumulating obligations; OPEN always wins.
-                        let gate = support[q] & 3 == 2 && !chart.contains(pixelCenter(x: qx, y: qy))
-                        support[q] |= gate ? 8 : 4
-                    } }
-                }
-            }
-            // Count the finished row runs before growing storage. Implicit Array.append growth
-            // doubles an old allocator-rounded capacity, not the logical count we prepaid.
-            // Both row passes and amortized copying are admitted; no per-patch array is retained.
-            func forEachContact(_ body: (Contact) -> Void) {
-                for y in Int(contactBounds.minY)..<Int(contactBounds.maxY) {
-                    var x = Int(contactBounds.minX)
-                    while x < Int(contactBounds.maxX) {
-                        let flags = support[y * width + x] & 12
-                        if flags == 0 { x += 1; continue }
-                        let open = flags & 4 != 0
-                        let start = x
-                        repeat { x += 1 } while x < Int(contactBounds.maxX)
-                            && (support[y * width + x] & 12 != 0)
-                            && (support[y * width + x] & 4 != 0) == open
-                        body(Contact(start: UInt32(y * width + start) | (open ? Contact.openBit : 0),
-                                     count: UInt32(x - start)))
-                    }
-                }
-            }
-            try meter.visit(Int(contactBounds.width), times: Int(contactBounds.height))
+            // The GPU rejects any runtime contact on the outer working rim. A core cell
+            // already on that rim has no complete contact neighbourhood and is also protected.
             var additions = 0
-            forEachContact { _ in additions += 1 }
+            try members.forEachContact(in: contactBounds, chart: chart, height: height, meter: &meter) {
+                _ in additions += 1
+            }
             let (total, totalOverflow) = contacts.count.addingReportingOverflow(additions)
             guard !totalOverflow, total <= Int(UInt32.max) else { throw .exceedsBudget }
             if total > paidContactCapacity {
@@ -765,18 +895,16 @@ enum VectorMendSupport {
                     paidContactCapacity = total
                 }
             }
-            try meter.visit(Int(contactBounds.width), times: Int(contactBounds.height))
-            forEachContact { contacts.append($0) }
+            try members.forEachContact(in: contactBounds, chart: chart, height: height, meter: &meter) {
+                contacts.append($0)
+            }
             patches[target] = Patch(contactStart: UInt32(contactStart), contactCount: UInt32(contacts.count - contactStart),
                                     spanStart: old.spanStart, spanCount: old.spanCount, unknown: unknown ? 1 : 0)
-            dirty = contactBounds
-
         }
         try meter.checkCapacity(traces, chargedCount: captured.count)
         try meter.checkCapacity(bounds, chargedCount: entryCount)
         try meter.checkCapacity(seen, chargedCount: entryCount)
         try meter.checkCapacity(included, chargedCount: addresses.count)
-        try meter.checkCapacity(queue, chargedCount: addresses.count)
         try meter.checkCapacity(contacts, chargedCount: paidContactCapacity)
         try meter.checkCapacity(memo.capacity, stride: MemoryLayout<(GroupPair, Int8)>.stride,
                                 chargedCount: memo.count, chargedStride: 128)
@@ -810,8 +938,6 @@ enum VectorMendSupport {
         let (count, overflow) = width.multipliedReportingOverflow(by: height)
         guard width > 0, height > 0, !overflow, count < Int(Contact.openBit),
               width <= 16_383, height <= 16_383 else { throw .invalidWindow }
-        try meter.retainArray(UInt8.self, count: count)
-        try meter.visit(count) // initialization is real CPU work on every grid attempt
         // These growing containers pay one header/rounding allowance now; every later append
         // retains its existing doubled payload charge before growth.
         try meter.retainArray(Patch.self, count: 0)
@@ -819,7 +945,6 @@ enum VectorMendSupport {
         try meter.retainArray(Address.self, count: 0)
         try meter.retainArray(Contact.self, count: 0)
         let window = CGRect(x: 0, y: 0, width: width, height: height)
-        var support = [UInt8](repeating: 0, count: count)
         var patchCount = 0, rowCount = 0
         for group in captured {
             for dab in group.dabs {
@@ -863,8 +988,7 @@ enum VectorMendSupport {
         var contacts: [Contact] = []
         try certify(captured, addresses: addresses, spans: spans, unknownCoverage: unknownCoverage,
                     width: width, height: height, patches: &patches, contacts: &contacts,
-                    support: &support, meter: &meter, isCurrent: isCurrent)
-        try meter.checkCapacity(support, chargedCount: count)
+                    meter: &meter, isCurrent: isCurrent)
         try meter.checkCapacity(patches, chargedCount: patches.count)
         try meter.checkCapacity(spans, chargedCount: spans.count)
         try meter.checkCapacity(addresses, chargedCount: addresses.count)

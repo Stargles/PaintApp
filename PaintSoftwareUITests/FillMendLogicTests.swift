@@ -1572,6 +1572,61 @@ final class FillMendLogicTests: XCTestCase {
             window: original, isCurrent: { false }), "a cancelled request publishes no partial picture or rows")
     }
 
+    func testRecordedPressureLineMendsInsideTheCircleWithoutChangingTheOuterBoundary() throws {
+        let size = RecordedMendScene.canvasSize
+        let seed = RecordedMendScene.canvasPoint(656, 255)
+        let window = FillWindow.bucket(around: CGPoint(x: seed.x.rounded(.down), y: seed.y.rounded(.down)),
+                                       in: size, pixelBudget: MetalFillEngine.workingPixelBudget(isLasso: false))
+        XCTAssertEqual(window.scale, 1)
+        let lineProbes = [(CGFloat(515.5), CGFloat(440)), (644, 343)].map { x, y in
+            window.workingPixel(of: RecordedMendScene.canvasPoint(x, y))
+        }
+        let tap = window.workingPixel(of: seed)
+        let brush = BrushLibrary.opaqueRound
+        let engine = try XCTUnwrap(MetalFillEngine.shared)
+        for (width, reach): (CGFloat, Float) in [(12, 12), (20, 40)] {
+            let strokes = [RecordedMendScene.outline, RecordedMendScene.line].map { points in
+                let samples = points.map { x, y, force in
+                    VectorSample(point: RecordedMendScene.canvasPoint(x, y), pressure: force)
+                }
+                return VectorStroke(brush: brush, color: CodableColor(UIColor.black), size: width,
+                                    opacity: 1, samples: StrokeSamples(samples, channels: .pressureOnly), seed: 0x7354)
+            }
+            let reference = try supportReference(strokes, canvasSize: size, window: window, emptyReferenceAbove: true)
+            let session = try XCTUnwrap(engine.makeSession(referenceRGBA: reference.rgba, width: window.workingWidth,
+                height: window.workingHeight, pathWall: reference.pathWall(),
+                gapWidthLimit: Float(CanvasManager.fillGapRange.upperBound)).session)
+            session.installVectorReference(reference.support)
+            let seedColor = session.seedColor(atX: tap.x, y: tap.y)
+            func bucket(reach: Float) throws -> Pixels {
+                Pixels(bytes: try XCTUnwrap(session.fill(seedX: tap.x, seedY: tap.y, seedColor: seedColor,
+                    threshold: 0.15, gapWidth: 8, edgeOverlap: 2, mendReach: reach,
+                    fillColor: SIMD4(1, 0, 0, 1))), width: window.workingWidth)
+            }
+            let off = try bucket(reach: 0)
+            XCTAssertTrue(off.isRed(tap.x, tap.y), "the ordinary bucket reaches the recorded seed")
+            XCTAssertTrue(lineProbes.allSatisfy { off.isBare($0.x, $0.y) }, "the pressure line occupies two bare probes")
+            let on = try bucket(reach: reach)
+            let (light, heavy) = (lineProbes[0], lineProbes[1])
+            XCTAssertTrue(on.isRed(heavy.x, heavy.y), "Mend Reach covers the heavy line body at brush size \(width)")
+            if width == 12 {
+                XCTAssertTrue(on.isRed(light.x, light.y), "the thinner case also covers the light line body")
+            } else {
+                // This section of the early turn is shared by regular and ambiguous support at
+                // the wider diameter. Widening Reach should still leave its unknown pixels clear.
+                XCTAssertTrue(on.isBare(light.x, light.y), "ambiguous wide-stroke support still protects the early turn")
+            }
+            let bounds = VectorCanvas.paintedBounds(of: [.stroke(strokes[1])]).applying(window.transform).insetBy(dx: -2, dy: -2)
+            let changedOutsideLine = stride(from: 3, to: on.bytes.count, by: 4).contains { i in
+                guard on.bytes[i] != off.bytes[i] else { return false }
+                let pixel = i / 4
+                let center = CGPoint(x: CGFloat(pixel % on.width) + 0.5, y: CGFloat(pixel / on.width) + 0.5)
+                return !bounds.contains(center)
+            }
+            XCTAssertFalse(changedOutsideLine, "the full picture outside the line's bounds stays the same")
+        }
+    }
+
     func testLongSnappedCircleDoesNotSuppressMendingOfADetachedInteriorLine() throws {
         let size = CGSize(width: 2048, height: 2048)
         let circle = ShapeGeometry(kind: .oval, startPoint: CGPoint(x: 274, y: 274),
@@ -1828,4 +1883,71 @@ final class FillMendLogicTests: XCTestCase {
                        "a gate cannot excuse physical INK from an unaccounted contributor in its halo")
     }
 
+}
+
+
+// Pencil touch samples from the November 14 recording, without its prediction/coalescing history.
+// The fixed UI replay uses the same positions. The GPU witness also replays normalized force.
+enum RecordedMendScene {
+    static let canvasSize = CGSize(width: 2048, height: 2048)
+    static let outline: [(CGFloat, CGFloat, CGFloat)] = [
+        (657, 175.5, 0.079),
+        (631.5, 168.5, 0.144),
+        (606, 176, 0.156),
+        (575, 189.5, 0.149),
+        (539, 211, 0.153),
+        (509, 234.5, 0.182),
+        (488, 256, 0.194),
+        (464, 289.5, 0.197),
+        (449.5, 317, 0.192),
+        (436, 359, 0.204),
+        (432, 402.5, 0.233),
+        (437, 443, 0.242),
+        (452.5, 482, 0.223),
+        (480, 512.5, 0.192),
+        (515, 536, 0.175),
+        (557, 550, 0.158),
+        (601, 554, 0.106),
+        (646, 547.5, 0.096),
+        (669, 540, 0.082),
+        (710, 516, 0.067),
+        (743, 486, 0.108),
+        (768, 453, 0.106),
+        (787, 414, 0.094),
+        (795.5, 375, 0.091),
+        (795, 338.5, 0.098),
+        (785, 301.5, 0.125),
+        (770.5, 267, 0.149),
+        (754, 237, 0.163),
+        (733.5, 210.5, 0.132),
+        (709.5, 190, 0.120),
+        (685.5, 176, 0.156),
+        (659.5, 169.5, 0.156),
+        (629, 165.5, 0.149),
+        (612.5, 170.5, 0.086)
+    ]
+    static let line: [(CGFloat, CGFloat, CGFloat)] = [
+        (484, 462, 0.079),
+        (484, 460, 0.091),
+        (496, 453.5, 0.146),
+        (515.5, 440, 0.343),
+        (541.5, 420, 0.542),
+        (564.5, 403.5, 0.626),
+        (591.5, 385, 0.688),
+        (618.5, 365, 0.770),
+        (644, 343, 0.902),
+        (669, 321.5, 1.000),
+        (692.5, 302.5, 1.000),
+        (709, 288.5, 1.000),
+        (710.5, 284.5, 1.000)
+    ]
+
+    private static let fromWindow = CGAffineTransform(translationX: -1024, y: -1024)
+        .concatenating(CGAffineTransform(rotationAngle: 0.0948))
+        .concatenating(CGAffineTransform(scaleX: 1.1804, y: 1.1804))
+        .concatenating(CGAffineTransform(translationX: 568 + 663.29, y: 405 - 10.24)).inverted()
+
+    static func canvasPoint(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+        CGPoint(x: x, y: y).applying(fromWindow)
+    }
 }

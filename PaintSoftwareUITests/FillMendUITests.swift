@@ -373,6 +373,72 @@ final class FillMendUITests: PaintUITestCase {
         }
     }
 
+    func testRecordedCircleMendsFromTheLayerUnderItsInk() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let app = XCUIApplication()
+        let size = RecordedMendScene.canvasSize
+        XCTAssertTrue(launchIntoEditor(app, size: size))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        openLayerPanel(app)
+        addVectorLayerFromOpenPanel(app) // fill target
+        addVectorLayerFromOpenPanel(app) // reference ink above it
+        closeLayerRail(app)
+        openBrushLibrary(app)
+        let opaque = app.buttons["brushPanel.brush.Opaque Round"]
+        XCTAssertTrue(opaque.waitForExistence(timeout: 5))
+        if !opaque.isSelected { tapWhenHittable(opaque, "Opaque Round") }
+        openBrushEditor(app)
+        let sizeSlider = app.sliders["brushPanel.sizeSlider"]
+        adjustSlider(sizeSlider, to: 11.0 / 199, tolerance: 0.014)
+        closeBrushEditor(app)
+        app.buttons["toolbar.brushButton"].tap()
+
+        let paper = paperRect(in: canvas, canvasSize: size)
+        let frame = canvas.frame
+        func at(_ x: CGFloat, _ y: CGFloat) -> CGVector {
+            let p = RecordedMendScene.canvasPoint(x, y)
+            return onHost(paper, Double(p.x / size.width), Double(p.y / size.height))
+        }
+        for stroke in [RecordedMendScene.outline, RecordedMendScene.line] {
+            let points = stroke.map { x, y, _ in logicalAppPoint(in: frame, normalizedOffset: at(x, y)) }
+            try fingerStroke(through: points, interval: 0.032)
+        }
+        let center = at(644, 343)
+        let seed = at(656, 255)
+        let outline = at(432, 402.5)
+        let exterior = at(409, 385)
+        XCTAssertTrue(waitUntil(canvas, center, isInk), "the recorded line is drawn")
+        XCTAssertTrue(waitUntil(canvas, outline, isInk), "the enclosing outline is drawn")
+        openLayerPanel(app)
+        let target = app.staticTexts["layerPanel.row.1"]
+        tapWhenHittable(target, "The separate fill layer")
+        closeLayerRail(app)
+        setBrushColor(app, hex: "FF0000")
+        let fillButton = app.buttons["toolbar.fillButton"]
+        XCTAssertTrue(openFillPanel(app))
+        let reach = app.sliders["fillPanel.mendReachSlider"]
+        scrollFillPanel(app, to: reach)
+        XCTAssertTrue(app.staticTexts["Mend Reach: 12 px"].exists)
+        XCTAssertEqual(app.switches["fillPanel.mendGapToggle"].value as? String, "1")
+        fillButton.tap()
+        canvas.coordinate(withNormalizedOffset: seed).tap()
+        XCTAssertTrue(waitUntil(canvas, seed, isRed), "the first bucket tap fills the enclosed paper")
+        app.buttons["toolbar.brushButton"].tap()
+        openLayerPanel(app)
+        tapWhenHittable(app.buttons["layerPanel.row.2.visibility"], "Hide the reference ink")
+        closeLayerRail(app)
+        XCTAssertTrue(waitUntil(canvas, outline, isWhitish), "the enclosing line's outer footprint stays clear")
+        let picture = try screen(of: canvas)
+        attachScreenshot(XCUIScreen.main, "recorded-circle-mend-reference-hidden")
+        XCTAssertTrue(isRed(picture.pixel(normalizedX: center.dx, normalizedY: center.dy)),
+                      "the committed fill below the line covers its body")
+        XCTAssertTrue(isWhitish(picture.pixel(normalizedX: exterior.dx, normalizedY: exterior.dy)),
+                      "paper beyond the enclosing circle stays clear")
+    }
+
     /// Cold launch → saved vector fill with the option off → the vector layer action → one undo.
     /// The hidden line art remains an explicit reference, so the picture reads the fill itself.
     func testMendAllFillsIsVectorOnlyRepairsAnAttachedStemAndUndoesAsOneStep() throws {
