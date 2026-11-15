@@ -929,6 +929,7 @@ extension CanvasManager {
         var resizedLayers = layers
         let replacements = Dictionary(uniqueKeysWithValues: prepared.cels.map { ($0.celID, $0) })
         for layerIndex in resizedLayers.indices {
+            resizedLayers[layerIndex].rebaseContainerPose(through: map)
             for celIndex in resizedLayers[layerIndex].cels.indices {
                 let original = resizedLayers[layerIndex].cels[celIndex]
                 guard let pixels = replacements[original.id], pixels.layerID == resizedLayers[layerIndex].id else {
@@ -1145,6 +1146,25 @@ extension CanvasManager {
 
 
 
+}
+
+private extension Layer {
+    mutating func rebaseContainerPose(through map: CanvasResizeMap) {
+        guard let transform else { return }
+        // A fractional projective Parallax share depends on the canvas origin.
+        if transform.mode != .parallax {
+            self.transform = transform.rebased(through: map)
+        }
+
+        // The Shake distances are canvas lengths. Its angle, timing and noise pattern use other units.
+        let scale = Double(map.scale)
+        guard scale != 1 else { return }
+        for channel in [TargetChannel.shakeX, .shakeY] {
+            self[keyPath: channel.layerPath] *= scale
+            channelTracks[channel.id] = channelTracks[channel.id]?.mappingValues(scale: scale, offset: 0)
+            channelBaselines[channel.id] = channelBaselines[channel.id].map { $0 * scale }
+        }
+    }
 }
 
 // MARK: - Baking full-precision strokes back onto the grid (TODO item (14))

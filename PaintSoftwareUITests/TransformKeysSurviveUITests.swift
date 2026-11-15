@@ -163,6 +163,14 @@ final class TransformKeysSurviveUITests: PaintUITestCase {
     }
 
     func testScaleArtworkKeepsTheDistanceBetweenTwoDrawnCelPoses() throws {
+        try assertScaleArtworkKeepsDrawnPoses(container: false)
+    }
+
+    func testScaleArtworkKeepsTheDistanceBetweenTwoDrawnTransformLayerPoses() throws {
+        try assertScaleArtworkKeepsDrawnPoses(container: true)
+    }
+
+    private func assertScaleArtworkKeepsDrawnPoses(container: Bool) throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app, size: CGSize(width: 1000, height: 1000),
                                        orientationBeforeCreatingCanvas: .landscapeLeft))
@@ -177,17 +185,26 @@ final class TransformKeysSurviveUITests: PaintUITestCase {
                             from: onHost(paper, 0.41, 0.34), to: onHost(paper, 0.45, 0.37))
         XCTAssertTrue(waitUntil(canvas, onHost(paper, 0.41, 0.34), isInk), "The rectangle is drawn")
 
-        addKeysAtThePlayhead(app, layer: 0, frame: 0)
+        let poseLayer = container ? 1 : 0
+        if container {
+            openLayerPanel(app)
+            addTransformLayerFromAddMenu(app)
+            XCTAssertTrue(app.staticTexts["layerPanel.row.1"].waitForExistence(timeout: 5))
+            app.buttons["toolbar.layersButton"].tap()
+        }
+        addKeysAtThePlayhead(app, layer: poseLayer, frame: 0)
         goTo(app, frame: 4)
-        addKeysAtThePlayhead(app, layer: 0, frame: 4)
+        if !container { addKeysAtThePlayhead(app, layer: poseLayer, frame: 4) }
         app.buttons["toolbar.moveButton"].tap()
         let done = app.buttons["moveBar.doneButton"]
         XCTAssertTrue(done.waitForExistence(timeout: 5))
         let box = try XCTUnwrap(settledMoveBox(app))
         dragOnCanvas(app, from: CGVector(dx: box.midX, dy: box.midY),
                      to: CGVector(dx: box.midX + 0.20 * paper.width, dy: box.midY))
+        if container { addKeysAtThePlayhead(app, layer: poseLayer, frame: 4) }
         done.tap()
-        XCTAssertEqual(markers(app, layer: 0), "0|4")
+        XCTAssertEqual(markers(app, layer: poseLayer), "0|4")
+        let attachmentPrefix = container ? "transform-layer-resize" : "keyed-resize"
 
         func rectangleLeft() throws -> CGFloat {
             let probe = try settledProbe(canvas, window: scan)
@@ -198,9 +215,9 @@ final class TransformKeysSurviveUITests: PaintUITestCase {
         goTo(app, frame: 0)
         let beforeA = try rectangleLeft()
         XCTAssertGreaterThan(beforeB - beforeA, 0.14, "The authored translation visibly moves the rectangle")
-        attachScreenshot(XCUIScreen.main, "keyed-resize-original-key-a")
+        attachScreenshot(XCUIScreen.main, attachmentPrefix + "-original-key-a")
         goTo(app, frame: 4)
-        attachScreenshot(XCUIScreen.main, "keyed-resize-original-key-b")
+        attachScreenshot(XCUIScreen.main, attachmentPrefix + "-original-key-b")
 
         let settings = app.buttons["toolbar.settingsButton"]
         settings.tap()
@@ -221,13 +238,13 @@ final class TransformKeysSurviveUITests: PaintUITestCase {
         settings.tap()
         XCTAssertTrue(row.waitForNonExistence(timeout: 5))
         XCTAssertEqual(paperRect(in: canvas, canvasSize: CGSize(width: 2000, height: 2000)), paper)
-        XCTAssertEqual(markers(app, layer: 0), "0|4")
+        XCTAssertEqual(markers(app, layer: poseLayer), "0|4")
 
         let afterB = try rectangleLeft()
-        attachScreenshot(XCUIScreen.main, "keyed-resize-enlarged-key-b")
+        attachScreenshot(XCUIScreen.main, attachmentPrefix + "-enlarged-key-b")
         goTo(app, frame: 0)
         let afterA = try rectangleLeft()
-        attachScreenshot(XCUIScreen.main, "keyed-resize-enlarged-key-a")
+        attachScreenshot(XCUIScreen.main, attachmentPrefix + "-enlarged-key-a")
         XCTAssertEqual(afterA, beforeA, accuracy: 0.012, "The first pose keeps its position relative to the paper")
         XCTAssertEqual(afterB - afterA, beforeB - beforeA, accuracy: 0.015,
                        "Doubling the artwork doubles the translation in canvas points")

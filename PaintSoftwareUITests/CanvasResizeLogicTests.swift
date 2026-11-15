@@ -654,6 +654,125 @@ final class CanvasResizeLogicTests: XCTestCase {
         XCTAssertEqual(try drawnBounds(reloaded), enlarged, "The reopened project draws the same scaled motion")
     }
 
+    func testFitCarriesDrawnAffineContainerMotionAndItsHeldPose() throws {
+        let beforeSize = CGSize(width: 100, height: 100)
+        let afterSize = CGSize(width: 400, height: 200)
+        let box = CGRect(origin: .zero, size: beforeSize)
+        let base = PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: 10, y: 4))
+        let held = PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: -5, y: 8))
+        let track = TransformTrack(box: box, curves: [.x: AnimationCurve(keys: [
+            .init(frame: 0, value: 60, interpolation: .linear),
+            .init(frame: 10, value: 80)
+        ])])
+        for mode in [TransformLayerMode.move, .rotate] {
+            let manager = CanvasFixture.manager(layerCount: 0)
+            manager.canvasSize = beforeSize
+            XCTAssertTrue(manager.addVectorLayer())
+            let vector = try XCTUnwrap(manager.layers[0].cels[0].vector)
+            vector.addFill(path: CGPath(rect: CGRect(x: 40, y: 40, width: 8, height: 6), transform: nil),
+                           color: CodableColor(red: 1, green: 0, blue: 0, alpha: 1))
+            XCTAssertTrue(manager.addTransformLayer())
+            let layerIndex = manager.currentLayerIndex
+            manager.layers[layerIndex].transform = LayerPose(pose: base, track: track, baseline: held, mode: mode)
+            manager.layers[layerIndex].rotateSpeed = 18
+
+            func drawnBounds() throws -> [CGRect] {
+                try [0, 5, 10].map { frame in
+                    let request = try XCTUnwrap(manager.makeRenderRequest(atFrame: frame, includeBackground: false))
+                    let picture = try XCTUnwrap(Compositor.composite(request))
+                    return try XCTUnwrap(PixelOps.opaqueContentBounds(UIImage(cgImage: picture)))
+                }
+            }
+            let before = mode == .move
+                ? [50, 60, 70].map { CGRect(x: $0, y: 44, width: 8, height: 6) }
+                : [CGRect(x: 50, y: 44, width: 8, height: 6),
+                   CGRect(x: 74, y: 44, width: 6, height: 8),
+                   CGRect(x: 82, y: 58, width: 8, height: 6)]
+            let enlarged = before.map { CGRect(x: 2 * $0.minX + 100, y: 2 * $0.minY,
+                                               width: 16, height: 12) }
+            XCTAssertEqual(try drawnBounds(), before)
+            XCTAssertTrue(manager.resizeCanvas(to: afterSize, mode: .scaleToFit))
+            XCTAssertEqual(try drawnBounds(), enlarged)
+            let resized = try XCTUnwrap(manager.layers[layerIndex].transform)
+            XCTAssertEqual(resized.baseline?.box, CGRect(x: 100, y: 0, width: 200, height: 200))
+            XCTAssertEqual(resized.baseline?.corners.p0, CGPoint(x: 90, y: 16))
+
+            manager.undo()
+            XCTAssertEqual(try drawnBounds(), before)
+            XCTAssertEqual(manager.layers[layerIndex].transform?.baseline, held)
+            manager.redo()
+            XCTAssertEqual(try drawnBounds(), enlarged)
+        }
+    }
+
+    func testFitKeepsTheExistingProjectiveParallaxMap() throws {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        let size = CGSize(width: 100, height: 100)
+        manager.canvasSize = size
+        XCTAssertTrue(manager.addVectorLayer())
+        manager.layers[0].parallaxShare = 0.5
+        XCTAssertTrue(manager.addTransformLayer())
+        let index = manager.currentLayerIndex
+        let pose = PoseQuad(box: CGRect(origin: .zero, size: size), corners: Quad(
+            CGPoint(x: 0, y: 0), CGPoint(x: 50, y: 0),
+            CGPoint(x: 50, y: 50), CGPoint(x: 0, y: 100)))
+        manager.layers[index].transform = LayerPose(pose: pose, mode: .parallax)
+        manager.layers[index].shakeX = 9
+        let before = try XCTUnwrap(manager.layerPoses(atFrame: 0)[0])
+        XCTAssertTrue(before.isProjective)
+
+        // Here the transported full-strength pose would still be valid, while the canvas origin
+        // would be on its vanishing line and the current 50% blend would discard the map.
+        XCTAssertTrue(manager.resizeCanvas(to: CGSize(width: 600, height: 200), mode: .scaleToFit))
+        XCTAssertEqual(manager.layerPoses(atFrame: 0)[0], before)
+        XCTAssertEqual(manager.layers[index].shakeX, 18, "Shake distance follows the resize even in Parallax")
+    }
+
+    func testFitKeepsRepeatAndScalesTheMoveAndShakeItWasHolding() throws {
+        let manager = CanvasFixture.manager(layerCount: 0)
+        manager.canvasSize = CGSize(width: 100, height: 100)
+        XCTAssertTrue(manager.addVectorLayer())
+        XCTAssertTrue(manager.addTransformLayer())
+        let layerIndex = manager.currentLayerIndex
+        let box = CGRect(x: 15, y: 20, width: 60, height: 55)
+        let base = PoseQuad(box: box, mappedBy: CGAffineTransform(translationX: -3, y: 5))
+        manager.layers[layerIndex].transform = LayerPose(pose: base, mode: .shake,
+                                                          shakeSeed: 41, shakePeriod: 3, repeatPeriod: 3)
+        let target = KeyframeTarget.layer(id: manager.layers[layerIndex].id)
+        manager.layers[layerIndex].shakeX = 9
+        manager.layers[layerIndex].shakeY = 7
+        manager.layers[layerIndex].shakeRotation = 13
+        let x = TargetChannel.shakeX.id
+        let y = TargetChannel.shakeY.id
+        manager.layers[layerIndex].channelTracks[x] = AnimationCurve(keys: [
+            .init(frame: 0, value: 8, outHandle: .init(deltaFrames: 3, deltaValue: 5), tangentMode: .free),
+            .init(frame: 10, value: 18, inHandle: .init(deltaFrames: -2, deltaValue: -3), tangentMode: .free)
+        ])
+        manager.layers[layerIndex].channelBaselines = [x: 4, y: 6]
+        let frames = [0, 3, 7, 10]
+        let point = CGPoint(x: 30, y: 36)
+        let before = try frames.map { frame in
+            try XCTUnwrap(manager.layerPoses(atFrame: frame)[0]?.applied(to: point))
+        }
+        manager.setTransformLayerMode(target, to: .repeat)
+        XCTAssertEqual(manager.leafFrames(atFrame: 7)[0], 1)
+        XCTAssertTrue(manager.resizeCanvas(to: CGSize(width: 400, height: 200), mode: .scaleToFit))
+        XCTAssertEqual(manager.leafFrames(atFrame: 7)[0], 1, "The active loop reads the same drawing after Fit")
+
+        let resized = manager.layers[layerIndex]
+        XCTAssertEqual(resized.shakeX, 18)
+        XCTAssertEqual(resized.channelBaselines, [x: 8, y: 12])
+        let resizedPoint = CGPoint(x: 160, y: 72)
+        manager.setTransformLayerMode(target, to: .move)
+        XCTAssertEqual(manager.layerPoses(atFrame: 0)[0]?.applied(to: resizedPoint), CGPoint(x: 154, y: 82))
+        manager.setTransformLayerMode(target, to: .shake)
+        for (frame, prior) in zip(frames, before) {
+            let after = try XCTUnwrap(manager.layerPoses(atFrame: frame)[0]?.applied(to: resizedPoint))
+            XCTAssertEqual(after.x, 2 * prior.x + 100, accuracy: 1e-8)
+            XCTAssertEqual(after.y, 2 * prior.y, accuracy: 1e-8)
+        }
+    }
+
     func testScalingArtworkCarriesAnOffsetGroupTrackAndItsHeldPoseTogether() throws {
         let manager = CanvasFixture.manager(layerCount: 0)
         manager.canvasSize = CGSize(width: 120, height: 120)

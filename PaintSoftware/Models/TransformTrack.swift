@@ -303,15 +303,19 @@ struct KeyframeCrop: Equatable {
     }
 }
 
+private extension PoseQuad {
+    func rebased(through map: CanvasResizeMap) -> PoseQuad {
+        let transform = map.transform
+        return PoseQuad(box: box.applying(transform), corners: corners.mapped(by: transform))
+    }
+}
+
 extension Cel {
 
     /// Keep the cel and group poses in the same canvas coordinates as the resized drawing.
     mutating func rebasePoseCoordinates(through map: CanvasResizeMap) {
         transformTracks = transformTracks.mapValues { $0.rebased(through: map) }
-        let transform = map.transform
-        pendingPoseBaselines = pendingPoseBaselines.mapValues { pose in
-            PoseQuad(box: pose.box.applying(transform), corners: pose.corners.mapped(by: transform))
-        }
+        pendingPoseBaselines = pendingPoseBaselines.mapValues { $0.rebased(through: map) }
     }
 
     /// **Removes every pose key outside this cel's span, from every channel, and says what went** —
@@ -472,6 +476,15 @@ struct LayerPose: Equatable {
     /// transformation layer holds, and the value §2.5's *"a state of the unmoved item at keyframe A"*
     /// means one level out.
     init(restingIn box: CGRect) { self.init(pose: PoseQuad(restingIn: box)) }
+
+    /// Keep the authored, keyed and held poses together in the resized canvas space.
+    func rebased(through map: CanvasResizeMap) -> LayerPose {
+        var rebased = self
+        rebased.pose = pose.rebased(through: map)
+        rebased.track = track.rebased(through: map)
+        rebased.baseline = baseline?.rebased(through: map)
+        return rebased
+    }
 
     /// §2.26's stricter predicate, for the channel list: some component is an animation.
     var isAnimated: Bool { track.isAnimated }
