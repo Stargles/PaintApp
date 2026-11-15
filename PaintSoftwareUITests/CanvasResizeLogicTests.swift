@@ -689,7 +689,7 @@ final class CanvasResizeLogicTests: XCTestCase {
                    CGRect(x: 74, y: 44, width: 6, height: 8),
                    CGRect(x: 82, y: 58, width: 8, height: 6)]
             let enlarged = before.map { CGRect(x: 2 * $0.minX + 100, y: 2 * $0.minY,
-                                               width: 16, height: 12) }
+                                               width: 2 * $0.width, height: 2 * $0.height) }
             XCTAssertEqual(try drawnBounds(), before)
             XCTAssertTrue(manager.resizeCanvas(to: afterSize, mode: .scaleToFit))
             XCTAssertEqual(try drawnBounds(), enlarged)
