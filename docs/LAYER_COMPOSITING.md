@@ -108,10 +108,9 @@ the one piece the artist actually chose, is left alone. Nothing is lost that the
 not already destroyed. The signal is the absence of `opacity`, which is why `FolderManifest` writes
 it unconditionally — omitting it when it happens to be 1 would re-arm a one-time migration forever.
 
-Saved `ViewPreset`s need the same treatment, which is **a correction to an earlier draft of this
-section**: a preset written under the write-through records every child of a hidden group as hidden,
-so applying one re-creates exactly the state the migration cleared. Fixing the document alone would
-mean the group comes back once and empties again the next time the artist flips views.
+Saved `ViewPreset`s need the same treatment. An old preset records every child of a hidden group
+as hidden. The migration uses the hidden groups in each preset independently, including when the
+same group is visible in the saved scene.
 
 ### 4.2 Isolated groups
 

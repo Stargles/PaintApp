@@ -647,6 +647,39 @@ final class ProjectSaveLogicTests: XCTestCase {
         XCTAssertEqual(preset.layerVisibility[reloaded.layers[1].id], true)
     }
 
+    func testAnOldHiddenViewPresetRestoresItsInkWhenTheLiveGroupWasSavedVisible() throws {
+        let manager = makeManager()
+        let outer = try XCTUnwrap(manager.addFolder(name: "Outer"))
+        let inner = try XCTUnwrap(manager.addFolder(name: "Inner", parentFolderID: outer))
+        let layerID = manager.layers[0].id
+        manager.layers[0].parentFolderID = inner
+
+        // Hide, Add View, All, then Save was supported by the historical app. Reproduce its
+        // write-through for this fixture. The saved view and the live scene intentionally differ.
+        manager.toggleFolderVisibility(outer)
+        let innerIndex = try XCTUnwrap(manager.folders.firstIndex { $0.id == inner })
+        manager.folders[innerIndex].isVisible = false
+        manager.layers[0].isVisible = false
+        manager.addViewPreset()
+        manager.selectViewPreset(at: -1)
+
+        let url = projectURL()
+        saveAndWait(manager, to: url)
+        stripGroupPropertiesFromSavedManifest(at: url)
+
+        let loaded = try XCTUnwrap(ProjectStore.load(from: url))
+        XCTAssertEqual(folder(loaded, named: "Outer")?.isVisible, true)
+        let preset = try XCTUnwrap(loaded.viewPresets.first)
+        XCTAssertEqual(preset.folderVisibility[outer], false, "The artist saved a view that hides the group")
+        loaded.selectViewPreset(at: 0)
+        loaded.toggleFolderVisibility(outer)
+
+        XCTAssertEqual(folder(loaded, named: "Inner")?.isVisible, true,
+                       "Showing the group must restore subfolders hidden by the old write-through")
+        XCTAssertTrue(try XCTUnwrap(loaded.layers.first { $0.id == layerID }).isVisible,
+                      "Showing the group must restore the drawn child, even when the live saved state was visible")
+    }
+
     /// A pre-phase-4 folder that was *visible* has children carrying their own honest flags, so the
     /// migration must leave them exactly alone.
     func testAnOldVisibleGroupKeepsItsChildrensOwnVisibility() throws {
