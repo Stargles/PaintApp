@@ -402,8 +402,10 @@ extension CanvasManager {
         recordUndo(label: label, cost: cost, undo: { [weak self] in
             vectorCanvas.restoreElements(oldElements, changedInk: ink, rewriting: rewritten)
             if PlaybackTrace.isOn, label == .brushStroke {
-                PlaybackTrace.shared.vectorStrokeRestored(layerID: layerID, celID: celID,
-                    vectorID: vectorCanvas.residencyID, documentVersion: vectorCanvas.documentVersion)
+                MainActor.assumeIsolated {
+                    PlaybackTrace.shared.vectorStrokeRestored(layerID: layerID, celID: celID,
+                        vectorID: vectorCanvas.residencyID, documentVersion: vectorCanvas.documentVersion)
+                }
             }
             self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         }, redo: { [weak self] in

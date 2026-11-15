@@ -1103,7 +1103,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         let base: UIImage?
         /// Coverage is the actual content frozen for the base, independent of display-only ticks.
         var installedRevision: Int?
-        var undoPictureSource: PlaybackTrace.UndoPictureSource?
+        var renderedSynchronously = false
         switch plan.base {
         case .interpolation:
             baseDocumentVersion = Self.nothingDisplayed
@@ -1151,7 +1151,6 @@ final class StrokeCanvasView: CanvasPlaneView {
                 shownVectorVersion = version
                 base = cached.image
                 installedRevision = currentRevision
-                undoPictureSource = base == nil ? .empty : .cached
             case .rasterize(let version):
                 if waitingForTheRender {
                     pendingVectorRender = nil
@@ -1163,7 +1162,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                     shownVectorVersion = version
                     base = rendered
                     installedRevision = currentRevision
-                    undoPictureSource = .synchronous
+                    renderedSynchronously = true
                 } else {
                     pendingVectorRender = revision
                     startVectorRender(of: vectorCanvas, at: revision, streamHasWindow: streamHasWindow)
@@ -1189,8 +1188,10 @@ final class StrokeCanvasView: CanvasPlaneView {
         if imageView.image !== base { imageView.image = base }
         if plan.base == .committedRender { baseDocumentVersion = documentVersion }
         showOverlays(plan.showsScratchLayer ? scratch : nil)
-        if PlaybackTrace.isOn, let undoPictureSource {
-            traceCommittedBase(of: vectorCanvas, documentVersion: documentVersion, source: undoPictureSource)
+        if PlaybackTrace.isOn, plan.base == .committedRender {
+            let source: PlaybackTrace.UndoPictureSource = renderedSynchronously ? .synchronous
+                : (base == nil ? .empty : .cached)
+            traceCommittedBase(of: vectorCanvas, documentVersion: documentVersion, source: source)
         }
         return true
     }

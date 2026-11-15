@@ -4776,7 +4776,9 @@ final class CanvasManager: ObservableObject {
 
     func undo() {
         guard PlaybackTrace.isOn else { undoNow(); return }
-        PlaybackTrace.shared.traceUndo { undoNow() }
+        // The UI owns the opt-in trace on main. Logic tests also compile CanvasManager
+        // without the app target's default main-actor isolation.
+        MainActor.assumeIsolated { PlaybackTrace.shared.traceUndo { undoNow() } }
     }
 
     private func undoNow() {
