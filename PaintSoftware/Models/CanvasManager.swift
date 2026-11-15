@@ -4775,7 +4775,8 @@ final class CanvasManager: ObservableObject {
     // MARK: - Undo / redo
 
     func undo() {
-        PlaybackTrace.span(.undoPress, value: 0) { undoNow() }
+        guard PlaybackTrace.isOn else { undoNow(); return }
+        PlaybackTrace.shared.traceUndo { undoNow() }
     }
 
     private func undoNow() {

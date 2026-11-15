@@ -1103,6 +1103,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         let base: UIImage?
         /// Coverage is the actual content frozen for the base, independent of display-only ticks.
         var installedRevision: Int?
+        var undoPictureSource: PlaybackTrace.UndoPictureSource?
         switch plan.base {
         case .interpolation:
             baseDocumentVersion = Self.nothingDisplayed
@@ -1150,6 +1151,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                 shownVectorVersion = version
                 base = cached.image
                 installedRevision = currentRevision
+                undoPictureSource = base == nil ? .empty : .cached
             case .rasterize(let version):
                 if waitingForTheRender {
                     pendingVectorRender = nil
@@ -1161,6 +1163,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                     shownVectorVersion = version
                     base = rendered
                     installedRevision = currentRevision
+                    undoPictureSource = .synchronous
                 } else {
                     pendingVectorRender = revision
                     startVectorRender(of: vectorCanvas, at: revision, streamHasWindow: streamHasWindow)
@@ -1186,6 +1189,9 @@ final class StrokeCanvasView: CanvasPlaneView {
         if imageView.image !== base { imageView.image = base }
         if plan.base == .committedRender { baseDocumentVersion = documentVersion }
         showOverlays(plan.showsScratchLayer ? scratch : nil)
+        if PlaybackTrace.isOn, let undoPictureSource {
+            traceCommittedBase(of: vectorCanvas, documentVersion: documentVersion, source: undoPictureSource)
+        }
         return true
     }
 
@@ -1276,6 +1282,16 @@ final class StrokeCanvasView: CanvasPlaneView {
         // their identity guards make them. This is a landing render, so it is the held ink that has
         // just changed and the scratch that has not.
         showOverlays(scratch)
+        if PlaybackTrace.isOn, landing == .show {
+            traceCommittedBase(of: canvas, documentVersion: revision.document, source: .deferred)
+        }
+    }
+
+    private func traceCommittedBase(of canvas: VectorCanvas, documentVersion: Int,
+                                    source: PlaybackTrace.UndoPictureSource) {
+        guard !hostIsBlanked, !isHidden, let layerID, let celID = contentRevisions.celID else { return }
+        PlaybackTrace.shared.committedBaseAssigned(layerID: layerID, celID: celID,
+            vectorID: canvas.residencyID, documentVersion: documentVersion, source: source)
     }
 
     // MARK: - The lasso move's floating piece

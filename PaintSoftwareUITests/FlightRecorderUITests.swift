@@ -11,6 +11,43 @@ import XCTest
 /// because it is short.
 final class FlightRecorderUITests: PaintUITestCase {
 
+    func testRecordedUndoReplacesSettledInkThenEmptiesTheBase() throws {
+        let app = XCUIApplication()
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = visiblePaperRect(app, in: canvas)
+        let older = onHost(paper, 0.40, 0.40)
+        let newer = onHost(paper, 0.40, 0.62)
+        drawLine(on: canvas, from: onHost(paper, 0.28, 0.40), to: onHost(paper, 0.60, 0.40))
+        drawLine(on: canvas, from: onHost(paper, 0.28, 0.62), to: onHost(paper, 0.60, 0.62))
+        XCTAssertNotNil(waitForPixel(canvas, at: newer, matches: { self.isInk($0) }))
+        XCTAssertNotNil(waitForPixel(canvas, at: older, matches: { self.isInk($0) }))
+        XCTAssertNotNil(waitForBakeBar(app) { $0.isEmpty }, "the two strokes settle before Undo")
+
+        let settings = app.buttons["toolbar.settingsButton"]
+        settings.tap()
+        let toggle = app.buttons["recorder.toggle"]
+        tapWhenHittable(toggle, "Record my actions")
+        XCTAssertEqual(toggle.label, "Stop recording actions")
+        settings.tap()
+
+        let undo = app.buttons["sideToolbar.undoButton"]
+        undo.tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: newer, matches: { self.isWhitish($0) }))
+        XCTAssertTrue(isInk(rgbaPixel(of: canvas, at: older)), "Undo keeps the earlier stroke")
+        attachScreenshot(XCUIScreen.main, "Recorded Undo keeps settled earlier ink")
+        undo.tap()
+        XCTAssertNotNil(waitForPixel(canvas, at: older, matches: { self.isWhitish($0) }))
+        XCTAssertNotNil(waitForPixel(canvas, at: newer, matches: { self.isWhitish($0) }))
+
+        settings.tap()
+        tapWhenHittable(toggle, "Stop recording actions")
+        XCTAssertEqual(toggle.label, "Record my actions")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'recording-'"))
+            .firstMatch.waitForExistence(timeout: 5))
+    }
+
     func testRepeatedSavesAndActionTakesRemainSeparateInThePublicRecordingsList() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))

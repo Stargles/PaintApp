@@ -423,6 +423,18 @@ final class ActionRecorder: ObservableObject {
     /// still canvas writes almost nothing.
     private func writeMainThreadWindow() {
         let window = PlaybackTrace.shared.drainWindow()
+        for picture in window.undoPictures {
+            emit("undoBaseAssigned", [
+                ("layerID", .str(picture.target.layerID.uuidString)),
+                ("celID", .str(picture.target.celID.uuidString)),
+                ("documentVersion", .int(picture.target.documentVersion)),
+                ("source", .str(picture.source.rawValue)),
+                ("pressAt", .num(picture.pressAt - startTime)),
+                ("baseAssignedAt", .num(picture.assignedAt - startTime)),
+                ("pressToRestoreMs", .num(picture.pressToRestoreMs)),
+                ("pressToBaseMs", .num(picture.pressToBaseMs))
+            ], inRing: false)
+        }
         guard !window.phases.isEmpty else { return }
         var fields: [(String, JSONValue)] = []
         for phase in window.phases.prefix(8) {

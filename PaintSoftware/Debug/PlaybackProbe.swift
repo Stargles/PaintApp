@@ -311,6 +311,12 @@ enum PlaybackProbe {
              "totalMs": $0.totalMs, "meanMs": $0.meanMs,
              "p50Ms": $0.p50Ms, "p90Ms": $0.p90Ms, "maxMs": $0.maxMs]
         }
+        json["undoPictures"] = report.undoPictures.map {
+            ["layerID": $0.target.layerID.uuidString, "celID": $0.target.celID.uuidString,
+             "documentVersion": $0.target.documentVersion, "source": $0.source.rawValue,
+             "pressAt": $0.pressAt - report.startedAt,
+             "pressToRestoreMs": $0.pressToRestoreMs, "pressToBaseMs": $0.pressToBaseMs]
+        }
         json["ticks"] = report.ticks.map {
             ["frame": $0.frame, "at": $0.atSeconds, "intervalMs": $0.intervalMs,
              "mainBusyMs": $0.mainBusyMs, "mainCpuMs": $0.mainCpuMs,

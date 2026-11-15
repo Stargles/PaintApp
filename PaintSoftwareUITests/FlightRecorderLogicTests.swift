@@ -96,6 +96,72 @@ final class FlightRecorderLogicTests: XCTestCase {
         return try Data(contentsOf: url)
     }
 
+    @MainActor
+    func testUndoPictureMatchesOnlyTheRestoredCelOwnerAndExactDocumentVersionAcrossWindows() {
+        let trace = PlaybackTrace.shared
+        trace.start()
+        defer { trace.stop() }
+
+        let layer = UUID(), cel = UUID(), canvas = UUID()
+        func assign(layerID: UUID = layer, celID: UUID = cel, vectorID: UUID = canvas,
+                    version: Int = 12, source: PlaybackTrace.UndoPictureSource = .deferred) {
+            trace.committedBaseAssigned(layerID: layerID, celID: celID, vectorID: vectorID,
+                                        documentVersion: version, source: source)
+        }
+        trace.traceUndo {
+            trace.vectorStrokeRestored(layerID: layer, celID: cel, vectorID: canvas, documentVersion: 12)
+        }
+        let pressWindow = trace.drainWindow()
+        XCTAssertEqual(pressWindow.phases.first { $0.phase == "undoPress" }?.count, 1)
+        XCTAssertTrue(pressWindow.undoPictures.isEmpty, "the press alone is not a committed picture")
+
+        assign(layerID: UUID())
+        assign(celID: UUID())
+        assign(vectorID: UUID())
+        assign(version: 11)
+        assign(version: 13)
+        XCTAssertTrue(trace.drainWindow().undoPictures.isEmpty, "a different owner or revision cannot finish the sample")
+        assign()
+        assign(source: .cached)
+        let pictures = trace.drainWindow().undoPictures
+        XCTAssertEqual(pictures.count, 1, "the first exact assignment consumes this press")
+        XCTAssertEqual(pictures.first?.target.documentVersion, 12)
+        XCTAssertEqual(pictures.first?.source, .deferred)
+        XCTAssertGreaterThanOrEqual(pictures.first?.pressToBaseMs ?? -1,
+                                    pictures.first?.pressToRestoreMs ?? 0)
+    }
+
+    @MainActor
+    func testUndoPictureFromAnOlderPressOrRecordingDoesNotFinishLater() {
+        let trace = PlaybackTrace.shared
+        trace.start()
+        defer { trace.stop() }
+
+        let layer = UUID(), cel = UUID(), canvas = UUID()
+        func restore() {
+            trace.vectorStrokeRestored(layerID: layer, celID: cel, vectorID: canvas, documentVersion: 1)
+        }
+        func assign() {
+            trace.committedBaseAssigned(layerID: layer, celID: cel, vectorID: canvas,
+                                        documentVersion: 1, source: .empty)
+        }
+        trace.traceUndo { restore() }
+        trace.traceUndo {}
+        assign()
+        XCTAssertTrue(trace.drainWindow().undoPictures.isEmpty, "an unrelated subsequent press supersedes the pending one")
+
+        trace.traceUndo { restore() }
+        trace.stop()
+        trace.start()
+        restore()
+        assign()
+        XCTAssertTrue(trace.report().undoPictures.isEmpty, "a fresh recording cannot inherit a pending press")
+
+        trace.traceUndo { restore() }
+        assign()
+        XCTAssertEqual(trace.report().undoPictures.first?.source, .empty)
+    }
+
     // MARK: - The detector, against the recordings
 
     func testTheDetectorTripsOnTheOwnersRecordingOfTheFrozenCanvas() throws {

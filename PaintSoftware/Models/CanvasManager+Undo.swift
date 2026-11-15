@@ -401,6 +401,10 @@ extension CanvasManager {
         // The rewritten set reads the same way too — the ids are the same ids.
         recordUndo(label: label, cost: cost, undo: { [weak self] in
             vectorCanvas.restoreElements(oldElements, changedInk: ink, rewriting: rewritten)
+            if PlaybackTrace.isOn, label == .brushStroke {
+                PlaybackTrace.shared.vectorStrokeRestored(layerID: layerID, celID: celID,
+                    vectorID: vectorCanvas.residencyID, documentVersion: vectorCanvas.documentVersion)
+            }
             self?.celContentChangedOutsideStroke(layerID: layerID, celID: celID)
         }, redo: { [weak self] in
             vectorCanvas.restoreElements(newElements, changedInk: ink, rewriting: rewritten)

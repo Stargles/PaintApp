@@ -273,8 +273,10 @@ final class PlaybackTrace: @unchecked Sendable {
         lock.lock()
         events.removeAll(keepingCapacity: true)
         overflowed = false
+        undoPictures.removeAll(keepingCapacity: true)
         startedAt = CACurrentMediaTime()
         lock.unlock()
+        undoPicture = nil
         installObservers()
         Self.isOn = true
     }
@@ -314,6 +316,80 @@ final class PlaybackTrace: @unchecked Sendable {
         lock.lock()
         if events.count < Self.eventCeiling {
             events.append(Event(phase: phase, start: start, end: end, value: value, onMain: onMain))
+        } else {
+            overflowed = true
+        }
+        lock.unlock()
+    }
+
+    // MARK: - Undo to committed base
+
+    /// The same cel may be rebound to a new owner with a coincidentally equal version. Reference
+    /// stream ticks change the display version but do not change this document version.
+    struct UndoPictureTarget: Equatable {
+        let layerID: UUID
+        let celID: UUID
+        let vectorID: UUID
+        let documentVersion: Int
+    }
+
+    enum UndoPictureSource: String {
+        case empty, cached, synchronous, deferred
+    }
+
+    struct UndoPicture {
+        let target: UndoPictureTarget
+        let source: UndoPictureSource
+        let pressAt: CFTimeInterval
+        let assignedAt: CFTimeInterval
+        let pressToRestoreMs: Double
+
+        var pressToBaseMs: Double { (assignedAt - pressAt) * 1000 }
+    }
+
+    @MainActor private var undoPressAt: CFTimeInterval?
+    @MainActor private var undoPicture: (target: UndoPictureTarget, pressAt: CFTimeInterval, restoredAt: CFTimeInterval)?
+    private var undoPictures: [UndoPicture] = []
+    private static let undoPictureCeiling = 256
+
+    /// Keep just the most recent press in flight. A more recent press can supersede its render
+    /// before the older picture ever reaches the base.
+    @MainActor
+    func traceUndo(_ body: () -> Void) {
+        guard Self.isOn else { body(); return }
+        let pressAt = CACurrentMediaTime()
+        undoPicture = nil
+        undoPressAt = pressAt
+        defer {
+            undoPressAt = nil
+            append(.undoPress, start: pressAt, end: CACurrentMediaTime(), value: 0)
+        }
+        body()
+    }
+
+    @MainActor
+    func vectorStrokeRestored(layerID: UUID, celID: UUID, vectorID: UUID, documentVersion: Int) {
+        guard let pressAt = undoPressAt else { return }
+        let target = UndoPictureTarget(layerID: layerID, celID: celID, vectorID: vectorID,
+                                       documentVersion: documentVersion)
+        undoPicture = (target, pressAt, CACurrentMediaTime())
+    }
+
+    /// Called after the normal renderer has installed the exposed committed base. The timestamp
+    /// ends at the app's image slot, before compositor presentation and screen scanout.
+    @MainActor
+    func committedBaseAssigned(layerID: UUID, celID: UUID, vectorID: UUID, documentVersion: Int,
+                               source: UndoPictureSource) {
+        guard let pending = undoPicture,
+              pending.target == UndoPictureTarget(layerID: layerID, celID: celID, vectorID: vectorID,
+                                                  documentVersion: documentVersion) else { return }
+        let assignedAt = CACurrentMediaTime()
+        undoPicture = nil
+        lock.lock()
+        if undoPictures.count < Self.undoPictureCeiling {
+            undoPictures.append(UndoPicture(target: pending.target, source: source, pressAt: pending.pressAt,
+                                             assignedAt: assignedAt,
+                                             pressToRestoreMs: (pending.restoredAt - pending.pressAt) * 1000))
         } else {
             overflowed = true
         }
@@ -482,6 +558,8 @@ final class PlaybackTrace: @unchecked Sendable {
         let overflowed: Bool
         let ticks: [TickSummary]
         let phases: [PhaseSummary]
+        let undoPictures: [UndoPicture]
+        let startedAt: CFTimeInterval
         /// The whole run's version of `TickSummary.unattributedMs`, and the three numbers it is
         /// derived from, so a reader can check the arithmetic rather than trust it.
         let mainBusyMs: Double
@@ -531,19 +609,20 @@ final class PlaybackTrace: @unchecked Sendable {
     /// count is the operational form of *"the canvas is not showing the bake"* — a canvas that is
     /// engaged rasterizes nothing per flip (PERFORMANCE.md §16.2), so the count answers the question
     /// without the recorder needing a reference to `CanvasManager`, which by design it does not have.
-    func drainWindow() -> (phases: [PhaseSummary], ringHits: Int, ringMisses: Int) {
+    func drainWindow() -> (phases: [PhaseSummary], ringHits: Int, ringMisses: Int, undoPictures: [UndoPicture]) {
         lock.lock()
         let events = self.events
+        let undoPictures = self.undoPictures
         self.events.removeAll(keepingCapacity: true)
+        self.undoPictures.removeAll(keepingCapacity: true)
         overflowed = false
         lock.unlock()
-        guard !events.isEmpty else { return ([], 0, 0) }
 
         var hits = 0, misses = 0
         for event in events where event.phase == .bakeRead {
             event.value == 1 ? (hits += 1) : (misses += 1)
         }
-        return (Self.summarize(events), hits, misses)
+        return (Self.summarize(events), hits, misses, undoPictures)
     }
 
     /// One `PhaseSummary` per phase present in `events`, ordered by total time descending.
@@ -572,6 +651,7 @@ final class PlaybackTrace: @unchecked Sendable {
         let events = self.events
         let startedAt = self.startedAt
         let overflowed = self.overflowed
+        let undoPictures = self.undoPictures
         lock.unlock()
 
         let sorted = events.sorted { $0.start < $1.start }
@@ -643,7 +723,7 @@ final class PlaybackTrace: @unchecked Sendable {
 
         let span = (sorted.last?.end ?? startedAt) - startedAt
         return Report(seconds: span, eventCount: events.count, overflowed: overflowed,
-                      ticks: tickSummaries, phases: summaries,
+                      ticks: tickSummaries, phases: summaries, undoPictures: undoPictures, startedAt: startedAt,
                       mainBusyMs: busyMs, mainCpuMs: cpuMs, attributedMs: attributed,
                       unattributedMs: max(busyMs - attributed, 0))
     }
