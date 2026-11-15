@@ -112,11 +112,12 @@ HANDOFF.md is a navigation/checkpoint document, never the only record of an outs
   exterior leak and protected-turn leak each failed the intended assertion. Combined
   `69b6b5c9` passed seven cold workflows and both fast tiers (5637 passed, 4 opt-in skips each).
   Simulator Release first Mend was 68/122 ms at 12/20 px, with 1.8/2.0 ms for a reused Reach
-  update. Latest signed `00cb237b` includes this exact fix, open-lasso Move, editable vector
+  update. Signed `00cb237b` includes this exact fix, open-lasso Move, editable vector
   Flip and restored and smaller timeline thumbnails. Both mandatory fast tiers and 30 cold
   checks passed, including all 13 in the touched Mend/lasso classes and the actual recorded
-  outline. Signature verified, profile through Nov 20 02:09 Toronto. The iPad was locked at
-  the last check. Await saved Gallery and unlock. Real iPad confirmation remains open.
+  outline. The later signed `01fb0fe7` includes this same Mend fix and passed the recorded
+  motion again. Both signatures verify. The iPad was locked at 19:02. Await saved Gallery and
+  unlock. Real iPad confirmation remains open.
   Evidence: `~/PaintWork/mend-20261114/results/`.
 - [ ] **Show vector Liquify while the stroke is still held (November 12).** Owner says the
   installed iPad only shows the reshaping after lift. The points should follow the gesture live.
@@ -221,7 +222,10 @@ in parallel and keep the exact simulator-qualified iPad candidate isolated until
   canonical local commits on `tmp/nov14-canonical-before-promotion`. Prepared local review
   branch `tmp/nov14-promotion-review` at `646402f8` with identical production tree to signed
   `00cb237b`, two verified test owners and reconciled documents. Both Git ancestry checks passed.
-  The local-main migration decision remains open; no remote refs or renewer files changed.
+  The evening review `78eaa615` carries the same queue onto exact code `01fb0fe7` and retains
+  the detailed audit. App and UI test trees match the candidate. The new preview still
+  conflicts only in records (HANDOFF and TODO). The local-main migration decision remains
+  open; remote refs and renewer files were left alone.
   Ref and conflict receipt:
   `~/PaintWork/nov14-audit-evidence/integration/`.
 
@@ -264,7 +268,9 @@ in parallel and keep the exact simulator-qualified iPad candidate isolated until
   Combined `01fb0fe7` passed all 19 visible workflows. That includes brush preview restoration,
   the opacity control, the recorded Mend Gaps motion and open-lasso Move. Inspected the same
   run's clipped draft, solid red fill with its reference hidden, and settled Undo with the
-  earlier stroke over a green stream. Both fast tiers and final signing remain in progress.
+  earlier stroke over a green stream. Debug and Release each passed 5,647 plus four opt-in
+  skips with all static IDs reconciled. Arm64 Release `01fb0fe7` is signed and verified.
+  The iPad was still passcode-locked at 19:02, so installation and physical use remain open.
 
 1. **iPad update and real use.** Signed Release `8214421f` installed and normal-launched at
    02:12 Toronto November 13, with a profile through November 20. It includes live Liquify,
@@ -290,6 +296,11 @@ in parallel and keep the exact simulator-qualified iPad candidate isolated until
    reopening Settings. Use a disposable copy for a drag or Set Down.
 4. **Architecture and performance audit.** Close the remaining concrete rendering, input, media,
    and saved-data issues and test their existing implementations. Keep development storage bounded.
+   The exact `01fb0fe7` opt-in Release run passed both Fill checks and isolated Lens Blur.
+   The interactive fixture verified exterior safety and cut-out coverage. Mend All repaired
+   the 300- and 1,000-cel fixtures and verified atomic refusal. Lens Blur returned a changed
+   2048×1024 picture with a radius-zero identity and Gaussian comparison. Timings and footprint
+   apply to these simulator fixtures. Evidence: `~/PaintWork/nov14-evening-evidence/`.
    The detailed audit and follow-through checklist follow the owner queue.
 5. **Windows streaming.** Verify Blender, source switching, reconnects, clipboard, bake and latency
    on the real link. November 14 Tailscale sees the laptop online and SSH responds, but it

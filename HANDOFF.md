@@ -28,14 +28,26 @@ TODO.md tracks outstanding work and owner rulings. Prior evidence and milestones
   their intended native pixel checks. Restored green and a separate 1080×810 pt landscape
   witness passed. All component simulators have been deleted.
   Evidence: `~/PaintWork/nov14-bounded-thumbnail-evidence/evening-ui/mask-triage/`.
-- Combined exact source `01fb0fe7` is in the owned test lane. This includes masked Shape Hold,
+- Combined exact source `01fb0fe7` completed the simulator gates. It includes masked Shape Hold,
   the stream/edit worker split, bounded tick summary, extra automatic freeze evidence, and the
   already qualified damaged-text and Mend All fixture changes. All 19 cold workflows passed,
   with no missing methods. Inspected clipped edit handles, the recorded red fill with its
-  reference hidden, and green-stream Undo. Both fast tiers are in the native lane, followed
-  by a build-only signing job if green. The exact project has 1,335 unique top-level PBX objects
+  reference hidden, and green-stream Undo. Both Debug and Release passed 5,647 plus four
+  opt-in skips with every ID matched. The owned simulator was deleted. Signed arm64 Release
+  `01fb0fe7` verifies, UUID `0244C786-A5F5-381C-8C23-C89BC5B09295`, same app identity and paired
+  device set, profile through Nov 20 02:09 Toronto. It is staged under
+  `~/PaintWork/crash-20261111/device-fresh-01fb0fe7-Release/`. Installation awaits saved Gallery
+  and unlock. Exact opt-in Release passed 2/2 Fill and 1/1 isolated Lens. Mend All changed the
+  300- and 1,000-cel light fixtures in ~2.34/8.19 s with ~0.5/0.0 MB sampled footprint increase.
+  Interactive Mend On/Off took ~95/5 ms and ~0.3/0.2 MB in the 64² fixture. Lens returned the
+  changed 2048×1024 pixels in 20–22 ms; same-run radius-zero and Gaussian were 12 and 22 ms.
+  These figures are simulator measurements. The opt-in simulator was also deleted.
+  The exact project has 1,335 unique top-level PBX objects
   and zero compiler warnings on changed app lines. Static fast selection is 5,651 cases.
-  The canonical repo has the exact isolated ref `tmp/nov14-evening-gate`. Evidence: `~/PaintWork/nov14-evening-evidence/`.
+  Canonical has isolated ref `tmp/nov14-evening-gate` and a records-only review at `78eaa615`.
+  The review has identical app and test trees and preserves both historical queues. The
+  two-way ref and three-way conflict receipts are in `~/PaintWork/nov14-audit-evidence/integration/`.
+  Native evidence: `~/PaintWork/nov14-evening-evidence/`.
 - Stream timing summary `3c939109` passed 26 focused Debug checks, including visible On Top
   stream placement. It stores count, sum and peak instead of the sample array. The deliberate
   peak fault reached its native assertion and passed restored. The other two counters also
@@ -46,7 +58,7 @@ TODO.md tracks outstanding work and owner rulings. Prior evidence and milestones
   Exact stream/Undo `ad1d6160` visibly removed the newest stroke while the next On Top frame
   was still waiting. The old alias failed the edit-admission logic test, and the cold UI
   passed in both layouts. Physical Undo timing stays open. The iPad still required its passcode
-  at 18:19 and its recording list was unchanged at 18:01.
+  at 19:02 and its recording list was still unchanged. Device remains on `8214421f`.
 
 ### November 14 active work
 
