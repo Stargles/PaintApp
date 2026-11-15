@@ -198,9 +198,16 @@ final class TransformKeysSurviveUITests: PaintUITestCase {
         app.buttons["toolbar.moveButton"].tap()
         let done = app.buttons["moveBar.doneButton"]
         XCTAssertTrue(done.waitForExistence(timeout: 5))
-        let box = try XCTUnwrap(settledMoveBox(app))
-        dragOnCanvas(app, from: CGVector(dx: box.midX, dy: box.midY),
-                     to: CGVector(dx: box.midX + 0.20 * paper.width, dy: box.midY))
+        let dragStart: CGVector
+        if container {
+            // A transform layer's box covers the paper, so start well inside its edges.
+            dragStart = onHost(paper, 0.45, 0.40)
+        } else {
+            let box = try XCTUnwrap(settledMoveBox(app))
+            dragStart = CGVector(dx: box.midX, dy: box.midY)
+        }
+        dragOnCanvas(app, from: dragStart,
+                     to: CGVector(dx: dragStart.dx + 0.20 * paper.width, dy: dragStart.dy))
         if container { addKeysAtThePlayhead(app, layer: poseLayer, frame: 4) }
         done.tap()
         XCTAssertEqual(markers(app, layer: poseLayer), "0|4")
