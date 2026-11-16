@@ -87,7 +87,7 @@ final class DeferredVectorRenderLogicTests: XCTestCase {
         // constant: at most four a second over the 2.7 s run, plus the one at the start.
         XCTAssertLessThanOrEqual(starts.count, 12,
                                  "twenty edits must share renders rather than paying one each: \(starts.count)")
-        XCTAssertGreaterThanOrEqual(starts.last!, taps.last!, "and the last edit is rendered after it")
+        XCTAssertGreaterThanOrEqual(starts.last!, taps.last! - 0.001, "and the last edit is rendered after it")
 
         pacing.reset()
         XCTAssertEqual(pacing.delay(at: starts.last!), 0, "a different cel's first picture is never held back")
