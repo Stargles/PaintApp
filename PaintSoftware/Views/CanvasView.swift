@@ -1420,10 +1420,16 @@ struct CanvasView: UIViewRepresentable {
                 // **The open lasso's size** (TODO (184)): how many points the Freehand lasso holds, or
                 // `none` — the host hides the overlay's layers from XCUITest like every descendant.
                 + " lasso:\(canvasManager.openLasso.map { String($0.points.count) } ?? "none")"
+                // **What the render server holds for this window** — `-uiTestContentsCensus` only.
+                + (LayerContentsCensus.shared.map { " " + $0.field } ?? "")
             // **Compared before it is written, because this now runs on every pass.** Building the
             // string is a handful of interpolations against a `renderTree` derivation and a
             // whole-tree `==` on the same line, so it is free; assigning an accessibility label is
             // not necessarily, and a canvas at rest has a great many passes that change nothing.
+            if let census = LayerContentsCensus.shared, let hostView {
+                census.attach(to: hostView.window)
+                census.onChange = { [weak self] in self?.publishCanvasState() }
+            }
             guard let hostView, state != lastPublishedCanvasState else { return }
             lastPublishedCanvasState = state
             hostView.accessibilityLabel = state
