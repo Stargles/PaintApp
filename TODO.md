@@ -204,6 +204,44 @@ folders the owner deleted during the emergency cleanup; verify availability befo
 
 ## Remaining work as of November 13
 
+**November 16 evening.** Perspective Fit (`fecc1a8f`) is done and the assembled gate passed
+(13/13 cold, 5,654 + 4 skips per fast tier). `main` is now the single tested line, synced to GitHub.
+Remaining: physical iPad confirmation of the items below, freeze/crash root causes, Windows SSH.
+
+**November 15 continuation.** Device was paired but still locked. Continue the detailed audit
+on the signed `01fb0fe7` lineage: independently reproduce the perspective resize corner case,
+qualify old-writer package compatibility without touching the owner's library, and close the
+settled Undo measurement gap using the existing device probe if it can isolate the visible
+result. Verify actual source and test receipts before repeating runs. The source decision and
+iPad readiness are still pending.
+
+- Old saved Views can still hide a group's descendants when the project was last saved with
+  the group visible. Exact `01fb0fe7` failed both nested-folder and member-layer reopen
+  assertions after the artist reapplies the old View and shows the group. The old writer
+  could produce this through Hide → Add View → All → Save. Repair each saved visibility
+  state independently in the existing migration. Keep the current-format guard.
+- A separate historical writer check shows an empty legacy compositor Input A below
+  populated Input B, while dropping the slot tag ranks the empty folder above it. Covered
+  fixtures populate both slots. Preserve the real order with a mixed old fixture before
+  retiring that migration. The two previously recorded owner archive paths are absent;
+  seven local candidate packages contain neither legacy marker.
+- Legacy View fix `d5ff1463` passed 63 focused checks and the reverse fault. The cold
+  Gallery proof passed with tracked older artwork, verifying its ink hides and returns. Container resize follows actual
+  artwork through Move, Rotate, Repeat's stored pose and Shake in `ff0a5e94`, with 56 focused logic checks and the cold Resize gesture green. Fractional
+  projective Parallax remains separate: a known Fit yields no half-share pose when the
+  old blend's origin falls on the mapped vanishing line. On November 15 the owner answered
+  “no scenes need to be preserved” to the A/B appearance choice. Implement Fit-safe placement
+  in the shared Parallax math. Existing scene packages remain intact; an older saved scene can
+  render this transform differently. Use the authored rest box, with no compatibility flag,
+  new persisted state or general interpolation overhaul. Parked clean on
+  `tmp/nov15-parallax-fit` at `2907dc4b`. Implement and verify the 400×200 placement and
+  600×200 vanishing-line cases, then run the final assembled gates. The superseded assembled
+  gate was cancelled and supplies no pass credit.
+- Settled Undo `7b27c469` traces from the press through restoration to assignment of the
+  exact matching committed base. The real recorder UI produced both a deferred nonempty
+  and immediate empty assignment on one cel. The unattended Probe recorded two deferred
+  assignments. Physical comparative timing remains open.
+
 Kevin reiterated that a blocked release must not stop the other open work. Run independent tasks
 in parallel and keep the exact simulator-qualified iPad candidate isolated until signing.
 
@@ -222,10 +260,11 @@ in parallel and keep the exact simulator-qualified iPad candidate isolated until
   canonical local commits on `tmp/nov14-canonical-before-promotion`. Prepared local review
   branch `tmp/nov14-promotion-review` at `646402f8` with identical production tree to signed
   `00cb237b`, two verified test owners and reconciled documents. Both Git ancestry checks passed.
-  The evening review `78eaa615` carries the same queue onto exact code `01fb0fe7` and retains
+  The evening review `ee98a190` carries the same queue onto exact code `01fb0fe7` and retains
   the detailed audit. App and UI test trees match the candidate. The new preview still
   conflicts only in records (HANDOFF and TODO). The local-main migration decision remains
-  open; remote refs and renewer files were left alone.
+  open; submitted the owner choice on the verified branch and named Desktop backup. Remote
+  refs and renewer files were left alone.
   Ref and conflict receipt:
   `~/PaintWork/nov14-audit-evidence/integration/`.
 
@@ -238,7 +277,8 @@ in parallel and keep the exact simulator-qualified iPad candidate isolated until
   bounded telemetry, separate from finding a device restart cause. Exact `3c939109` passed
   26 Debug checks including visible On Top stream placement. Extracted production behavior
   and existing assertion expressions distinguish lost count, sum and peak. The native
-  peak fault failed as expected, then passed restored. Await assembled qualification.
+  peak fault failed as expected, then passed restored. Assembled `01fb0fe7` passed both
+  fast tiers and all 19 targeted UI checks. Release and shared-source promotion remain open.
 
 - [ ] **Reconcile the remaining on-screen rendering and brush audit controls.** On signed
   `00cb237b`, drive the existing masking, playback bake, live/linked Liquify, brush curve
@@ -301,7 +341,7 @@ in parallel and keep the exact simulator-qualified iPad candidate isolated until
    the 300- and 1,000-cel fixtures and verified atomic refusal. Lens Blur returned a changed
    2048×1024 picture with a radius-zero identity and Gaussian comparison. Timings and footprint
    apply to these simulator fixtures. Evidence: `~/PaintWork/nov14-evening-evidence/`.
-   The detailed audit and follow-through checklist follow the owner queue.
+   The full audit and follow-through checklist is in the audit sections of this file below.
 5. **Windows streaming.** Verify Blender, source switching, reconnects, clipboard, bake and latency
    on the real link. November 14 Tailscale sees the laptop online and SSH responds, but it
    still rejects the configured key. Desktop Commander lists the laptop offline. A read-only discovery

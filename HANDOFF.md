@@ -1,9 +1,99 @@
 # Handoff
 
-## Current checkpoint — November 14, 2026, Toronto
+## Start the next session — Claude Code
 
-TODO.md tracks outstanding work and owner rulings. Prior evidence and milestones are in canonical
-`git show 0ff0a1f0:HANDOFF.md`. The detailed audit follows the owner queue in TODO.md.
+From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
+
+> Continue PaintSoftware from HANDOFF.md. Read AGENTS.md, CLAUDE.md, TODO.md and BUGS.md and verify
+> `main` equals `origin/main`. Start with the owner's physical results on the iPad build installed
+> from `main` (Fill/Mend, Undo with stream off/on, erasing, live Liquify). Finish all actionable
+> items, use focused delegation and keep TODO.md and HANDOFF.md current. Brief the owner in terms
+> of what they see in PaintApp.
+
+## Sign-off — November 16, 2026, Toronto (evening)
+
+- **One version.** On the owner's instruction ("one version that is most up to date on the mac
+  that is also synced to github") the tested release lineage became `main`, fast-forwarding
+  GitHub from `afd2030c`. The Desktop-only record commits were carried as content (owner queue,
+  audit sections, CLAUDE/AGENTS) and the old Desktop history is preserved in the archive bundle
+  `~/PaintWork/archive/refs-2026-11-16.bundle` together with every former `tmp/*` branch.
+  Leftover worktrees were removed; new work uses a short-lived `~/PaintWork/PaintApp-<id>`
+  worktree merged back with `--ff-only`, as before.
+- **No install floor.** The owner ruled the five-day profile floor was never theirs; it is
+  removed from CLAUDE.md, `~/PaintApp/deploy/resign.sh` (backup `~/PaintWork/resign.sh.bak-2026-11-16`)
+  and `tools/test-resign-region.sh` (harness green). Install a gated build whenever useful; refuse
+  only a profile with under an hour left.
+- **Perspective Fit shipped.** `fecc1a8f` blends a fractional projective Parallax share about the
+  authored box origin, and Resize now transports Parallax poses. 309/309 focused logic checks, both
+  reverse faults red, the cold Resize UI green, rendered 400×200 and 600×200 Fit pictures 0-pixel
+  diff to the expected placement (`~/PaintWork/nov15-parallax-evidence/fit-fecc1a8f/`).
+- **Assembled gate at exact `fecc1a8f`** (legacy View, container Resize, Undo trace, perspective
+  Fit): 13/13 cold workflows, Debug and Release each 5,654 passed + 4 opt-in skips, static
+  selection reconciled, owned simulator deleted. Receipts:
+  `~/PaintWork/nov15-release-evidence/exact-fecc1a8fb5860673d418517760f7aa77f9ed2476/`.
+- Signed Release of `fecc1a8f` built under `~/PaintWork/crash-20261111/device-fresh-fecc1a8f-Release/`;
+  see TODO's iPad item for the install result. Physical Undo/erase latency, the Mend Fill
+  confirmation, live Liquify, freeze/crash root causes and Windows SSH remain open.
+
+TODO.md tracks outstanding work and owner rulings. Older checkpoints are in `git log -p HANDOFF.md`.
+
+### November 15 continuation
+
+**Original checkpoint at 02:08 Toronto.** Resume the approved
+perspective correction first. The clean worktree is `~/PaintWork/PaintApp-nov15-parallax-fit`,
+branch `tmp/nov15-parallax-fit` at `2907dc4b`. It has no edits or owned simulator. In
+`TransformLayerMode.parallaxMap`, compute the fractional projective component relative to
+the authored box origin and restore world coordinates. Preserve zero/full shares and the
+affine control. Then remove the Parallax exclusion in `CanvasManager+Document`'s existing
+resize transport, replace the temporary preserve-old assertion in `CanvasResizeLogicTests`,
+and verify visible 400×200 and 600×200 Fit examples. Existing packages stay intact.
+Analytic inputs, rendered comparison and prior compositor fixture links are in
+`~/PaintWork/nov15-parallax-evidence/README.txt`.
+
+
+- Owner asked to continue through all actionable work. CoreDevice confirmed the iPad is paired and
+  still requires a recent unlock at 02:06 Toronto. `01fb0fe7` is the latest verified signed Release.
+  Its profile remains valid through Nov 20 02:09. It meets the usual five-day install floor through
+  Nov 15 02:09. The owner was told about that window. No device write occurred.
+- Preserve the separate product and Desktop record histories. The previous exact release review
+  with current notes is `ee98a190`. Git's read-only push preview confirms that review can
+  fast-forward the shared branch. The owner's history decision remains pending.
+- Old View failure reproduced on exact source at both nested folder and layer after reopen.
+  Fix `d5ff1463` repairs preset and saved scene independently. All 63 focused checks passed.
+  The old condition failed both intended reopen assertions and the restored check passed.
+  The disposable cold Gallery proof passed. It opened older tracked artwork, selected the
+  old View and showed its group again with the same ink restored. The older tracked drawing
+  was copied into a reconstructed legacy View manifest. Inspected restored blue ink in
+  `cold/attachments/F61BACD9-69B2-4F6D-828E-B85E61FC00F1.png` under the evidence directory.
+  Owner packages remain untouched.
+  Evidence: `~/PaintWork/nov15-legacy-view-evidence/`.
+- Resize candidate `ff0a5e94` covers ordinary and stored container pose and Shake transport,
+  including a mode-switch control. Active Parallax geometry retains the previous behavior.
+  Exact Debug passed all 56 logic cases and the new cold Resize gesture. Inspected both landscape
+  captures showing the two positions and keys. Five other unchanged cold workflows passed
+  on identical production source. The four deliberate reverse cases failed as intended
+  and all four passed restored. The picture of the old fault showed half the expected travel.
+  Fractional perspective remains separate: an example holds the same saved scene values
+  but must change its picture to correct Fit; a wider valid full-strength pose makes the
+  current half-share blend undefined. Owner answered “no scenes need to be preserved” to
+  the A/B appearance choice. Proceed with the shared Fit-safe blend and test existing stored
+  inputs against the new math. Keep actual packages intact.
+  Evidence: `~/PaintWork/nov15-parallax-evidence/`.
+- Undo diagnostic `7b27c469` passed 26 focused logic controls, three existing recorder UI checks,
+  the prior green-stream UI, and its own landscape cold check. The latter recorded exactly
+  two accepts on one cel, a deferred nonempty replacement and immediate empty assignment.
+  The unattended Probe also captured two consecutive deferred assignments. This measures the
+  app's accepted base before physical presentation. Device timing and attribution remain open.
+  Evidence: `~/PaintWork/nov15-undo-probe-evidence/`.
+- Prepared composite branch `tmp/nov15-release-gate` at `2907dc4b` from the old-View fix, Resize
+  and recorder. Both linters passed. The owner chose the perspective fix after this assembly,
+  so include it before running the release gates. The superseded 2907 cold run and its
+  conditional signing wait were cancelled at the owner's decision. Its incomplete result
+  is not a gate. The owned simulator was deleted, and no owned job remains.
+  Rerun the focused cases and an exact combined cold/Debug/Release gate after implementation.
+  Scripts and cancelled result: `~/PaintWork/nov15-release-evidence/`.
+- Windows still rejects the configured SSH key. Device and shared-repository writes await the
+  actual readiness/decisions. No new physical freeze or crash evidence.
 
 ### November 14 evening continuation
 
@@ -44,7 +134,7 @@ TODO.md tracks outstanding work and owner rulings. Prior evidence and milestones
   These figures are simulator measurements. The opt-in simulator was also deleted.
   The exact project has 1,335 unique top-level PBX objects
   and zero compiler warnings on changed app lines. Static fast selection is 5,651 cases.
-  Canonical has isolated ref `tmp/nov14-evening-gate` and a records-only review at `78eaa615`.
+  Canonical has isolated ref `tmp/nov14-evening-gate` and a records-only review at `ee98a190`.
   The review has identical app and test trees and preserves both historical queues. The
   two-way ref and three-way conflict receipts are in `~/PaintWork/nov14-audit-evidence/integration/`.
   Native evidence: `~/PaintWork/nov14-evening-evidence/`.
@@ -58,7 +148,10 @@ TODO.md tracks outstanding work and owner rulings. Prior evidence and milestones
   Exact stream/Undo `ad1d6160` visibly removed the newest stroke while the next On Top frame
   was still waiting. The old alias failed the edit-admission logic test, and the cold UI
   passed in both layouts. Physical Undo timing stays open. The iPad still required its passcode
-  at 19:02 and its recording list was still unchanged. Device remains on `8214421f`.
+  at 19:02 and its recording list was still unchanged. The later read-only system crash listing
+  had no added paths against the 17:22 baseline. Device remains on `8214421f`. The repository
+  selection and saved Gallery/unlock are pending with the owner. Retained signed releases, source
+  refs, result bundles and screenshots. Cleaned ~4.5 GiB of owned compiler output; 47 GiB free.
 
 ### November 14 active work
 

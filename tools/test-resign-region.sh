@@ -134,10 +134,10 @@ read_profile_dates(){
     PROFILE_CREATION_ISO=$(date -u -r "$NOW" '+%Y-%m-%dT%H:%M:%SZ')
     case "$FIXTURE_MINT_MODE" in
       clockfail|advanced) PROFILE_EXPIRATION_ISO=$(date -u -v+8d -r "$NOW" '+%Y-%m-%dT%H:%M:%SZ'); PROFILE_EXPIRATION_EPOCH=$((NOW - 86400)) ;;
-      short) PROFILE_EXPIRATION_ISO=$(date -u -v+4d -r "$NOW" '+%Y-%m-%dT%H:%M:%SZ'); PROFILE_EXPIRATION_EPOCH=$((NOW - 86400)) ;;
+      short) PROFILE_EXPIRATION_ISO=$(date -u -v+30M -r "$NOW" '+%Y-%m-%dT%H:%M:%SZ'); PROFILE_EXPIRATION_EPOCH=$((NOW - 86400)) ;;
       early) PROFILE_EXPIRATION_ISO=$(date -u -v+2d -r "$NOW" '+%Y-%m-%dT%H:%M:%SZ'); PROFILE_EXPIRATION_EPOCH=$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$PROFILE_EXPIRATION_ISO" '+%s') ;;
       stale) PROFILE_EXPIRATION_ISO=$(date -u -v-1d -r "$NOW" '+%Y-%m-%dT%H:%M:%SZ'); PROFILE_EXPIRATION_EPOCH=$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$PROFILE_EXPIRATION_ISO" '+%s') ;;
-      aged) PROFILE_EXPIRATION_ISO=$(date -u -v+5d -r "$NOW" '+%Y-%m-%dT%H:%M:%SZ'); PROFILE_EXPIRATION_EPOCH=$((NOW - 86400)) ;;
+      aged) PROFILE_EXPIRATION_ISO=$(date -u -v+1H -r "$NOW" '+%Y-%m-%dT%H:%M:%SZ'); PROFILE_EXPIRATION_EPOCH=$((NOW - 86400)) ;;
     esac
 }
 run_as_user(){
