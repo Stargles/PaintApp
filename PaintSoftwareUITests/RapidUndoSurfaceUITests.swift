@@ -44,6 +44,7 @@ final class RapidUndoSurfaceUITests: PaintUITestCase {
 
         // Twenty strokes as fast as the harness can draw them, on the top layer, below the marks.
         let before = Int(readField(app, "rasterizes:")) ?? -1
+        let handedBefore = census(app).handed
         var drawn: [CGVector] = []
         for stroke in 0..<20 {
             let y = 0.36 + Double(stroke) * 0.03
@@ -69,6 +70,29 @@ final class RapidUndoSurfaceUITests: PaintUITestCase {
         }
         attachScreenshot(canvas, "3-after-twenty-quick-undos")
         let afterUndos = Int(readField(app, "rasterizes:")) ?? -1
+        let end = census(app)
         print("RAPID-UNDO rasterizes before=\(before) afterStrokes=\(afterStrokes) afterUndos=\(afterUndos) census strokes=\(censusAfterStrokes) end=\(readField(app, "census:")) frame=\(String(describing: readFrameLabel(app)))")
+
+        // What the render server was handed. Unpaced, the twenty undos alone handed it a picture
+        // per undo and the simulator's `backboardd` climbed to 2.3 GB; the iPad's dies at 1,850 MiB.
+        XCTAssertGreaterThanOrEqual(before, 0, "PREMISE: the canvas label publishes rasterizes:")
+        XCTAssertLessThanOrEqual(afterStrokes - before, 30,
+                                 "twenty strokes walked \(afterStrokes - before) whole 5000² cels — one each at most, plus slack")
+        XCTAssertLessThanOrEqual(afterUndos - afterStrokes, 30,
+                                 "twenty undos walked \(afterUndos - afterStrokes) whole 5000² cels")
+        XCTAssertLessThanOrEqual(end.handed - handedBefore, 50,
+                                 "forty edits handed the render server \(end.handed - handedBefore) canvas-sized pictures")
+        XCTAssertLessThanOrEqual(end.busiest, 4,
+                                 "the render server was handed \(end.busiest) canvas-sized pictures in one second")
+        XCTAssertLessThanOrEqual(end.peakLarge, 6,
+                                 "the layer tree referenced \(end.peakLarge) canvas-sized pictures at once — five layers' worth plus one")
+    }
+
+    /// `census:` on `canvas.host` — `LayerContentsCensus.field`.
+    private func census(_ app: XCUIApplication) -> (peakMiB: Int, peakLarge: Int, handed: Int, busiest: Int) {
+        let parts = readField(app, "census:").split(separator: ",").compactMap { Int($0) }
+        XCTAssertEqual(parts.count, 4, "PREMISE: -uiTestContentsCensus publishes census: on canvas.host")
+        guard parts.count == 4 else { return (0, 0, Int.max, Int.max) }
+        return (parts[0], parts[1], parts[2], parts[3])
     }
 }

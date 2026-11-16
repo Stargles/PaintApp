@@ -66,6 +66,72 @@ enum VectorRenderCache {
     /// only then is `dropCachedImage()` called on each — so a canvas lock is never taken while this
     /// lock is held, and the one nesting that does exist (`dropCachedImage` → `noteDropped`) runs the
     /// other way round.
+    /// **A layer host has started showing `canvas`'s committed picture**, and its image view now
+    /// holds whatever that canvas memoizes. Paired with `unpin`.
+    ///
+    /// **A pinned canvas is neither charged nor evicted, because evicting it frees nothing.** The
+    /// image the memo names is the one on screen, retained by the view whether or not the memo
+    /// keeps it, so dropping it reclaims no byte — and it throws away the base the next edit on that
+    /// layer repairs or appends to. MEASURED on 2026-11-16 at the owner's shape — 5000², five vector
+    /// layers, the iPad 9's 192 MiB budget, which holds two such renders: every undo on a visible
+    /// layer found its memo evicted and re-walked the whole cel (0.71 s on the owner's iPad), and
+    /// every bake of the frame on screen re-walked the other four layers (2.2–7.4 s a frame, the
+    /// orange bars). The budget bounds what is held *beyond* what is shown; what is shown is bounded
+    /// by the layers on screen, and is the display's to account for.
+    static func pin(_ canvas: VectorCanvas) {
+        let key = ObjectIdentifier(canvas)
+        lock.lock()
+        defer { lock.unlock() }
+        if var pin = pins[key], pin.canvas === canvas {
+            pin.count += 1
+            pins[key] = pin
+        } else {
+            pins[key] = Pin(canvas: canvas, count: 1)
+        }
+        // Its bytes leave the budget while it is on screen.
+        if let entry = entries[key], entry.canvas === canvas, !entry.pinned {
+            residentTotal -= entry.bytes
+            pinnedEntries += 1
+            entries[key]?.pinned = true
+        }
+    }
+
+    /// The host has stopped showing `canvas`. Its memo is an ordinary cache entry again — charged,
+    /// and the first to go if the budget is over, since it is the least recently used of anything
+    /// that was on screen.
+    static func unpin(_ canvas: VectorCanvas) {
+        let key = ObjectIdentifier(canvas)
+        lock.lock()
+        defer { lock.unlock() }
+        guard var pin = pins[key], pin.canvas === canvas else { return }
+        pin.count -= 1
+        if pin.count > 0 { pins[key] = pin; return }
+        pins.removeValue(forKey: key)
+        if let entry = entries[key], entry.canvas === canvas, entry.pinned {
+            residentTotal += entry.bytes
+            pinnedEntries -= 1
+            entries[key]?.pinned = false
+        }
+    }
+
+    /// `pin` for as long as this lives — what a host holds while it shows a canvas, so letting go of
+    /// the view or the canvas cannot leave the pin behind.
+    final class DisplayPin {
+        let canvas: VectorCanvas
+        init(_ canvas: VectorCanvas) {
+            self.canvas = canvas
+            VectorRenderCache.pin(canvas)
+        }
+        deinit { VectorRenderCache.unpin(canvas) }
+    }
+
+    /// Whether a host is showing `canvas` — for tests.
+    static func isPinned(_ canvas: VectorCanvas) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return isPinnedLocked(ObjectIdentifier(canvas), canvas)
+    }
+
     static func noteRendered(_ canvas: VectorCanvas) {
         // Before the lock. Touching a lazy `static let` runs its initialiser, which registers with
         // `MemoryPressure` and takes *that* type's lock; doing it while holding this one would put a
@@ -115,8 +181,9 @@ enum VectorRenderCache {
         removeLocked(ObjectIdentifier(canvas))
     }
 
-    /// Bytes of memoized vector render the app is holding, across every live canvas that has
-    /// registered one. The instrument `PixelOps.rasterizeCacheBytes` is for the memo next door.
+    /// Bytes of memoized vector render the app is holding beyond what layer hosts are showing
+    /// (`pin`), across every live canvas that has registered one — the figure the budget binds.
+    /// The instrument `PixelOps.rasterizeCacheBytes` is for the memo next door.
     static var residentBytes: Int {
         lock.lock()
         defer { lock.unlock() }
@@ -139,6 +206,7 @@ enum VectorRenderCache {
         let all = entries.values.compactMap(\.canvas)
         entries.removeAll()
         residentTotal = 0
+        pinnedEntries = 0
         lock.unlock()
         for canvas in all { canvas.dropCachedImage() }
     }
@@ -158,6 +226,24 @@ enum VectorRenderCache {
         weak var canvas: VectorCanvas?
         var bytes: Int
         var lastUsed: UInt64
+        /// On screen — see `pin`. Its bytes are not in `residentTotal` and it is never a victim.
+        var pinned = false
+    }
+
+    private struct Pin {
+        weak var canvas: VectorCanvas?
+        var count: Int
+    }
+
+    /// Canvases a host is showing, with how many hosts are — see `pin`.
+    private static var pins: [ObjectIdentifier: Pin] = [:]
+    /// How many of `entries` are pinned, maintained beside `residentTotal` for its O(1) reason.
+    private static var pinnedEntries = 0
+
+    /// Caller must hold `lock`.
+    private static func isPinnedLocked(_ key: ObjectIdentifier, _ canvas: VectorCanvas) -> Bool {
+        guard let pin = pins[key] else { return false }
+        return pin.canvas === canvas
     }
 
     private static let lock = NSLock()
@@ -193,21 +279,25 @@ enum VectorRenderCache {
         // Treated as its continuation, the entry keeps the dead owner's nil reference, the next prune
         // drops it as dead, and a live canvas holds a memo no eviction can ever reach.
         if var existing = entries[key], existing.canvas === canvas {
-            residentTotal += bytes - existing.bytes
+            if !existing.pinned { residentTotal += bytes - existing.bytes }
             existing.bytes = bytes
             if touching { existing.lastUsed = clock }
             entries[key] = existing
         } else {
-            if let dead = entries[key] { residentTotal -= dead.bytes }
+            if let dead = entries[key] {
+                if dead.pinned { pinnedEntries -= 1 } else { residentTotal -= dead.bytes }
+            }
             if !touching { clock += 1 }
-            entries[key] = Entry(canvas: canvas, bytes: bytes, lastUsed: clock)
-            residentTotal += bytes
+            let pinned = isPinnedLocked(key, canvas)
+            entries[key] = Entry(canvas: canvas, bytes: bytes, lastUsed: clock, pinned: pinned)
+            if pinned { pinnedEntries += 1 } else { residentTotal += bytes }
         }
     }
 
     /// Caller must hold `lock`.
     private static func removeLocked(_ key: ObjectIdentifier) {
-        if let removed = entries.removeValue(forKey: key) { residentTotal -= removed.bytes }
+        guard let removed = entries.removeValue(forKey: key) else { return }
+        if removed.pinned { pinnedEntries -= 1 } else { residentTotal -= removed.bytes }
     }
 
     /// Forgets entries whose canvas has been deallocated. A deleted cel must not hold a slot, and a
@@ -218,7 +308,12 @@ enum VectorRenderCache {
     /// moment that matters — being about to evict a live cel — is exactly when this runs.
     private static func pruneLocked() {
         for (key, entry) in entries where entry.canvas == nil { removeLocked(key) }
+        for (key, pin) in pins where pin.canvas == nil { pins.removeValue(forKey: key) }
     }
+
+    /// Entries the count ceiling applies to — a pinned one is on screen and is not the cache's.
+    /// Caller must hold `lock`.
+    private static var unpinnedCount: Int { entries.count - pinnedEntries }
 
     private static func victimsLocked(keeping keep: ObjectIdentifier?,
                                       budgetBytes: Int? = nil,
@@ -226,13 +321,13 @@ enum VectorRenderCache {
         let budget = budgetBytes ?? Self.budgetBytes
         let limit = entryLimit ?? Self.entryLimit
         // The O(1) gate. Everything below it is O(entries) and runs only at the bound.
-        guard residentTotal > budget || entries.count > limit else { return [] }
+        guard residentTotal > budget || unpinnedCount > limit else { return [] }
         pruneLocked()
-        guard residentTotal > budget || entries.count > limit else { return [] }
+        guard residentTotal > budget || unpinnedCount > limit else { return [] }
         var victims: [VectorCanvas] = []
         for (key, entry) in entries.sorted(by: { $0.value.lastUsed < $1.value.lastUsed }) {
-            guard residentTotal > budget || entries.count > limit else { break }
-            guard key != keep, let canvas = entry.canvas else { continue }
+            guard residentTotal > budget || unpinnedCount > limit else { break }
+            guard key != keep, !entry.pinned, let canvas = entry.canvas else { continue }
             victims.append(canvas)
             removeLocked(key)
         }

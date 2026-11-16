@@ -540,6 +540,64 @@ final class MemoryBudgetLogicTests: XCTestCase {
         }
     }
 
+    /// **A canvas a layer host is showing is neither charged nor evicted, because evicting it frees
+    /// nothing** — the November 16 iPad test (`VectorRenderCache.pin`).
+    ///
+    /// The owner's document is five vector layers at 5000², and the iPad 9's budget holds two such
+    /// renders. Every render on one layer evicted the others' memos, which their image views went on
+    /// holding — no byte freed — so the next undo on a visible layer found no base and walked the
+    /// whole cel (0.71 s on the device), and every bake of the frame on screen re-walked four layers
+    /// (2.2–7.4 s a frame). Same ratio here at the owner's old canvas: two entries' budget, five
+    /// layers on screen, three cels off it.
+    @MainActor
+    func testACanvasOnScreenKeepsTheBaseItsNextUndoRepairs() {
+        VectorRenderCache.removeAll()
+        defer { VectorRenderCache.removeAll(); CompositorBudget.budgetOverrideBytes = nil }
+        let entryBytes = 2048 * 1024 * 4
+        CompositorBudget.budgetOverrideBytes = entryBytes * 2
+
+        let shown = (0..<5).map { _ in ownersCanvasCel() }
+        var pins = shown.map(VectorRenderCache.DisplayPin.init)
+        let offScreen = (0..<3).map { _ in ownersCanvasCel() }
+        for canvas in shown + offScreen { _ = canvas.render() }
+        XCTAssertEqual(shown.filter(\.hasCachedImage).count, 5,
+                       "every layer on screen keeps the picture its host is holding anyway")
+        XCTAssertEqual(offScreen.filter(\.hasCachedImage).count, 2,
+                       "and the budget still binds what is held beyond the screen")
+        XCTAssertLessThanOrEqual(VectorRenderCache.residentBytes, entryBytes * 2)
+
+        // A second stroke on the top layer lands, then is undone: the undo repairs the stroke's
+        // rectangle on the standing picture rather than walking the cel.
+        let top = shown[4]
+        let beforeStroke = top.elements
+        var samples = StrokeSamples(channels: .pressureOnly)
+        for step in 0..<8 { samples.append(VectorSample(x: 300 + CGFloat(step) * 40, y: 600, pressure: 0.7)) }
+        top.addStroke(VectorStroke(brush: Brush(name: "Bench", tip: .round, size: 12),
+                                   color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
+                                   size: 12, opacity: 1, samples: samples))
+        _ = top.render()
+        for canvas in offScreen { _ = canvas.render() }
+        let repairs = top.regionRepairs
+        top.restoreElements(beforeStroke, changedInk: nil)
+        _ = top.render()
+        XCTAssertEqual(top.regionRepairs, repairs + 1,
+                       "the undo must repair the stroke's rectangle on the picture on screen, not walk the whole cel")
+
+        // What a bake of the frame on screen asks: every other layer's picture, already drawn.
+        let walks = shown.dropLast().map(\.rasterizations)
+        for canvas in shown.dropLast() { _ = canvas.render() }
+        XCTAssertEqual(shown.dropLast().map(\.rasterizations), walks,
+                       "asking the layers on screen for their pictures must walk none of them")
+
+        // Off screen again, they are ordinary entries and the budget takes them back.
+        pins.removeAll()
+        _ = ownersCanvasCel().render()
+        XCTAssertLessThanOrEqual(VectorRenderCache.entryCount, 2,
+                                 "a canvas no host shows is the cache's again, bounded like any other")
+        XCTAssertLessThanOrEqual(VectorRenderCache.residentBytes, entryBytes * 2)
+        withExtendedLifetime((shown, offScreen)) {}
+    }
+
     /// **A canvas the allocator puts where a dead one stood is still evictable.**
     ///
     /// The registry keys on `ObjectIdentifier`, an address, and a canvas has no `deinit` hook: its

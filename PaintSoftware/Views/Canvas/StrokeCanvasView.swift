@@ -286,6 +286,12 @@ final class StrokeCanvasView: CanvasPlaneView {
             // an unrelated number — or, worse, drawn over the *new* cel's base until it was. A layer
             // switch mid-render is exactly when that happens.
             if oldValue !== vectorCanvas {
+                // The memo of a canvas on screen is the picture this view holds; evicting it frees
+                // nothing (`VectorRenderCache.pin`).
+                displayPin = vectorCanvas.map(VectorRenderCache.DisplayPin.init)
+                pacedRender?.cancel()
+                pacedRender = nil
+                renderPacing.reset()
                 unlandedInk.removeAll()
                 // What a derived picture contains is a version of the canvas it was derived from.
                 interpolationPresentation.invalidateCoverage()
@@ -415,8 +421,17 @@ final class StrokeCanvasView: CanvasPlaneView {
         }
     }
 
-    /// The background rasterize this host is waiting for, always about `vectorCanvas`.
+    /// The background rasterize this host is waiting for, always about `vectorCanvas` — or, while
+    /// `pacedRender` is armed, the newest one it will start when the interval is up.
     private var pendingVectorRender: DeferredVectorRender.Revision?
+
+    /// When this host may next start a canvas-sized render — `DeferredVectorRender.Pacing`.
+    private var renderPacing = DeferredVectorRender.Pacing()
+    /// The render held back by `renderPacing`, armed at most once.
+    private var pacedRender: DispatchWorkItem?
+
+    /// Holds `vectorCanvas` out of `VectorRenderCache`'s budget while this view shows it.
+    private var displayPin: VectorRenderCache.DisplayPin?
 
     /// **The ink that is on screen but not in the base slot** — every stroke committed since the
     /// base was rasterized, shown above it until a render that contains them lands. See
@@ -1165,7 +1180,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                     renderedSynchronously = true
                 } else {
                     pendingVectorRender = revision
-                    startVectorRender(of: vectorCanvas, at: revision, streamHasWindow: streamHasWindow)
+                    paceVectorRender(of: vectorCanvas, at: revision, streamHasWindow: streamHasWindow)
                     // The base slot keeps what it has, and so does the held ink — which is the
                     // whole of this defect's fix: the picture the base is missing stays up until the
                     // render that contains it lands.
@@ -1194,6 +1209,30 @@ final class StrokeCanvasView: CanvasPlaneView {
             traceCommittedBase(of: vectorCanvas, documentVersion: documentVersion, source: source)
         }
         return true
+    }
+
+    /// Starts the render now, or — inside `DeferredVectorRender.Pacing.interval` of the last one —
+    /// once the interval is up, for wherever the canvas has got to by then.
+    private func paceVectorRender(of canvas: VectorCanvas, at revision: DeferredVectorRender.Revision,
+                                  streamHasWindow: Bool) {
+        let now = CACurrentMediaTime()
+        let delay = renderPacing.delay(at: now)
+        guard delay > 0 else {
+            renderPacing.started(at: now)
+            startVectorRender(of: canvas, at: revision, streamHasWindow: streamHasWindow)
+            return
+        }
+        guard pacedRender == nil else { return }
+        let paced = DispatchWorkItem { [weak self] in
+            guard let self, self.vectorCanvas === canvas else { return }
+            self.pacedRender = nil
+            // `pendingVectorRender` names the newest held-back revision, which nothing is running
+            // for: renders start only here and at the leading edge, and the leading one was older.
+            self.pendingVectorRender = nil
+            self.refreshDisplayIfStale()
+        }
+        pacedRender = paced
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: paced)
     }
 
     /// Rasterizes the requested base on `DeferredVectorRender.queue` and hands the result back on main.

@@ -125,6 +125,38 @@ enum DeferredVectorRender {
     /// already looking at the result, so the queue runs at user-initiated priority.
     static let queue = DispatchQueue(label: "com.paintapp.StrokeCanvasView.render", qos: .userInitiated)
 
+    /// **How often one host may start a canvas-sized render of the cel it is showing** — the bound on
+    /// the pictures a run of edits hands the render server.
+    ///
+    /// Every landed render is a new canvas-sized `CGImage` on the host's image view, and Core
+    /// Animation copies each one to `backboardd`, which keeps the copies until it has caught up.
+    /// MEASURED on 2026-11-16 at the owner's shape (5000², five vector layers, iPad 9 simulator):
+    /// twenty undos tapped as fast as XCUITest can took the simulator's `backboardd` from 0.5 GB to
+    /// **2.7 GB in three seconds** — one 95 MB picture per landed undo — while the layer tree never
+    /// referenced more than five at once. The iPad's render server dies at 1,850 MiB, which is the
+    /// three November 16 jetsam events, a black screen and a restart. One stroke or undo a second
+    /// held it at five to eight pictures.
+    ///
+    /// **Leading edge, then the newest edit once the interval is up.** The first edit after a pause
+    /// renders at once, so a single undo is as immediate as it was; edits inside the interval share
+    /// one render of wherever the canvas has got to when it ends — never a render per edit, and
+    /// never a stale one, because the render it starts asks for the canvas's version at that moment.
+    /// A finished stroke stays on screen meanwhile as held ink (`UnlandedInk`).
+    struct Pacing {
+        static let interval: CFTimeInterval = 0.25
+        private var lastStart: CFTimeInterval = -.infinity
+
+        /// Seconds until a render may start; zero when it may start now.
+        func delay(at now: CFTimeInterval) -> CFTimeInterval {
+            max(0, lastStart + Self.interval - now)
+        }
+
+        mutating func started(at now: CFTimeInterval) { lastStart = now }
+
+        /// A different cel: its first picture is not an edit's and is never held back.
+        mutating func reset() { lastStart = -.infinity }
+    }
+
     /// The display revision includes incoming stream frames. An On Top window can keep those
     /// pixels current independently of the host's committed base.
     struct Revision: Equatable {
