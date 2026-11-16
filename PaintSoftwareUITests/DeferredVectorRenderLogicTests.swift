@@ -83,8 +83,10 @@ final class DeferredVectorRenderLogicTests: XCTestCase {
         XCTAssertEqual(starts.first, 0, "the first undo after a pause renders at once")
         XCTAssertTrue(zip(starts, starts.dropFirst()).allSatisfy { $1 - $0 >= interval - 1e-9 },
                       "no two renders start inside one interval: \(starts)")
-        XCTAssertLessThanOrEqual(starts.count, Int((taps.last! / interval).rounded(.up)) + 1,
-                                 "twenty edits share renders rather than paying one each")
+        // The bound the render server needs, stated in pictures rather than derived from the
+        // constant: at most four a second over the 2.7 s run, plus the one at the start.
+        XCTAssertLessThanOrEqual(starts.count, 12,
+                                 "twenty edits must share renders rather than paying one each: \(starts.count)")
         XCTAssertGreaterThanOrEqual(starts.last!, taps.last!, "and the last edit is rendered after it")
 
         pacing.reset()
