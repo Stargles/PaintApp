@@ -1151,10 +1151,7 @@ extension CanvasManager {
 private extension Layer {
     mutating func rebaseContainerPose(through map: CanvasResizeMap) {
         guard let transform else { return }
-        // A fractional projective Parallax share depends on the canvas origin.
-        if transform.mode != .parallax {
-            self.transform = transform.rebased(through: map)
-        }
+        self.transform = transform.rebased(through: map)
 
         // The Shake distances are canvas lengths. Its angle, timing and noise pattern use other units.
         let scale = Double(map.scale)

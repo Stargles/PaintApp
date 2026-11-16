@@ -102,12 +102,32 @@ extension TransformLayerMode {
     /// Nil where the authored pose is at rest or the share leaves the item where it is, for
     /// `LayerPose.mapping(atFrame:)`'s reason: nil is what decides whether the leaf beneath has a
     /// derivation at all, so an untouched parallax layer must cost the document nothing.
+    ///
+    /// **A projective pose is shared about its own box's origin**, not the canvas's. The blend lerps
+    /// the normalised perspective row, and that row depends on where the coordinate origin sits, so
+    /// about the canvas origin a fractional share would change its picture under a Fit resize and
+    /// with the box's place on the canvas. Blending in box-relative coordinates and translating back
+    /// makes the share follow the box. An affine pose is already origin-free (the blend carries its
+    /// translation by the box centre), so it keeps the direct path and its exact bytes; shares 0 and
+    /// 1 are the blend's own exact endpoints either way.
     static func parallaxMap(authored: PoseQuad, share: Double) -> PoseMap? {
         guard !authored.isIdentity else { return nil }
-        let rest = PoseQuad(restingIn: authored.box)
-        guard let blended = PoseInterpolation.blend(rest, authored, t: CGFloat(share)),
-              !blended.isIdentity, let map = blended.map, !map.isIdentity else { return nil }
-        return map
+        guard authored.map?.isProjective == true, share != 1 else {
+            let rest = PoseQuad(restingIn: authored.box)
+            guard let blended = PoseInterpolation.blend(rest, authored, t: CGFloat(share)),
+                  !blended.isIdentity, let map = blended.map, !map.isIdentity else { return nil }
+            return map
+        }
+        let origin = authored.box.origin
+        let toLocal = CGAffineTransform(translationX: -origin.x, y: -origin.y)
+        let local = PoseQuad(box: authored.box.offsetBy(dx: -origin.x, dy: -origin.y),
+                             corners: authored.corners.mapped(by: toLocal))
+        guard let blended = PoseInterpolation.blend(PoseQuad(restingIn: local.box), local,
+                                                    t: CGFloat(share)),
+              !blended.isIdentity, let localMap = blended.map, !localMap.isIdentity else { return nil }
+        let map = PoseMap.affine(toLocal).concatenating(localMap)
+            .concatenating(.affine(CGAffineTransform(translationX: origin.x, y: origin.y)))
+        return map.isIdentity ? nil : map
     }
 
     /// **θ(f) = Σ speed(k) for k from `start` to `frame − 1`** — §5.3, in degrees. Integrated rather

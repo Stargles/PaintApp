@@ -705,27 +705,63 @@ final class CanvasResizeLogicTests: XCTestCase {
         }
     }
 
-    func testFitKeepsTheExistingProjectiveParallaxMap() throws {
-        let manager = CanvasFixture.manager(layerCount: 0)
-        let size = CGSize(width: 100, height: 100)
-        manager.canvasSize = size
-        XCTAssertTrue(manager.addVectorLayer())
-        manager.layers[0].parallaxShare = 0.5
-        XCTAssertTrue(manager.addTransformLayer())
-        let index = manager.currentLayerIndex
-        let pose = PoseQuad(box: CGRect(origin: .zero, size: size), corners: Quad(
-            CGPoint(x: 0, y: 0), CGPoint(x: 50, y: 0),
-            CGPoint(x: 50, y: 50), CGPoint(x: 0, y: 100)))
-        manager.layers[index].transform = LayerPose(pose: pose, mode: .parallax)
-        manager.layers[index].shakeX = 9
-        let before = try XCTUnwrap(manager.layerPoses(atFrame: 0)[0])
-        XCTAssertTrue(before.isProjective)
+    /// The owner's ruling (2026-11-15): Fit moves and scales a fractional perspective Parallax share
+    /// with the artwork, even where that changes the picture an older scene showed. The share is the
+    /// box-relative blend, so after Fit it is the original map conjugated by the Fit similarity.
+    func testFitCarriesTheProjectiveParallaxShareWithTheArtwork() throws {
+        for (afterSize, offset, origin) in [(CGSize(width: 400, height: 200), CGFloat(100), CGPoint.zero),
+                                            (CGSize(width: 600, height: 200), CGFloat(200), CGPoint.zero),
+                                            (CGSize(width: 400, height: 200), CGFloat(100), CGPoint(x: 20, y: 10))] {
+            let manager = CanvasFixture.manager(layerCount: 0)
+            let size = CGSize(width: 100, height: 100)
+            manager.canvasSize = size
+            XCTAssertTrue(manager.addVectorLayer())
+            manager.layers[0].parallaxShare = 0.5
+            XCTAssertTrue(manager.addTransformLayer())
+            let index = manager.currentLayerIndex
+            let o = origin
+            let pose = PoseQuad(box: CGRect(origin: o, size: size), corners: Quad(
+                CGPoint(x: o.x, y: o.y), CGPoint(x: o.x + 50, y: o.y),
+                CGPoint(x: o.x + 50, y: o.y + 50), CGPoint(x: o.x, y: o.y + 100)))
+            manager.layers[index].transform = LayerPose(pose: pose, mode: .parallax)
+            manager.layers[index].shakeX = 9
+            let before = try XCTUnwrap(manager.layerPoses(atFrame: 0)[0])
+            XCTAssertTrue(before.isProjective)
 
-        // Here the transported full-strength pose would still be valid, while the canvas origin
-        // would be on its vanishing line and the current 50% blend would discard the map.
-        XCTAssertTrue(manager.resizeCanvas(to: CGSize(width: 600, height: 200), mode: .scaleToFit))
-        XCTAssertEqual(manager.layerPoses(atFrame: 0)[0], before)
-        XCTAssertEqual(manager.layers[index].shakeX, 18, "Shake distance follows the resize even in Parallax")
+            XCTAssertTrue(manager.resizeCanvas(to: afterSize, mode: .scaleToFit))
+            let after = try XCTUnwrap(manager.layerPoses(atFrame: 0)[0],
+                                      "\(afterSize): the half share survives Fit")
+            XCTAssertTrue(after.isProjective)
+            let fit = { (p: CGPoint) in CGPoint(x: 2 * p.x + offset, y: 2 * p.y) }
+            for p in [CGPoint(x: o.x + 10, y: o.y + 10), CGPoint(x: o.x + 80, y: o.y + 20),
+                      CGPoint(x: o.x + 40, y: o.y + 90), CGPoint(x: o.x + 60, y: o.y + 60)] {
+                let expected = fit(try XCTUnwrap(before.applied(to: p)))
+                let actual = try XCTUnwrap(after.applied(to: fit(p)))
+                XCTAssertEqual(actual.x, expected.x, accuracy: 1e-6, "\(afterSize) \(o) at \(p)")
+                XCTAssertEqual(actual.y, expected.y, accuracy: 1e-6, "\(afterSize) \(o) at \(p)")
+            }
+            XCTAssertEqual(manager.layers[index].shakeX, 18, "Shake distance follows the resize in Parallax")
+        }
+    }
+
+    /// The analytic case in the evidence README: at the resized 400×200 box, the correct half share's
+    /// normalised perspective row has x coefficient 1/300 in canvas coordinates — the canvas-origin
+    /// blend gave 1/200. Full share stays the transported authored pose bit for bit, and an
+    /// affine pose keeps the direct blend's exact map.
+    func testParallaxShareIsBoxRelativeAndKeepsItsEndpointsAndAffineBytes() throws {
+        let box = CGRect(x: 100, y: 0, width: 200, height: 200)
+        let authored = PoseQuad(box: box, corners: Quad(
+            CGPoint(x: 100, y: 0), CGPoint(x: 200, y: 0), CGPoint(x: 200, y: 100), CGPoint(x: 100, y: 200)))
+        let half = try XCTUnwrap(TransformLayerMode.parallaxMap(authored: authored, share: 0.5))
+        let canvas = half.homography
+        XCTAssertEqual(canvas.g / canvas.i, 1.0 / 300, accuracy: 1e-12)
+        XCTAssertEqual(canvas.h / canvas.i, 0, accuracy: 1e-12)
+        XCTAssertEqual(TransformLayerMode.parallaxMap(authored: authored, share: 1), authored.map)
+        XCTAssertNil(TransformLayerMode.parallaxMap(authored: authored, share: 0))
+
+        let affine = PoseQuad(box: box, mappedBy: CGAffineTransform(rotationAngle: 0.3).translatedBy(x: 12, y: -4))
+        let direct = PoseInterpolation.blend(PoseQuad(restingIn: box), affine, t: 0.5)?.map
+        XCTAssertEqual(TransformLayerMode.parallaxMap(authored: affine, share: 0.5), direct)
     }
 
     func testFitKeepsRepeatAndScalesTheMoveAndShakeItWasHolding() throws {
