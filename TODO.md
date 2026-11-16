@@ -6,6 +6,16 @@
 HANDOFF.md is a navigation/checkpoint document, never the only record of an outstanding task.
 **Resumed November 12.** The combined candidate passed both simulator gates. See HANDOFF.md for signing and the physical iPad checks.
 
+- [ ] **November 16 iPad test of `fecc1a8f` failed (owner, Test1, 5000², 5 vector layers).**
+  Undo lag still there; the circle-and-line Fill gap still there; rapid draw→Undo and rapid
+  drawing each blacked out / restarted the iPad; entering a document shows orange bars ~10 s per
+  frame ("not like this before"). Eraser seemed fine. Owner: a build this faulty must never reach
+  the iPad; fix everything, audit the repo for spaghetti, and keep going without stopping.
+  Evidence `~/PaintWork/nov16-owner-test/`: three JetsamEvents 18:18–18:20 all kill
+  **backboardd at its 1,850 MiB per-process limit** (PaintSoftware 626–816 MiB) — the display
+  server is drowning in surfaces the app hands it. Recordings: Undo press→base assigned 0.71 s;
+  every edit re-rasterizes a whole 5000² vector cel off-main (350–640 ms each, 19 in 2 s during
+  rapid strokes); bakeComposite 2.2–7.4 s per frame.
 - [ ] **Fix severe Undo latency.** Owner reports drawing is responsive after the latest Release
   install (`d4d59f6bc261d23366c8e713ecab96353fe0183c`), but Undo still has “enormous latency” despite an
   earlier fix. Reproduce and compare that specific path first; correct the root cause efficiently.
