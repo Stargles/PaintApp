@@ -206,6 +206,8 @@ folders the owner deleted during the emergency cleanup; verify availability befo
 
 **November 16 evening.** Perspective Fit (`fecc1a8f`) is done and the assembled gate passed
 (13/13 cold, 5,654 + 4 skips per fast tier). `main` is now the single tested line, synced to GitHub.
+Installed on the iPad that evening (`fecc1a8f`). Owner to check: circle+line Mend Fill, Undo with
+stream off and on, erasing speed, Liquify following the Pencil live.
 Remaining: physical iPad confirmation of the items below, freeze/crash root causes, Windows SSH.
 
 **November 15 continuation.** Device was paired but still locked. Continue the detailed audit

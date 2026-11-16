@@ -31,8 +31,10 @@ From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
   Fit): 13/13 cold workflows, Debug and Release each 5,654 passed + 4 opt-in skips, static
   selection reconciled, owned simulator deleted. Receipts:
   `~/PaintWork/nov15-release-evidence/exact-fecc1a8fb5860673d418517760f7aa77f9ed2476/`.
-- Signed Release of `fecc1a8f` built under `~/PaintWork/crash-20261111/device-fresh-fecc1a8f-Release/`;
-  see TODO's iPad item for the install result. Physical Undo/erase latency, the Mend Fill
+- **Installed on the iPad 2026-11-16 ~18:20 Toronto**: signed Release `fecc1a8f` (UUID
+  `260F953C-109A-321C-BB5F-E17E684838CE`, profile through Nov 20 02:09), from
+  `~/PaintWork/crash-20261111/device-fresh-fecc1a8f-Release/`; `resign_state` updated. Awaiting the
+  owner's checks: Mend Fill, Undo stream off/on, erasing, live Liquify. Physical Undo/erase latency, the Mend Fill
   confirmation, live Liquify, freeze/crash root causes and Windows SSH remain open.
 
 TODO.md tracks outstanding work and owner rulings. Older checkpoints are in `git log -p HANDOFF.md`.
