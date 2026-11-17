@@ -571,6 +571,9 @@ final class FillMendUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
         openBrushLibrary(app)
+        let inking = app.buttons["brushPanel.group.Inking"]
+        XCTAssertTrue(inking.waitForExistence(timeout: 5), "the Inking group holds Rough Ink")
+        tapWhenHittable(inking, "Inking group")
         let rough = app.buttons["brushPanel.brush.Rough Ink"]
         XCTAssertTrue(rough.waitForExistence(timeout: 5))
         if !rough.isSelected { tapWhenHittable(rough, "Rough Ink") }
