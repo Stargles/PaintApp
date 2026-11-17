@@ -848,7 +848,7 @@ final class FillMendLogicTests: XCTestCase {
             for y in 34..<54 { for x in low..<high {
                 XCTAssertTrue(off.isBare(x, y), "PREMISE: production overlap leaves this body gap")
                 XCTAssertTrue(exact.isRed(x, y), "Reach covers every pixel of the actual uncovered body")
-                XCTAssertTrue(tooShort.isBare(x, y), "a below-width Reach cannot cross the remaining body")
+                XCTAssertTrue(tooShort.isRed(x, y), "the detached body is an island the region surrounds, so any Reach fills it")
             } }
             if size == 10 {
                 for y in (70 + Int(overlap))..<(80 - Int(overlap)) { for x in 30..<40 {
@@ -1618,9 +1618,9 @@ final class FillMendLogicTests: XCTestCase {
             if width == 12 {
                 XCTAssertTrue(on.isRed(light.x, light.y), "the thinner case also covers the light line body")
             } else {
-                // This section of the early turn is shared by regular and ambiguous support at
-                // the wider diameter. Widening Reach should still leave its unknown pixels clear.
-                XCTAssertTrue(on.isBare(light.x, light.y), "ambiguous wide-stroke support still protects the early turn")
+                // The line is detached from the outline, so the whole of it — the early turn the certificate
+                // used to protect as an uncertain join included — is an island and is filled under.
+                XCTAssertTrue(on.isRed(light.x, light.y), "the early turn of a detached line is filled too")
             }
             let bounds = VectorCanvas.paintedBounds(of: [.stroke(strokes[1])]).applying(window.transform).insetBy(dx: -2, dy: -2)
             let changedOutsideLine = stride(from: 3, to: on.bytes.count, by: 4).contains { i in
