@@ -363,7 +363,7 @@ extension CanvasManager {
         var outcome: MetalFillEngine.SessionOutcome?
         let maskBytes = lassoMask.map { UndoBudget.addingCost(32, $0.capacity) } ?? 0
         if let prepared = Self.prepareFillReference(references: references, window: window,
-            isLasso: lassoMask != nil, reserving: maskBytes,
+            isLasso: lassoMask != nil, reserving: maskBytes, certifiesMend: lassoMask != nil,
             isCurrent: { self.isCurrentFillGeneration(context.generation) }) {
             admittedWindow = prepared.window
             var admittedMask = lassoMask
@@ -1314,14 +1314,15 @@ extension CanvasManager {
     /// snapshots are immutable source handles; nil is their existing exact transparency proof.
     static func makeFillReference(references: [(layer: Layer, cel: Cel)], window: FillWindow,
                                   excludingElement: (celID: UUID, elementID: UUID)? = nil,
-                                  isLasso: Bool = false, reserving reservedBytes: Int = 0) -> FillReference? {
+                                  isLasso: Bool = false, reserving reservedBytes: Int = 0,
+                                  certifiesMend: Bool = true) -> FillReference? {
         let listBytes = fillReferenceListBytes(references.count)
         guard reservedBytes >= 0, reservedBytes < MetalFillEngine.fillBudgetBytes,
               listBytes < MetalFillEngine.fillBudgetBytes - reservedBytes,
               CompositorBudget.hasHeadroom(for: listBytes) else { return nil }
         return drawFillReference(snapshots: freezeFillReferences(references), window: window,
                           excludingElement: excludingElement, isLasso: isLasso,
-                          supportOverride: window.scale < 1 ? .unavailable(width: window.workingWidth,
+                          supportOverride: window.scale < 1 || !certifiesMend ? .unavailable(width: window.workingWidth,
                               height: window.workingHeight) : nil, reservedBytes: reservedBytes, isCurrent: { true })
     }
 
@@ -1331,11 +1332,12 @@ extension CanvasManager {
     static func prepareFillReference(references: [(layer: Layer, cel: Cel)], window original: FillWindow,
                                      excludingElement: (celID: UUID, elementID: UUID)? = nil,
                                      isLasso: Bool = false, reserving reservedBytes: Int = 0,
-                                     isCurrent: () -> Bool) -> FillReference? {
+                                     certifiesMend: Bool = true, isCurrent: () -> Bool) -> FillReference? {
         guard isCurrent() else { return nil }
-        guard original.scale < 1 else {
+        guard original.scale < 1, certifiesMend else {
             return makeFillReference(references: references, window: original,
-                                     excludingElement: excludingElement, isLasso: isLasso, reserving: reservedBytes)
+                                     excludingElement: excludingElement, isLasso: isLasso, reserving: reservedBytes,
+                                     certifiesMend: certifiesMend)
         }
         guard reservedBytes >= 0, reservedBytes < MetalFillEngine.fillBudgetBytes else { return nil }
         let budget = MetalFillEngine.fillBudgetBytes - reservedBytes

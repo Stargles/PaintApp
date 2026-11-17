@@ -1633,6 +1633,164 @@ final class FillMendLogicTests: XCTestCase {
         }
     }
 
+    // MARK: - Ink the fill is enclosed around (November 17)
+
+    /// `FillEnclosedInk` on hand-made masks, one picture a rule. `#` is ink, `.` paper the flood reached and `o`
+    /// paper it did not; the answer uses `F` for the region afterwards and keeps `#` and `o` where nothing was added.
+    private func absorbed(_ rows: [String]) -> [String] {
+        let height = rows.count, width = rows[0].count
+        var reference = [UInt8](repeating: 0, count: width * height * 4)
+        var region = [UInt8](repeating: 0, count: width * height)
+        for (y, row) in rows.enumerated() {
+            for (x, c) in row.enumerated() {
+                if c == "#" { reference[(y * width + x) * 4 + 3] = 255 }
+                if c == "." { region[y * width + x] = 1 }
+            }
+        }
+        reference.withUnsafeBytes { ref in
+            region.withUnsafeMutableBufferPointer {
+                FillEnclosedInk.absorb(region: $0.baseAddress!, reference: ref.baseAddress!, pathWall: nil,
+                                       seed: .zero, width: width, height: height)
+            }
+        }
+        return (0..<height).map { y in
+            String((0..<width).map { x -> Character in
+                let i = y * width + x
+                if region[i] != 0 { return "F" }
+                return reference[i * 4 + 3] != 0 ? "#" : "o"
+            })
+        }
+    }
+
+    func testAnIslandOfInkInsideTheRegionIsFilledAndTheOutlineIsNot() {
+        let out = absorbed([
+            "oooooooooo",
+            "o########o",
+            "o#......#o",
+            "o#.####.#o",
+            "o#......#o",
+            "o########o",
+            "oooooooooo"])
+        XCTAssertEqual(out[3], "o#FFFFFF#o", "the bar is filled under")
+        XCTAssertEqual(out[1], "o########o", "the outline has unreached paper outside it, so it is not an island")
+        XCTAssertEqual(out[0], "oooooooooo")
+    }
+
+    func testARingWhoseHollowWasNotReachedIsNotFilledOver() {
+        let out = absorbed([
+            "ooooooooooooooo",
+            "o#############o",
+            "o#...........#o",
+            "o#.#########.#o",
+            "o#.#ooooooo#.#o",
+            "o#.#ooooooo#.#o",
+            "o#.#ooooooo#.#o",
+            "o#.#########.#o",
+            "o#...........#o",
+            "o#############o",
+            "ooooooooooooooo"])
+        XCTAssertEqual(out[3], "o#F#########F#o", "the inner ring touches its unreached hollow")
+        XCTAssertEqual(out[4], "o#F#ooooooo#F#o", "and the hollow stays bare")
+    }
+
+    func testInkTouchingTheWindowEdgeIsNotAnIsland() {
+        let out = absorbed([
+            "......",
+            "#.....",
+            "......"])
+        XCTAssertEqual(out[1], "#FFFFF", "what lies past the window is unknown, so the ink is left to the mend")
+    }
+
+    func testSpeckleWithPinholesBetweenItIsFilledAsOnePiece() {
+        // Rough ink: dots with unreached single-pixel gaps between them.
+        let out = absorbed([
+            "..........",
+            ".#o#o#o#..",
+            ".#o#o#o#..",
+            ".........."])
+        XCTAssertEqual(out, ["FFFFFFFFFF", "FFFFFFFFFF", "FFFFFFFFFF", "FFFFFFFFFF"])
+    }
+
+    func testAPocketIsAbsorbedAtSixteenPixelsAndNotAtSeventeen() {
+        let sixteen = absorbed(["........", "........", "..oooo..", "..oooo..", "..oooo..", "..oooo..", "........", "........"])
+        XCTAssertTrue(sixteen.allSatisfy { !$0.contains("o") }, "16 px of unreached paper wholly inside the region is filled: \(sixteen)")
+        let seventeen = absorbed(["........", "........", "..oooo..", "..oooo..", "..oooo..", "..oooo..", "..o.....", "........"])
+        XCTAssertEqual(seventeen[2], "FFooooFF", "17 px is a shape, not a pinhole")
+    }
+
+    func testAnUnreachedPocketBesideAnOutlineStaysBare() {
+        // Speckle on the outline's outside is not enclosed: its pocket joins the outline's piece.
+        let out = absorbed([
+            "ooooo",
+            "o###o",
+            "o#.#o",
+            "o###o",
+            "ooooo"])
+        XCTAssertEqual(out[2], "o#F#o")
+        XCTAssertEqual(out[1], "o###o")
+    }
+
+    // MARK: Through the tool, on a 64 px canvas
+
+    /// A frame with `extra` ink drawn inside it, on layer 0; the fill goes on a raster layer above and Edge Overlap
+    /// is 0 so every covered pixel is the rule's own.
+    private func enclosedScene(mend: Bool, _ extra: (CGContext) -> Void) throws -> Pixels {
+        let manager = CanvasFixture.manager(layerCount: 1)
+        let art = UIGraphicsImageRenderer(size: CanvasFixture.canvasSize, format: PixelOps.transparentFormat()).image { ctx in
+            UIColor.black.setFill()
+            ctx.cgContext.addRect(Self.frame)
+            ctx.cgContext.addRect(Self.frame.insetBy(dx: 2, dy: 2))
+            ctx.cgContext.fillPath(using: .evenOdd)
+            extra(ctx.cgContext)
+        }
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, art)
+        manager.addLayer()
+        manager.fillSettings.bucketEdgeOverlap = 0
+        manager.setFillMendsGaps(mend)
+        bucket(manager, at: CGPoint(x: 12, y: 12), colour: Self.red)
+        return try fillLayerPixels(manager)
+    }
+
+    func testALineInsideTheFrameIsFilledUnderAndTheFrameIsNotLeaked() throws {
+        let line: (CGContext) -> Void = { ctx in
+            ctx.fill(CGRect(x: 20, y: 30, width: 20, height: 2))
+            ctx.fill(CGRect(x: 44, y: 40, width: 3, height: 3))
+        }
+        let off = try enclosedScene(mend: false, line)
+        XCTAssertTrue(off.isBare(25, 30) && off.isBare(45, 41), "PREMISE: without Mend Gaps the ink is left bare")
+        let on = try enclosedScene(mend: true, line)
+        XCTAssertTrue(on.isRed(25, 30) && on.isRed(25, 31) && on.isRed(45, 41), "the enclosed ink is filled")
+        XCTAssertTrue(on.isRed(12, 12) && on.isRed(32, 20))
+        XCTAssertTrue(on.isBare(2, 2) && on.isBare(Int(Self.frame.minX) + 1, 30) && on.isBare(32, Int(Self.frame.maxY) - 1),
+                      "the frame's own ink and the paper outside it are not filled")
+        var leaked = 0
+        for y in 0..<Self.side { for x in 0..<Self.side
+            where !Self.frame.insetBy(dx: 2, dy: 2).contains(CGPoint(x: x, y: y)) && !on.isBare(x, y) { leaked += 1 } }
+        XCTAssertEqual(leaked, 0, "nothing outside the frame's inner edge is covered")
+    }
+
+    func testAnInnerRingBetweenTwoLoopsIsNotFilledOverItsHollow() throws {
+        let ring: (CGContext) -> Void = { ctx in
+            let outer = CGRect(x: 20, y: 20, width: 24, height: 24)
+            ctx.addRect(outer); ctx.addRect(outer.insetBy(dx: 2, dy: 2)); ctx.fillPath(using: .evenOdd)
+        }
+        let on = try enclosedScene(mend: true, ring)
+        XCTAssertTrue(on.isRed(12, 12), "PREMISE: the tap fills between the loops")
+        XCTAssertTrue(on.isBare(32, 32), "the ring's hollow is not reached and stays bare")
+        XCTAssertTrue(on.isBare(21, 32), "so the ring itself is a boundary, not an island")
+    }
+
+    func testAnIslandDoesNotChangeWhatTheMendDoesAtAnAttachedStub() throws {
+        let stub: (CGContext) -> Void = { ctx in ctx.fill(CGRect(x: 6, y: 20, width: 12, height: 3)) }
+        let island: (CGContext) -> Void = { ctx in stub(ctx); ctx.fill(CGRect(x: 36, y: 36, width: 8, height: 2)) }
+        let without = try enclosedScene(mend: true, stub)
+        let with = try enclosedScene(mend: true, island)
+        for y in 0..<Self.side { for x in 0..<Self.side where !(34...46 ~= x && 34...40 ~= y) {
+            XCTAssertTrue(with.at(x, y) == without.at(x, y), "(\(x),\(y)) outside the island is as the stub alone leaves it")
+        } }
+        XCTAssertTrue(with.isRed(40, 36), "the island itself is filled")
+    }
+
     // MARK: - The owner's November 16 case: Rough Ink at 0.1% on a 5000² canvas, on an iPad 9's budget
 
     /// The owner's own 5000² scene — `recording-20261116-181756`'s Pencil touches, window points to canvas
@@ -1689,6 +1847,10 @@ final class FillMendLogicTests: XCTestCase {
     /// What the owner's fill leaves, measured on the fill layer's own pixels.
     private struct OwnerFillReport {
         var lineInk = 0, lineUncovered = 0, leaked = 0, covered = 0, windowScale: CGFloat = 0
+        /// Pixels carrying any of the line's alpha (the fringe included) that the fill does not cover at all.
+        var lineFootprint = 0, lineFootprintBare = 0
+        /// Pixels within `hairlineReach` of the line, off the circle's own band, whose fill alpha is under 250.
+        var hairline = 0
     }
 
     /// Circle + line on layer 0, a different (empty) vector layer on top and active, the fill tapped inside
@@ -1747,6 +1909,23 @@ final class FillMendLogicTests: XCTestCase {
         let width = fillCG.width
         var report = OwnerFillReport()
         report.windowScale = windowScale
+        // The line's neighbourhood, and the circle's own band: a hairline is a gap there, and only there.
+        let circleCG = try XCTUnwrap(VectorCanvas(size: scene.canvasSize, strokes: [circle]).render()?.cgImage)
+        let circleBytes = try XCTUnwrap(CanvasFixture.rgbaBytes(circleCG))
+        let height = fillCG.height
+        let reach = 8, circleBand = 6
+        var near = [Bool](repeating: false, count: width * height)
+        var band = [Bool](repeating: false, count: width * height)
+        func spread(_ source: [UInt8], radius: Int, into mask: inout [Bool], within rect: CGRect) {
+            for y in Int(rect.minY)..<Int(rect.maxY) { for x in Int(rect.minX)..<Int(rect.maxX) where source[(y * width + x) * 4 + 3] > 0 {
+                for yy in max(0, y - radius)...min(height - 1, y + radius) { for xx in max(0, x - radius)...min(width - 1, x + radius) {
+                    mask[yy * width + xx] = true } }
+            } }
+        }
+        let canvasRect = CGRect(x: 0, y: 0, width: width, height: height)
+        let lineBox = VectorCanvas.paintedBounds(of: [.stroke(line)]).insetBy(dx: -4, dy: -4).intersection(canvasRect)
+        spread(lineBytes, radius: reach, into: &near, within: lineBox)
+        spread(circleBytes, radius: circleBand, into: &band, within: lineBox.insetBy(dx: -Double(reach + circleBand), dy: -Double(reach + circleBand)).intersection(canvasRect))
         for i in 0..<(width * fillCG.height) {
             let covered = fillBytes[i * 4 + 3] >= 250
             if covered {
@@ -1757,6 +1936,11 @@ final class FillMendLogicTests: XCTestCase {
                 report.lineInk += 1
                 if !covered { report.lineUncovered += 1 }
             }
+            if lineBytes[i * 4 + 3] > 0 {
+                report.lineFootprint += 1
+                if fillBytes[i * 4 + 3] == 0 { report.lineFootprintBare += 1 }
+            }
+            if near[i], !band[i], fillBytes[i * 4 + 3] < 250 { report.hairline += 1 }
         }
         return report
     }
@@ -1774,8 +1958,10 @@ final class FillMendLogicTests: XCTestCase {
         XCTAssertEqual(report.windowScale, 1, "the fill's window held the circle at scale 1 — a resampled window loses the mend")
         XCTAssertEqual(report.leaked, 0, "no fill outside the circle's outer boundary")
         XCTAssertGreaterThan(report.lineInk, 5000, "PREMISE: the line has the ink the recording's pressures give it")
-        XCTAssertLessThan(Double(report.lineUncovered) / Double(report.lineInk), 0.15,
-                          "\(report.lineUncovered) of \(report.lineInk) pixels of the line's ink are left bare under it")
+        XCTAssertEqual(report.lineFootprintBare, 0,
+                       "\(report.lineFootprintBare) of \(report.lineFootprint) pixels under the line, fringe included, are left bare")
+        XCTAssertEqual(report.lineUncovered, 0, "the line's ink is all under the fill")
+        XCTAssertEqual(report.hairline, 0, "no pixel beside the line, off the circle's own band, is under-covered")
     }
 
     /// The same scene with a thinner smooth brush — a 3 px line is two working pixels at the old window's scale.
@@ -1784,8 +1970,8 @@ final class FillMendLogicTests: XCTestCase {
         let report = try ownerRoughInkFill(brush: BrushLibrary.opaqueRound, size: 3)
         XCTAssertEqual(report.windowScale, 1)
         XCTAssertEqual(report.leaked, 0)
-        XCTAssertLessThan(Double(report.lineUncovered) / Double(max(1, report.lineInk)), 0.05,
-                          "\(report.lineUncovered) of \(report.lineInk) pixels of the thin line are left bare under it")
+        XCTAssertEqual(report.lineFootprintBare, 0, "the thin line is under the fill, fringe included")
+        XCTAssertEqual(report.hairline, 0)
     }
 
     func testLongSnappedCircleDoesNotSuppressMendingOfADetachedInteriorLine() throws {

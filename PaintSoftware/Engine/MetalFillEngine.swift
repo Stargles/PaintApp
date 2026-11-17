@@ -905,6 +905,7 @@ final class MetalFillSession {
                             buffers: [(pass.labels, 0), (gap.table, 1), (pass.region, 2), (paramsBuf, 3)])
         }
         let needsMendSupport = mends && completedMendCut != currentCut
+        var finished = false
         if needsMendSupport { completedMendCut = nil }
         if let lassoBuf, let alphaBuf, let filledBuf {
             // **`fill = loopMask ∧ ¬reached`, and it replaced a union of the loop back over the
@@ -963,13 +964,39 @@ final class MetalFillSession {
             if mends { encodeMend(enc3, painted: regionTmpBuf, source: regionBuf, reach: mendReach,
                                             refCount: 1, nearestOpen: nearestOpen ?? featureCoordinates,
                                             fence: lassoBuf) }
-            engine.encode2D(enc3, p.paint, width: width, height: height,
-                            buffers: [(regionTmpBuf, 0), (outBuf, 1), (paramsBuf, 2)])
+            if mends {
+                // **Ink the flood went round is filled under** (`FillEnclosedInk`): a CPU walk over the finished
+                // region, so the region is settled first and the paint is encoded afterwards.
+                enc3.endEncoding()
+                cb3.commit()
+                cb3.waitUntilCompleted()
+                guard cb3.status == .completed else { return nil }
+                referenceRGBA.withUnsafeBytes { reference in
+                    let wall = hasPathWall ? UnsafeRawPointer(pathWallBuf.contents()) : nil
+                    FillEnclosedInk.absorb(region: regionTmpBuf.contents().bindMemory(to: UInt8.self, capacity: count),
+                                           reference: reference.baseAddress!, pathWall: wall, seed: primary,
+                                           width: width, height: height)
+                }
+                guard let paintBuffer = engine.makeCommandBuffer(),
+                      let paintEncoder = paintBuffer.makeComputeCommandEncoder() else { return nil }
+                engine.encode2D(paintEncoder, p.paint, width: width, height: height,
+                                buffers: [(regionTmpBuf, 0), (outBuf, 1), (paramsBuf, 2)])
+                paintEncoder.endEncoding()
+                paintBuffer.commit()
+                paintBuffer.waitUntilCompleted()
+                guard paintBuffer.status == .completed else { return nil }
+                finished = true
+            } else {
+                engine.encode2D(enc3, p.paint, width: width, height: height,
+                                buffers: [(regionTmpBuf, 0), (outBuf, 1), (paramsBuf, 2)])
+            }
         }
-        enc3.endEncoding()
-        cb3.commit()
-        cb3.waitUntilCompleted()
-        guard cb3.status == .completed else { return nil }
+        if !finished {
+            enc3.endEncoding()
+            cb3.commit()
+            cb3.waitUntilCompleted()
+            guard cb3.status == .completed else { return nil }
+        }
         if let nearestOpen { self.structure?.nearestOpenFeatures = nearestOpen }
         if needsMendSupport { completedMendCut = currentCut }
 
@@ -1167,5 +1194,133 @@ final class MetalFillSession {
             engine.encode2D(enc, p.unionMask, width: width, height: height,
                             buffers: [(featureWorkspace, 0), (painted, 1), (paramsBuf, 2)])
         }
+    }
+}
+
+// MARK: - Ink the fill is enclosed around
+
+/// **Ink the flood went round, and the pinholes between its speckle** — what a bucket fill with Mend Gaps on
+/// adds to the region once the flood, the Edge Overlap and the mend have run (the owner's November 17 ruling:
+/// *a line drawn inside the shape is filled under, whole, with no hairline*).
+///
+/// The flood stops at ink, so a line inside a circle leaves the line itself bare. The rule is topological
+/// rather than a width or a reach. **Solid** is any pixel the region does not hold that is ink — differs from
+/// the tapped colour at all, so a rough or antialiased fringe belongs to it — or is an unfilled pocket of at
+/// most `pinholeLimit` pixels not touching the window's edge (what a rough brush's speckle leaves between its
+/// dabs). A connected piece of solid (8-connected) is **enclosed** when every pixel around it is already in the
+/// region: it touches no unfilled open paper and not the window's edge. An enclosed piece is added. A piece that
+/// touches unfilled paper is left to Edge Overlap and the mend: the circle's own outline (paper outside it), and
+/// a ring around a hole (its inside is open paper the region did not reach, so the ring is a boundary, not an
+/// island).
+///
+/// One pass over the window plus a walk of each piece: O(window pixels), with no GPU round trip of its own.
+enum FillEnclosedInk {
+    /// The largest unfilled pocket, in pixels, that counts as part of the ink round it.
+    static let pinholeLimit = 16
+    /// How far a channel may differ from the tapped colour before a pixel counts as ink, in 8-bit steps.
+    static let inkTolerance = 2
+
+    private enum Kind {
+        static let open: UInt8 = 0       // unfilled paper, not yet judged
+        static let solid: UInt8 = 1      // ink, or a pocket small enough to be part of it
+        static let filled: UInt8 = 2     // in the region
+        static let wide: UInt8 = 3       // unfilled paper in a pocket too big, or at the window's edge
+        static let queued: UInt8 = 4     // in the pocket walk being made
+        static let visited: UInt8 = 5    // a solid pixel already assigned to a piece
+    }
+
+    /// - Parameters:
+    ///   - region: one byte a pixel, non-zero where the fill is; extended in place.
+    ///   - reference: the working window's RGBA reference (premultiplied), `width * height * 4` bytes.
+    ///   - pathWall: the vector layers' stroke centre lines, in the reference's layout, or nil — a pixel with
+    ///     alpha there is ink whatever the reference shows, so a segmented brush's dots join up.
+    ///   - seed: the tapped colour, premultiplied 0...1.
+    /// - Returns: how many pixels were added.
+    @discardableResult
+    static func absorb(region: UnsafeMutablePointer<UInt8>, reference: UnsafeRawPointer,
+                       pathWall: UnsafeRawPointer?, seed: SIMD4<Float>, width: Int, height: Int) -> Int {
+        let count = width * height
+        guard count > 0 else { return 0 }
+        let seedBytes = (0..<4).map { Int(max(0, min(255, (seed[$0] * 255).rounded()))) }
+        let seedWord = UInt32(seedBytes[0]) | UInt32(seedBytes[1]) << 8
+            | UInt32(seedBytes[2]) << 16 | UInt32(seedBytes[3]) << 24
+        let tolerance = inkTolerance
+        let around = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+        var kind = [UInt8](repeating: Kind.open, count: count)
+        var members: [Int32] = []
+        var added = 0
+
+        kind.withUnsafeMutableBufferPointer { kind in
+            // 1. Classify: the region, ink, and the rest.
+            for i in 0..<count {
+                if region[i] != 0 { kind[i] = Kind.filled; continue }
+                if let pathWall, pathWall.load(fromByteOffset: i * 4 + 3, as: UInt8.self) != 0 {
+                    kind[i] = Kind.solid; continue
+                }
+                if reference.loadUnaligned(fromByteOffset: i * 4, as: UInt32.self) == seedWord { continue }
+                for c in 0..<4 where abs(Int(reference.load(fromByteOffset: i * 4 + c, as: UInt8.self)) - seedBytes[c]) > tolerance {
+                    kind[i] = Kind.solid; break
+                }
+            }
+
+            // 2. Unfilled pockets small enough to be ink's own speckle. A pocket is only ever beside something that
+            //    is not open paper, so the walk starts there; a pocket past the limit — or at the window's edge —
+            //    is marked wide as far as it was walked, which keeps every pixel to one walk.
+            for beside in 0..<count where kind[beside] == Kind.solid || kind[beside] == Kind.filled {
+              let bx = beside % width, by = beside / width
+              for (sdx, sdy) in around {
+                let sx = bx + sdx, sy = by + sdy
+                guard sx >= 0, sy >= 0, sx < width, sy < height, kind[sy * width + sx] == Kind.open else { continue }
+                let start = sy * width + sx
+                members.removeAll(keepingCapacity: true)
+                members.append(Int32(start)); kind[start] = Kind.queued
+                var wide = false, head = 0
+                walk: while head < members.count {
+                    let p = Int(members[head]); head += 1
+                    let x = p % width, y = p / width
+                    for (dx, dy) in around {
+                        let nx = x + dx, ny = y + dy
+                        guard nx >= 0, ny >= 0, nx < width, ny < height else { wide = true; break walk }
+                        let q = ny * width + nx
+                        switch kind[q] {
+                        case Kind.wide: wide = true; break walk
+                        case Kind.open:
+                            kind[q] = Kind.queued; members.append(Int32(q))
+                            if members.count > pinholeLimit { wide = true; break walk }
+                        default: break
+                        }
+                    }
+                }
+                let result = wide ? Kind.wide : Kind.solid
+                for m in members { kind[Int(m)] = result }
+              }
+            }
+
+            // 3. Each connected piece of solid, added when everything round it is in the region.
+            for start in 0..<count where kind[start] == Kind.solid {
+                members.removeAll(keepingCapacity: true)
+                members.append(Int32(start)); kind[start] = Kind.visited
+                var enclosed = true, head = 0
+                while head < members.count {
+                    let p = Int(members[head]); head += 1
+                    let x = p % width, y = p / width
+                    for (dx, dy) in around {
+                        let nx = x + dx, ny = y + dy
+                        guard nx >= 0, ny >= 0, nx < width, ny < height else { enclosed = false; continue }
+                        let q = ny * width + nx
+                        switch kind[q] {
+                        case Kind.solid: kind[q] = Kind.visited; members.append(Int32(q))
+                        case Kind.open, Kind.wide: enclosed = false
+                        default: break
+                        }
+                    }
+                }
+                if enclosed {
+                    for m in members { region[Int(m)] = 1 }
+                    added += members.count
+                }
+            }
+        }
+        return added
     }
 }

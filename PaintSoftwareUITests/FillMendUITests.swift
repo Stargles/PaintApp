@@ -637,6 +637,32 @@ final class FillMendUITests: PaintUITestCase {
             if sample { gaps.append(t) }
         }
         XCTAssertTrue(gaps.isEmpty, "the fill leaves paper under the line at \(gaps.count) of 41 points along it: \(gaps)")
+        // **No hairline either**: every pixel along the line's whole run and six screen pixels either side of its
+        // centre is the fill's red (the antialiased fringe of red on red is red), so no paper shows anywhere in it.
+        var whitish = 0, sampled = 0
+        for step in 0...400 {
+            let t = 0.05 + 0.9 * Double(step) / 400
+            let cx = Double(lineFrom.dx) + Double(lineTo.dx - lineFrom.dx) * t
+            let cy = Double(lineFrom.dy) + Double(lineTo.dy - lineFrom.dy) * t
+            for off in -6...6 {
+                sampled += 1
+                if isWhitish(picture.pixel(normalizedX: cx + Double(off) / pw, normalizedY: cy + Double(off) / ph)) { whitish += 1 }
+            }
+        }
+        XCTAssertEqual(whitish, 0, "paper shows in \(whitish) of \(sampled) samples around the line")
+        // The line's middle, magnified 4x without smoothing, for a look.
+        let shot = canvas.screenshot().image
+        let mid = CGPoint(x: (lineFrom.dx + lineTo.dx) / 2 * shot.size.width, y: (lineFrom.dy + lineTo.dy) / 2 * shot.size.height)
+        let crop = CGRect(x: mid.x - 60, y: mid.y - 60, width: 120, height: 120)
+        let zoomed = UIGraphicsImageRenderer(size: CGSize(width: 480, height: 480)).image { ctx in
+            ctx.cgContext.interpolationQuality = .none
+            ctx.cgContext.scaleBy(x: 4, y: 4)
+            shot.draw(at: CGPoint(x: -crop.minX, y: -crop.minY))
+        }
+        let zoomAttachment = XCTAttachment(image: zoomed)
+        zoomAttachment.name = "rough-ink-5000-line-zoomed-4x"
+        zoomAttachment.lifetime = .keepAlways
+        add(zoomAttachment)
         XCTAssertTrue(isRed(picture.pixel(normalizedX: seed.dx, normalizedY: seed.dy)), "the fill is red")
         for outside in [point(-1.2, 0), point(1.2, 0), point(0, -1.2), point(0, 1.2)] {
             XCTAssertTrue(isWhitish(picture.pixel(normalizedX: outside.dx, normalizedY: outside.dy)),
