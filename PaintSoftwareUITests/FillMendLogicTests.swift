@@ -1710,9 +1710,19 @@ final class FillMendLogicTests: XCTestCase {
         XCTAssertTrue(manager.fillSettings.mendsGaps, "the default is Mend Gaps on")
         manager.setFillMendsGaps(mend)
         manager.brushColor = Self.red
+        let tapped = ProcessInfo.processInfo.systemUptime
         manager.beginInteractiveFill(at: scene.tap)
         manager.endInteractiveFill()
-        settle(6)
+        var latency = -1.0
+        while ProcessInfo.processInfo.systemUptime - tapped < 60 {
+            manager.fillLock.lock()
+            let produced = manager.fillRenderedRegion != nil
+            manager.fillLock.unlock()
+            if produced { latency = ProcessInfo.processInfo.systemUptime - tapped; break }
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.005))
+        }
+        print("OWNERFILL tap to first render: \(latency) s")
+        settle(1)
         manager.fillLock.lock()
         let windowScale = manager.fillWindow?.scale ?? 0
         manager.fillLock.unlock()

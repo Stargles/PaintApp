@@ -148,6 +148,7 @@ final class FlightRecorderLogicTests: XCTestCase {
             XCTAssertTrue(fill.contains(expected), "the Fill line names \(expected): \(fill)")
         }
         XCTAssertEqual(atTouch.count, 2, "every canvas touch-began carries a snapshot")
+        guard atTouch.count == 2 else { return }
         XCTAssertTrue(atTouch[0].contains("brush=Rough Ink") && atTouch[0].contains("size=0.1% = 5 px"), "\(atTouch[0])")
         XCTAssertTrue(atTouch[1].contains("tool=fill") && atTouch[1].contains("mendGaps=off") && atTouch[1].contains("mendReach=12"),
                       "\(atTouch[1])")
