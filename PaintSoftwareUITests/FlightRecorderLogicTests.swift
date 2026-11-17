@@ -84,6 +84,75 @@ final class FlightRecorderLogicTests: XCTestCase {
         XCTAssertNotEqual(saved[0], saved[1])
     }
 
+    /// **A recording says what the tool was set to** — the November 16 recording of a Fill that left a gap
+    /// under a Rough Ink line held no brush, size, pressure or Fill setting, so which brush and whether Mend
+    /// Gaps was on could not be read from it. The settings are written when recording starts, again when
+    /// they change (at the edge of the touch that changed them), and a snapshot rides on every canvas
+    /// touch-began.
+    @MainActor
+    func testARecordingCarriesTheToolSettingsAtStartOnChangeAndOnEveryCanvasTouchBegan() throws {
+        let recorder = ActionRecorder.shared
+        try XCTSkipIf(recorder.isRecording, "an existing recording owns the recorder")
+        recorder.refreshRecordings()
+        let known = Set(recorder.recordings.map(\.url))
+        let manager = CanvasManager()
+        manager.canvasSize = CGSize(width: 5000, height: 5000)
+        manager.addVectorLayer()
+        manager.addVectorLayer()
+        manager.selectedTool = .pen
+        manager.selectPreset(BrushLibrary.roughInk, for: .brush)
+        manager.setSizeSliderPosition(0, of: .brush) // the slider's bottom: 0.1% of 5000
+        recorder.toolSettingsProvider = { [weak manager] in manager?.recorderToolSettings() ?? [] }
+        var created: [URL] = []
+        defer {
+            recorder.toolSettingsProvider = nil
+            recorder.stop()
+            for url in created { try? FileManager.default.removeItem(at: url) }
+            recorder.refreshRecordings()
+        }
+        func touch(_ phase: String, id: Int, target: String?) -> TouchSample {
+            TouchSample(time: CACurrentMediaTime(), phase: phase, type: "pencil", touchID: id,
+                        object: ObjectIdentifier(manager), moves: nil, target: target, targetClass: "CanvasHostView",
+                        hitClass: "StrokeCanvasView", role: "other", label: nil, depth: 0, resolution: "view",
+                        normalized: .zero, window: .zero, windowNormalized: .zero, concurrent: 1, isPencil: true,
+                        force: 1, maxForce: 4, altitude: 0, azimuth: 0, coalescedAway: nil, touchViewClass: nil,
+                        boundRecognizers: nil)
+        }
+        recorder.start(canvasSize: manager.canvasSize, projectName: "tool-settings")
+        recorder.touch(touch("began", id: 1, target: "canvas.host"))
+        recorder.touch(touch("ended", id: 1, target: "canvas.host"))
+        // The artist picks Fill, turns Mend Gaps off, and taps: the change lands at the touch's edge.
+        manager.selectedTool = .fill
+        manager.setFillMendsGaps(false)
+        recorder.touch(touch("began", id: 2, target: "canvas.host"))
+        recorder.touch(touch("ended", id: 2, target: "canvas.host"))
+        recorder.stop()
+        recorder.refreshRecordings()
+        let url = try XCTUnwrap(Set(recorder.recordings.map(\.url)).subtracting(known).first)
+        created.append(url)
+        let text = String(decoding: try recordingBytes(at: url, containing: "recordingStopped"), as: UTF8.self)
+        let lines = text.split(separator: "\n").map(String.init)
+        let settings = lines.filter { $0.contains("\"event\":\"toolSettings\"") }
+        let atTouch = lines.filter { $0.contains("\"event\":\"toolAtTouch\"") }
+
+        XCTAssertEqual(settings.count, 2, "once at the start, once when Fill replaced the brush — not per touch: \(settings)")
+        let start = try XCTUnwrap(settings.first)
+        for expected in ["\"reason\":\"start\"", "\"tool\":\"pen\"", "\"brush\":\"Rough Ink\"",
+                         "0.1% = 5 px", "size<-pressurex1", "flow<-pressurex0.1", "\"opacity\":\"100%\"",
+                         "\"targetLayer\":\"1 "] {
+            XCTAssertTrue(start.contains(expected), "the start line names \(expected): \(start)")
+        }
+        let fill = try XCTUnwrap(settings.last)
+        for expected in ["\"tool\":\"fill\"", "\"mendGaps\":false", "\"mendReach\":\"12\"", "\"edgeOverlap\":\"2\"",
+                         "\"fillType\":\"flood\"", "\"references\":\"2 of 2:", "\"targetLayer\""] {
+            XCTAssertTrue(fill.contains(expected), "the Fill line names \(expected): \(fill)")
+        }
+        XCTAssertEqual(atTouch.count, 2, "every canvas touch-began carries a snapshot")
+        XCTAssertTrue(atTouch[0].contains("brush=Rough Ink") && atTouch[0].contains("size=0.1% = 5 px"), "\(atTouch[0])")
+        XCTAssertTrue(atTouch[1].contains("tool=fill") && atTouch[1].contains("mendGaps=off") && atTouch[1].contains("mendReach=12"),
+                      "\(atTouch[1])")
+    }
+
     /// Wait for the existing asynchronous writer's terminal content, rather than mistaking file
     /// existence (created before its first flush) for a completed recording.
     @MainActor

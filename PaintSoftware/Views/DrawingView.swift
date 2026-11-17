@@ -307,6 +307,9 @@ struct DrawingView: View {
         .onAppear {
             ActionRecorder.shared.startFlight(canvasSize: canvasManager.canvasSize,
                                               projectName: canvasManager.projectName)
+            ActionRecorder.shared.toolSettingsProvider = { [weak canvasManager] in
+                canvasManager?.recorderToolSettings() ?? []
+            }
         }
         // Continuing to draw or fill dismisses whatever top-bar dropdown is open instead of the first
         // touch being swallowed by a tap-to-dismiss catcher — see CanvasManager.interactionBegan.

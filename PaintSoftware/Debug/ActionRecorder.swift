@@ -128,6 +128,46 @@ final class ActionRecorder: ObservableObject {
 
     private init() {}
 
+    // MARK: - The tool in hand
+
+    typealias ToolSettings = [(String, JSONValue)]
+
+    /// What the editor says its active tool is set to — brush preset, size, pressure, opacity, and the Fill
+    /// tool's Mend Gaps, Reach and Edge Overlap — **set by the editor and held weakly by the closure**, so
+    /// the recorder still keeps no project alive. Read only on the touch hooks below, never per sample.
+    ///
+    /// A November 16 recording of a Fill that left a gap under a line carried no brush and no Fill
+    /// setting at all, so the question that decided the whole report — which brush, how big, was Mend on —
+    /// could not be answered from the file. Now it is the first thing in one.
+    var toolSettingsProvider: (() -> ToolSettings)?
+    /// The last settings written, as the line they make, so an unchanged tool writes nothing.
+    private var lastToolSettings: String?
+
+    /// Writes a `toolSettings` event when the tool's settings differ from the last one written — on
+    /// recording start (`force`), and on every touch that begins or ends, which is how a slider or a
+    /// preset pick reaches it: both are touches, and the change has landed by the time the finger lifts.
+    func noteToolSettings(reason: String, force: Bool = false) {
+        guard let fields = toolSettingsProvider?(), !fields.isEmpty else { return }
+        let line = Self.line("toolSettings", fields, at: 0)
+        guard force || line != lastToolSettings else { return }
+        lastToolSettings = line
+        emit("toolSettings", [("reason", .str(reason))] + fields)
+    }
+
+    /// The compact form a canvas touch-began carries, so a stroke or a fill can be read against its
+    /// settings without searching back for the last change.
+    static func compact(_ fields: ToolSettings) -> String {
+        fields.map { key, value in
+            switch value {
+            case .str(let s): return "\(key)=\(s)"
+            case .num(let n): return "\(key)=\(number(n))"
+            case .int(let i): return "\(key)=\(i)"
+            case .bool(let b): return "\(key)=\(b ? "on" : "off")"
+            case .null: return "\(key)=nil"
+            }
+        }.joined(separator: " ")
+    }
+
     // MARK: - The flight recorder
 
     /// Turns the flight ring on. Idempotent; called on every editor appearance so a dump names the
@@ -167,6 +207,7 @@ final class ActionRecorder: ObservableObject {
             return nil
         }
         let base = entries.first?.time ?? now
+        let tool = toolSettingsProvider?() ?? []
         let header = Self.headerLine(canvasSize: flightContext.canvasSize, projectName: flightContext.projectName,
                                      tap: tapReport, url: url, freezesCaught: AppSettings.standard.canvasRepairCount,
                                      flight: [("trigger", .str(trigger)), ("events", .int(entries.count)),
@@ -180,6 +221,7 @@ final class ActionRecorder: ObservableObject {
         }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             var text = header + "\n"
+            if !tool.isEmpty { text += Self.line("toolSettings", [("reason", .str("flight"))] + tool, at: 0) + "\n" }
             for entry in entries {
                 text += Self.line(entry.element.event, entry.element.fields, at: entry.time - base) + "\n"
             }
@@ -334,6 +376,7 @@ final class ActionRecorder: ObservableObject {
         // so a hook can never fire into a nil writer.
         Self.isCapturing = true
         isRecording = true
+        noteToolSettings(reason: "start", force: true)
 
         // Runloop-mode `.common` so the timer keeps ticking while a scroll or a drag is tracking;
         // the default mode would stall exactly during the gestures being recorded.
@@ -519,6 +562,13 @@ final class ActionRecorder: ObservableObject {
     /// while a recording is running (`WindowEventTap.recordsInFull`).
     func touch(_ s: TouchSample) {
         emit("touch", Self.touchFields(s), at: s.time, inRing: s.phase != "moved")
+        // The tool's settings: written when they changed, at the edges of a touch only — a touch that
+        // only began on a slider has not changed it yet, and the one that lifts has.
+        guard s.phase == "began" || s.phase == "ended" else { return }
+        noteToolSettings(reason: s.phase == "began" ? "touch-began" : "touch-ended")
+        if s.phase == "began", s.target == "canvas.host", let fields = toolSettingsProvider?(), !fields.isEmpty {
+            emit("toolAtTouch", [("touch", .int(s.touchID)), ("settings", .str(Self.compact(fields)))], at: s.time)
+        }
     }
 
     /// A touch line's fields, in file order. `touch` numbers the sequence and `uid` is the `UITouch`
@@ -866,5 +916,66 @@ private final class RecordingWriter {
             try? handle.synchronize()
             try? handle.close()
         }
+    }
+}
+
+
+// MARK: - What the editor reports of the tool in hand
+
+extension CanvasManager {
+    /// **The active tool's settings, as a recording writes them.** A stroke tool: the preset by name, size
+    /// as the toolbar shows it (a percentage of the canvas's shorter side) and in canvas pixels, opacity,
+    /// the pressure and every other modulation row, stabilisation and spacing. The Fill tool: its type,
+    /// Mend Gaps on or off with Reach, Edge Overlap, Gap Closing, Threshold, which layers are its
+    /// references, and the layer it lands on. Strings for the numbers, so a 0.1% brush is not rounded to 0.
+    func recorderToolSettings() -> ActionRecorder.ToolSettings {
+        typealias J = ActionRecorder.JSONValue
+        func trimmed(_ value: Double) -> String {
+            var text = String(format: "%.3f", value)
+            while text.hasSuffix("0") { text.removeLast() }
+            if text.hasSuffix(".") { text.removeLast() }
+            return text
+        }
+        func inputName(_ input: BrushInput) -> String {
+            switch input {
+            case .pressure: return "pressure"
+            case .tiltAngle: return "tiltAngle"
+            case .tiltDirection: return "tiltDirection"
+            case .direction: return "direction"
+            case .taper: return "taper"
+            case .velocity: return "velocity"
+            case .random: return "random"
+            }
+        }
+        var fields: [(String, J)] = [("tool", .str(selectedTool.rawValue)),
+                                     ("color", .str(brushColor.hexString))]
+        if let stroke = selectedTool.strokeTool {
+            let profile = toolProfiles[stroke]
+            let brush = profile.preset
+            fields += [("brush", .str(brush.name)),
+                       ("size", .str("\(trimmed(sizePercent(of: stroke) * 100))% = \(trimmed(Double(profile.size))) px")),
+                       ("opacity", .str("\(trimmed(profile.opacity * 100))%")),
+                       ("pressure", .str(brush.modulations.rows.isEmpty ? "none"
+                            : brush.modulations.rows.map { "\($0.output.rawValue)<-\(inputName($0.input))x\(trimmed($0.amount))" }
+                                .joined(separator: ","))),
+                       ("spacing", .str(trimmed(brush.dab.spacing))),
+                       ("stabilization", .str(trimmed(brush.stroke.stabilization)))]
+        } else if selectedTool == .fill {
+            let settings = fillSettings
+            let references = layers.filter(\.isFillReference).map(\.name)
+            fields += [("fillType", .str(fillMode.rawValue)),
+                       ("mendGaps", .bool(settings.mendsGaps)),
+                       ("mendReach", .str(trimmed(Double(settings.mendReach)))),
+                       ("edgeOverlap", .str(trimmed(Double(fillEdgeOverlap)))),
+                       ("gapClosing", .str(trimmed(Double(settings.gapClosing)))),
+                       ("threshold", .str(trimmed(Double(settings.threshold)))),
+                       ("canvasEdgeIsBoundary", .bool(settings.canvasEdgeIsBoundary)),
+                       ("references", .str("\(references.count) of \(layers.count): \(references.joined(separator: "|"))"))]
+        }
+        if layers.indices.contains(currentLayerIndex) {
+            let layer = layers[currentLayerIndex]
+            fields += [("targetLayer", .str("\(currentLayerIndex) \(layer.name) (\(layer.kind))"))]
+        }
+        return fields
     }
 }
