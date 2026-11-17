@@ -693,12 +693,12 @@ final class LassoMoveLogicTests: XCTestCase {
         XCTAssertFalse(lifetime.isReleased, "Premise: the vector owns the custom-backed real path archive.")
         XCTAssertTrue(manager.beginVectorWholeCelMove())
         manager.nudgeVectorFloat(to: movedBy(manager, dx: 4, dy: 0))
-        manager.history.maxCost = 0
-        // Drop the first step, whose before-list legitimately owns the original archive. The float
+        // Drop the first step, whose before-list legitimately owns the original archive: recording
+        // the second step over a zero budget evicts the oldest (the newest is always kept). The float
         // still owns it until commit; a later history step must not retain the whole original part.
-        manager.history.trimUnderMemoryPressure()
-        manager.history.maxCost = Int.max
+        manager.history.maxCost = 0
         manager.nudgeVectorFloat(to: movedBy(manager, dx: 4, dy: 0))
+        manager.history.maxCost = Int.max
         XCTAssertEqual(manager.history.undoStack.count, 1)
         XCTAssertFalse(lifetime.isReleased)
         autoreleasepool { XCTAssertTrue(manager.commitVectorFloatIfNeeded()) }

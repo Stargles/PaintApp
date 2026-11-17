@@ -297,8 +297,10 @@ final class VectorDuplicateLogicTests: XCTestCase {
         destination.history.maxCost = minimumRetainedBytes - 1
         XCTAssertNil(destination.pasteSelectionFromPasteboard())
         destination.commitVectorFloatIfNeeded()
-        XCTAssertTrue(destination.history.undoStack.isEmpty, "the actual retained-byte budget trims the oversized pasted actions")
-        XCTAssertEqual(destination.history.currentCost, 0, "trimmed actions retain no Undo payload charge")
+        XCTAssertEqual(destination.history.undoStack.count, UndoHistory.minimumKeptUndoSteps,
+                       "the retained-byte budget trims older actions but never the newest, oversized one")
+        XCTAssertLessThan(destination.history.currentCost, minimumRetainedBytes * 2,
+                          "the trimmed older action retains no Undo payload charge")
     }
 
     @MainActor
