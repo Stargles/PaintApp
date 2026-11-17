@@ -661,6 +661,8 @@
 		5B74E61948504D11B601E202 /* RasterSamplingLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B74E61948504D11B601E201 /* RasterSamplingLogicTests.swift */; };
 		83A52AB211004A949CCFB502 /* RasterSamplingBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83A52AB211004A949CCFB501 /* RasterSamplingBench.swift */; };
 		298D10B1B716D5A4AA91B7B6 /* PaintSoftwareUITests/Fixtures/text-old-product-75365af5.paintproj in Resources */ = {isa = PBXBuildFile; fileRef = A4DA995B352E329F0A543649 /* PaintSoftwareUITests/Fixtures/text-old-product-75365af5.paintproj */; };
+		35129C2C4F80792746D11C7F /* BakeStripWalkLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ADD8EFEAD4ABC09467F9DDC /* BakeStripWalkLogicTests.swift */; };
+		A93AF5CD4C3A8495EF0901CC /* BakeStripWalkBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91F320F38B8255478784A772 /* BakeStripWalkBench.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1330,6 +1332,8 @@
 		5B74E61948504D11B601E201 /* RasterSamplingLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RasterSamplingLogicTests.swift; sourceTree = "<group>"; };
 		83A52AB211004A949CCFB501 /* RasterSamplingBench.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RasterSamplingBench.swift; sourceTree = "<group>"; };
 		A4DA995B352E329F0A543649 /* PaintSoftwareUITests/Fixtures/text-old-product-75365af5.paintproj */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder; path = PaintSoftwareUITests/Fixtures/text-old-product-75365af5.paintproj; sourceTree = "<group>"; };
+		3ADD8EFEAD4ABC09467F9DDC /* BakeStripWalkLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BakeStripWalkLogicTests.swift; sourceTree = "<group>"; };
+		91F320F38B8255478784A772 /* BakeStripWalkBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BakeStripWalkBench.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -1602,6 +1606,8 @@
 				B4F38094FCC8E64305588F07 /* RasterResidencyLogicTests.swift */,
 				B87AF22B470D6379F6E590B9 /* PlaybackEngagementLogicTests.swift */,
 				C70989B34DF5634378495B7A /* PlaybackBudgetBench.swift */,
+				91F320F38B8255478784A772 /* BakeStripWalkBench.swift */,
+				3ADD8EFEAD4ABC09467F9DDC /* BakeStripWalkLogicTests.swift */,
 				B15594D42CD2BEE2DF454CD2 /* PlaybackBakeUITests.swift */,
 				0DC3C52DAB88CB9CCEEFC2A4 /* VectorPreviewPlanLogicTests.swift */,
 				5637E8C1116D62155E6800D8 /* FrameRecipeLogicTests.swift */,
@@ -2400,6 +2406,8 @@
 				36A461ABC706F5D17268285F /* RasterResidencyLogicTests.swift in Sources */,
 				16D31DA4BD1FC7197121E9D5 /* PlaybackEngagementLogicTests.swift in Sources */,
 				E60BB146B0C2EB78139BC7ED /* PlaybackBudgetBench.swift in Sources */,
+				A93AF5CD4C3A8495EF0901CC /* BakeStripWalkBench.swift in Sources */,
+				35129C2C4F80792746D11C7F /* BakeStripWalkLogicTests.swift in Sources */,
 				348A6846E7C59368E7B805A4 /* PlaybackBakeUITests.swift in Sources */,
 				21F8A43BB9211B69B8F755BA /* VectorPreviewPlanLogicTests.swift in Sources */,
 				9A7B5C3D1E2F000000000A02 /* PaintSoftware/Engine/StrokeGeometry.swift in Sources */,

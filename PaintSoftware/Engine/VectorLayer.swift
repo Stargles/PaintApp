@@ -6987,6 +6987,7 @@ final class VectorCanvas {
     private static func drawLocalContent(into cg: CGContext, elements: [VectorElement],
                                          quality: RenderQuality, clippedTo clip: CGRect?,
                                          known knownBounds: [UUID: CGRect]) -> Walk? {
+        WalkProbe.record()
         // One target — and so one `DabGradientCache` — for the whole walk: a per-run target would
         // throw away the cache's hit rate at every fill or eraser.
         let target = CGContextDabTarget(cg)
@@ -8100,4 +8101,16 @@ extension VectorCanvasData.VideoRef {
             speed: c.decode(Double.self, forKey: .speed),
             documentFPS: VectorVideoElement.resolvedFrameRate(c.decodeIfPresent(Int.self, forKey: .mappedFrameRate)))
     }
+}
+
+
+/// Counts every walk of a vector display list into a context — the instrument behind "how many times
+/// did that frame bake re-walk each cel", which is a number rather than a timing so it is stable on a
+/// loaded machine. One locked increment per walk; a walk is milliseconds.
+enum WalkProbe {
+    private static let lock = NSLock()
+    private static var count = 0
+    static func reset() { lock.lock(); count = 0; lock.unlock() }
+    static var walks: Int { lock.lock(); defer { lock.unlock() }; return count }
+    fileprivate static func record() { lock.lock(); count += 1; lock.unlock() }
 }
