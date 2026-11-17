@@ -440,12 +440,12 @@ extension CanvasManager {
         }
 
         let elementsBeforeLift = vector.elements
-        vector.elements = split.elements
+        // The list and the suppression change together (`installLift`), so the hole the lift needs
+        // is declared as the rectangle it changes rather than as a whole-cel invalidation. The
+        // `elements` setter deliberately does not invalidate; this is the lift's one invalidation.
+        vector.installLift(elements: split.elements, suppressing: split.insideIDs)
         let lifted = Dictionary(uniqueKeysWithValues:
             split.elements.filter { split.insideIDs.contains($0.id) }.map { ($0.id, $0) })
-        // Assigning the suppression is the one invalidation of the lift — the `elements` setter
-        // deliberately does not invalidate, and callers follow with a bump.
-        vector.suppressedElementIDs = split.insideIDs
 
         // **Re-taken against the split list, not `target.poses`.** A cut mints fresh ids for both
         // halves, so the dictionary the membership test was built from cannot answer for the pieces

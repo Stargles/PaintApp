@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C7ADDB5D28606940FDF7E5B5 /* VectorMoveStallBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0690209872E595A3D849A53E /* VectorMoveStallBench.swift */; };
+		6E73FBEBB7928C4CB2C841E0 /* VectorLiftRepairLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F405A3ADF7D77C02623BD9C2 /* VectorLiftRepairLogicTests.swift */; };
 		560C11000000000000000002 /* SelectionClipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 560C11000000000000000001 /* SelectionClipboard.swift */; };
 		A05511000000000000000004 /* PaintSoftware/Engine/RasterPixels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A05511000000000000000003 /* PaintSoftware/Engine/RasterPixels.swift */; };
 		A05511000000000000000002 /* PaintSoftware/Engine/LZ4Block.swift in Sources */ = {isa = PBXBuildFile; fileRef = A05511000000000000000001 /* PaintSoftware/Engine/LZ4Block.swift */; };
@@ -677,6 +679,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0690209872E595A3D849A53E /* VectorMoveStallBench.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorMoveStallBench.swift; sourceTree = "<group>"; };
+		F405A3ADF7D77C02623BD9C2 /* VectorLiftRepairLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorLiftRepairLogicTests.swift; sourceTree = "<group>"; };
 		560C11000000000000000001 /* SelectionClipboard.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Models/SelectionClipboard.swift; sourceTree = "<group>"; };
 		A05511000000000000000003 /* PaintSoftware/Engine/RasterPixels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/RasterPixels.swift; sourceTree = "<group>"; };
 		A05511000000000000000001 /* PaintSoftware/Engine/LZ4Block.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/LZ4Block.swift; sourceTree = "<group>"; };
@@ -1741,6 +1745,8 @@
 				013A41F1EC13F3CDBDB34768 /* ThumbnailRenderLogicTests.swift */,
 				6AE585A643A05F533D61FF99 /* ThumbnailRenderBench.swift */,
 				717C9716F5DE07CAD525928D /* MemoryAuditBench.swift */,
+				0690209872E595A3D849A53E /* VectorMoveStallBench.swift */,
+				F405A3ADF7D77C02623BD9C2 /* VectorLiftRepairLogicTests.swift */,
 				DEC0DE000000000000000092 /* BlockDragCharacterizationTests.swift */,
 				DEC0DE000000000000000096 /* RenderTreeCharacterizationTests.swift */,
 				DEC0DE9F0000000000000007 /* EffectParityLogicTests.swift */,
@@ -2593,6 +2599,8 @@
 				7848B7FEFCE5AEFE7AC3097B /* ThumbnailRenderLogicTests.swift in Sources */,
 				2AFCCD3A631454D22DC189D2 /* ThumbnailRenderBench.swift in Sources */,
 				295CCCBE4F27D38A3228BA16 /* MemoryAuditBench.swift in Sources */,
+				C7ADDB5D28606940FDF7E5B5 /* VectorMoveStallBench.swift in Sources */,
+				6E73FBEBB7928C4CB2C841E0 /* VectorLiftRepairLogicTests.swift in Sources */,
 				DEC0DE00000000000000000A /* PaintSoftware/Engine/BrushLibrary.swift in Sources */,
 				53E58A87775E730DF8AEA510 /* PaintSoftware/Engine/BrushGroup.swift in Sources */,
 				B260F52A04C5DBC81BB54DFD /* PaintSoftware/Engine/BrushLibraryStore.swift in Sources */,

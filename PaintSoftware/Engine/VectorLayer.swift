@@ -2007,11 +2007,57 @@ final class VectorCanvas {
             lock.lock()
             defer { lock.unlock() }
             guard _suppressedElementIDs != newValue else { return }
+            let damage = liftDamage(from: _elements, to: _elements,
+                                    suppressing: newValue, replacing: _suppressedElementIDs)
             _suppressedElementIDs = newValue
-            // `.everything`: suppression changes which elements the walk *includes*, and the one it
-            // hides sits wherever it always sat rather than at the end.
-            invalidate(.everything)
+            // `.everything` unless this is a lift whose footprints are all measured (`liftDamage`):
+            // suppression changes which elements the walk *includes*, and the one it hides sits
+            // wherever it always sat rather than at the end.
+            invalidate(damage ?? .everything, repairingUnderSuppression: damage != nil)
         }
+    }
+
+    /// **A lasso Move's lift as one locked change: the split list and the suppression together.**
+    ///
+    /// The picture the lift needs is the layer *with the lifted ink gone* — a hole. Declaring the
+    /// lift `.everything` made that a whole-cel walk on the main thread at touch-down (MEASURED, see
+    /// `VectorMoveStallBench`: seconds at 5000²). The hole differs from the picture already on screen
+    /// only where the lifted ink was, so this declares that rectangle (`liftDamage`) and the next
+    /// render repairs it over the standing memo, at a cost that follows the lifted piece rather than
+    /// the cel. Falls back to `.everything` whenever a footprint is unmeasured.
+    func installLift(elements newElements: [VectorElement], suppressing ids: Set<UUID>) {
+        lock.lock()
+        defer { lock.unlock() }
+        let damage = liftDamage(from: _elements, to: newElements,
+                                suppressing: ids, replacing: _suppressedElementIDs)
+        _elements = newElements
+        dropIncrementalBase()
+        _suppressedElementIDs = ids
+        invalidate(damage ?? .everything, repairingUnderSuppression: damage != nil)
+    }
+
+    /// The rectangle a lift changes, or nil when it cannot be bounded and the caller must declare
+    /// `.everything`. Caller must hold `lock`.
+    ///
+    /// Only a lift qualifies — a suppression that *grows* from what was showing — because a lift
+    /// removes ink whose footprint the last render measured and has not changed since. Un-suppressing
+    /// is not: a drag rewrites those elements in place, so their stored footprints describe where the
+    /// ink *was* and a rectangle drawn from them would repair the wrong place. A victim of a cut
+    /// (present before, absent after) contributes its footprint; its fragments, which have none yet,
+    /// stay inside it, and a fragment that strays is caught by the render's escape check.
+    private func liftDamage(from old: [VectorElement], to new: [VectorElement],
+                            suppressing newSet: Set<UUID>, replacing oldSet: Set<UUID>) -> Damage? {
+        guard cachedImage != nil, oldSet.isSubset(of: newSet) else { return nil }
+        let oldIDs = Set(old.map(\.id)), newIDs = Set(new.map(\.id))
+        let victims = oldIDs.subtracting(newIDs)
+        var union = CGRect.null
+        for id in victims.union(newSet.subtracting(oldSet).intersection(oldIDs)) {
+            guard let rect = paintedBounds[id] else { return nil }
+            union = union.union(rect)
+        }
+        // A fresh id that no victim accounts for is ink this cannot bound.
+        if !newIDs.subtracting(oldIDs).isEmpty && victims.isEmpty { return nil }
+        return union.isNull ? nil : .region(union)
     }
 
     /// The text editor's half of `suppressedElementIDs`, kept as a one-element view over it so
@@ -2076,6 +2122,10 @@ final class VectorCanvas {
     /// It costs no memory for the same reason `incrementalBase` does not: it holds the object `cachedImage` was
     /// already holding, and only outlives it between the edit and the render that consumes it.
     private var regionBase: (image: UIImage, region: CGRect)?
+    /// The suppression `regionBase` may be repaired under — set only by a lift (`liftDamage`), whose
+    /// base is the picture *before* the ink was hidden. Nil for every other base, which must be
+    /// repaired against an unsuppressed list.
+    private var regionBaseSuppression: Set<UUID>?
 
     /// **The three above again, at one reduced resolution** — what `render(quality:resolution:)`
     /// memoizes and repairs, kept apart from the native trio because it is a different picture.
@@ -2523,9 +2573,11 @@ final class VectorCanvas {
     private(set) var lastDamage: Damage = .everything
 
     /// Caller must hold `lock`.
-    private func invalidate(_ damage: Damage, restoringAppendPrefix: Bool = false) {
+    private func invalidate(_ damage: Damage, restoringAppendPrefix: Bool = false,
+                            repairingUnderSuppression: Bool = false) {
         contentVersion += 1
-        invalidateRenderOnly(damage, restoringAppendPrefix: restoringAppendPrefix)
+        invalidateRenderOnly(damage, restoringAppendPrefix: restoringAppendPrefix,
+                             repairingUnderSuppression: repairingUnderSuppression)
     }
 
     /// Drops the memoized renders and moves the display's staleness key, **without** claiming the
@@ -2535,7 +2587,8 @@ final class VectorCanvas {
     /// `changesDocument` is false for exactly one caller — a stream frame arriving, which changes no
     /// picture the document keeps and so leaves `documentVersion` still; see that property.
     private func invalidateRenderOnly(_ damage: Damage, changesDocument: Bool = true,
-                                      restoringAppendPrefix: Bool = false) {
+                                      restoringAppendPrefix: Bool = false,
+                                      repairingUnderSuppression: Bool = false) {
         version += 1
         if changesDocument { documentVersion += 1 }
         if case .region(let rect) = damage, rect.isNull {
@@ -2560,7 +2613,7 @@ final class VectorCanvas {
             appendedSinceBase = 0
         } else {
             // The region re-walk starts from the image about to be invalidated.
-            applyToRegionBase(damage)
+            applyToRegionBase(damage, repairingUnderSuppression: repairingUnderSuppression)
             cachedImage = nil
             applyToIncrementalBase(damage)
         }
@@ -2581,7 +2634,9 @@ final class VectorCanvas {
     /// an append leaves existing elements alone but is served by `incrementalBase`, which is
     /// strictly cheaper, so it keeps the footprints and drops the base rather than trying to hold
     /// both stories at once.
-    private func applyToRegionBase(_ damage: Damage) {
+    private func applyToRegionBase(_ damage: Damage, repairingUnderSuppression: Bool = false) {
+        // Valid only for the suppression a lift declared it for; every other path clears the claim.
+        regionBaseSuppression = repairingUnderSuppression ? _suppressedElementIDs : nil
         switch damage {
         case .everything:
             regionBase = nil
@@ -2594,7 +2649,7 @@ final class VectorCanvas {
         case .region(let rect):
             let rect = rect.standardized
             // A suppressed element is absent from the standing picture, so it cannot be a repair base.
-            guard _suppressedElementIDs.isEmpty,
+            guard _suppressedElementIDs.isEmpty || repairingUnderSuppression,
                   !rect.isNull, !rect.isInfinite else { regionBase = nil; return }
             if let standing = regionBase {
                 regionBase = (standing.image, standing.region.union(rect))
@@ -6461,7 +6516,8 @@ final class VectorCanvas {
     private func repairableBase(quality: RenderQuality, in slot: ReducedRender?,
                                 native: Bool) -> (image: UIImage, region: CGRect)? {
         guard let base = native ? regionBase : slot?.regionBase else { return nil }
-        guard quality == .full, _suppressedElementIDs.isEmpty,
+        guard quality == .full,
+              _suppressedElementIDs.isEmpty || (native && regionBaseSuppression == _suppressedElementIDs),
               !base.region.isNull, !base.region.isEmpty else { return nil }
         guard let clip = Self.repairClip(base.region, in: size,
                                          resolution: native ? 1 : (slot?.resolution ?? 1)) else { return nil }
