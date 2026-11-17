@@ -656,7 +656,9 @@ final class MemoryBudgetLogicTests: XCTestCase {
         XCTAssertEqual(shown.dropLast().map(\.rasterizations), walks,
                        "asking the layers on screen for their pictures must walk none of them")
 
-        // Off screen again, they are ordinary entries and the budget takes them back.
+        // Off screen again, they are ordinary entries and the budget takes them back. The pins are
+        // never read, so Release may free them at their last use: hold them to here explicitly.
+        withExtendedLifetime(pins) {}
         pins.removeAll()
         _ = ownersCanvasCel().render()
         XCTAssertLessThanOrEqual(VectorRenderCache.entryCount, 2,
