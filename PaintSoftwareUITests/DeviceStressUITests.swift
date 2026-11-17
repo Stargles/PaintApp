@@ -53,8 +53,10 @@ final class DeviceStressUITests: PaintUITestCase {
         rotateDevice(app, to: .landscapeLeft)
         XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 30), "setup: the gallery")
 
-        // The fixtures: a folder, entered, and a 5000² scene made inside it.
+        // The fixtures: a folder, entered, and a 5000² scene made inside it. First remove any folder an
+        // earlier run of this harness created and could not clean up (named in the env, empty only).
         goToTopOfGallery(app)
+        removeStaleOwnedFolders(app)
         app.buttons["gallery.newFolderButton"].tap()
         let field = app.textFields["gallery.folderRenameField"]
         XCTAssertTrue(field.waitForExistence(timeout: 10), "New Folder puts the tile's name into edit")
@@ -64,7 +66,7 @@ final class DeviceStressUITests: PaintUITestCase {
         tile.tap()
         XCTAssertEqual(app.staticTexts["gallery.breadcrumbPath"].label.hasSuffix(ownedFolder), true,
                        "inside the owned folder")
-        XCTAssertTrue(openNewCanvas(app, size: canvasSize), "a 5000² scene inside the owned folder")
+        XCTAssertTrue(openNewCanvasOnDevice(app), "a 5000² scene inside the owned folder")
         print("DEVICE-STRESS fixtures folder=\(ownedFolder) scene=Untitled setup=\(Date().timeIntervalSince(t0))s")
 
         let canvas = app.otherElements["canvas.host"]
@@ -135,6 +137,72 @@ final class DeviceStressUITests: PaintUITestCase {
         print("DEVICE-STRESS done total=\(Date().timeIntervalSince(t0))s")
     }
 
+    /// The shared `openNewCanvas` types both sizes back to back, which works on a simulator (hardware
+    /// keyboard) but not on the iPad, whose number pad covers the Height field. Hide the keyboard after
+    /// each field.
+    private func openNewCanvasOnDevice(_ app: XCUIApplication) -> Bool {
+        app.buttons["gallery.newCanvasButton"].tap()
+        let create = app.buttons["sizePicker.createButton"]
+        guard create.waitForExistence(timeout: 10) else { return false }
+        for id in ["sizePicker.widthField", "sizePicker.heightField"] {
+            let field = app.textFields[id]
+            guard field.waitForExistence(timeout: 5) else { return false }
+            if !field.isHittable { hideKeyboard(app) }
+            setField(field, to: String(Int(canvasSize.width)))
+            hideKeyboard(app)
+        }
+        guard create.isHittable else { return false }
+        create.tap()
+        return app.staticTexts["timeline.frameLabel"].waitForExistence(timeout: 20)
+    }
+
+    private func hideKeyboard(_ app: XCUIApplication) {
+        guard app.keyboards.count > 0 else { return }
+        let hide = app.keyboards.buttons["Hide keyboard"]
+        if hide.exists && hide.isHittable { hide.tap() } else {
+            let title = app.staticTexts["Create New Canvas"]
+            if title.exists { title.tap() }
+        }
+        _ = app.keyboards.firstMatch.waitForNonExistence(timeout: 3)
+    }
+
+    /// Folders an earlier run of this harness made and left behind, by exact name from
+    /// `PAINTAPP_DEVICE_STRESS_STALE` (comma-separated). Only `ZZ-stress-` names, only when empty.
+    private func removeStaleOwnedFolders(_ app: XCUIApplication) {
+        let names = (ProcessInfo.processInfo.environment["PAINTAPP_DEVICE_STRESS_STALE"] ?? "")
+            .split(separator: ",").map(String.init).filter { $0.hasPrefix("ZZ-stress-") }
+        for name in names {
+            let tile = app.buttons["gallery.folderTile.\(name)"]
+            guard tile.waitForExistence(timeout: 3) else {
+                print("DEVICE-STRESS stale: \(name) not present"); continue
+            }
+            tile.tap()
+            let crumb = app.staticTexts["gallery.breadcrumbPath"]
+            guard crumb.waitForExistence(timeout: 10), crumb.label.hasSuffix(name) else {
+                XCTFail("stale cleanup: not inside \(name); touching nothing"); return
+            }
+            Thread.sleep(forTimeInterval: 1)
+            let menus = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "gallery.tileMenu."))
+            let empty = menus.count == 0
+            app.buttons["gallery.breadcrumbBack"].tap()
+            guard empty else { print("DEVICE-STRESS stale: \(name) is not empty; left alone"); continue }
+            deleteOwnedFolder(app, name)
+            print("DEVICE-STRESS stale: removed empty folder \(name)")
+        }
+    }
+
+    private func deleteOwnedFolder(_ app: XCUIApplication, _ name: String) {
+        let menu = app.buttons["gallery.folderMenu.\(name)"]
+        guard menu.waitForExistence(timeout: 10) else { XCTFail("cleanup: folder menu for \(name) missing"); return }
+        menu.tap()
+        let delete = app.buttons["Delete"]
+        if delete.waitForExistence(timeout: 5) { delete.tap() }
+        let confirm = app.alerts.buttons["Delete"]
+        if confirm.waitForExistence(timeout: 5) { confirm.tap() }
+        XCTAssertTrue(app.buttons["gallery.folderTile.\(name)"].waitForNonExistence(timeout: 15),
+                      "the owned folder \(name) is gone")
+    }
+
     private func assertForeground(_ app: XCUIApplication, _ when: String) {
         XCTAssertEqual(app.state, .runningForeground, "the app is still in the foreground \(when)")
     }
@@ -157,6 +225,10 @@ final class DeviceStressUITests: PaintUITestCase {
     /// folder. Refuses to touch anything unless the folder it is in is the owned one by name.
     private func cleanUpOwnedFixtures(_ app: XCUIApplication) {
         if app.state != .runningForeground { app.launch() }   // no arguments: a plain relaunch
+        // A failure inside the size picker leaves it up (and maybe its number pad) over the gallery.
+        hideKeyboard(app)
+        let cancel = app.buttons["sizePicker.cancelButton"]
+        if cancel.exists { cancel.tap(); _ = cancel.waitForNonExistence(timeout: 5) }
         _ = app.buttons["toolbar.galleryButton"].waitForExistence(timeout: 8)
         goToTopOfGallery(app)
         let folderTile = app.buttons["gallery.folderTile.\(ownedFolder)"]
