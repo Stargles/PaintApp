@@ -266,6 +266,11 @@ final class UndoHistory {
     /// most the one oversized step, never by a history of them.
     static let minimumKeptUndoSteps = 1
 
+    /// A saturated (`Int.max`) or negative price is an overflowed or invalid one — not a large real
+    /// step — and keeps `addingCost`'s refuse-conservatively rule: such a step is evictable even
+    /// when it is the newest.
+    private static func isTrustedCost(_ action: Action) -> Bool { action.cost >= 0 && action.cost < Int.max }
+
     /// Called (once per history, until `removeAll`) the first time a budget drops steps, with how many
     /// went. Dropping on every later record would raise a notice on every stroke at a canvas where
     /// each step is the whole budget, so the history says it once and stays quiet.
@@ -282,7 +287,7 @@ final class UndoHistory {
     private func trim() -> Int {
         var total = currentCost
         var dropped = 0
-        while total > maxCost, undoStack.count > Self.minimumKeptUndoSteps {
+        while total > maxCost, undoStack.count > Self.minimumKeptUndoSteps || !(undoStack.last.map(Self.isTrustedCost) ?? true) {
             let removed = undoStack.removeFirst().cost
             dropped += 1
             // A saturated sum is a lower bound, so subtracting from it could admit another
