@@ -32,6 +32,15 @@ HANDOFF.md is a navigation/checkpoint document, never the only record of an outs
   raster thumbnails at canvas size. Add a gated 5000²×5-layer fixture for every budget consumer.
   Fill rework: ink wholly enclosed by the fill region is covered (no hairline), replacing the
   slow certificate for that case (fill branch `tmp/nov16-fill` still shows a hairline, 3.3 s/tap).
+  **Nov 17 status — all fixes integrated on `tmp/nov17-combined` (`bfd05c8d`), unmerged, gate running:**
+  render-server pinning + 0.25 s render pacing (surfaces), band-from-memo bake (orange bars),
+  Undo trim that never wipes history + notice, Fill window at scale 1 + recorder tool settings,
+  enclosed-ink Fill (owner's line: 0 bare pixels, 1.52→0.54 s simulator Release), and Move lift
+  repairing only the lifted footprint (91→31 ms simulator Release). Vector undo is already
+  diff-priced (0.11 MB a stroke); a whole-cel raster step at 5000² is 190.7 MB of the iPad 9's
+  192 MB budget, so raster layers keep only the protected minimum (audit item, open). Still owed:
+  Debug/Release fast tiers + full UI suite at the combined head, then the on-iPad stress run
+  (ask owner) before install.
 - [ ] **Fix severe Undo latency.** Owner reports drawing is responsive after the latest Release
   install (`d4d59f6bc261d23366c8e713ecab96353fe0183c`), but Undo still has “enormous latency” despite an
   earlier fix. Reproduce and compare that specific path first; correct the root cause efficiently.
