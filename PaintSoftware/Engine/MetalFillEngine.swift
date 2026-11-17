@@ -971,11 +971,15 @@ final class MetalFillSession {
                 cb3.commit()
                 cb3.waitUntilCompleted()
                 guard cb3.status == .completed else { return nil }
+                // With the vector certificate ready the mend kernel has already covered attached ink on proof, and the
+                // ink round it is protected; without it (the bucket's usual case) the run rule stands in for it.
+                var certifiedMend = false
+                if case .ready = vectorSupport { certifiedMend = true }
                 referenceRGBA.withUnsafeBytes { reference in
                     let wall = hasPathWall ? UnsafeRawPointer(pathWallBuf.contents()) : nil
                     FillEnclosedInk.absorb(region: regionTmpBuf.contents().bindMemory(to: UInt8.self, capacity: count),
-                                           reference: reference.baseAddress!, pathWall: wall, seed: primary,
-                                           width: width, height: height)
+                                           reference: reference.baseAddress!, pathWall: wall, seedPixel: seedY * width + seedX,
+                                           reach: certifiedMend ? 0 : mendReach, width: width, height: height)
                 }
                 guard let paintBuffer = engine.makeCommandBuffer(),
                       let paintEncoder = paintBuffer.makeComputeCommandEncoder() else { return nil }
@@ -1208,12 +1212,17 @@ final class MetalFillSession {
 /// the tapped colour at all, so a rough or antialiased fringe belongs to it — or is an unfilled pocket of at
 /// most `pinholeLimit` pixels not touching the window's edge (what a rough brush's speckle leaves between its
 /// dabs). A connected piece of solid (8-connected) is **enclosed** when every pixel around it is already in the
-/// region: it touches no unfilled open paper and not the window's edge. An enclosed piece is added. A piece that
-/// touches unfilled paper is left to Edge Overlap and the mend: the circle's own outline (paper outside it), and
-/// a ring around a hole (its inside is open paper the region did not reach, so the ring is a boundary, not an
-/// island).
+/// region: it touches no unfilled open paper and not the window's edge. An enclosed piece is added.
 ///
-/// One pass over the window plus a walk of each piece: O(window pixels), with no GPU round trip of its own.
+/// **A piece that touches unfilled paper is not an island, and is left alone except for what the region runs
+/// straight across**: the circle's own outline (paper outside it) and a ring around a hole (its inside is open
+/// paper the region did not reach) are boundaries and stay bare, while a stem drawn from the outline into the
+/// shape is covered because the region lies on both sides of it — a pixel of such a piece joins when, along
+/// some axis, region is within `reach` on both sides with only ink between. That is the internal-gap mend's
+/// run rule without its vector certificate, which cost the bucket most of its time at 5000².
+///
+/// The cost is bounded by the ink, not the window: a pass over the window classifies it, open paper is walked
+/// once each, and only ink the region does not hold is ever looked at again.
 enum FillEnclosedInk {
     /// The largest unfilled pocket, in pixels, that counts as part of the ink round it.
     static let pinholeLimit = 16
@@ -1227,6 +1236,7 @@ enum FillEnclosedInk {
         static let wide: UInt8 = 3       // unfilled paper in a pocket too big, or at the window's edge
         static let queued: UInt8 = 4     // in the pocket walk being made
         static let visited: UInt8 = 5    // a solid pixel already assigned to a piece
+        static let near: UInt8 = 6       // such a pixel within reach of the region, a candidate for the run rule
     }
 
     /// - Parameters:
@@ -1234,93 +1244,211 @@ enum FillEnclosedInk {
     ///   - reference: the working window's RGBA reference (premultiplied), `width * height * 4` bytes.
     ///   - pathWall: the vector layers' stroke centre lines, in the reference's layout, or nil — a pixel with
     ///     alpha there is ink whatever the reference shows, so a segmented brush's dots join up.
-    ///   - seed: the tapped colour, premultiplied 0...1.
+    ///   - seedPixel: the tapped pixel's index. Its reference colour is the paper colour — read from the reference
+    ///     and not from the fill's seed colour, which on a fill over a stream is the picture's and not a layer's.
+    ///   - reach: the widest ink, in working pixels, that the region is carried across when it lies on both sides;
+    ///     0 for none.
     /// - Returns: how many pixels were added.
     @discardableResult
     static func absorb(region: UnsafeMutablePointer<UInt8>, reference: UnsafeRawPointer,
-                       pathWall: UnsafeRawPointer?, seed: SIMD4<Float>, width: Int, height: Int) -> Int {
+                       pathWall: UnsafeRawPointer?, seedPixel: Int, reach: Float,
+                       width: Int, height: Int) -> Int {
         let count = width * height
         guard count > 0 else { return 0 }
-        let seedBytes = (0..<4).map { Int(max(0, min(255, (seed[$0] * 255).rounded()))) }
+        guard seedPixel >= 0, seedPixel < count else { return 0 }
+        let seedBytes = (0..<4).map { Int(reference.load(fromByteOffset: seedPixel * 4 + $0, as: UInt8.self)) }
         let seedWord = UInt32(seedBytes[0]) | UInt32(seedBytes[1]) << 8
             | UInt32(seedBytes[2]) << 16 | UInt32(seedBytes[3]) << 24
         let tolerance = inkTolerance
-        let around = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
-        var kind = [UInt8](repeating: Kind.open, count: count)
+        let (s0, s1, s2, s3) = (seedBytes[0], seedBytes[1], seedBytes[2], seedBytes[3])
+        // The eight neighbours as (dx, dy) in two flat tables, so the walks index rather than iterate tuples.
+        let dxs: [Int] = [-1, 0, 1, -1, 1, -1, 0, 1], dys: [Int] = [-1, -1, -1, 0, 0, 1, 1, 1]
+        let kind = UnsafeMutablePointer<UInt8>.allocate(capacity: count)
+        defer { kind.deallocate() }
         var members: [Int32] = []
         var added = 0
 
-        kind.withUnsafeMutableBufferPointer { kind in
-            // 1. Classify: the region, ink, and the rest.
-            for i in 0..<count {
-                if region[i] != 0 { kind[i] = Kind.filled; continue }
+        do {
+            let dx = UnsafeMutablePointer<Int>.allocate(capacity: 8), dy = UnsafeMutablePointer<Int>.allocate(capacity: 8)
+            defer { dx.deallocate(); dy.deallocate() }
+            for k in 0..<8 { dx[k] = dxs[k]; dy[k] = dys[k] }
+            // 1. Classify: the region, ink, and the rest. Eight pixels at a time where the region holds all of them.
+            let regionRaw = UnsafeRawPointer(region), kindRaw = UnsafeMutableRawPointer(kind)
+            var i = 0
+            while i < count {
+                if i + 8 <= count, !hasZeroByte(regionRaw.loadUnaligned(fromByteOffset: i, as: UInt64.self)) {
+                    kindRaw.storeBytes(of: 0x0202_0202_0202_0202, toByteOffset: i, as: UInt64.self)
+                    i += 8; continue
+                }
+                if region[i] != 0 { kind[i] = Kind.filled; i += 1; continue }
+                kind[i] = Kind.open
                 if let pathWall, pathWall.load(fromByteOffset: i * 4 + 3, as: UInt8.self) != 0 {
-                    kind[i] = Kind.solid; continue
+                    kind[i] = Kind.solid; i += 1; continue
                 }
-                if reference.loadUnaligned(fromByteOffset: i * 4, as: UInt32.self) == seedWord { continue }
-                for c in 0..<4 where abs(Int(reference.load(fromByteOffset: i * 4 + c, as: UInt8.self)) - seedBytes[c]) > tolerance {
-                    kind[i] = Kind.solid; break
+                if reference.loadUnaligned(fromByteOffset: i * 4, as: UInt32.self) != seedWord {
+                    let o = i * 4
+                    if abs(Int(reference.load(fromByteOffset: o, as: UInt8.self)) - s0) > tolerance
+                        || abs(Int(reference.load(fromByteOffset: o + 1, as: UInt8.self)) - s1) > tolerance
+                        || abs(Int(reference.load(fromByteOffset: o + 2, as: UInt8.self)) - s2) > tolerance
+                        || abs(Int(reference.load(fromByteOffset: o + 3, as: UInt8.self)) - s3) > tolerance {
+                        kind[i] = Kind.solid
+                    }
                 }
+                i += 1
             }
 
-            // 2. Unfilled pockets small enough to be ink's own speckle. A pocket is only ever beside something that
-            //    is not open paper, so the walk starts there; a pocket past the limit — or at the window's edge —
-            //    is marked wide as far as it was walked, which keeps every pixel to one walk.
-            for beside in 0..<count where kind[beside] == Kind.solid || kind[beside] == Kind.filled {
-              let bx = beside % width, by = beside / width
-              for (sdx, sdy) in around {
-                let sx = bx + sdx, sy = by + sdy
-                guard sx >= 0, sy >= 0, sx < width, sy < height, kind[sy * width + sx] == Kind.open else { continue }
-                let start = sy * width + sx
+            // 2. Unfilled pockets small enough to be ink's own speckle. Every open pixel is walked at most once:
+            //    a walk past the limit — or to the window's edge — marks all it reached wide, and a pixel that
+            //    already has a wide neighbour is wide without a walk (in raster order, nearly all of a big expanse).
+            var start = -1
+            while true {
+                start = next(Kind.open, after: start, kind: kind, count: count)
+                if start < 0 { break }
+                let sx = start % width, sy = start / width
+                if sx == 0 || sy == 0 || sx == width - 1 || sy == height - 1
+                    || kind[start - 1] == Kind.wide || kind[start - width] == Kind.wide
+                    || kind[start - width - 1] == Kind.wide || kind[start - width + 1] == Kind.wide {
+                    kind[start] = Kind.wide; continue
+                }
                 members.removeAll(keepingCapacity: true)
                 members.append(Int32(start)); kind[start] = Kind.queued
                 var wide = false, head = 0
                 walk: while head < members.count {
                     let p = Int(members[head]); head += 1
                     let x = p % width, y = p / width
-                    for (dx, dy) in around {
-                        let nx = x + dx, ny = y + dy
+                    for k in 0..<8 {
+                        let nx = x + dx[k], ny = y + dy[k]
                         guard nx >= 0, ny >= 0, nx < width, ny < height else { wide = true; break walk }
                         let q = ny * width + nx
-                        switch kind[q] {
-                        case Kind.wide: wide = true; break walk
-                        case Kind.open:
+                        let state = kind[q]
+                        if state == Kind.wide { wide = true; break walk }
+                        if state == Kind.open {
                             kind[q] = Kind.queued; members.append(Int32(q))
                             if members.count > pinholeLimit { wide = true; break walk }
-                        default: break
                         }
                     }
                 }
                 let result = wide ? Kind.wide : Kind.solid
                 for m in members { kind[Int(m)] = result }
-              }
             }
 
-            // 3. Each connected piece of solid, added when everything round it is in the region.
-            for start in 0..<count where kind[start] == Kind.solid {
-                members.removeAll(keepingCapacity: true)
+            // 3. Each connected piece of solid, added when everything round it is in the region. A piece that is
+            //    not added leaves the pixels that touch the region in `frontier`, for the run rule below.
+            var frontier: [Int32] = [], pieceFrontier: [Int32] = []
+            start = -1
+            while true {
+                start = next(Kind.solid, after: start, kind: kind, count: count)
+                if start < 0 { break }
+                members.removeAll(keepingCapacity: true); pieceFrontier.removeAll(keepingCapacity: true)
                 members.append(Int32(start)); kind[start] = Kind.visited
                 var enclosed = true, head = 0
                 while head < members.count {
                     let p = Int(members[head]); head += 1
                     let x = p % width, y = p / width
-                    for (dx, dy) in around {
-                        let nx = x + dx, ny = y + dy
+                    var touchesRegion = false
+                    for k in 0..<8 {
+                        let nx = x + dx[k], ny = y + dy[k]
                         guard nx >= 0, ny >= 0, nx < width, ny < height else { enclosed = false; continue }
                         let q = ny * width + nx
-                        switch kind[q] {
-                        case Kind.solid: kind[q] = Kind.visited; members.append(Int32(q))
-                        case Kind.open, Kind.wide: enclosed = false
-                        default: break
-                        }
+                        let state = kind[q]
+                        if state == Kind.solid { kind[q] = Kind.visited; members.append(Int32(q)) }
+                        else if state == Kind.open || state == Kind.wide { enclosed = false }
+                        else if state == Kind.filled { touchesRegion = true }
                     }
+                    if touchesRegion { pieceFrontier.append(Int32(p)) }
                 }
                 if enclosed {
                     for m in members { region[Int(m)] = 1 }
                     added += members.count
+                } else {
+                    frontier.append(contentsOf: pieceFrontier)
                 }
             }
+
+            // 4. Ink the region runs straight across: through the pixel's thinnest crossing — the shortest run of ink
+            //    along one of four axes, no longer than `reach` — region at both ends. The thinnest one, so a curved
+            //    outline's convex crest (region either side along the tangent, a hollow or paper across it) is not
+            //    mistaken for a stem. Judged against the region as step 3 left it, and added together so one
+            //    joined pixel never lends reach to the next.
+            guard reach >= 1, !frontier.isEmpty else { return added }
+            // Only ink within `reach` of the region can lie on a run that ends in it, so the pixels judged are
+            // the frontier and what lies within `reach` steps of it — the ink's rim, however big the ink is.
+            var candidates = frontier
+            for pixel in frontier { kind[Int(pixel)] = Kind.near }
+            var layerStart = 0
+            for _ in 1..<max(2, Int(reach)) {
+                let layerEnd = candidates.count
+                if layerStart == layerEnd { break }
+                for index in layerStart..<layerEnd {
+                    let p = Int(candidates[index])
+                    let x = p % width, y = p / width
+                    for k in 0..<8 {
+                        let nx = x + dx[k], ny = y + dy[k]
+                        guard nx >= 0, ny >= 0, nx < width, ny < height else { continue }
+                        let q = ny * width + nx
+                        if kind[q] == Kind.visited { kind[q] = Kind.near; candidates.append(Int32(q)) }
+                    }
+                }
+                layerStart = layerEnd
+            }
+            let axes: [(Int, Int)] = [(1, 0), (0, 1), (1, 1), (1, -1)]
+            var joined: [Int32] = []
+            /// Steps to the first pixel that is not ink, doubled and plus one when that pixel is the region's; 0
+            /// when the ink runs on past `limit`. The window's edge ends a run as something that is not the region.
+            func run(_ x0: Int, _ y0: Int, _ sx: Int, _ sy: Int, _ limit: Int) -> Int {
+                var x = x0, y = y0
+                for step in 1...limit {
+                    x += sx; y += sy
+                    guard x >= 0, y >= 0, x < width, y < height else { return step * 2 }
+                    let q = y * width + x
+                    if region[q] != 0 { return step * 2 + 1 }
+                    if kind[q] != Kind.visited && kind[q] != Kind.near { return step * 2 }
+                }
+                return 0
+            }
+            for pixel in candidates {
+                let x = Int(pixel) % width, y = Int(pixel) / width
+                var thinnest = Float.infinity, bothRegion = false
+                for (ax, ay) in axes {
+                    let stride: Float = ax != 0 && ay != 0 ? 1.41421356 : 1
+                    let limit = Int(reach / stride)
+                    guard limit >= 1 else { continue }
+                    let ahead = run(x, y, ax, ay, limit)
+                    guard ahead > 0 else { continue }
+                    let behind = run(x, y, -ax, -ay, limit)
+                    guard behind > 0 else { continue }
+                    let chord = Float(ahead / 2 + behind / 2 - 1) * stride
+                    guard chord <= reach else { continue }
+                    let regionBothEnds = ahead & 1 == 1 && behind & 1 == 1
+                    if chord < thinnest { thinnest = chord; bothRegion = regionBothEnds }
+                    else if chord == thinnest, !regionBothEnds { bothRegion = false }
+                }
+                if bothRegion { joined.append(pixel) }
+            }
+            for pixel in joined { region[Int(pixel)] = 1 }
+            added += joined.count
         }
         return added
+    }
+
+    /// Whether any of a word's eight bytes is zero.
+    @inline(__always)
+    private static func hasZeroByte(_ w: UInt64) -> Bool {
+        (w &- 0x0101_0101_0101_0101) & ~w & 0x8080_8080_8080_8080 != 0
+    }
+
+    /// The first index after `index` whose byte is `value`, or -1; eight bytes at a time where none is.
+    private static func next(_ value: UInt8, after index: Int, kind: UnsafeMutablePointer<UInt8>, count: Int) -> Int {
+        let raw = UnsafeRawPointer(kind)
+        let pattern = UInt64(value) &* 0x0101_0101_0101_0101
+        var i = index + 1
+        while i < count {
+            if i + 8 <= count, !hasZeroByte(raw.loadUnaligned(fromByteOffset: i, as: UInt64.self) ^ pattern) {
+                i += 8; continue
+            }
+            if kind[i] == value { return i }
+            i += 1
+        }
+        return -1
     }
 }

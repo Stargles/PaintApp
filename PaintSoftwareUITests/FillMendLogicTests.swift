@@ -1637,7 +1637,7 @@ final class FillMendLogicTests: XCTestCase {
 
     /// `FillEnclosedInk` on hand-made masks, one picture a rule. `#` is ink, `.` paper the flood reached and `o`
     /// paper it did not; the answer uses `F` for the region afterwards and keeps `#` and `o` where nothing was added.
-    private func absorbed(_ rows: [String]) -> [String] {
+    private func absorbed(_ rows: [String], reach: Float = 0) -> [String] {
         let height = rows.count, width = rows[0].count
         var reference = [UInt8](repeating: 0, count: width * height * 4)
         var region = [UInt8](repeating: 0, count: width * height)
@@ -1647,10 +1647,11 @@ final class FillMendLogicTests: XCTestCase {
                 if c == "." { region[y * width + x] = 1 }
             }
         }
+        let seedPixel = region.firstIndex { $0 != 0 } ?? 0
         reference.withUnsafeBytes { ref in
             region.withUnsafeMutableBufferPointer {
                 FillEnclosedInk.absorb(region: $0.baseAddress!, reference: ref.baseAddress!, pathWall: nil,
-                                       seed: .zero, width: width, height: height)
+                                       seedPixel: seedPixel, reach: reach, width: width, height: height)
             }
         }
         return (0..<height).map { y in
@@ -1674,6 +1675,24 @@ final class FillMendLogicTests: XCTestCase {
         XCTAssertEqual(out[3], "o#FFFFFF#o", "the bar is filled under")
         XCTAssertEqual(out[1], "o########o", "the outline has unreached paper outside it, so it is not an island")
         XCTAssertEqual(out[0], "oooooooooo")
+    }
+
+    func testAStemFromTheOutlineIsCoveredWhenTheRegionLiesOnBothSidesOfIt() {
+        let rows = [
+            "oooooooooooo",
+            "o##########o",
+            "o#........#o",
+            "o#####....#o",
+            "o#####....#o",
+            "o#........#o",
+            "o##########o",
+            "oooooooooooo"]
+        let wide = absorbed(rows, reach: 4)
+        XCTAssertEqual(wide[3], "o#FFFFFFFF#o", "a stem within the reach is covered whole, though it is joined to the outline")
+        XCTAssertEqual(wide[4], "o#FFFFFFFF#o")
+        XCTAssertEqual(wide[1], "o##########o", "the outline itself has paper outside it and is not covered")
+        XCTAssertEqual(absorbed(rows, reach: 1)[3], "o#####FFFF#o", "a stem thicker than the reach is left to the mend")
+        XCTAssertEqual(absorbed(rows)[3], "o#####FFFF#o", "with no reach the stem is left alone")
     }
 
     func testARingWhoseHollowWasNotReachedIsNotFilledOver() {
