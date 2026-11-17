@@ -520,7 +520,9 @@ final class IncrementalAppendLogicTests: XCTestCase {
 
         canvas.suppressedElementIDs = [canvas.elements[2].id]
         _ = canvas.render()
-        XCTAssertEqual(canvas.lastDamage, .everything)
+        // Hiding a measured element declares its footprint (`VectorLiftRepairLogicTests` pins the
+        // pixels); it is still not an append.
+        guard case .region = canvas.lastDamage else { return XCTFail("\(canvas.lastDamage)") }
 
         canvas.addStroke(Self.stroke(60))
         let duringEdit = (try XCTUnwrap(canvas.render()))

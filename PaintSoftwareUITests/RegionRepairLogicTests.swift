@@ -643,10 +643,13 @@ final class RegionRepairLogicTests: XCTestCase {
         let hidden = Self.drawnCanvas(24)
         hidden.suppressedElementIDs = [hidden.elements[0].id]
         _ = hidden.render()
+        // The lift itself may repair (`VectorLiftRepairLogicTests`); the edit made *under* the
+        // suppression must not.
+        let repairsAfterLift = hidden.regionRepairs
         XCTAssertTrue(hidden.erase(alongPath: Self.flick(over: 9), brush: Self.brush(),
                                    size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         _ = hidden.render()
-        XCTAssertEqual(hidden.regionRepairs, 0, "a cel with something suppressed cannot repair in place")
+        XCTAssertEqual(hidden.regionRepairs, repairsAfterLift, "a cel with something suppressed cannot repair in place")
     }
 
     /// **A repaired cel still appends incrementally**, which is the check that the two bases have
