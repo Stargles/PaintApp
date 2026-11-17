@@ -16,6 +16,13 @@ HANDOFF.md is a navigation/checkpoint document, never the only record of an outs
   server is drowning in surfaces the app hands it. Recordings: Undo press→base assigned 0.71 s;
   every edit re-rasterizes a whole 5000² vector cel off-main (350–640 ms each, 19 in 2 s during
   rapid strokes); bakeComposite 2.2–7.4 s per frame.
+  Owner details: the Fill test line was **Rough Ink at 0.1%**, pressure-varying (thicker near the
+  end); the recorder captured no brush or Fill settings — **the recorder must log active tool
+  settings** (preset, size, pressure, Fill/Mend/Reach) — owner calls that gap a failure itself.
+  Owner also recalls **Fill latency and a crash when rapidly filling several regions** (no
+  recording); treat as the same full-size-surface family until measured otherwise.
+  Owner has retired Codex for now; the owner's concern is less-visible defects of the same kind —
+  the repo audit must look for them, not only for structure.
 - [ ] **Fix severe Undo latency.** Owner reports drawing is responsive after the latest Release
   install (`d4d59f6bc261d23366c8e713ecab96353fe0183c`), but Undo still has “enormous latency” despite an
   earlier fix. Reproduce and compare that specific path first; correct the root cause efficiently.
