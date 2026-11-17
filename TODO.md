@@ -23,6 +23,15 @@ HANDOFF.md is a navigation/checkpoint document, never the only record of an outs
   recording); treat as the same full-size-surface family until measured otherwise.
   Owner has retired Codex for now; the owner's concern is less-visible defects of the same kind —
   the repo audit must look for them, not only for structure.
+- [ ] **Fix the November 16 audit findings** ([docs/AUDIT-2026-11-16.md](docs/AUDIT-2026-11-16.md), 18
+  ranked). The repeating defect: RAM-derived budgets (192 MiB on iPad 9) tested at 2048² that
+  silently decline, scale down or drop history at the owner's 5000² scene. First: Undo trim can
+  empty the whole stack after one big step (UndoHistory.trim); ~20 `hasHeadroom … return nil`
+  refusals need a notice; canvas-size ceiling measures the app, not backboardd; canvas-sized
+  `CALayer.contents` installs outside the paced path; synchronous full-cel render on Move start;
+  raster thumbnails at canvas size. Add a gated 5000²×5-layer fixture for every budget consumer.
+  Fill rework: ink wholly enclosed by the fill region is covered (no hairline), replacing the
+  slow certificate for that case (fill branch `tmp/nov16-fill` still shows a hairline, 3.3 s/tap).
 - [ ] **Fix severe Undo latency.** Owner reports drawing is responsive after the latest Release
   install (`d4d59f6bc261d23366c8e713ecab96353fe0183c`), but Undo still has “enormous latency” despite an
   earlier fix. Reproduce and compare that specific path first; correct the root cause efficiently.
