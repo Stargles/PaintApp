@@ -559,7 +559,12 @@ enum PixelOps {
         if tier != .backing, cel.display?.replacingBase == nil, let derived = cel.derived {
             guard let rendered = derived.render(quality, resolution: derivedResolution) else { return nil }
             vectorImage = rendered
-        } else if tier != .backing, window == nil, cel.display == nil, let vector = cel.vector {
+        } else if tier != .backing, cel.display == nil, let vector = cel.vector {
+            // A strip (`window` set) draws its band of the cel's one full-frame picture, exactly as an
+            // unwindowed flatten does: that picture is the canvas's own memo, so a bake of what is on
+            // screen re-walks nothing, and a bake of anything else walks each cel once rather than once
+            // per strip. Re-walking the display list into every strip (7ce30627, 2026-10-14) cost
+            // layers x strips full walks - 5.9 s a frame at 5000^2 x 5 on an iPad 9's budget.
             guard let rendered = vector.render(quality: quality, fittingInto: content.size) else { return nil }
             vectorImage = rendered
         }

@@ -41,12 +41,14 @@ final class LiveHalvesStripLogicTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
+        StripedCompositor.streamsFlatStacks = false
         Compositor.backend = .coreGraphics
         MaskResolver.clearCache()
         PixelOps.clearRasterizeCache()
     }
 
     override func tearDown() {
+        StripedCompositor.streamsFlatStacks = true
         // The default rather than the literal, for `Compositor.defaultBackend`'s reason.
         Compositor.backend = Compositor.defaultBackend
         CompositorBudget.budgetOverrideBytes = nil

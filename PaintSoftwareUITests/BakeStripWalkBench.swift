@@ -65,6 +65,24 @@ final class BakeStripWalkBench: XCTestCase {
         }
         manager.currentLayerIndex = 0
         manager.currentFrame = 0
+        Compositor.backend = .coreGraphics
+        do {
+            PixelOps.clearRasterizeCache(); VectorRenderCache.removeAll()
+            let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: true))
+            let plan = StripedCompositor.plan(for: recipe)
+            func ms(_ label: String, _ body: () -> Void) {
+                let t = CFAbsoluteTimeGetCurrent(); autoreleasepool { body() }
+                print("BAKESTRIP | stage \(label) \(Int((CFAbsoluteTimeGetCurrent() - t) * 1000)) ms")
+            }
+            print("BAKESTRIP | plan \(plan.map { $0.buffer }) chunks=\(ChunkedCompositor.chunkSources(for: recipe.tree, canvasSize: plan[0].buffer.size, budgetBytes: CompositorBudget.textureBudgetBytes))")
+            let w = recipe.windowed(to: plan[0].buffer)
+            ms("resolve strip0 cold") { _ = FrameRecipe.resolveSources(w.leaves, canvasSize: w.canvasSize, quality: w.quality, window: w.window) }
+            ms("resolve strip0 warm") { _ = FrameRecipe.resolveSources(w.leaves, canvasSize: w.canvasSize, quality: w.quality, window: w.window) }
+            let w1 = recipe.windowed(to: plan[1].buffer)
+            ms("resolve strip1 (memo warm)") { _ = FrameRecipe.resolveSources(w1.leaves, canvasSize: w1.canvasSize, quality: w1.quality, window: w1.window) }
+            ms("chunked composite strip0 (sources warm)") { _ = ChunkedCompositor.composite(w) }
+            ms("assemble-ish: composite strip1") { _ = ChunkedCompositor.composite(w1) }
+        }
         for backend in [CompositorBackend.coreGraphics, .automatic] {
             Compositor.backend = backend
             for pass in 0..<2 {

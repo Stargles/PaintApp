@@ -113,7 +113,65 @@ enum StripedCompositor {
         guard strips.count > 1 else {
             return ChunkedCompositor.composite(recipe, budgetBytes: budgetBytes)
         }
+        if let streamed = streamFlatStack(recipe) { return streamed }
         return assemble(strips, of: recipe, budgetBytes: budgetBytes)
+    }
+
+    // MARK: - The flat stack, streamed
+
+    /// **A stack of plain source-over leaves needs neither strips nor chunks** — it needs the frame's
+    /// own accumulator and one leaf at a time, which is exactly what a strip-and-chunk walk emulates
+    /// at the price of a readback and a re-draw of the carried accumulator per chunk.
+    ///
+    /// MEASURED 2026-11-16, 5000² x 5 vector layers at an iPad 9's 183.7 MB: the budget plans 3 strips
+    /// of 2013 rows and one source per chunk, so a frame was 15 chunk composites plus 15 band
+    /// rasterizes, 5.9 s (CoreGraphics) to 7.3 s (automatic). Here each leaf's one full-frame picture
+    /// (the memo the canvas already holds) is drawn into the single frame renderer and let go.
+    ///
+    /// **Same bytes**, because it is the same arithmetic as the chunked carry: both are source-over
+    /// into one 8-bit premultiplied buffer in leaf order (`CoreGraphicsCompositor.draw`, the one
+    /// primitive), and the chunk driver's accumulator readback is exact. The strip pins hold it to
+    /// that. Applies only to what that holds for: unwindowed, every root node a leaf that blends
+    /// `.normal` with no mask and no grade. Anything else — and any frame the process cannot hold two
+    /// of (`hasHeadroom`) — takes the strips. Not taken when a test forced `.metal`.
+    ///
+    /// Peak is the destination plus one leaf picture: ~2 frames, against the strip walk's frame plus
+    /// a strip and its accumulators.
+    /// A development seam: the strip suites turn this off so a flat fixture still exercises the strip
+    /// machinery (the memo windows, the seams) that the stream deliberately never reaches. Main-thread
+    /// test state, restored in `tearDown`.
+    nonisolated(unsafe) static var streamsFlatStacks = true
+
+    static func streamFlatStack(_ recipe: FrameRecipe) -> CGImage? {
+        guard streamsFlatStacks, recipe.window == nil, Compositor.backend != .metal else { return nil }
+        for node in recipe.tree {
+            guard case .leaf = node.content, node.effect == nil, node.masks.isEmpty,
+                  node.blendMode == .normal else { return nil }
+        }
+        let frame = CGRect(origin: .zero, size: recipe.canvasSize)
+        guard CompositorBudget.hasHeadroom(for: CompositorBudget.textureBytes(for: recipe.canvasSize) * 2)
+        else { return nil }
+        var declined = false
+        let image = UIGraphicsImageRenderer(bounds: frame, format: PixelOps.transparentFormat())
+            .image { context in
+                if let paper = recipe.background {
+                    paper.color.setFill()
+                    UIRectFill(paper.rect)
+                }
+                for node in recipe.tree where !declined {
+                    guard node.isVisible, case .leaf(let index) = node.content else { continue }
+                    autoreleasepool {
+                        let resolved = FrameRecipe.resolveSources(recipe.leaves, canvasSize: recipe.canvasSize,
+                                                                  quality: recipe.quality, subset: [index])
+                        if resolved.failed { declined = true; return }
+                        guard recipe.leaves.indices.contains(index), let source = resolved.sources[index] else { return }
+                        CoreGraphicsCompositor.draw(UIImage(cgImage: source.image, scale: 1, orientation: .up),
+                                                    mode: .normal, opacity: node.opacity,
+                                                    in: frame, context: context)
+                    }
+                }
+            }
+        return declined ? nil : image.cgImage
     }
 
     // MARK: - The apron

@@ -45,12 +45,14 @@ final class StripedCompositeLogicTests: XCTestCase {
     override func setUp() {
         super.setUp()
         Compositor.backend = .coreGraphics
+        StripedCompositor.streamsFlatStacks = false
         MaskResolver.clearCache()
         PixelOps.clearRasterizeCache()
     }
 
     override func tearDown() {
         Compositor.backend = Compositor.defaultBackend
+        StripedCompositor.streamsFlatStacks = true
         MaskResolver.clearCache()
         PixelOps.clearRasterizeCache()
         super.tearDown()

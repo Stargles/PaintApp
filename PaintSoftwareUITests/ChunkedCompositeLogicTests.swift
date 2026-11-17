@@ -30,11 +30,13 @@ final class ChunkedCompositeLogicTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
+        StripedCompositor.streamsFlatStacks = false
         Compositor.backend = .coreGraphics
         MaskResolver.clearCache()
     }
 
     override func tearDown() {
+        StripedCompositor.streamsFlatStacks = true
         // The default rather than `.coreGraphics` — see `Compositor.defaultBackend` for what
         // restoring the literal cost once the default stopped being it.
         Compositor.backend = Compositor.defaultBackend

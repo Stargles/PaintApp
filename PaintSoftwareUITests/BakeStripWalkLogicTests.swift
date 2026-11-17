@@ -63,26 +63,38 @@ final class BakeStripWalkLogicTests: XCTestCase {
         return rows * rowBytes * (sources + ChunkedCompositor.carriedTextures + recipe.tree.peakCompositeTextures)
     }
 
-    func testAStripedBakeWalksEachVectorCelOnce() throws {
+    private func bakeAndCompare(streaming: Bool) throws {
+        StripedCompositor.streamsFlatStacks = streaming
+        defer { StripedCompositor.streamsFlatStacks = true }
         let manager = makeDocument()
         let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: true))
         let budget = stripBudget(rows: 100, recipe: recipe)
         let strips = StripedCompositor.plan(for: recipe, budgetBytes: budget).count
         XCTAssertGreaterThan(strips, 2, "Fixture: the budget must cut the frame into several strips")
 
-        // Reference: the unstripped whole-frame walk.
-        let whole = Compositor.composite(recipe.resolve())
+        // The bake first, on cold memos, so the walks it makes are the ones counted.
         MaskResolver.clearCache(); PixelOps.clearRasterizeCache()
-
         WalkProbe.reset()
-        let striped = recipe.composite(budgetBytes: budget)
+        let baked = recipe.composite(budgetBytes: budget)
         let walks = WalkProbe.walks
-        print("BAKESTRIPWALK | strips=\(strips) layers=\(layerCount) walks=\(walks)")
-
+        print("BAKESTRIPWALK | streaming=\(streaming) strips=\(strips) layers=\(layerCount) walks=\(walks)")
         XCTAssertLessThanOrEqual(walks, layerCount,
                                  "\(strips) strips re-walked \(layerCount) vector cels \(walks) times; "
-                                 + "a bake draws each cel's one full-frame picture, strip by strip")
-        assertPixelsIdentical(striped, whole,
-                              "A strip of the memoized picture must be the band of the whole frame")
+                                 + "a bake draws each cel's one full-frame picture")
+
+        MaskResolver.clearCache(); PixelOps.clearRasterizeCache()
+        let whole = Compositor.composite(recipe.resolve())
+        assertPixelsIdentical(baked, whole, "The bake must be the whole-frame walk, byte for byte")
+    }
+
+    /// The streamed flat stack — what a plain document of normal layers takes.
+    func testAFlatStackBakeWalksEachVectorCelOnceAndMatchesTheWholeFrame() throws {
+        try bakeAndCompare(streaming: true)
+    }
+
+    /// The strips, for a stack the stream does not take: each strip draws its band of the cel's one
+    /// picture instead of re-walking its display list.
+    func testAStripedBakeWalksEachVectorCelOnceAndMatchesTheWholeFrame() throws {
+        try bakeAndCompare(streaming: false)
     }
 }
