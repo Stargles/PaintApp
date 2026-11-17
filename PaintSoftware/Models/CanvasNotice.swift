@@ -222,6 +222,11 @@ struct CanvasNotice: Identifiable, Equatable {
         /// smaller or close something else, which the message names.
         case outOfMemoryToDraw
 
+        /// **The undo history dropped its oldest steps to stay inside the memory budget.** Said once
+        /// per document (`UndoHistory.onStepsDropped`); at a very large canvas a single step is most of
+        /// the budget, so only the latest few can be kept and the artist should know why Undo is shallow.
+        case undoHistoryTrimmed
+
         /// A required raster source or edit allocation is temporarily unavailable. The complete
         /// previous picture/edit is retained; absence and a refused read never share a blank value.
         case drawingSourceUnavailable
@@ -425,6 +430,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .fillsMended(let count): return "Mended \(count) \(count == 1 ? "fill" : "fills")."
         case .noFillGapsToMend: return "No fill gaps could be mended with the current settings and reference layers."
         case .fillMendingExceedsBudget: return "Couldn't mend all fills — this layer is too large for one edit. Nothing was changed."
+        case .undoHistoryTrimmed:  return "Undo history is short on a canvas this large — the oldest steps were dropped to save memory."
         case .outOfMemoryToDraw:   return "This iPad ran out of memory drawing a canvas this large — some of the picture was skipped. Work at a smaller size, or close other apps."
         case .drawingSourceUnavailable: return "This picture couldn't be prepared right now. Your drawing was kept — try again."
         case .videoBakeRefused(let refusal): return "Couldn't bake — \(refusal.phrase)."
@@ -554,7 +560,7 @@ struct CanvasNotice: Identifiable, Equatable {
         // other apps" is not this app's to do.
         case .fillNeedsMoreMemory: return nil
         case .fillsMended, .noFillGapsToMend, .fillMendingExceedsBudget: return nil
-        case .outOfMemoryToDraw: return nil
+        case .outOfMemoryToDraw, .undoHistoryTrimmed: return nil
         case .drawingSourceUnavailable, .nodeInputLimit: return nil
         // Nor this one. An unreadable file has no fix this app can offer, and a crop with nothing
         // decodable in it is undone from the block's own edge handles or Adjust Speed row, neither
@@ -628,6 +634,7 @@ struct CanvasNotice: Identifiable, Equatable {
         case .noFillGapsToMend: return "noFillGapsToMend"
         case .fillMendingExceedsBudget: return "fillMendingExceedsBudget"
         case .outOfMemoryToDraw: return "outOfMemoryToDraw"
+        case .undoHistoryTrimmed: return "undoHistoryTrimmed"
         case .drawingSourceUnavailable: return "drawingSourceUnavailable"
         case .nodeInputLimit: return "nodeInputLimit"
         case .videoBakeRefused: return "videoBakeRefused"

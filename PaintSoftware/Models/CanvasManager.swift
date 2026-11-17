@@ -2384,6 +2384,9 @@ final class CanvasManager: ObservableObject {
         // **A refused allocation trims like a warning and, unlike one, is told to the artist**: it
         // means a canvas-sized picture was not drawn (`VectorCanvas.renderLocalContent`), and a
         // frame silently skipped is CLAUDE.md's refusal with no notice.
+        history.onStepsDropped = { [weak self] _ in
+            DispatchQueue.main.async { self?.raise(.undoHistoryTrimmed) }
+        }
         MemoryPressure.startObservingSystemEvents()
         memoryPressureToken = MemoryPressure.register("UndoHistory") { [weak self] level in
             guard level.trims == .warning else { return }

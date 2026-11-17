@@ -231,6 +231,7 @@ final class UndoHistory {
     func removeAll() {
         undoStack.removeAll()
         redoStack.removeAll()
+        dropNoticeArmed = true
     }
 
     /// Gives bytes back on a memory warning **by trimming, never by clearing** — the distinction
@@ -247,25 +248,56 @@ final class UndoHistory {
     /// so a test can assert on the effect rather than on the mechanism.
     @discardableResult
     func trimUnderMemoryPressure() -> Int {
-        let before = undoStack.count
         let budget = maxCost
         maxCost = UndoBudget.pressuredMaxCostBytes(budget)
-        trim()
+        let dropped = trim()
         maxCost = budget
-        return before - undoStack.count
+        return dropped
     }
+
+    /// **The newest undo steps that no budget may evict.** One: the step the artist just made.
+    ///
+    /// At the owner's 5000² canvas a single whole-cel step (before and after buffers) is 200 MB and
+    /// the iPad 9 budget is 192 MiB, so a step that is merely *large* used to be evicted by its own
+    /// `record` — and the memory-pressure trim (half the budget) did the same to the whole history —
+    /// leaving Undo lit-then-dead with nothing said (docs/AUDIT-2026-11-16.md finding 3). One is the
+    /// most that is safe to promise: each further kept step is another 200 MB resident on a 3 GB
+    /// device, which is the thing the budget exists to prevent. The budget is therefore exceeded by at
+    /// most the one oversized step, never by a history of them.
+    static let minimumKeptUndoSteps = 1
+
+    /// Called (once per history, until `removeAll`) the first time a budget drops steps, with how many
+    /// went. Dropping on every later record would raise a notice on every stroke at a canvas where
+    /// each step is the whole budget, so the history says it once and stays quiet.
+    var onStepsDropped: ((Int) -> Void)?
+    private var dropNoticeArmed = true
 
     /// Evicts the oldest undoable actions once retained cost (across both stacks — a redo
     /// entry still holds the same captured state as its undo counterpart) exceeds the budget.
-    /// Only trims `undoStack`: a redo-able action is the most recent thing the user did, so
-    /// it's kept even if that means momentarily exceeding budget until the next `record(_:)`.
-    private func trim() {
+    /// **Never evicts the newest `minimumKeptUndoSteps` undo steps.** If undo is already at that
+    /// floor and the total is still over, the *far end* of the redo stack goes next (the step the
+    /// artist undid longest ago, the least likely to be redone), keeping the one next to redo.
+    /// Returns how many steps were dropped from both stacks.
+    @discardableResult
+    private func trim() -> Int {
         var total = currentCost
-        while total > maxCost, !undoStack.isEmpty {
+        var dropped = 0
+        while total > maxCost, undoStack.count > Self.minimumKeptUndoSteps {
             let removed = undoStack.removeFirst().cost
+            dropped += 1
             // A saturated sum is a lower bound, so subtracting from it could admit another
             // oversized action. Only this exceptional case needs a fresh total after removal.
             total = total == Int.max ? currentCost : total - removed
         }
+        while total > maxCost, redoStack.count > 1 {
+            let removed = redoStack.removeFirst().cost
+            dropped += 1
+            total = total == Int.max ? currentCost : total - removed
+        }
+        if dropped > 0, dropNoticeArmed {
+            dropNoticeArmed = false
+            onStepsDropped?(dropped)
+        }
+        return dropped
     }
 }

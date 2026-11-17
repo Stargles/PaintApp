@@ -216,6 +216,73 @@ final class MemoryBudgetLogicTests: XCTestCase {
                        "after the warning the history must grow back to the full budget as the artist works")
     }
 
+    /// **Audit 2026-11-16 finding 3, at the owner's canvas and the iPad 9 budget, through real
+    /// whole-cel commits.** At 5000² one commit retains 200,000,000 bytes against a 192 MiB
+    /// (201,326,592) budget: it fits once, so the history is exactly one step deep — and the
+    /// memory-pressure budget (96 MiB) is smaller than that one step, so the old `trim()` evicted the
+    /// artist's newest step too and Undo went dead with no word said.
+    @MainActor
+    func testAnOversizedStepAtTheOwnersCanvasIsNeverEvictedByItsOwnTrimOrByPressure() throws {
+        let owners = CGSize(width: 5000, height: 5000)
+        let whole = CGRect(origin: .zero, size: owners)
+        let manager = CanvasManager()
+        manager.canvasSize = owners
+        manager.addLayer()
+        let layerID = manager.layers[0].id
+        let celID = manager.layers[0].cels[0].id
+        manager.history.maxCost = UndoBudget.maxCostBytes(physicalMemory: 3 << 30)
+        manager.notice = nil
+        let a = try CanvasFixture.rasterTexture(CanvasFixture.solidImage(.red, rect: whole, size: owners), size: owners)
+        let b = try CanvasFixture.rasterTexture(CanvasFixture.solidImage(.blue, rect: whole, size: owners), size: owners)
+        let c = try CanvasFixture.rasterTexture(CanvasFixture.solidImage(.green, rect: whole, size: owners), size: owners)
+        manager.layers[0].cels[0].raster = a
+        manager.history.removeAll()
+
+        for (old, new) in [(a, b), (b, c), (c, a)] {
+            manager.registerUndoableCelChange(layerID: layerID, celID: celID,
+                                              oldRaster: old, oldBaked: nil, newRaster: new, newBaked: nil,
+                                              label: .fill)
+            XCTAssertTrue(manager.canUndo, "a commit must never leave Undo dead because of its own size")
+        }
+        XCTAssertGreaterThanOrEqual(manager.history.undoStack.count, 1)
+        XCTAssertGreaterThan(manager.history.currentCost, manager.history.maxCost / 2,
+                             "Control: the step is bigger than the pressured budget, which is the case")
+
+        manager.history.trimUnderMemoryPressure()
+        XCTAssertEqual(manager.history.undoStack.count, UndoHistory.minimumKeptUndoSteps,
+                       "a memory warning must leave the newest step, not empty the history")
+        let said = expectation(description: "notice hops to main")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { said.fulfill() }
+        wait(for: [said], timeout: 5)
+        XCTAssertEqual(manager.notice?.code, "undoHistoryTrimmed", "dropped steps are said: \(manager.notice?.code ?? "nothing")")
+    }
+
+    /// The policy alone: the newest step survives its own push, trim drops oldest-first, redo is
+    /// bounded too, and the drop is announced once.
+    func testTrimKeepsTheNewestStepBoundsRedoAndSpeaksOnce() {
+        let budget = 100
+        let history = UndoHistory(maxCost: budget)
+        var announcements = 0
+        history.onStepsDropped = { _ in announcements += 1 }
+        history.record(step(60, label: .brushStroke))
+        history.record(step(500, label: .fill))   // alone exceeds the budget
+        XCTAssertEqual(history.undoStack.map(\.label), [.fill], "oldest goes; the oversized newest stays")
+        history.record(step(500, label: .fill))
+        history.record(step(500, label: .fill))
+        XCTAssertEqual(announcements, 1, "once, not on every record")
+        XCTAssertEqual(history.undoStack.count, 1)
+
+        // Redo is bounded too: pressure on 1 undo + 3 redo steps of 200 (budget 1000 -> 500)
+        // leaves the newest undo step and the one redo step nearest to being redone.
+        let h2 = UndoHistory(maxCost: 1_000)
+        for _ in 0..<4 { h2.record(step(200)) }
+        h2.undo(); h2.undo(); h2.undo()
+        XCTAssertEqual(h2.redoStack.count, 3)
+        h2.trimUnderMemoryPressure()
+        XCTAssertEqual(h2.undoStack.count, 1)
+        XCTAssertEqual(h2.redoStack.count, 1, "redo is evicted from its far end once undo is at its floor")
+    }
+
     /// Redo is user data too, and `trim()` charges it against the budget while only ever evicting
     /// undo. Pressure must not change that: the step the artist just undid is the single most likely
     /// thing they are about to redo.
