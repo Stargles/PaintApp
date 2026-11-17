@@ -114,6 +114,29 @@ final class FillWindowLogicTests: XCTestCase {
         XCTAssertLessThanOrEqual(scaled.workingWidth * scaled.workingHeight, 1_000_000)
     }
 
+    /// **The owner's November 16 case**: 5000², a 1,480 px circle, the iPad 9's 4.8 M working pixels. A
+    /// doubling toward both reached sides is 3,072² and is scaled to 0.71, which a 6 px line does not
+    /// survive; a quarter-step is 1,536² at scale 1, and the next growth finds the region enclosed.
+    func testGrowthStepsLessThanADoublingWhenTheDoublingWouldBeScaledButAStepFitsAtScaleOne() throws {
+        let canvas = CGSize(width: 5000, height: 5000)
+        let budget = 4_800_000
+        let window = FillWindow.bucket(around: CGPoint(x: 3000, y: 3000), in: canvas, pixelBudget: budget)
+        XCTAssertEqual(window.scale, 1)
+        let grown = try XCTUnwrap(window.grown(toward: [.left, .top, .right, .bottom], pixelBudget: budget))
+        XCTAssertEqual(grown.scale, 1, "the owner's circle is held at its own resolution")
+        XCTAssertEqual(grown.rect, CGRect(x: 2232, y: 2232, width: 1536, height: 1536),
+                       "the largest of a half, a quarter … step that fits 80% of the budget at scale 1")
+        XCTAssertLessThanOrEqual(grown.workingWidth * grown.workingHeight, budget * 8 / 10,
+                                 "the rest of the budget stays for the mend's geometry")
+        // A region that really exceeds the budget still scales — nothing is refused.
+        let huge = try XCTUnwrap(grown.grown(toward: [.left, .top, .right, .bottom], pixelBudget: 2_400_000))
+        XCTAssertEqual(huge.rect, CGRect(x: 696, y: 696, width: 4304, height: 4304), "no step fits scale 1, so it doubles into a scaled window as before")
+        XCTAssertLessThan(huge.scale, 1)
+        // …and one that fits doubles exactly as before.
+        let roomy = try XCTUnwrap(window.grown(toward: [.left, .top, .right, .bottom], pixelBudget: 100_000_000))
+        XCTAssertEqual(roomy.rect, CGRect(x: 1464, y: 1464, width: 3072, height: 3072))
+    }
+
     func testALassoWindowIsTheLoopPlusItsHalo() {
         let canvas = CGSize(width: 6000, height: 6000)
         let window = FillWindow.lasso(around: CGRect(x: 1000, y: 1000, width: 500, height: 400), halo: 88,

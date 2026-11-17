@@ -51,6 +51,10 @@ struct FillWindow: Equatable {
     /// that is not grows out of it in a step or two.
     static let initialBucketSide: CGFloat = 1024
 
+    /// The share of the working-pixel budget a stepped growth may fill, keeping the rest for the mend's
+    /// geometry (see `grown`).
+    static let mendReserve: CGFloat = 0.8
+
     // MARK: - Making one
 
     /// The window covering `rect` of the canvas — clipped to the canvas, snapped outward to whole
@@ -106,16 +110,44 @@ struct FillWindow: Equatable {
         max(1, Int((halo * scale).rounded(.up)))
     }
 
-    /// This window doubled toward `sides`, or nil when none of them can move.
+    /// This window grown toward `sides`, or nil when none of them can move.
+    ///
+    /// **A doubling when the doubled window still fits the budget at scale 1, and otherwise the
+    /// largest step that does** — the owner's November 16 case. At the owner's 5000² a 1,480 px circle
+    /// from a 1,024 px first window doubled toward both sides it reached into a 3,072² window, which
+    /// does not fit the iPad 9's 4.8 M working pixels, so it was worked at scale 0.71: a 6 px line
+    /// resampled to 4, and the mend's whole-window work estimate (64 M) exhausted, which turns
+    /// mending off for the entire fill with no notice. A 2,304 × 2,048 window holds the same circle at
+    /// scale 1. So when the full doubling would scale, halve the step (a half, a quarter … down to a
+    /// sixteenth of the window) until the window fits at scale 1, and take the doubling as before
+    /// only when no step does — a region that really exceeds the budget still scales, as `FillWindow`
+    /// documents.
     func grown(toward sides: Sides, pixelBudget: Int) -> FillWindow? {
         let movable = sides.intersection(growableSides)
         guard !movable.isEmpty else { return nil }
-        var box = rect
-        if movable.contains(.left) { box.origin.x -= rect.width; box.size.width += rect.width }
-        if movable.contains(.right) { box.size.width += rect.width }
-        if movable.contains(.top) { box.origin.y -= rect.height; box.size.height += rect.height }
-        if movable.contains(.bottom) { box.size.height += rect.height }
-        return Self.fitting(box, in: canvasSize, pixelBudget: pixelBudget)
+        func stepped(by fraction: CGFloat) -> FillWindow {
+            var box = rect
+            let (dx, dy) = (rect.width * fraction, rect.height * fraction)
+            if movable.contains(.left) { box.origin.x -= dx; box.size.width += dx }
+            if movable.contains(.right) { box.size.width += dx }
+            if movable.contains(.top) { box.origin.y -= dy; box.size.height += dy }
+            if movable.contains(.bottom) { box.size.height += dy }
+            return Self.fitting(box, in: canvasSize, pixelBudget: pixelBudget)
+        }
+        let doubled = stepped(by: 1)
+        guard doubled.scale < 1, scale == 1 else { return doubled }
+        // A window that fills the whole budget leaves the mend's geometry no room (`prepareVectorSupport`
+        // finds nothing available and mending is quietly off), so the stepped windows keep a reserve.
+        let reserved = Int(CGFloat(pixelBudget) * Self.mendReserve)
+        var fraction: CGFloat = 1
+        while fraction > 1.0 / 16 {
+            fraction /= 2
+            let candidate = stepped(by: fraction)
+            if candidate.scale == 1, candidate.workingWidth * candidate.workingHeight <= reserved {
+                return candidate == self ? doubled : candidate
+            }
+        }
+        return doubled
     }
 
     // MARK: - Mapping

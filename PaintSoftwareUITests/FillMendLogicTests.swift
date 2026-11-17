@@ -75,11 +75,11 @@ final class FillMendLogicTests: XCTestCase {
         wait(for: [done], timeout: seconds + 5)
     }
 
-    private func bucket(_ manager: CanvasManager, at point: CGPoint, colour: Color) {
+    private func bucket(_ manager: CanvasManager, at point: CGPoint, colour: Color, settle seconds: TimeInterval = 0.5) {
         manager.brushColor = colour
         manager.beginInteractiveFill(at: point)
         manager.endInteractiveFill()
-        settle()
+        settle(seconds)
         manager.commitInteractiveFill()
     }
 
@@ -1631,6 +1631,151 @@ final class FillMendLogicTests: XCTestCase {
             }
             XCTAssertFalse(changedOutsideLine, "the full picture outside the line's bounds stays the same")
         }
+    }
+
+    // MARK: - The owner's November 16 case: Rough Ink at 0.1% on a 5000² canvas, on an iPad 9's budget
+
+    /// The owner's own 5000² scene — `recording-20261116-181756`'s Pencil touches, window points to canvas
+    /// at the fit scale (810 pt tall paper → 5000 px), force over the Pencil's 4.1667 maximum, resampled
+    /// along a Catmull-Rom path every 1.5 pt so the stored stroke is as dense as a live one.
+    private enum OwnerRoughInkScene {
+        nonisolated(unsafe) static var canvasSide: CGFloat = 5000
+        static var canvasSize: CGSize { CGSize(width: canvasSide, height: canvasSide) }
+        static var pointsToCanvas: CGFloat { canvasSide / 810 }
+        static let circle: [(CGFloat, CGFloat, CGFloat)] = [
+            (699.5, 179, 0.079), (675, 168, 0.247), (644, 155.5, 0.367), (607, 163, 0.425), (566.5, 184, 0.48),
+            (546.5, 197.5, 0.487), (528, 215, 0.497), (499, 251.5, 0.514), (491.5, 294.5, 0.554),
+            (510.5, 336, 0.581), (549.5, 359, 0.564), (573, 364.5, 0.586), (599, 366, 0.602), (625, 365, 0.629),
+            (649.5, 361, 0.624), (688.5, 342.5, 0.574), (716.5, 313, 0.514), (732.5, 280, 0.499),
+            (731.5, 246.5, 0.502), (723, 215.5, 0.451), (702.5, 192.5, 0.557), (680, 170.5, 0.535),
+            (659.5, 158, 0.398)]
+        static let line: [(CGFloat, CGFloat, CGFloat)] = [
+            (666.5, 207, 0.079), (664.5, 205.5, 0.041), (663, 211.5, 0.046), (646, 231.5, 0.106),
+            (626.5, 253, 0.214), (599.5, 277, 0.571), (576.5, 301, 0.979), (566.5, 321, 1.001),
+            (567.5, 317, 0.295)]
+        static var tap: CGPoint { canvasPoint(661.5, 275) }
+
+        static func canvasPoint(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: (x - 135) * pointsToCanvas, y: y * pointsToCanvas)
+        }
+
+        static func samples(_ raw: [(CGFloat, CGFloat, CGFloat)]) -> [VectorSample] {
+            func at(_ i: Int) -> (CGFloat, CGFloat, CGFloat) { raw[min(max(i, 0), raw.count - 1)] }
+            var out: [VectorSample] = []
+            for i in 0..<(raw.count - 1) {
+                let (p0, p1, p2, p3) = (at(i - 1), at(i), at(i + 1), at(i + 2))
+                let length = hypot(p2.0 - p1.0, p2.1 - p1.1)
+                let steps = max(1, Int((length / 1.5).rounded(.up)))
+                for k in 0..<steps {
+                    let t = CGFloat(k) / CGFloat(steps), t2 = t * t, t3 = t2 * t
+                    func c(_ a: CGFloat, _ b: CGFloat, _ cc: CGFloat, _ d: CGFloat) -> CGFloat {
+                        0.5 * ((2 * b) + (-a + cc) * t + (2 * a - 5 * b + 4 * cc - d) * t2 + (-a + 3 * b - 3 * cc + d) * t3)
+                    }
+                    out.append(VectorSample(point: canvasPoint(c(p0.0, p1.0, p2.0, p3.0), c(p0.1, p1.1, p2.1, p3.1)),
+                                            pressure: min(max(c(p0.2, p1.2, p2.2, p3.2), 0.01), 1)))
+                }
+            }
+            let last = raw[raw.count - 1]
+            out.append(VectorSample(point: canvasPoint(last.0, last.1), pressure: last.2))
+            return out
+        }
+
+        static func stroke(_ raw: [(CGFloat, CGFloat, CGFloat)], brush: Brush, size: CGFloat, seed: UInt64) -> VectorStroke {
+            VectorStroke(brush: brush, color: CodableColor(UIColor.black), size: size, opacity: 1,
+                         samples: StrokeSamples(samples(raw), channels: .pressureOnly), seed: seed)
+        }
+    }
+
+    /// What the owner's fill leaves, measured on the fill layer's own pixels.
+    private struct OwnerFillReport {
+        var lineInk = 0, lineUncovered = 0, leaked = 0, covered = 0, windowScale: CGFloat = 0
+    }
+
+    /// Circle + line on layer 0, a different (empty) vector layer on top and active, the fill tapped inside
+    /// the circle with the **default** settings — the owner's gesture end to end through `CanvasManager`.
+    private func ownerRoughInkFill(brush: Brush = BrushLibrary.roughInk, size: CGFloat = 5,
+                                   mend: Bool = true, seeds: (UInt64, UInt64) = (0x7354, 0x7355)) throws -> OwnerFillReport {
+        let scene = OwnerRoughInkScene.self
+        let prior = CompositorBudget.budgetOverrideBytes
+        defer { CompositorBudget.budgetOverrideBytes = prior }
+        CompositorBudget.budgetOverrideBytes = 192_663_552 // the owner's iPad 9, read off the device
+        let manager = CanvasManager()
+        manager.canvasSize = scene.canvasSize
+        manager.addVectorLayer()
+        let ink = try XCTUnwrap(manager.layers[0].cels[0].vector)
+        let circle = scene.stroke(scene.circle, brush: brush, size: size, seed: seeds.0)
+        let line = scene.stroke(scene.line, brush: brush, size: size, seed: seeds.1)
+        ink.restoreElements([.stroke(circle), .stroke(line)], changedInk: nil)
+        manager.addVectorLayer()
+        XCTAssertTrue(manager.fillSettings.mendsGaps, "the default is Mend Gaps on")
+        manager.setFillMendsGaps(mend)
+        manager.brushColor = Self.red
+        manager.beginInteractiveFill(at: scene.tap)
+        manager.endInteractiveFill()
+        settle(6)
+        manager.fillLock.lock()
+        let windowScale = manager.fillWindow?.scale ?? 0
+        manager.fillLock.unlock()
+        manager.commitInteractiveFill()
+        let fill = try XCTUnwrap(manager.layers[1].cels.first?.vector).render()
+        let fillCG = try XCTUnwrap(fill?.cgImage)
+        let fillBytes = try XCTUnwrap(CanvasFixture.rgbaBytes(fillCG))
+        let lineCG = try XCTUnwrap(VectorCanvas(size: scene.canvasSize, strokes: [line]).render()?.cgImage)
+        let lineBytes = try XCTUnwrap(CanvasFixture.rgbaBytes(lineCG))
+        // The circle's outer hull: its centre-line polygon, filled, plus half the widest possible stroke.
+        let hull = CGMutablePath()
+        let pts = scene.samples(scene.circle).map(\.point)
+        hull.addLines(between: pts); hull.closeSubpath()
+        let side = Int(scene.canvasSide)
+        let hullContext = try XCTUnwrap(CGContext(data: nil, width: side, height: side, bitsPerComponent: 8,
+            bytesPerRow: side, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue))
+        hullContext.setFillColor(gray: 1, alpha: 1); hullContext.setStrokeColor(gray: 1, alpha: 1)
+        hullContext.setLineWidth(size * 2 + 6)
+        hullContext.translateBy(x: 0, y: scene.canvasSide); hullContext.scaleBy(x: 1, y: -1)
+        hullContext.addPath(hull); hullContext.drawPath(using: .fillStroke)
+        let hullBytes = hullContext.data!.assumingMemoryBound(to: UInt8.self)
+        let width = fillCG.width
+        var report = OwnerFillReport()
+        report.windowScale = windowScale
+        for i in 0..<(width * fillCG.height) {
+            let covered = fillBytes[i * 4 + 3] >= 250
+            if covered {
+                report.covered += 1
+                if hullBytes[i] == 0 { report.leaked += 1 }
+            }
+            if lineBytes[i * 4 + 3] >= 128 {
+                report.lineInk += 1
+                if !covered { report.lineUncovered += 1 }
+            }
+        }
+        return report
+    }
+
+    /// **The owner's Rough Ink line, from their own recording, through the whole fill** — the first window
+    /// 1,024², grown as the fill reaches its rim, on the iPad 9's budget, at the default settings. Before
+    /// the window's growth stopped at the budget it doubled to 3,072², was worked at scale 0.71, and the
+    /// mend — whose certificate had spent its 64 M of work by then — was off for the whole fill: 67% of the
+    /// line's ink was left uncovered under Rough Ink at 5 px, and 80% under the 12 px Opaque Round the
+    /// earlier qualification used. What is still bare is the stroke's final reversal, which the certificate
+    /// deliberately protects as an uncertain join.
+    func testTheOwnersRecordedRoughInkLineIsMendedOnA5000Canvas() throws {
+        OwnerRoughInkScene.canvasSide = 5000
+        let report = try ownerRoughInkFill()
+        XCTAssertEqual(report.windowScale, 1, "the fill's window held the circle at scale 1 — a resampled window loses the mend")
+        XCTAssertEqual(report.leaked, 0, "no fill outside the circle's outer boundary")
+        XCTAssertGreaterThan(report.lineInk, 5000, "PREMISE: the line has the ink the recording's pressures give it")
+        XCTAssertLessThan(Double(report.lineUncovered) / Double(report.lineInk), 0.15,
+                          "\(report.lineUncovered) of \(report.lineInk) pixels of the line's ink are left bare under it")
+    }
+
+    /// The same scene with a thinner smooth brush — a 3 px line is two working pixels at the old window's scale.
+    func testAThinSmoothPressureLineOnA5000CanvasIsMendedToo() throws {
+        OwnerRoughInkScene.canvasSide = 5000
+        let report = try ownerRoughInkFill(brush: BrushLibrary.opaqueRound, size: 3)
+        XCTAssertEqual(report.windowScale, 1)
+        XCTAssertEqual(report.leaked, 0)
+        XCTAssertLessThan(Double(report.lineUncovered) / Double(max(1, report.lineInk)), 0.05,
+                          "\(report.lineUncovered) of \(report.lineInk) pixels of the thin line are left bare under it")
     }
 
     func testLongSnappedCircleDoesNotSuppressMendingOfADetachedInteriorLine() throws {

@@ -550,6 +550,97 @@ final class FillMendUITests: PaintUITestCase {
         XCTAssertFalse(after.light(inPadding.dx, inPadding.dy),
                        "With the buffer at the padding's width the fill reaches out to the padded canvas's edge")
     }
+
+    /// **The owner's November 16 case at the owner's size**: a 5000² document, the Rough Ink preset at
+    /// 5 px (the slider's 0.1%), a circle and a line inside it on one layer, the fill tapped from
+    /// another layer on an iPad 9 simulator in landscape with the iPad 9's memory budget — read off the
+    /// screen with the reference hidden. At this size the first window's growth used to double into a
+    /// 3,072² window that does not fit the budget, was worked at 0.71, and lost the mend entirely.
+    ///
+    /// **XCUITest cannot press a Pencil, so the pressure variation is not here**; a finger draws at one
+    /// pressure and Rough Ink's own random size row makes the width vary along the line.
+    /// `FillMendLogicTests.testTheOwnersRecordedRoughInkLineIsMendedOnA5000Canvas` carries the recorded
+    /// pressures.
+    func testRoughInkCircleAndLineOnA5000CanvasFillSolidUnderTheLineFromAnotherLayer() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-uiTestTextureBudgetBytes", "201326592"]
+        let size = CGSize(width: 5000, height: 5000)
+        XCTAssertTrue(launchIntoEditor(app, size: size, orientationBeforeCreatingCanvas: .landscapeLeft))
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+
+        openBrushLibrary(app)
+        let rough = app.buttons["brushPanel.brush.Rough Ink"]
+        XCTAssertTrue(rough.waitForExistence(timeout: 5))
+        if !rough.isSelected { tapWhenHittable(rough, "Rough Ink") }
+        setBrushSize(app, normalized: 4.0 / 199)
+        app.buttons["toolbar.brushButton"].tap()
+
+        let paper = visiblePaperRect(app, in: canvas, canvasSize: size)
+        let host = canvas.frame
+        let radiusY = paper.height * 0.34
+        let radiusX = radiusY * host.height / host.width
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGVector {
+            CGVector(dx: paper.midX + radiusX * x, dy: paper.midY + radiusY * y)
+        }
+        let circle = (0...76).map { step in
+            let angle = CGFloat(step) * .pi / 36
+            return logicalAppPoint(in: host, normalizedOffset: point(-cos(angle), sin(angle)))
+        }
+        try fingerStroke(through: circle)
+        let lineFrom = point(0.45, -0.45), lineTo = point(-0.4, 0.5)
+        try fingerStroke(through: (0...24).map { step in
+            let t = CGFloat(step) / 24
+            return logicalAppPoint(in: host, normalizedOffset: CGVector(
+                dx: lineFrom.dx + (lineTo.dx - lineFrom.dx) * t, dy: lineFrom.dy + (lineTo.dy - lineFrom.dy) * t))
+        }, interval: 0.03)
+        let seed = point(0.7, -0.1)
+        let outline = point(-1, 0)
+        XCTAssertTrue(waitUntil(canvas, outline, isInk), "PREMISE: the circle's left edge is drawn")
+
+        openLayerPanel(app)
+        addVectorLayerFromOpenPanel(app)
+        closeLayerRail(app)
+        setBrushColor(app, hex: "FF0000")
+        XCTAssertTrue(openFillPanel(app))
+        let mend = app.switches["fillPanel.mendGapToggle"]
+        scrollFillPanel(app, to: mend)
+        XCTAssertEqual(mend.value as? String, "1", "PREMISE: Mend Gaps is on at its default")
+        app.buttons["toolbar.fillButton"].tap()
+        canvas.coordinate(withNormalizedOffset: seed).tap()
+        XCTAssertTrue(waitUntil(canvas, seed, isRed, timeout: 60), "one bucket tap fills inside the circle")
+        app.buttons["toolbar.brushButton"].tap() // commit
+        openLayerPanel(app)
+        tapWhenHittable(app.buttons["layerPanel.row.0.visibility"], "Hide the circle and line")
+        closeLayerRail(app)
+        XCTAssertTrue(waitUntil(canvas, outline, isWhitish, timeout: 20), "the hidden circle's own footprint stays unpainted")
+        let picture = try screen(of: canvas)
+        attachScreenshot(XCUIScreen.main, "rough-ink-5000-circle-and-line-reference-hidden")
+
+        // Walk the line's middle 80%: no paper within two screen pixels either side of its centre.
+        let pw = Double(picture.width), ph = Double(picture.height)
+        var gaps: [Double] = []
+        for step in 0...40 {
+            let t = 0.1 + 0.8 * Double(step) / 40
+            let cx = Double(lineFrom.dx) + Double(lineTo.dx - lineFrom.dx) * t
+            let cy = Double(lineFrom.dy) + Double(lineTo.dy - lineFrom.dy) * t
+            let sample = (-2...2).contains { off in
+                // Perpendicular offsets, in screen pixels, along x and y alike: the line is diagonal.
+                [(Double(off), 0.0), (0.0, Double(off))].contains { dx, dy in
+                    isWhitish(picture.pixel(normalizedX: cx + dx / pw, normalizedY: cy + dy / ph))
+                }
+            }
+            if sample { gaps.append(t) }
+        }
+        XCTAssertTrue(gaps.isEmpty, "the fill leaves paper under the line at \(gaps.count) of 41 points along it: \(gaps)")
+        XCTAssertTrue(isRed(picture.pixel(normalizedX: seed.dx, normalizedY: seed.dy)), "the fill is red")
+        for outside in [point(-1.2, 0), point(1.2, 0), point(0, -1.2), point(0, 1.2)] {
+            XCTAssertTrue(isWhitish(picture.pixel(normalizedX: outside.dx, normalizedY: outside.dy)),
+                          "paper beyond the circle stays clear")
+        }
+    }
+
 }
 
 private extension ScreenshotPixels {
