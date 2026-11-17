@@ -98,4 +98,43 @@ final class BakeStripWalkBench: XCTestCase {
             }
         }
     }
+
+    /// The owner's open: a 5000² scene of five vector layers and three distinct frames, baked by the
+    /// canvas's own `FrameBaker` from nothing. Prints how long until every orange bar is gone.
+    func testOpeningAThreeFrameDocumentBakesItsFramesPromptly() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BakeStripWalkBench-" + UUID().uuidString, isDirectory: true)
+        FrameBakeStore.cachesDirectoryOverride = root
+        defer { FrameBakeStore.cachesDirectoryOverride = nil; try? FileManager.default.removeItem(at: root) }
+        let canvas = CGSize(width: 5000, height: 5000)
+        let frames = 3
+        let manager = CanvasManager()
+        manager.brushLibraryOverride = CanvasFixture.isolatedBrushLibrary()
+        manager.canvasSize = canvas
+        for layer in 0..<5 {
+            manager.addVectorLayer()
+            manager.layers[layer].cels = (0..<frames).map { frame in
+                let cel = Cel(id: UUID(), startFrame: frame, frameCount: 1,
+                              raster: .empty(size: canvas), vector: .empty(size: canvas))
+                for stroke in 0..<150 {
+                    cel.vector?.addStroke(Self.ink(seed: layer * 10_000 + frame * 1000 + stroke, canvas: canvas))
+                }
+                return cel
+            }
+        }
+        manager.currentLayerIndex = 0
+        manager.currentFrame = 0
+        manager.syncFrameBake(suspended: false)
+        let baker = manager.frameBaker
+        baker.markEverythingDirty()
+        var settled = false
+        let idle = expectation(description: "the bake queue drains")
+        baker.onIdle = { if !settled { settled = true; idle.fulfill() } }
+        let start = CFAbsoluteTimeGetCurrent()
+        baker.kick()
+        wait(for: [idle], timeout: 900)
+        let ms = (CFAbsoluteTimeGetCurrent() - start) * 1000
+        baker.onIdle = nil
+        print("BAKESTRIP | open: \(Int(ms)) ms for \(frames) frames (baked \(baker.bakedCount), deduped \(baker.dedupedCount), failed \(baker.failedCount))")
+    }
 }
