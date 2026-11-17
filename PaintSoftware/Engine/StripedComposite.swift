@@ -133,7 +133,7 @@ enum StripedCompositor {
     /// primitive), and the chunk driver's accumulator readback is exact. The strip pins hold it to
     /// that. Applies only to what that holds for: unwindowed, every root node a leaf that blends
     /// `.normal` with no mask and no grade. Anything else — and any frame the process cannot hold two
-    /// of (`hasHeadroom`) — takes the strips. Not taken when a test forced `.metal`.
+    /// of (`hasHeadroom`, for the destination and a batch) — takes the strips. Not taken when a test forced `.metal`.
     ///
     /// Peak is the destination plus one leaf picture: ~2 frames, against the strip walk's frame plus
     /// a strip and its accumulators.
@@ -149,7 +149,7 @@ enum StripedCompositor {
                   node.blendMode == .normal else { return nil }
         }
         let frame = CGRect(origin: .zero, size: recipe.canvasSize)
-        guard CompositorBudget.hasHeadroom(for: CompositorBudget.textureBytes(for: recipe.canvasSize) * 2)
+        guard CompositorBudget.hasHeadroom(for: CompositorBudget.textureBytes(for: recipe.canvasSize) * 4)
         else { return nil }
         var declined = false
         let image = UIGraphicsImageRenderer(bounds: frame, format: PixelOps.transparentFormat())
@@ -158,16 +158,29 @@ enum StripedCompositor {
                     paper.color.setFill()
                     UIRectFill(paper.rect)
                 }
-                for node in recipe.tree where !declined {
-                    guard node.isVisible, case .leaf(let index) = node.content else { continue }
+                // **Three leaves resolve at a time**, across cores, because a cold vector cel is a full
+                // walk (350-640 ms at 5000²) and one at a time leaves the other cores idle; a batch is
+                // the most the headroom check above pays for beyond the destination.
+                let visible = recipe.tree.compactMap { node -> (Int, Double)? in
+                    guard node.isVisible, case .leaf(let index) = node.content else { return nil }
+                    return (index, node.opacity)
+                }
+                let batchSize = 3
+                var start = 0
+                while start < visible.count, !declined {
+                    let batch = Array(visible[start..<min(start + batchSize, visible.count)])
+                    start += batchSize
                     autoreleasepool {
                         let resolved = FrameRecipe.resolveSources(recipe.leaves, canvasSize: recipe.canvasSize,
-                                                                  quality: recipe.quality, subset: [index])
+                                                                  quality: recipe.quality,
+                                                                  subset: Set(batch.map(\.0)))
                         if resolved.failed { declined = true; return }
-                        guard recipe.leaves.indices.contains(index), let source = resolved.sources[index] else { return }
-                        CoreGraphicsCompositor.draw(UIImage(cgImage: source.image, scale: 1, orientation: .up),
-                                                    mode: .normal, opacity: node.opacity,
-                                                    in: frame, context: context)
+                        for (index, opacity) in batch {
+                            guard let source = resolved.sources[index] else { continue }
+                            CoreGraphicsCompositor.draw(UIImage(cgImage: source.image, scale: 1, orientation: .up),
+                                                        mode: .normal, opacity: opacity,
+                                                        in: frame, context: context)
+                        }
                     }
                 }
             }

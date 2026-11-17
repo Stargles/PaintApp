@@ -85,8 +85,8 @@ final class BakeStripWalkBench: XCTestCase {
         }
         for backend in [CompositorBackend.coreGraphics, .automatic] {
             Compositor.backend = backend
-            for pass in 0..<2 {
-                PixelOps.clearRasterizeCache(); VectorRenderCache.removeAll(); MaskResolver.clearCache()
+            for pass in 0..<3 {
+                if pass < 2 { PixelOps.clearRasterizeCache(); VectorRenderCache.removeAll(); MaskResolver.clearCache() }
                 let recipe = try XCTUnwrap(manager.makeFrameRecipe(atFrame: 0, includeBackground: true))
                 let strips = StripedCompositor.plan(for: recipe).count
                 WalkProbe.reset()
