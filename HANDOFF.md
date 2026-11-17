@@ -5,37 +5,31 @@
 From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
 
 > Continue PaintSoftware from HANDOFF.md. Read AGENTS.md, CLAUDE.md, TODO.md and BUGS.md and verify
-> `main` equals `origin/main`. Start with the owner's physical results on the iPad build installed
-> from `main` (Fill/Mend, Undo with stream off/on, erasing, live Liquify). Finish all actionable
-> items, use focused delegation and keep TODO.md and HANDOFF.md current. Brief the owner in terms
-> of what they see in PaintApp.
+> `main` equals `origin/main`. Start with the owner's re-test of the November 17 build on their
+> iPad (Test1: Undo lag, circle-and-line Fill, rapid draw/Undo, orange bars on entering). Then the
+> twelve UI tests red on old `main` too, raster Undo pricing, and the open audit findings in
+> TODO.md. Use focused delegation, keep TODO.md and HANDOFF.md current, and brief the owner in
+> terms of what they see in PaintApp.
 
-## Sign-off — November 16, 2026, Toronto (evening)
+## Sign-off — November 17, 2026, Toronto
 
-- **One version.** On the owner's instruction ("one version that is most up to date on the mac
-  that is also synced to github") the tested release lineage became `main`, fast-forwarding
-  GitHub from `afd2030c`. The Desktop-only record commits were carried as content (owner queue,
-  audit sections, CLAUDE/AGENTS) and the old Desktop history is preserved in the archive bundle
-  `~/PaintWork/archive/refs-2026-11-16.bundle` together with every former `tmp/*` branch.
-  Leftover worktrees were removed; new work uses a short-lived `~/PaintWork/PaintApp-<id>`
-  worktree merged back with `--ff-only`, as before.
-- **No install floor.** The owner ruled the five-day profile floor was never theirs; it is
-  removed from CLAUDE.md, `~/PaintApp/deploy/resign.sh` (backup `~/PaintWork/resign.sh.bak-2026-11-16`)
-  and `tools/test-resign-region.sh` (harness green). Install a gated build whenever useful; refuse
-  only a profile with under an hour left.
-- **Perspective Fit shipped.** `fecc1a8f` blends a fractional projective Parallax share about the
-  authored box origin, and Resize now transports Parallax poses. 309/309 focused logic checks, both
-  reverse faults red, the cold Resize UI green, rendered 400×200 and 600×200 Fit pictures 0-pixel
-  diff to the expected placement (`~/PaintWork/nov15-parallax-evidence/fit-fecc1a8f/`).
-- **Assembled gate at exact `fecc1a8f`** (legacy View, container Resize, Undo trace, perspective
-  Fit): 13/13 cold workflows, Debug and Release each 5,654 passed + 4 opt-in skips, static
-  selection reconciled, owned simulator deleted. Receipts:
-  `~/PaintWork/nov15-release-evidence/exact-fecc1a8fb5860673d418517760f7aa77f9ed2476/`.
-- **Installed on the iPad 2026-11-16 ~18:20 Toronto**: signed Release `fecc1a8f` (UUID
-  `260F953C-109A-321C-BB5F-E17E684838CE`, profile through Nov 20 02:09), from
-  `~/PaintWork/crash-20261111/device-fresh-fecc1a8f-Release/`; `resign_state` updated. Awaiting the
-  owner's checks: Mend Fill, Undo stream off/on, erasing, live Liquify. Physical Undo/erase latency, the Mend Fill
-  confirmation, live Liquify, freeze/crash root causes and Windows SSH remain open.
+- **The November 16 failures are fixed on `main`** (TODO.md's first item has the list): the
+  display server is no longer handed a canvas-sized picture per edit (the backboardd Jetsam
+  behind the black-outs), the bake reuses its band memo (orange bars), Undo trims history to its
+  budget with a notice instead of wiping it, Fill covers ink enclosed by the region (the owner's
+  circle-and-line), the recorder logs tool settings, and a Move's lift repairs only what was lifted.
+- **Gates at `d08d18a5`:** Debug and Release fast tiers 5,679 passed + 4 skipped each; the first
+  full UI run (on the 13" simulator, which fails the 1080×810 size premises — use an iPad 9th
+  generation simulator for the UI suite) left 33 reds; re-run serially on a fresh iPad 9 simulator
+  with the one extra Fill red the worker found, 12 remain and all 12 are red on old `main` with
+  the same message (TODO.md item). Four Fill regressions found on the way were fixed in `10f65379`.
+- **Device stress on the owner's iPad passed** — `PaintSoftwareUITests/DeviceStressUITests.swift`,
+  opt-in with `PAINTAPP_DEVICE_STRESS=1`, creates and trashes its own `ZZ-stress-*` folder and
+  scene, never resets settings or libraries. Log: `~/PaintWork/nov17-device-stress/device-run3.log`.
+- **Lessons:** the Release optimiser may free a never-read `var` at its last use — hold test pins
+  with `withExtendedLifetime`; on the real iPad the number pad covers the size fields, so a device
+  harness hides the keyboard between fields; "Timed out while enabling automation mode" is the lock
+  screen.
 
 TODO.md tracks outstanding work and owner rulings. Older checkpoints are in `git log -p HANDOFF.md`.
 

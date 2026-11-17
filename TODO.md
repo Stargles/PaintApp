@@ -23,24 +23,42 @@ HANDOFF.md is a navigation/checkpoint document, never the only record of an outs
   recording); treat as the same full-size-surface family until measured otherwise.
   Owner has retired Codex for now; the owner's concern is less-visible defects of the same kind —
   the repo audit must look for them, not only for structure.
+  **Nov 17 — fixed, gated, merged to `main` and installed; awaiting the owner's re-test.**
+  Render-server pinning + 0.25 s render pacing (surfaces), band-from-memo bake (orange bars),
+  Undo trim that never wipes history + notice, Fill window at scale 1 + recorder tool settings,
+  enclosed-ink Fill (owner's line: 0 bare pixels, 1.52→0.54 s simulator Release, measured before
+  `10f65379` made absorb cheaper and also cover a stem attached to the outline), and Move lift
+  repairing only the lifted footprint (91→31 ms simulator Release). Gates at `d08d18a5`: Debug and
+  Release fast tiers each 5,679 passed + 4 skipped; the 34 UI tests red in the first full run,
+  re-run serially on a fresh iPad 9 simulator, left 12 reds, every one also red with the same
+  message on old main `6464761a` (item below). **On the owner's iPad** (Debug, opt-in
+  `DeviceStressUITests`, 5000² + 5 vector layers, owned fixtures trashed afterwards): 20 strokes
+  then 20 Undos ×2, 30 rapid strokes, a grid + 10 fills — no crash, no new Jetsam/backboardd log;
+  20 Undos took ~9.5 s of XCUITest-paced taps. Owner to confirm by hand: Undo lag, the circle-and-
+  line Fill, rapid draw/Undo, orange bars on entering Test1.
 - [ ] **Fix the November 16 audit findings** ([docs/AUDIT-2026-11-16.md](docs/AUDIT-2026-11-16.md), 18
   ranked). The repeating defect: RAM-derived budgets (192 MiB on iPad 9) tested at 2048² that
-  silently decline, scale down or drop history at the owner's 5000² scene. First: Undo trim can
-  empty the whole stack after one big step (UndoHistory.trim); ~20 `hasHeadroom … return nil`
-  refusals need a notice; canvas-size ceiling measures the app, not backboardd; canvas-sized
-  `CALayer.contents` installs outside the paced path; synchronous full-cel render on Move start;
-  raster thumbnails at canvas size. Add a gated 5000²×5-layer fixture for every budget consumer.
-  Fill rework: ink wholly enclosed by the fill region is covered (no hairline), replacing the
-  slow certificate for that case (fill branch `tmp/nov16-fill` still shows a hairline, 3.3 s/tap).
-  **Nov 17 status — all fixes integrated on `tmp/nov17-combined` (`bfd05c8d`), unmerged, gate running:**
-  render-server pinning + 0.25 s render pacing (surfaces), band-from-memo bake (orange bars),
-  Undo trim that never wipes history + notice, Fill window at scale 1 + recorder tool settings,
-  enclosed-ink Fill (owner's line: 0 bare pixels, 1.52→0.54 s simulator Release), and Move lift
-  repairing only the lifted footprint (91→31 ms simulator Release). Vector undo is already
-  diff-priced (0.11 MB a stroke); a whole-cel raster step at 5000² is 190.7 MB of the iPad 9's
-  192 MB budget, so raster layers keep only the protected minimum (audit item, open). Still owed:
-  Debug/Release fast tiers + full UI suite at the combined head, then the on-iPad stress run
-  (ask owner) before install.
+  silently decline, scale down or drop history at the owner's 5000² scene. **Done Nov 17:** Undo
+  trim no longer empties the stack (notice instead); Fill covers enclosed ink without the slow
+  certificate; Move lift repairs only the lifted footprint; render pacing for the deferred vector
+  installs. **Open:** ~20 silent `hasHeadroom … return nil` refusals need a notice; canvas-size
+  ceiling measures the app, not backboardd's 1,850 MiB; `CALayer.contents` installs still outside
+  the paced path; raster thumbnails at canvas size; three bitmaps per vector cel; unbounded static
+  caches; commit/un-suppress still invalidates `.everything`; `renderIsolated` on the main thread.
+  Add a gated 5000²×5-layer fixture for every budget consumer (`DeviceStressUITests` is the device half).
+- [ ] **Twelve UI tests are red on old `main` as well (found Nov 17, not caused by the fixes).**
+  Serial on an iPad 9 simulator, red at `6464761a` and at `d08d18a5` with the same messages:
+  BrushMenu photo tip (draws round, not the tall staged tip); SandwichCompositing layer drop into a
+  node (no "Mix 1"); OptionsPanel Tone Curve and Screen Picker (grey-patch premise); GraphEditorFinger
+  second finger (toolbar has no 44 pt empty gap at 1080 pt); BlendModes Chromatic Aberration (19.93
+  vs 20) and near-tie fade (slider stops at 0.33); FillSliderLive gap closing (sealed fill never
+  shown while held); FillContainment reference layer (fill floods past the lineart); FolderMoveScope
+  box on next frame; SelectionEdit colour readout; ShapeRecovery drawing over a pending shape.
+  Evidence `~/PaintWork/nov17-gate-evidence/`, `~/PaintWork/nov17-final-gate/ui34.xcresult`.
+  Triage each: stale test vs real defect (FillContainment and FillSliderLive look real).
+- [ ] **Raster Undo at 5000² is one whole-cel step (190.7 MB) against the iPad 9's 192 MB
+  budget**, so raster layers keep only the protected minimum of history. Price raster steps by
+  their dirty tiles, as vector steps already are (0.11 MB a stroke).
 - [ ] **Fix severe Undo latency.** Owner reports drawing is responsive after the latest Release
   install (`d4d59f6bc261d23366c8e713ecab96353fe0183c`), but Undo still has “enormous latency” despite an
   earlier fix. Reproduce and compare that specific path first; correct the root cause efficiently.
