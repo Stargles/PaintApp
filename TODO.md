@@ -42,6 +42,10 @@ could not be verified as open or closed; verify against `main` and `git log`, th
   reappear and then vanish — the old base picture shown again before the erased one lands. Recording
   on the iPad (newest after 22:53). One fix: the live picture stays until the base that matches it is
   on screen, for adds and removes alike.
+  **Same family, frame change (owner, Nov 17 late, recorded on the iPad):** changing frames, parts
+  of the active layer are drawn over parts of the other layers for up to ~1 s before the frame settles;
+  a frame change must look near-instant. Likely regression. Rule for all three: the screen never shows
+  a mix of old and new pictures — hold the last complete picture until every part of the new one is ready.
 - [ ] **Canvas freeze still recurs.** Flight `flight-20261117-191152` (Test, 2048², same folder): the
   watchdog replaced a stranded `canvas.pan` found `.ended` with 0 touches on `CanvasPlaneView`;
   lifetime repairs now 24. In that flight a two-finger pan's touch was cancelled and began again
