@@ -47,3 +47,10 @@ frame) until every host of the new frame is ready.
 
 ## Next
 1. (Triage done.) Real remaining work, not done: fix the handoff (stroke/eraser/frame-step) and commit separately.
+1. Triage the failing stroke-stays-on-screen test, then fix the handoff (stroke/eraser/frame-step) and commit separately.
+
+# nov18-eraser (branch tmp/nov18-eraser)
+Done: StrokeScratch.replaceCelContent renders off main (LatestWins on a render queue); renderedCelContent
+for .replacing only answers a finished picture; settleCelContent() at lift (renders sync only if stale);
+view swaps via onRenderLanded. New test EraserOffMainLogicTests (+pbxproj ids ...D2001/2).
+Next: build+run the test (UDID own sim, simlock), mutation-check, fast tier, measure, drive, commit, cleanup.

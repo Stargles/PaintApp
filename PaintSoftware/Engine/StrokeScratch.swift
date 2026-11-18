@@ -84,8 +84,8 @@ final class StrokeScratch: DabTarget {
         if let cached = contentPresentation, cached.version == version { return cached.value }
         let picture: CelContentPicture
         if case .replacing = role {
-            picture = CelContentPicture(size: canvasSize, window: windowRect,
-                backing: celContent.backing, patch: nil, ink: celContent.ink)
+            // Drawn off main by `replaceCelContent`; only a finished picture is ever answered.
+            return contentPresentation?.value
         } else {
             guard let window, let image else { return nil }
             picture = CelContentPicture(size: canvasSize, window: windowRect,
@@ -96,8 +96,28 @@ final class StrokeScratch: DabTarget {
         return rendered
     }
 
+    /// **Where a `.replacing` scratch's pictures are drawn** (SCHEDULER rules 1, 2 and 4). Rendering the
+    /// admitted window re-draws every element in it, which at 5000² with five vector layers took a
+    /// 6.1 s main-thread pass in one eraser stroke (nov17 `handoff-1`), so main never does it: it
+    /// records the newest display list and the render runs on this queue, latest wins.
+    private static let renderQueue = DispatchQueue(label: "com.paintapp.StrokeScratch.render",
+                                                   qos: .userInitiated)
+    private var renders: LatestWins?
+    /// The newest replacement asked for, and the one whose picture `contentPresentation` holds.
+    private var requestedRender = 0
+    private var shownRender = 0
+    /// Main-thread landing of a finished picture; the view re-reads `renderedCelContent` and swaps it in.
+    var onRenderLanded: (() -> Void)?
+
+    /// Test seam: called with `Thread.isMainThread` for every replacement render.
+    nonisolated(unsafe) static var renderObserver: ((_ onMain: Bool) -> Void)?
+
+    /// Whether a newer display list than the picture on screen has been admitted.
+    var hasPendingRender: Bool { requestedRender != shownRender }
+
     /// Replaces the frozen display list and admits its measured damage into the existing geometric
-    /// window. This path owns no raster texture: `renderedCelContent` is the one bounded image.
+    /// window. The window's picture is drawn off the main thread (latest wins); until it lands
+    /// `renderedCelContent` keeps answering the last finished one, never an older or blank one.
     func replaceCelContent(ink: CelContentPicture.Ink, damage: CGRect) -> Bool {
         guard case .replacing = role, let celContent,
               let next = nextWindowRect(containing: damage) else { return false }
@@ -105,14 +125,52 @@ final class StrokeScratch: DabTarget {
                                  placement: celContent.placement)
         let picture = CelContentPicture(size: canvasSize, window: next,
             backing: updated.backing, patch: nil, ink: updated.ink)
-        guard let rendered = picture.rendered(placement: updated.placement) else {
-            failure = picture.hasFailed ? .unreadableBacking : .allocationRefused
-            return false
-        }
         self.celContent = updated
         windowRect = next
-        contentPresentation = (-1, rendered)
+        requestedRender += 1
+        let revision = requestedRender
+        let placement = updated.placement
+        let renders = self.renders ?? MainActor.assumeIsolated { LatestWins(queue: Self.renderQueue) }
+        self.renders = renders
+        MainActor.assumeIsolated {
+            renders.request { [weak self] in
+                guard self != nil else { return nil }
+                return {
+                    Self.renderObserver?(Thread.isMainThread)
+                    let rendered = picture.rendered(placement: placement)
+                    return { [weak self] in
+                        guard let self, revision == self.requestedRender else { return }
+                        guard let rendered else {
+                            self.failure = picture.hasFailed ? .unreadableBacking : .allocationRefused
+                            return
+                        }
+                        self.failure = nil
+                        self.contentPresentation = (-1, rendered)
+                        self.shownRender = revision
+                        self.onRenderLanded?()
+                    }
+                }
+            }
+        }
         return true
+    }
+
+    /// **Lift only**: makes the shown picture the newest one, drawing it here if the background render
+    /// has not landed, so a finished stroke is never handed off one step behind (erased ink would come
+    /// back). One window-sized render at pen-up, not one per move.
+    func settleCelContent() {
+        guard case .replacing = role, hasPendingRender, let celContent, !windowRect.isNull else { return }
+        MainActor.assumeIsolated { renders?.cancel() }
+        let picture = CelContentPicture(size: canvasSize, window: windowRect,
+            backing: celContent.backing, patch: nil, ink: celContent.ink)
+        Self.renderObserver?(Thread.isMainThread)
+        guard let rendered = picture.rendered(placement: celContent.placement) else {
+            failure = picture.hasFailed ? .unreadableBacking : .allocationRefused
+            return
+        }
+        failure = nil
+        contentPresentation = (-1, rendered)
+        shownRender = requestedRender
     }
 
     /// Reuses the touch-down reference frames and their original display-list slots while replacing
@@ -140,6 +198,8 @@ final class StrokeScratch: DabTarget {
               damage.width > 0, damage.height > 0,
               case .success = lastMutationResult,
               windowRect.contains(damage) else { return false }
+        // The picture may be one step behind the display list while the background render runs;
+        // the last finished one stays up, and lift settles it (`settleCelContent`).
         return renderedCelContent != nil
     }
 

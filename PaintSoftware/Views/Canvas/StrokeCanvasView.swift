@@ -1572,6 +1572,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// records a `LocalEdit` and the base there is a derived frame with a version of its own, so
     /// `retire(upTo:)`'s arithmetic does not apply to it and the picture could never be released.
     private func holdUnlandedInk(from scratch: StrokeScratch?, at version: Int) {
+        scratch?.settleCelContent()
         guard let scratch, !scratch.windowRect.isNull else {
             noteInk("notHeld", revision: contentRevisions.current, detail: "no scratch window")
             return
@@ -2521,6 +2522,11 @@ final class StrokeCanvasView: CanvasPlaneView {
         }()
         currentVectorSamples = StrokeSamples(channels: .captured)
         guard scratch != nil else { handleCancel(); return }
+        // A replacement scratch draws its window off main; swap each finished picture in.
+        scratch?.onRenderLanded = { [weak self] in
+            guard let self, let scratch = self.scratch else { return }
+            self.showOverlays(scratch)
+        }
         lastSampleTime = nil
         lastPreviewSample = nil
         previewCuts = [:]
@@ -2787,6 +2793,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         // so the *next* stroke's scratch cannot take this one's place on screen. Nothing is held for
         // an in-between, whose base is a derived frame with a version of its own.
         if vectorContentChanged, inBetweenCelID == nil {
+            scratch?.settleCelContent()
             holdUnlandedInk(from: showableScratch(scratch), at: vectorCanvas.version)
         }
         endScratch()

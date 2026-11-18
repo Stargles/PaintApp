@@ -1061,6 +1061,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                     XCTAssertTrue(scratch.replaceVectorDisplay(elements: preview.elements,
                         rewriting: preview.rewriting, damage: preview.damage),
                         "PREMISE: the changed list is admitted into the bounded scratch window")
+                    scratch.settleCelContent()
                     let shown = try XCTUnwrap(scratch.renderedCelContent,
                         "PREMISE: the Mode 2/4 scratch resolves its bounded replacement picture")
                     let referenceWindow = try XCTUnwrap(source.streamWindow(id: stream.id))
