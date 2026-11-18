@@ -2392,6 +2392,8 @@ final class CanvasManager: ObservableObject {
             guard level.trims == .warning else { return }
             DispatchQueue.main.async {
                 guard let self else { return }
+                // A declined action is told, not paid for in history.
+                if level == .workRefused { self.raise(.workNeedsMoreMemory); return }
                 if self.history.trimUnderMemoryPressure() > 0 { self.refreshUndoRedoState() }
                 if level == .allocationRefused { self.raise(.outOfMemoryToDraw) }
             }

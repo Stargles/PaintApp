@@ -272,7 +272,11 @@ enum ImageWarp {
             guard let plan = RasterPlan(sourceSize: sourceSize, destination: rect,
                                         inverseTexelMap: inverseTexelMap) else { return false }
             if plan.workingBytes > maximumWorkingBytes {
-                guard max(rect.width, rect.height) > 1 else { return false }
+                guard max(rect.width, rect.height) > 1 else {
+                    // Even one texel of this window is over the allowance: nothing can be drawn.
+                    MemoryPressure.signal(.workRefused)
+                    return false
+                }
                 let vertical = rect.width >= rect.height
                 let first = floor((vertical ? rect.width : rect.height) / 2)
                 let a = CGRect(x: rect.minX, y: rect.minY,
@@ -296,7 +300,12 @@ enum ImageWarp {
     static func rasterImage(plan: RasterPlan, maximumWorkingBytes: Int = CompositorBudget.textureBudgetBytes,
                             source: (CGRect) -> CGImage?) -> CGImage? {
         guard plan.workingBytes <= maximumWorkingBytes,
-              CompositorBudget.hasHeadroom(for: plan.workingBytes) else { return nil }
+              CompositorBudget.hasHeadroom(for: plan.workingBytes) else {
+            // A warped or posed picture the budget would not let be made: the caller discards its
+            // partial picture and the artist's tap does nothing, so say so.
+            MemoryPressure.signal(.workRefused)
+            return nil
+        }
         let width = Int(plan.destinationRect.width), height = Int(plan.destinationRect.height)
         let bytes: [UInt8]
         if plan.sourceRect.isEmpty { bytes = [UInt8](repeating: 0, count: width * height * 4) }

@@ -54,6 +54,13 @@ enum MemoryPressure {
         /// by telling the artist, which is the one thing a warning does not do. The picture that was
         /// being made was not made, so a message is owed.
         case allocationRefused
+        /// **A piece of work the artist asked for was declined for want of memory** — a warp, a
+        /// pose bake or any other pass that stopped at `CompositorBudget`'s limits and returned nothing
+        /// (`ImageWarp.rasterImage`). Caches give back as for a warning, but undo history is left
+        /// alone: nothing was drawn badly, one action was refused, and the artist's earlier steps are
+        /// exactly what they need to keep. `CanvasManager` answers it with
+        /// `CanvasNotice.Kind.workNeedsMoreMemory`.
+        case workRefused
 
         /// How much to give back: a refusal is as short as a warning.
         var trims: Level { self == .background ? .background : .warning }
@@ -165,7 +172,7 @@ enum MemoryPressurePolicy {
     /// place and that place is here.
     static func budget(_ level: MemoryPressure.Level, normalBytes: Int) -> Int {
         switch level.trims {
-        case .warning, .allocationRefused: return max(0, normalBytes / 2)
+        case .warning, .allocationRefused, .workRefused: return max(0, normalBytes / 2)
         case .background: return 0
         }
     }
