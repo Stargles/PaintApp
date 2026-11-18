@@ -1572,23 +1572,35 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// records a `LocalEdit` and the base there is a derived frame with a version of its own, so
     /// `retire(upTo:)`'s arithmetic does not apply to it and the picture could never be released.
     private func holdUnlandedInk(from scratch: StrokeScratch?, at version: Int) {
-        // SCHEDULER rule 2: a replacement window's last render may still be running at pen-up. Hold
-        // the last finished picture now and swap the newest one in when it lands, rather than
-        // drawing it here on main (757 ms at 5000² x 5 layers in Debug). Only when nothing has
-        // landed yet is there no picture to hold, and the lift draws it.
-        if let scratch, scratch.hasPendingRender, let stale = scratch.renderedCelContent,
-           let canvas = vectorCanvas, canvas.version == version {
+        // SCHEDULER rule 2: a replacement window's last render may still be running at pen-up, and
+        // drawing it here on main cost 757 ms at 5000² x 5 layers in Debug. Hold the last finished
+        // picture now and swap the newest in when it lands; if none has landed yet, the base stays
+        // up and the picture is held when the first one does (unless a base has covered it by then).
+        if let scratch, scratch.hasPendingRender, let canvas = vectorCanvas, canvas.version == version {
             let revision = contentRevisions.committed(canvas)
-            let id = nextUnlandedInkID
-            unlandedInk.hold(.init(id: id, version: revision, windowRect: stale.window,
-                replacing: stale.footprint, contents: .image(stale.image)))
-            nextUnlandedInkID += 1
-            noteInk("held", revision: revision, detail: "cel content, newest render pending")
+            var heldID: Int?
+            if let stale = scratch.renderedCelContent {
+                heldID = nextUnlandedInkID
+                unlandedInk.hold(.init(id: nextUnlandedInkID, version: revision, windowRect: stale.window,
+                    replacing: stale.footprint, contents: .image(stale.image)))
+                nextUnlandedInkID += 1
+                noteInk("held", revision: revision, detail: "cel content, newest render pending")
+            } else {
+                noteInk("notHeld", revision: revision, detail: "first render pending; held on landing")
+            }
             scratch.onRenderLanded = { [weak self, scratch] in
                 scratch.onRenderLanded = nil
-                guard let self, let latest = scratch.renderedCelContent,
-                      self.unlandedInk.replace(id: id, window: latest.window,
-                                               footprint: latest.footprint, image: latest.image) else { return }
+                guard let self, let latest = scratch.renderedCelContent else { return }
+                if let heldID {
+                    guard self.unlandedInk.replace(id: heldID, window: latest.window,
+                                                   footprint: latest.footprint, image: latest.image) else { return }
+                } else {
+                    guard self.installedInkRevision < revision, self.vectorCanvas === canvas else { return }
+                    self.unlandedInk.hold(.init(id: self.nextUnlandedInkID, version: revision,
+                        windowRect: latest.window, replacing: latest.footprint, contents: .image(latest.image)))
+                    self.nextUnlandedInkID += 1
+                    self.noteInk("held", revision: revision, detail: "cel content, landed after lift")
+                }
                 self.showOverlays(self.scratch)
             }
             return
@@ -1642,7 +1654,10 @@ final class StrokeCanvasView: CanvasPlaneView {
     }
 
     /// `base` names the picture that took the ink over, for the recorder's handoff line.
+    private var installedInkRevision = -1
+
     private func retireUnlandedInk(coveredByRevision revision: Int?, base: String) {
+        if let revision { installedInkRevision = max(installedInkRevision, revision) }
         guard let revision, !unlandedInk.isEmpty else { return }
         let before = unlandedInk.pictures.count
         unlandedInk.retire(upTo: revision)
