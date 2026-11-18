@@ -1607,7 +1607,7 @@ final class BlendModesAndCompositorUITests: PaintUITestCase {
         XCTAssertTrue(offsetY.waitForExistence(timeout: 5))
         XCTAssertEqual(try XCTUnwrap(Double(try XCTUnwrap(offsetX.value as? String))), 3)
         XCTAssertEqual(try XCTUnwrap(Double(try XCTUnwrap(offsetY.value as? String))), 0)
-        offsetX.adjust(toNormalizedSliderPosition: 1)
+        adjustSlider(offsetX, to: 1, tolerance: 0)
         XCTAssertEqual(try XCTUnwrap(Double(try XCTUnwrap(offsetX.value as? String))), 20)
         XCTAssertEqual(try XCTUnwrap(Double(try XCTUnwrap(offsetY.value as? String))), 0)
 

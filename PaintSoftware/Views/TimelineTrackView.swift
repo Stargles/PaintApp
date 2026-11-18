@@ -1008,7 +1008,9 @@ struct TimelineTrackView: UIViewRepresentable {
             }
         }
 
-        private func updateGraphBandTouch(at point: CGPoint) {
+        /// - Parameter releasing: the finger is lifting, so the axis lock keeps what the last tick showed
+        ///   (`AxisLock.releasing`) rather than re-reading a count the lift itself is changing.
+        private func updateGraphBandTouch(at point: CGPoint, releasing: Bool = false) {
             guard var drag = graphBandDrag else { return }
             let raw = CGSize(width: point.x - drag.start.x, height: point.y - drag.start.y)
             let hadMoved = drag.progress.didMove
@@ -1017,9 +1019,15 @@ struct TimelineTrackView: UIViewRepresentable {
             // lock sits in front of everything below, which reads `translation` and nothing else, so
             // neither the moves nor the handle shaping know it is there. A marquee is not held: a
             // rubber band kept to an axis is a line.
-            let translation = drag.takesAxisLock
-                ? drag.axisLock.translation(for: raw, touchesDown: canvasManager.modifierHold.touchesDown(including: graphBandTouch))
-                : raw
+            let translation: CGSize
+            if !drag.takesAxisLock {
+                translation = raw
+            } else if releasing {
+                translation = drag.axisLock.releasing(raw)
+            } else {
+                translation = drag.axisLock.translation(
+                    for: raw, touchesDown: canvasManager.modifierHold.touchesDown(including: graphBandTouch))
+            }
 
             if !hadMoved {
                 // One bracket for the whole drag, opened here rather than at touch-down: this is the
@@ -1140,7 +1148,7 @@ struct TimelineTrackView: UIViewRepresentable {
         }
 
         private func finishGraphBandTouch(at point: CGPoint) {
-            updateGraphBandTouch(at: point)
+            updateGraphBandTouch(at: point, releasing: true)
             guard let drag = graphBandDrag else { return }
             let translation = CGSize(width: point.x - drag.start.x, height: point.y - drag.start.y)
             // **Closed here rather than in a `defer`, and that ordering is load-bearing.** A tap

@@ -1905,7 +1905,14 @@ class PaintUITestCase: XCTestCase {
                                    holdLandsAt: TimeInterval = 0.1, travel: TimeInterval = 1.0) throws {
         let begin = 0.3, steps = 20
         let screenToPortrait = SynthesizedTouch.screenToPortrait()
-        let origin = element.coordinate(withNormalizedOffset: from).screenPoint
+        // Logical window points, from the frame the geometry assertions read: `XCUICoordinate.screenPoint`
+        // is already the rotated portrait point once the device is landscape, which `screenToPortrait`
+        // would then rotate a second time (and `delta` is a logical offset either way).
+        let frame = element.frame
+        func logical(_ offset: CGVector) -> CGPoint {
+            logicalAppPoint(in: frame, normalizedOffset: offset)
+        }
+        let origin = logical(from)
         let dragging = try SynthesizedTouch.path(at: origin.applying(screenToPortrait), offset: 0)
         for step in 1...steps {
             let t = Double(step) / Double(steps)
@@ -1918,7 +1925,7 @@ class PaintUITestCase: XCTestCase {
             try SynthesizedTouch.synthesize([dragging], named: "one-finger drag")
             return
         }
-        let rest = element.coordinate(withNormalizedOffset: holding).screenPoint
+        let rest = logical(holding)
         let held = try SynthesizedTouch.path(at: rest.applying(screenToPortrait), offset: holdLandsAt)
         for step in 1...steps {
             let t = Double(step) / Double(steps)

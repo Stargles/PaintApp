@@ -60,6 +60,19 @@ struct AxisLock {
         joinedTouches = JoinedTouches(baseline: touchesDown)
     }
 
+    /// **The translation the drag's last tick showed, for the finger's own `raw` at its release** — the
+    /// axis as it stands, with no count read. A finger lifting is not the drag going somewhere: the
+    /// release tick lands the key where the artist last saw it, so a node held to an axis stays on it
+    /// whichever of the two fingers leaves the glass first (reading the count there would see the held
+    /// finger gone and throw the key to the diagonal the instant it was let go).
+    func releasing(_ raw: CGSize) -> CGSize {
+        switch axis {
+        case .time: return CGSize(width: raw.width, height: 0)
+        case .value: return CGSize(width: 0, height: raw.height)
+        case nil: return raw
+        }
+    }
+
     /// The translation the drag should act on for the finger's own `raw`, with `touchesDown` touches
     /// down now. `raw` comes back untouched until a touch has joined and the drag has a direction.
     mutating func translation(for raw: CGSize, touchesDown: Int) -> CGSize {

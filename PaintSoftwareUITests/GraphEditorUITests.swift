@@ -1147,7 +1147,12 @@ final class GraphEditorFingerUITests: PaintUITestCase {
     ///    finger's whole travel, and the band must come out with the keys it went in with.
     func testASecondFingerHeldBesideAKeyDragKeepsItToOneAxis() throws {
         let app = XCUIApplication()
-        XCTAssertTrue(launchIntoEditor(app))
+        // The owner's landscape window: upright, the 9th-generation iPad's top toolbar has no empty
+        // stretch wide enough to rest a finger in (its widest gap is 23 pt), and landscape is how the
+        // owner draws.
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        XCTAssertEqual(app.windows.firstMatch.frame.size, CGSize(width: 1080, height: 810),
+                       "PREMISE: the held-finger drag is driven at the owner's landscape size")
         let authored = try authorAnAnimatedBrightnessCurve(app, from: 0, to: 6)
 
         app.buttons["timeline.graphEditorButton"].tap()
@@ -1165,10 +1170,11 @@ final class GraphEditorFingerUITests: PaintUITestCase {
         }
         let ppf = TimelineKeyMarkers.basePixelsPerFrame
         let height = band.frame.height
-        let origin = band.coordinate(withNormalizedOffset: .zero)
-        let key = origin.withOffset(CGVector(
-            dx: TimelineGraphBand.x(ofFrame: 6, pixelsPerFrame: ppf),
-            dy: TimelineGraphBand.y(ofValue: authored.end, in: 0...2, bandHeight: height))).screenPoint
+        // Window points read from the band's own frame: `XCUICoordinate.screenPoint` is the rotated
+        // portrait point once the device is landscape, and `normalized` wants the window's.
+        let bandOrigin = band.frame.origin
+        let key = CGPoint(x: bandOrigin.x + TimelineGraphBand.x(ofFrame: 6, pixelsPerFrame: ppf),
+                          y: bandOrigin.y + TimelineGraphBand.y(ofValue: authored.end, in: 0...2, bandHeight: height))
         // Towards the middle of the band, wherever the key sits, so a value drag has room.
         let towardsMiddle: CGFloat = authored.end > 1 ? 1 : -1
 
@@ -1201,9 +1207,8 @@ final class GraphEditorFingerUITests: PaintUITestCase {
 
         // 3. Held to value by a finger resting on the band, landing mid-drag — on the curve itself, two
         // frames in, where a finger that lifted as a tap would add a key.
-        let onTheCurve = origin.withOffset(CGVector(
-            dx: TimelineGraphBand.x(ofFrame: 2, pixelsPerFrame: ppf),
-            dy: TimelineGraphBand.y(ofValue: authored.start, in: 0...2, bandHeight: height))).screenPoint
+        let onTheCurve = CGPoint(x: bandOrigin.x + TimelineGraphBand.x(ofFrame: 2, pixelsPerFrame: ppf),
+                                 y: bandOrigin.y + TimelineGraphBand.y(ofValue: authored.start, in: 0...2, bandHeight: height))
         try drag(by: CGVector(dx: -ppf, dy: 50 * towardsMiddle), holding: onTheCurve, landsAt: 0.8)
         let heldValue = try XCTUnwrap(sliderBrightness(app))
         XCTAssertEqual(band.value as? String, start,

@@ -68,6 +68,20 @@ final class AxisLockLogicTests: XCTestCase {
         XCTAssertEqual(lock.axis, .value)
     }
 
+    /// **The release tick keeps the axis the last tick showed.** The held finger lifting a moment before
+    /// the dragging one must not throw the node to the diagonal as it is let go — and with no axis read
+    /// the release is the finger's own.
+    func testReleasingKeepsTheAxisTheLastTickShowedWhateverTheCountNow() {
+        var held = AxisLock(touchesDown: 1)
+        XCTAssertEqual(held.translation(for: size(40, 20), touchesDown: 2), size(40, 0))
+        XCTAssertEqual(held.releasing(size(42, 25)), size(42, 0), "the hold lifted first: still on its axis")
+        XCTAssertEqual(held.axis, .time, "releasing reads the lock and changes nothing")
+        var vertical = AxisLock(touchesDown: 1)
+        XCTAssertEqual(vertical.translation(for: size(10, -60), touchesDown: 2), size(0, -60))
+        XCTAssertEqual(vertical.releasing(size(12, -64)), size(0, -64))
+        XCTAssertEqual(AxisLock(touchesDown: 1).releasing(size(42, 25)), size(42, 25), "no lock, no change")
+    }
+
     /// **A touch down before the drag moves has no direction to read yet**, so the drag is free until
     /// it travels `decisiveTravel` — and is then held to the way it went, not to its first wobble.
     func testATouchDownFirstWaitsForTheDragToHaveADirection() {
