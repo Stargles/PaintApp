@@ -88,10 +88,6 @@ could not be verified as open or closed; verify against `main` and `git log`, th
 - [ ] **Retire the inline legacy migrations** (compositor Input A/B slot ranking; pre-group-property
   marker) through the one-shot package repair, preserving Projects/Backups/Trash and order, then delete
   the decoder branches. No new permissive decoder route. (Status unclear — check.)
-- [ ] **Fractional projective Parallax placement.** Owner ruled 2026-11-15: *"no scenes need to be
-  preserved"* — implement Fit-safe placement in the shared Parallax math using the authored rest box, no
-  compatibility flag, no new persisted state, no interpolation overhaul (400×200 and 600×200
-  vanishing-line cases). (Status unclear — check; Perspective Fit was reported done 2026-11-16.)
 - [ ] **Bound stream timing storage between displayed pictures:** keep only count, total and max in the
   existing measurement owner, preserving cadence and log output. (Status unclear — check.)
 - [ ] **Smaller audit findings from October 29 (status unclear — check each against `main`):** shape
