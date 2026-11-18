@@ -31,7 +31,7 @@ From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
    read counts only), and the owner's 2-minute check on the iPad: draw, erase a lot, Undo, pan, change
    frames, play, fill. Pause new features until the mixed-picture fix is installed.
 5. **Scheduler (owner said go, 2026-11-18):** after this install, stage 2 = an Opus design page reviewed before code, then the core + R1 migration; stage 3 = one memory budget + a reuse pool for canvas-sized pictures; then stages 4–5. Usage-aware: clear context between stages,
-   who may get a larger plan first. Every change must keep its rules.
+   since a fresh context is cheaper than a long one. Every change must keep its rules.
 
 ## Sign-off — November 17, 2026, Toronto
 
