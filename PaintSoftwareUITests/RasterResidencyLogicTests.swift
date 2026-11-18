@@ -2442,10 +2442,19 @@ extension RasterResidencyLogicTests {
         try XCTUnwrap(CanvasFixture.solidImage(.red, rect: CGRect(origin: .zero, size: size), size: size).pngData()).write(to: url)
         let owner = RasterResidency(budgetBytes: 512 * 256 * 4 * 8, hasHeadroom: { _ in true })
         let source = RasterSource.backed(by: try ProjectStore.RasterBacking.protect(url, using: owner).get(), using: owner)
+        // Unproven blankness: the ordinary decode is the route, because it is what proves (and heals)
+        // a legacy package's transparent PNG.
+        _ = try source.thumbnailImage(size: CGSize(width: 64, height: 32), format: PixelOps.transparentFormat()).get()
+        XCTAssertFalse(source.isCertainlyTransparent)
+        XCTAssertEqual(owner.usage.allocations, 1, "PREMISE: the first thumbnail of an unproven file decodes it once")
+        XCTAssertTrue(source.releaseResidentPixels())
+        let before = owner.usage
         let thumbnail = try source.thumbnailImage(size: CGSize(width: 64, height: 32),
                                                   format: PixelOps.transparentFormat()).get()
         try assertSmallRed(thumbnail)
-        XCTAssertEqual(owner.usage.allocations, 0, "ImageIO downsamples from the file; no pixel buffer is admitted")
-        XCTAssertEqual(owner.usage.highWaterBytes, 0)
+        XCTAssertEqual(owner.usage.allocations, before.allocations,
+                       "ImageIO downsamples from the file; no pixel buffer is admitted")
+        XCTAssertEqual(owner.usage.pixelBytes, 0)
+        XCTAssertEqual(owner.usage.highWaterBytes, before.highWaterBytes)
     }
 }

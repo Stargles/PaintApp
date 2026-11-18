@@ -197,15 +197,20 @@ final class RasterSource: RasterResidencyCandidate {
 
     /// **A thumbnail of this version that never makes a canvas-sized picture resident.** Pixels
     /// already resident are drawn as they are (an alias, nothing new); a source that is only a file
-    /// is downsampled from it (`RasterBacking.thumbnail`) rather than decoded whole into
+    /// whose blankness is already known is downsampled from it (`RasterBacking.thumbnail`) rather than decoded whole into
     /// `image`, where it would sit charged against the residency for as long as it lasted.
     func thumbnailImage(size: CGSize, format: UIGraphicsImageRendererFormat)
         -> Result<UIImage, RasterResidency.Failure> {
         lock.lock()
         let isResident = image != nil || lease != nil || loading != nil
         let backing = self.backing
+        // Whether this version's blankness is already known. **A decode of an unproven source is
+        // what heals a legacy package's transparent PNG** (`isCertainlyTransparent` is set by it, and
+        // the cel is then dropped on load); a downsample from the file cannot prove it, so until it
+        // is proven the ordinary decode stays the thumbnail's route.
+        let blankness = transparencyProven
         lock.unlock()
-        if !isResident, let backing {
+        if !isResident, blankness != nil, let backing {
             return backing.thumbnail(fitting: size, format: format, using: residency, excluding: [residencyID])
         }
         return resolveImage().map { full in
