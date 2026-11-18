@@ -2456,12 +2456,16 @@ final class SandwichCompositingUITests: PaintUITestCase {
 
         dragRow(layerCell(app, layerIndex: 0), onto: folderCell(app, named: "Mix 1"), dropDY: 0.5)
 
-        XCTAssertEqual(rowFolder(app, layerIndex: 0), "Mix 1",
+        // A dropped layer goes to the folder's place at the top of the stack (as in
+        // `testDroppingLayerOntoFolderMovesItInside`), so the layer that was index 0 is now index 1
+        // and the other drawn layer has dropped to index 0, still outside.
+        XCTAssertEqual(rowFolder(app, layerIndex: 1), "Mix 1",
                        "A node takes a drop like any other folder — that is the whole point of storing it as one")
-        XCTAssertEqual(app.otherElements["layerPanel.row.0.compositor"].value as? String, "input,0",
+        XCTAssertEqual(rowFolder(app, layerIndex: 0), "", "The layer that was not dropped stays outside the node")
+        XCTAssertEqual(app.otherElements["layerPanel.row.1.compositor"].value as? String, "input,0",
                        "And the row says which operand it is, which the named slot folders used to carry")
 
-        dragRow(layerCell(app, layerIndex: 1), onto: folderCell(app, named: "Mix 1"), dropDY: 0.5)
+        dragRow(layerCell(app, layerIndex: 0), onto: folderCell(app, named: "Mix 1"), dropDY: 0.5)
         XCTAssertEqual(rowFolder(app, layerIndex: 1), "Mix 1", "The second drawn layer fills the Mix")
         XCTAssertEqual(app.otherElements["layerPanel.row.1.compositor"].value as? String, "input,1")
         XCTAssertEqual(app.otherElements["layerPanel.row.0.compositor"].value as? String, "input,0")

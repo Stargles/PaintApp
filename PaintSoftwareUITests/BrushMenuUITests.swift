@@ -263,7 +263,10 @@ final class BrushMenuUITests: PaintUITestCase {
         cancel.tap()
     }
 
-    /// Root stages photo-tip-vertical-bar-40x200.png as the newest Photos item before this method.
+    /// **Needs the simulator's Photos library staged first**: `tools/stage-photo-tip.sh <udid>` adds
+    /// photo-tip-vertical-bar-40x200.png as the newest Photos item. Without it the picker's first tile is
+    /// one of the simulator's stock photos and the drawn mark is that photo's shape, not a tall bar —
+    /// MEASURED: the stock tile read 184 wide by 119 tall, which fails the tall-narrow assertion below.
     /// Selecting the same real picker cell twice must make two selected presets and the same tip.
     func testAColdPhotoTipImportAndSamePhotoReimportSelectAndDrawTheirVerticalTip() throws {
         let app = XCUIApplication()
