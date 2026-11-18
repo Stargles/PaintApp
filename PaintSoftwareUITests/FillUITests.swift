@@ -329,11 +329,17 @@ final class FillContainmentUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
-        // Draw lineart on the active top layer ("Layer 2").
-        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.3))
-        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.3), to: CGVector(dx: 0.7, dy: 0.7))
-        drawLine(on: canvas, from: CGVector(dx: 0.7, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.7))
-        drawLine(on: canvas, from: CGVector(dx: 0.3, dy: 0.7), to: CGVector(dx: 0.3, dy: 0.3))
+        // Draw lineart on the active top layer ("Layer 2"). The square is placed on the part of the paper
+        // the timeline panel leaves uncovered: on a portrait iPad the panel stands over the host's lower
+        // third, and a bottom edge drawn there is a scrub of the timeline, not ink — which left the square
+        // open and the fill, correctly, flooding out of it.
+        let visible = visiblePaperRect(app, in: canvas)
+        func at(_ x: Double, _ y: Double) -> CGVector { onHost(visible, x, y) }
+        let square = (min: 0.25, max: 0.75)
+        drawLine(on: canvas, from: at(square.min, square.min), to: at(square.max, square.min))
+        drawLine(on: canvas, from: at(square.max, square.min), to: at(square.max, square.max))
+        drawLine(on: canvas, from: at(square.max, square.max), to: at(square.min, square.max))
+        drawLine(on: canvas, from: at(square.min, square.max), to: at(square.min, square.min))
 
         // Switch the active (drawing/fill destination) layer back to the blank bottom layer.
         layersButton.tap()
@@ -349,9 +355,10 @@ final class FillContainmentUITests: PaintUITestCase {
         XCTAssertTrue(fillButton.waitForExistence(timeout: 5))
         fillButton.tap()
 
-        canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let centre = at(0.5, 0.5)
+        canvas.coordinate(withNormalizedOffset: centre).tap()
 
-        XCTAssertTrue(waitUntilFilled(canvas, dx: 0.5, dy: 0.5), "Fill should land on the blank active layer, bounded by the lineart on the layer above (a default fill reference)")
+        XCTAssertTrue(waitUntilFilled(canvas, dx: centre.dx, dy: centre.dy), "Fill should land on the blank active layer, bounded by the lineart on the layer above (a default fill reference)")
 
         // A point clearly outside the square (but still on real canvas content, not the view's own
         // letterbox margin — see `safeOutsideCornerPoint`'s doc comment) should stay untouched. If the
