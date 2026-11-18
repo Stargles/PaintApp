@@ -575,10 +575,12 @@ final class OptionsPanelUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let row = rowAboveTheDock(canvas)
-        let colorButton = app.buttons["toolbar.colorButton"]
-        colorButton.tap()
+        // Five lines 0.006 of the host apart are one solid patch only if the brush is wider than that
+        // (4.7 pt on the owner's 810 pt window, 9.5 canvas pixels here): the default is not.
+        setBrushSize(app, normalized: CGFloat(24) / 199)
+        openColorPanel(app)
         setHexField(app, app.textFields["colorPanel.hexField"], to: "6A6A6A")
-        colorButton.tap()
+        closeColorPanel(app)
         for offset in [-0.012, -0.006, 0, 0.006, 0.012] {
             drawLine(on: canvas, from: CGVector(dx: 0.2, dy: row + offset),
                      to: CGVector(dx: 0.8, dy: row + offset))
@@ -648,10 +650,13 @@ final class OptionsPanelUITests: PaintUITestCase {
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let row = rowAboveTheDock(canvas)
+        // Five lines 0.006 of the host apart are one solid patch only if the brush is wider than that
+        // (4.7 pt on the owner's 810 pt window, 9.5 canvas pixels here): the default is not.
+        setBrushSize(app, normalized: CGFloat(24) / 199)
         for (hex, start, end) in [("333333", 0.2, 0.45), ("CCCCCC", 0.55, 0.8)] {
-            app.buttons["toolbar.colorButton"].tap()
+            openColorPanel(app)
             setHexField(app, app.textFields["colorPanel.hexField"], to: hex)
-            app.buttons["toolbar.colorButton"].tap()
+            closeColorPanel(app)
             for offset in [-0.012, -0.006, 0, 0.006, 0.012] {
                 drawLine(on: canvas, from: CGVector(dx: start, dy: row + offset),
                          to: CGVector(dx: end, dy: row + offset))
