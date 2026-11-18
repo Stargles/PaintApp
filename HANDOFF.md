@@ -26,6 +26,10 @@ From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
 - **Device stress on the owner's iPad passed** — `PaintSoftwareUITests/DeviceStressUITests.swift`,
   opt-in with `PAINTAPP_DEVICE_STRESS=1`, creates and trashes its own `ZZ-stress-*` folder and
   scene, never resets settings or libraries. Log: `~/PaintWork/nov17-device-stress/device-run3.log`.
+- **Installed on the iPad 2026-11-17 (Toronto, evening)**: signed Release `9792e799` (binary UUID
+  `0A93A076-21CE-329D-88CE-1FFC3BE90D1B`, profile through Nov 20 07:09 UTC) from
+  `~/PaintWork/crash-20261111/device-fresh-9792e799-Release/`; `resign_state` updated. The integrated
+  `tmp/*` branches are deleted and archived in `~/PaintWork/archive/refs-2026-11-17.bundle`.
 - **Lessons:** the Release optimiser may free a never-read `var` at its last use — hold test pins
   with `withExtendedLifetime`; on the real iPad the number pad covers the size fields, so a device
   harness hides the keyboard between fields; "Timed out while enabling automation mode" is the lock
