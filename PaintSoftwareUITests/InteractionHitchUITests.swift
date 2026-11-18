@@ -146,6 +146,87 @@ final class InteractionHitchUITests: PaintUITestCase {
                                     + report.joined(separator: "\n"))
     }
 
+    /// **A frame step never shows a mix of two frames** (owner, 2026-11-18: parts of the layer being
+    /// drawn on showed over the other layers for up to a second). Two layers, two frames, a colour of
+    /// its own on each layer of each frame: green and yellow on the bottom layer's frames A and B, red
+    /// and blue on the top (active) layer's. Stepping A -> B -> A with the layer render slowed to the
+    /// iPad's pace, every screenshot must be wholly A or wholly B.
+    func testSteppingFramesNeverShowsAMixOfTwoFrames() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-uiTestTextureBudgetBytes", "201326592", "-uiTestSlowVectorRenderMillis", "700"]
+        XCTAssertTrue(launchIntoEditor(app, size: canvasSize, orientationBeforeCreatingCanvas: .landscapeLeft))
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let onion = app.buttons["timeline.onionSkinToggle"]
+        if onion.waitForExistence(timeout: 5), onion.value as? String == "on" { onion.tap() }
+        setBrushSize(app, normalized: 0.3)
+        let visible = visiblePaperRect(app, in: canvas, canvasSize: canvasSize)
+        func at(_ dx: Double, _ dy: Double) -> CGVector { onHost(visible, dx, dy) }
+        let host = canvas.frame
+        func pt(_ x: Double, _ y: Double) -> CGPoint {
+            let v = at(x, y)
+            return CGPoint(x: host.minX + host.width * v.dx, y: host.minY + host.height * v.dy)
+        }
+        func line(_ hex: String, _ y: Double) {
+            setBrushColor(app, hex: hex)
+            drawLine(on: canvas, from: at(0.1, y), to: at(0.9, y))
+        }
+        let toStart = app.buttons["timeline.toStartButton"]
+        let forward = app.buttons["timeline.stepForwardButton"]
+        let back = app.buttons["timeline.stepBackButton"]
+        // Bottom layer: green on frame A, then cut at frame 2 and yellow on B.
+        line("00C000", 0.25)
+        splitDrawing(app, layerIndex: 0, celIndex: 0, atFrame: 1)
+        line("FFE000", 0.40)
+        // Top layer: blue on B (the playhead is on frame 2), red on A.
+        addVectorLayer(app)
+        splitDrawing(app, layerIndex: 1, celIndex: 0, atFrame: 1)
+        line("0000FF", 0.75)
+        toStart.tap()
+        line("FF0000", 0.60)
+
+        let probes = (green: pt(0.5, 0.25), yellow: pt(0.5, 0.40), red: pt(0.5, 0.60), blue: pt(0.5, 0.75))
+        func shot() -> ScreenshotPixels? { ScreenshotPixels(XCUIScreen.main.screenshot().image) }
+        func near(_ p: ScreenshotPixels, _ at: CGPoint, _ rgb: (Int, Int, Int)) -> Bool {
+            guard let c = p.pixel(at: at) else { return false }
+            return abs(Int(c.r) - rgb.0) + abs(Int(c.g) - rgb.1) + abs(Int(c.b) - rgb.2) < 120
+        }
+        /// "A", "B", or what is on screen when the pair disagrees.
+        func reading(_ p: ScreenshotPixels) -> String {
+            let top = near(p, probes.blue, (0, 0, 255)) ? "B" : near(p, probes.red, (255, 0, 0)) ? "A" : "-"
+            let bottom = near(p, probes.yellow, (255, 224, 0)) ? "B" : near(p, probes.green, (0, 192, 0)) ? "A" : "-"
+            return top + bottom
+        }
+        func settle(_ want: String) {
+            let end = Date().addingTimeInterval(8)
+            while Date() < end { if let p = shot(), reading(p) == want { return }; Thread.sleep(forTimeInterval: 0.2) }
+        }
+        settle("AA")
+        guard let rest = shot() else { return XCTFail("no screenshot") }
+        attachScreenshot(app, "frame-A-at-rest")
+        XCTAssertEqual(reading(rest), "AA", "PREMISE: frame A is red over green; probes \(probes)")
+        var report: [String] = []
+        var mixes = 0
+        for (index, step) in [forward, back, forward, back].enumerated() {
+            let want = index % 2 == 0 ? "BB" : "AA"
+            step.tap()
+            let tapped = Date()
+            var seen: [String] = []
+            while Date().timeIntervalSince(tapped) < 1.8 {
+                guard let p = shot() else { continue }
+                let r = reading(p)
+                seen.append(String(format: "%.2f:%@", Date().timeIntervalSince(tapped), r))
+                if r != "AA" && r != "BB" { mixes += 1 }
+            }
+            report.append("step \(index + 1) -> \(want): " + seen.joined(separator: " "))
+            if index == 0 { attachScreenshot(app, "frame-B-after-step") }
+        }
+        print("FRAMESTEP " + report.joined(separator: "\nFRAMESTEP "))
+        XCTAssertEqual(mixes, 0, "a frame step showed one frame's active layer over the other frame's layers:\n"
+                       + report.joined(separator: "\n"))
+    }
+
     /// **What the screen shows live stays until the base that matches it is up** — quick strokes,
     /// then one eraser pass across all of them, at the owner's shape with the layer render slowed to
     /// the iPad's pace. Every screenshot from the first stroke to well after the erase is read; ink
