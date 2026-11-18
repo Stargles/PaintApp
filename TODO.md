@@ -38,6 +38,10 @@ could not be verified as open or closed; verify against `main` and `git log`, th
   live ink go before the paced base picture lands (`UnlandedInk` exists for exactly this handoff).
   Recording `recording-20261117-225331` (`~/PaintWork/nov17-lag-evidence/`) shows the strokes and
   rasterizes but the recorder does not log the live-ink → base-picture handoff — make it.
+  **Same family, erase (owner, Nov 17 late):** erasing a lot at once, the erased strokes briefly
+  reappear and then vanish — the old base picture shown again before the erased one lands. Recording
+  on the iPad (newest after 22:53). One fix: the live picture stays until the base that matches it is
+  on screen, for adds and removes alike.
 - [ ] **Canvas freeze still recurs.** Flight `flight-20261117-191152` (Test, 2048², same folder): the
   watchdog replaced a stranded `canvas.pan` found `.ended` with 0 touches on `CanvasPlaneView`;
   lifetime repairs now 24. In that flight a two-finger pan's touch was cancelled and began again
