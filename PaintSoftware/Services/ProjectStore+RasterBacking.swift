@@ -170,6 +170,44 @@ extension ProjectStore {
             }
         }
 
+        /// **This version's pixels at thumbnail size, without a canvas-sized bitmap being kept.**
+        /// A PNG backing is downsampled by ImageIO straight from the file, so no canvas-sized image is
+        /// ever decoded. A native backing has no scaled decode, so it is decoded into a lease that
+        /// lives only for the one draw — never stored on the source, which would hold it charged
+        /// against the residency until the next eviction pass.
+        func thumbnail(fitting size: CGSize, format: UIGraphicsImageRendererFormat,
+                       using residency: RasterResidency, excluding: Set<UUID>)
+            -> Result<UIImage, RasterResidency.Failure> {
+            switch payload {
+            case .png:
+                let longSide = max(size.width, size.height) * format.scale
+                let small: UIImage? = autoreleasepool {
+                    guard let source = CGImageSourceCreateWithURL(url as CFURL,
+                            [kCGImageSourceShouldCache: false] as CFDictionary),
+                          let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                            kCGImageSourceCreateThumbnailFromImageAlways: true,
+                            kCGImageSourceCreateThumbnailWithTransform: true,
+                            kCGImageSourceShouldCache: false,
+                            kCGImageSourceThumbnailMaxPixelSize: max(1, Int(longSide.rounded(.up)))] as CFDictionary)
+                    else { return nil }
+                    return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+                        UIImage(cgImage: cg).draw(in: CGRect(origin: .zero, size: size))
+                    }
+                }
+                return small.map { .success($0) } ?? .failure(.unreadableBacking)
+            case .native:
+                return decode(using: residency, excluding: excluding).flatMap { decoded in
+                    autoreleasepool {
+                        decoded.lease.image().map { image in
+                            UIGraphicsImageRenderer(size: size, format: format).image { _ in
+                                image.draw(in: CGRect(origin: .zero, size: size))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         private static func digest(_ bytes: UnsafeRawBufferPointer) -> Data {
             Data(SHA256.hash(data: Data(bytesNoCopy: UnsafeMutableRawPointer(mutating: bytes.baseAddress!),
                 count: bytes.count, deallocator: .none)))

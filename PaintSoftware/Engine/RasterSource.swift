@@ -195,6 +195,26 @@ final class RasterSource: RasterResidencyCandidate {
         return result
     }
 
+    /// **A thumbnail of this version that never makes a canvas-sized picture resident.** Pixels
+    /// already resident are drawn as they are (an alias, nothing new); a source that is only a file
+    /// is downsampled from it (`RasterBacking.thumbnail`) rather than decoded whole into
+    /// `image`, where it would sit charged against the residency for as long as it lasted.
+    func thumbnailImage(size: CGSize, format: UIGraphicsImageRendererFormat)
+        -> Result<UIImage, RasterResidency.Failure> {
+        lock.lock()
+        let isResident = image != nil || lease != nil || loading != nil
+        let backing = self.backing
+        lock.unlock()
+        if !isResident, let backing {
+            return backing.thumbnail(fitting: size, format: format, using: residency, excluding: [residencyID])
+        }
+        return resolveImage().map { full in
+            UIGraphicsImageRenderer(size: size, format: format).image { _ in
+                full.draw(in: CGRect(origin: .zero, size: size))
+            }
+        }
+    }
+
     /// A portable selected picture is a read, not a save checkpoint. Borrow the immutable native
     /// image and reserve the existing PNG encoder's workspace without changing its durable backing.
     /// Unlike prepareForSave, this completes on the caller's queue and schedules no package work.

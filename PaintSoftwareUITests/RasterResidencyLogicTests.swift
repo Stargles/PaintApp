@@ -2394,4 +2394,59 @@ extension RasterResidencyLogicTests {
             XCTAssertEqual(fixture.owner.usage.chargedBytes, 0)
         }
     }
+
+    // MARK: - Thumbnails are made at thumbnail size
+
+    /// The Nov 16 audit's item 7: a raster cel's thumbnail used to be a canvas-sized decode that the
+    /// source then kept (`self.image`), charged against the residency, drawn down afterwards. What is
+    /// asserted is the residency's own charge — a thumbnail of a cel that is only a file must leave
+    /// nothing canvas-sized resident — and the thumbnail's own backing bytes.
+    private func thumbnailFixture(_ owner: RasterResidency) throws -> (texture: RasterLayerTexture, size: CGSize) {
+        let size = CGSize(width: 512, height: 256)
+        let texture = try RasterLayerTexture.rendered(size: size, using: owner) { context in
+            context.setFillColor(UIColor.red.cgColor)
+            context.fill(CGRect(origin: .zero, size: size))
+            return true
+        }.get()
+        return (texture, size)
+    }
+
+    private func assertSmallRed(_ image: UIImage?, file: StaticString = #filePath, line: UInt = #line) throws {
+        let cg = try XCTUnwrap(image?.cgImage, file: file, line: line)
+        XCTAssertEqual(cg.width, 64, file: file, line: line)
+        XCTAssertEqual(cg.height, 32, file: file, line: line)
+        XCTAssertLessThanOrEqual(cg.bytesPerRow * cg.height, 64 * 32 * 4 + 4096,
+                                 "the thumbnail's own backing bytes are thumbnail-sized", file: file, line: line)
+        let bytes = try XCTUnwrap(CoreGraphicsCompositor.premultipliedBytes(cg, width: 64, height: 32))
+        XCTAssertEqual(Array(bytes.prefix(4)), [255, 0, 0, 255], file: file, line: line)
+    }
+
+    func testThumbnailOfANativeBackedCelLeavesNothingCanvasSizedResident() throws {
+        let canvas = 512 * 256 * 4
+        let owner = RasterResidency(budgetBytes: canvas * 8, hasHeadroom: { _ in true })
+        let (texture, size) = try thumbnailFixture(owner)
+        XCTAssertTrue(ProjectStore.serializingPackageMutation { texture.releaseResidentPixels() })
+        XCTAssertEqual(owner.usage.pixelBytes, 0, "PREMISE: the cel is now only a native file")
+        let thumbnail = ThumbnailRenderer.render(texture, canvasSize: size, thumbnailSize: CGSize(width: 64, height: 64))
+        try assertSmallRed(thumbnail)
+        XCTAssertEqual(owner.usage.pixelBytes, 0,
+                       "a thumbnail must not leave a canvas-sized decode resident on the cel")
+        XCTAssertEqual(owner.usage.registeredCandidateCount, 1)
+    }
+
+    func testThumbnailOfAPNGBackedCelDecodesNothingAtCanvasSize() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("raster-thumb-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let size = CGSize(width: 512, height: 256)
+        let url = root.appendingPathComponent("cel.png")
+        try XCTUnwrap(CanvasFixture.solidImage(.red, rect: CGRect(origin: .zero, size: size), size: size).pngData()).write(to: url)
+        let owner = RasterResidency(budgetBytes: 512 * 256 * 4 * 8, hasHeadroom: { _ in true })
+        let source = RasterSource.backed(by: try ProjectStore.RasterBacking.protect(url, using: owner).get(), using: owner)
+        let thumbnail = try source.thumbnailImage(size: CGSize(width: 64, height: 32),
+                                                  format: PixelOps.transparentFormat()).get()
+        try assertSmallRed(thumbnail)
+        XCTAssertEqual(owner.usage.allocations, 0, "ImageIO downsamples from the file; no pixel buffer is admitted")
+        XCTAssertEqual(owner.usage.highWaterBytes, 0)
+    }
 }
