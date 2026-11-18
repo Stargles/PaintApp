@@ -278,6 +278,7 @@ final class PlaybackTrace: @unchecked Sendable {
         lock.unlock()
         undoPicture = nil
         installObservers()
+        MainThreadStallSampler.shared.start()
         Self.isOn = true
     }
 
@@ -287,6 +288,7 @@ final class PlaybackTrace: @unchecked Sendable {
         guard Self.isOn else { return }
         Self.isOn = false
         removeObservers()
+        MainThreadStallSampler.shared.stop()
     }
 
     // MARK: - Recording
@@ -422,8 +424,10 @@ final class PlaybackTrace: @unchecked Sendable {
         let busy = CFRunLoopObserverCreateWithHandler(
             nil, CFRunLoopActivity.afterWaiting.rawValue, true, -2_000_000
         ) { [weak self] _, _ in
-            self?.busySince = CACurrentMediaTime()
+            let now = CACurrentMediaTime()
+            self?.busySince = now
             self?.busyCPUSince = Self.threadCPUSeconds()
+            MainThreadStallSampler.shared.passBegan(at: now)
         }
         // **First in the `beforeWaiting` order, so it marks where the sources stop and the
         // observers start.** Everything UIKit and SwiftUI do to lay out and draw a pass runs between
@@ -461,6 +465,7 @@ final class PlaybackTrace: @unchecked Sendable {
                 let cpu = Self.threadCPUSeconds() - (self.busyCPUSince ?? Self.threadCPUSeconds())
                 self.append(.mainBusy, start: since, end: now,
                             value: Int((cpu * 1_000_000).rounded()))
+                MainThreadStallSampler.shared.passEnded(at: now, cpu: cpu)
                 self.busySince = nil
                 self.busyCPUSince = nil
             }
@@ -609,7 +614,8 @@ final class PlaybackTrace: @unchecked Sendable {
     /// count is the operational form of *"the canvas is not showing the bake"* — a canvas that is
     /// engaged rasterizes nothing per flip (PERFORMANCE.md §16.2), so the count answers the question
     /// without the recorder needing a reference to `CanvasManager`, which by design it does not have.
-    func drainWindow() -> (phases: [PhaseSummary], ringHits: Int, ringMisses: Int, undoPictures: [UndoPicture]) {
+    func drainWindow() -> (phases: [PhaseSummary], ringHits: Int, ringMisses: Int, undoPictures: [UndoPicture],
+                           mainCpu: (totalMs: Double, longestPassMs: Double)) {
         lock.lock()
         let events = self.events
         let undoPictures = self.undoPictures
@@ -622,7 +628,15 @@ final class PlaybackTrace: @unchecked Sendable {
         for event in events where event.phase == .bakeRead {
             event.value == 1 ? (hits += 1) : (misses += 1)
         }
-        return (Self.summarize(events), hits, misses, undoPictures)
+        // **On a core, or waiting?** `mainBusy`'s value is the main thread's own CPU microseconds
+        // across the pass, so wall minus this is time it held the run loop without running — a lock,
+        // a page fault, a core it could not get. The longest pass's share is the line that tells a
+        // canvas-sized computation from a wait on background work.
+        let passes = events.filter { $0.phase == .mainBusy }
+        let cpuTotal = passes.reduce(0.0) { $0 + Double($1.value) / 1000 }
+        let longest = passes.max { ($0.end - $0.start) < ($1.end - $1.start) }
+        return (Self.summarize(events), hits, misses, undoPictures,
+                (cpuTotal, longest.map { Double($0.value) / 1000 } ?? 0))
     }
 
     /// One `PhaseSummary` per phase present in `events`, ordered by total time descending.

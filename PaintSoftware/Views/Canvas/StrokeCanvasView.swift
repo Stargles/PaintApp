@@ -292,7 +292,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                 pacedRender?.cancel()
                 pacedRender = nil
                 renderPacing.reset()
-                unlandedInk.removeAll()
+                dropUnlandedInk("a different canvas")
                 // What a derived picture contains is a version of the canvas it was derived from.
                 interpolationPresentation.invalidateCoverage()
                 // The ordering guard for an intermediate frame is about *this* canvas's counter.
@@ -336,7 +336,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         if imageView.image !== image { imageView.image = image }
         displayedRasterVersion = raster?.version ?? Self.nothingDisplayed
         baseDocumentVersion = Self.nothingDisplayed
-        unlandedInk.retire(upTo: contentRevisions.current)
+        retireUnlandedInk(coveredByRevision: contentRevisions.current, base: "raster picture")
         showOverlays(scratch)
     }
 
@@ -1126,7 +1126,7 @@ final class StrokeCanvasView: CanvasPlaneView {
             shownVectorVersion = vectorCanvas.version
             base = interpolationImage
             installedRevision = interpolationPresentation.coverage?.revision
-            if installedRevision == nil, heldEdit == nil { unlandedInk.removeAll() }
+            if installedRevision == nil, heldEdit == nil { dropUnlandedInk("derived base") }
         case .committedRender:
             // A single-cel To Cross cut has already changed the ordered document list. While its
             // bounded replacement window still covers every measured cut, that picture is the
@@ -1157,7 +1157,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                 // Nothing held can reach the screen either, and the pass that un-blanks the host
                 // repaints from the canvas — so the pictures would be bytes nobody can see, held
                 // against a base that is deliberately not being kept current.
-                unlandedInk.removeAll()
+                dropUnlandedInk("blanked by the composite")
                 showOverlays(plan.showsScratchLayer ? scratch : nil)
                 return false
             case .showNow(let version):
@@ -1195,7 +1195,8 @@ final class StrokeCanvasView: CanvasPlaneView {
         // **Before the base is installed and in the same main-thread turn**, so Core Animation
         // commits the new base and the removal of the ink it now contains together — otherwise the
         // artist sees one frame with the stroke drawn twice, once in each.
-        retireUnlandedInk(coveredByRevision: installedRevision)
+        retireUnlandedInk(coveredByRevision: installedRevision,
+                          base: renderedSynchronously ? "synchronous render" : "\(plan.base) memo")
         // Identity-checked because the committed render is memoized on the canvas's `version` and an
         // `.overlay` stroke does not touch the canvas until lift: every touch-move of a paint stroke
         // hands back the *same* image, and re-assigning it would put a Core Animation contents
@@ -1307,8 +1308,9 @@ final class StrokeCanvasView: CanvasPlaneView {
         // with the stroke drawn twice. Right for an intermediate frame too: it is a base rasterized
         // at `version`, so everything held up to `version` is in it and everything held after stays
         // drawn over it.
-        retireUnlandedInk(coveredByRevision: coverage)
+        retireUnlandedInk(coveredByRevision: coverage, base: landing == .show ? "render" : "intermediate render")
         if imageView.image !== image { imageView.image = image }
+        noteInk("base", revision: coverage, detail: landing == .show ? "render landed" : "intermediate render landed")
         baseDocumentVersion = revision.document
         shownVectorVersion = revision.display
         // **Recorded as displayed only when it is the canvas's own version.** An intermediate frame
@@ -1363,7 +1365,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         // with the lifted piece still in it, under a float showing the same piece again.
         guard refreshDisplayIfStale(waitingForTheRender: true) else { return false }
         // The current hole and the isolated picture are both ready before held ink is retired.
-        unlandedInk.removeAll()
+        dropUnlandedInk("move float latched")
         _ = showHeldInk(covering: [])
         vectorFloatBase = base
         floatView.transform = .identity
@@ -1570,15 +1572,23 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// records a `LocalEdit` and the base there is a derived frame with a version of its own, so
     /// `retire(upTo:)`'s arithmetic does not apply to it and the picture could never be released.
     private func holdUnlandedInk(from scratch: StrokeScratch?, at version: Int) {
-        guard let scratch, !scratch.windowRect.isNull else { return }
+        guard let scratch, !scratch.windowRect.isNull else {
+            noteInk("notHeld", revision: contentRevisions.current, detail: "no scratch window")
+            return
+        }
         if let shown = scratch.renderedCelContent, let canvas = vectorCanvas, canvas.version == version {
             let revision = contentRevisions.committed(canvas)
             unlandedInk.hold(.init(id: nextUnlandedInkID, version: revision, windowRect: shown.window,
                 replacing: shown.footprint, contents: .image(shown.image)))
             nextUnlandedInkID += 1
+            noteInk("held", revision: revision, detail: "cel content")
             return
         }
-        guard scratch.celContent == nil, let image = scratch.image else { return }
+        guard scratch.celContent == nil, let image = scratch.image else {
+            noteInk("notHeld", revision: contentRevisions.current,
+                    detail: scratch.celContent == nil ? "no scratch image" : "cel content not rendered")
+            return
+        }
         // Exactly the three fields `showOverlays` reads off a live scratch, so the picture does
         // not change when it changes hands.
         let alpha = scratch.replacesBase ? 1 : scratch.opacity
@@ -1597,17 +1607,38 @@ final class StrokeCanvasView: CanvasPlaneView {
 
     private func holdUnlandedPicture(_ contents: UnlandedInk.Picture.Contents, rect: CGRect, alpha: CGFloat,
                                     replacesBase: Bool, at version: Int) {
-        guard let canvas = vectorCanvas, canvas.version == version else { return }
+        guard let canvas = vectorCanvas, canvas.version == version else {
+            noteInk("notHeld", revision: contentRevisions.current, detail: "canvas moved past the stroke")
+            return
+        }
         let revision = contentRevisions.committed(canvas)
         unlandedInk.hold(UnlandedInk.Picture(id: nextUnlandedInkID, version: revision,
                                              windowRect: rect, alpha: alpha,
                                              replacesBase: replacesBase, contents: contents))
         nextUnlandedInkID += 1
+        noteInk("held", revision: revision, detail: "picture")
     }
 
-    private func retireUnlandedInk(coveredByRevision revision: Int?) {
+    /// `base` names the picture that took the ink over, for the recorder's handoff line.
+    private func retireUnlandedInk(coveredByRevision revision: Int?, base: String) {
         guard let revision, !unlandedInk.isEmpty else { return }
+        let before = unlandedInk.pictures.count
         unlandedInk.retire(upTo: revision)
+        if unlandedInk.pictures.count != before { noteInk("retired", revision: revision, detail: base) }
+    }
+
+    /// Drops every held picture — `UnlandedInk.removeAll`'s four cases — and says which one.
+    private func dropUnlandedInk(_ reason: String) {
+        guard !unlandedInk.isEmpty else { return }
+        unlandedInk.removeAll()
+        noteInk("dropped", revision: contentRevisions.current, detail: reason)
+    }
+
+    /// The recorder's line for one step of the lift-to-base handoff (`ActionRecorder.inkHandoff`).
+    private func noteInk(_ step: String, revision: Int, detail: String) {
+        ActionRecorder.ifRecording {
+            $0.inkHandoff(step, layer: layerID, revision: revision, held: unlandedInk.pictures.count, detail: detail)
+        }
     }
 
     /// Rebuilds views only when pictures change; a moved live replacement updates their clipping

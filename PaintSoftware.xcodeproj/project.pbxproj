@@ -497,6 +497,7 @@
 		9AC76803718DE42461485902 /* TextInkFootprintLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AC76803718DE42461485901 /* TextInkFootprintLogicTests.swift */; };
 		C8714C30085243FA8631F602 /* TextUndoFootprintUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8714C30085243FA8631F601 /* TextUndoFootprintUITests.swift */; };
 		B4E50890A2085E44C76DF22E /* RapidUndoSurfaceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6594C719B4E50890A2085E44 /* RapidUndoSurfaceUITests.swift */; };
+		3DCC23E1289D7D9646548D5B /* InteractionHitchUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4487FF113DCC23E1289D7D96 /* InteractionHitchUITests.swift */; };
 		A82AD247ED536B15643F40E7 /* FillRefusalNoticeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A72AD247ED536B15643F40E7 /* FillRefusalNoticeUITests.swift */; };
 		2253CEA332FA91C58675AC61 /* RapidFillSurfaceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE52DD2E82A70CD02D5288B7 /* RapidFillSurfaceUITests.swift */; };
 		3310AE371A08180AF608B25A /* DeviceStressUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 180AF608B25A9BB58D2C5630 /* DeviceStressUITests.swift */; };
@@ -539,6 +540,8 @@
 		F1A7A736F668620CDC16585E /* ChunkedCompositeMetalLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98FF1F362304A853093BCCC3 /* ChunkedCompositeMetalLogicTests.swift */; };
 		3BB38045479180895C907A33 /* PaintSoftware/Engine/FrameBakeKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A608416FBC72075D16FF806 /* PaintSoftware/Engine/FrameBakeKey.swift */; };
 		0AC1B5131E56217809A16C46 /* PaintSoftware/Debug/PlaybackTrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97AB84194A4246E335EBFDE0 /* PaintSoftware/Debug/PlaybackTrace.swift */; };
+		3A97F072E73CFDFA29CEA695 /* PaintSoftware/Engine/InteractionGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85BD29D23A97F072E73CFDFA /* PaintSoftware/Engine/InteractionGate.swift */; };
+		6919C139DB89EBE626CA266F /* PaintSoftware/Debug/MainThreadStallSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A2F8A1D6919C139DB89EBE6 /* PaintSoftware/Debug/MainThreadStallSampler.swift */; };
 		9F3524FADD635E4C6590A1C3 /* PaintSoftwareUITests/FlightRecorderUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8C19BFB7D1738C256175953 /* PaintSoftwareUITests/FlightRecorderUITests.swift */; };
 		11E1D249BCFC438A51CEAEC3 /* PaintSoftwareUITests/FlightRecorderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C545E79ABFBE13BE7006F17B /* PaintSoftwareUITests/FlightRecorderLogicTests.swift */; };
 		159091AE940B388FEAA2D077 /* PaintSoftware/Debug/FlightRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F320308DB08FAA6B869C70F /* PaintSoftware/Debug/FlightRecorder.swift */; };
@@ -1175,6 +1178,7 @@
 		9AC76803718DE42461485901 /* TextInkFootprintLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextInkFootprintLogicTests.swift; sourceTree = "<group>"; };
 		C8714C30085243FA8631F601 /* TextUndoFootprintUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextUndoFootprintUITests.swift; sourceTree = "<group>"; };
 		6594C719B4E50890A2085E44 /* RapidUndoSurfaceUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RapidUndoSurfaceUITests.swift; sourceTree = "<group>"; };
+		4487FF113DCC23E1289D7D96 /* InteractionHitchUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InteractionHitchUITests.swift; sourceTree = "<group>"; };
 		A72AD247ED536B15643F40E7 /* FillRefusalNoticeUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FillRefusalNoticeUITests.swift; sourceTree = "<group>"; };
 		180AF608B25A9BB58D2C5630 /* DeviceStressUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DeviceStressUITests.swift; sourceTree = "<group>"; };
 		DE52DD2E82A70CD02D5288B7 /* RapidFillSurfaceUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RapidFillSurfaceUITests.swift; sourceTree = "<group>"; };
@@ -1217,6 +1221,8 @@
 		98FF1F362304A853093BCCC3 /* ChunkedCompositeMetalLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChunkedCompositeMetalLogicTests.swift; sourceTree = "<group>"; };
 		3A608416FBC72075D16FF806 /* PaintSoftware/Engine/FrameBakeKey.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameBakeKey.swift; sourceTree = "<group>"; };
 		97AB84194A4246E335EBFDE0 /* PaintSoftware/Debug/PlaybackTrace.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Debug/PlaybackTrace.swift; sourceTree = "<group>"; };
+		85BD29D23A97F072E73CFDFA /* PaintSoftware/Engine/InteractionGate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/InteractionGate.swift; sourceTree = "<group>"; };
+		4A2F8A1D6919C139DB89EBE6 /* PaintSoftware/Debug/MainThreadStallSampler.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Debug/MainThreadStallSampler.swift; sourceTree = "<group>"; };
 		D8C19BFB7D1738C256175953 /* PaintSoftwareUITests/FlightRecorderUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/FlightRecorderUITests.swift; sourceTree = "<group>"; };
 		C545E79ABFBE13BE7006F17B /* PaintSoftwareUITests/FlightRecorderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/FlightRecorderLogicTests.swift; sourceTree = "<group>"; };
 		2F320308DB08FAA6B869C70F /* PaintSoftware/Debug/FlightRecorder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Debug/FlightRecorder.swift; sourceTree = "<group>"; };
@@ -1439,6 +1445,7 @@
 				9AC76803718DE42461485901 /* TextInkFootprintLogicTests.swift */,
 				C8714C30085243FA8631F601 /* TextUndoFootprintUITests.swift */,
 				6594C719B4E50890A2085E44 /* RapidUndoSurfaceUITests.swift */,
+				4487FF113DCC23E1289D7D96 /* InteractionHitchUITests.swift */,
 				A72AD247ED536B15643F40E7 /* FillRefusalNoticeUITests.swift */,
 				DE52DD2E82A70CD02D5288B7 /* RapidFillSurfaceUITests.swift */,
 				180AF608B25A9BB58D2C5630 /* DeviceStressUITests.swift */,
@@ -1881,6 +1888,8 @@
 				8D5C7EB37B566FA83C92E158 /* PaintSoftware/Engine/DecodedFrameRing.swift */,
 				3A608416FBC72075D16FF806 /* PaintSoftware/Engine/FrameBakeKey.swift */,
 				97AB84194A4246E335EBFDE0 /* PaintSoftware/Debug/PlaybackTrace.swift */,
+				85BD29D23A97F072E73CFDFA /* PaintSoftware/Engine/InteractionGate.swift */,
+				4A2F8A1D6919C139DB89EBE6 /* PaintSoftware/Debug/MainThreadStallSampler.swift */,
 				D8C19BFB7D1738C256175953 /* PaintSoftwareUITests/FlightRecorderUITests.swift */,
 				C545E79ABFBE13BE7006F17B /* PaintSoftwareUITests/FlightRecorderLogicTests.swift */,
 				2F320308DB08FAA6B869C70F /* PaintSoftware/Debug/FlightRecorder.swift */,
@@ -2279,6 +2288,7 @@
 				9AC76803718DE42461485902 /* TextInkFootprintLogicTests.swift in Sources */,
 				C8714C30085243FA8631F602 /* TextUndoFootprintUITests.swift in Sources */,
 				B4E50890A2085E44C76DF22E /* RapidUndoSurfaceUITests.swift in Sources */,
+				3DCC23E1289D7D9646548D5B /* InteractionHitchUITests.swift in Sources */,
 				A82AD247ED536B15643F40E7 /* FillRefusalNoticeUITests.swift in Sources */,
 				2253CEA332FA91C58675AC61 /* RapidFillSurfaceUITests.swift in Sources */,
 				3310AE371A08180AF608B25A /* DeviceStressUITests.swift in Sources */,
@@ -2537,6 +2547,8 @@
 				F1A7A736F668620CDC16585E /* ChunkedCompositeMetalLogicTests.swift in Sources */,
 				3BB38045479180895C907A33 /* PaintSoftware/Engine/FrameBakeKey.swift in Sources */,
 				0AC1B5131E56217809A16C46 /* PaintSoftware/Debug/PlaybackTrace.swift in Sources */,
+				3A97F072E73CFDFA29CEA695 /* PaintSoftware/Engine/InteractionGate.swift in Sources */,
+				6919C139DB89EBE626CA266F /* PaintSoftware/Debug/MainThreadStallSampler.swift in Sources */,
 				9F3524FADD635E4C6590A1C3 /* PaintSoftwareUITests/FlightRecorderUITests.swift in Sources */,
 				11E1D249BCFC438A51CEAEC3 /* PaintSoftwareUITests/FlightRecorderLogicTests.swift in Sources */,
 				159091AE940B388FEAA2D077 /* PaintSoftware/Debug/FlightRecorder.swift in Sources */,

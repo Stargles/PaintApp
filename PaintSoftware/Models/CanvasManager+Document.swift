@@ -1469,15 +1469,18 @@ extension CanvasManager {
 
     /// Where a debounced regen's pixels are drawn.
     ///
-    /// **Serial and `.userInitiated`, where the backfill's queue is concurrent and `.utility`**, and
-    /// the difference is what the two are for. The backfill is a whole project's worth of tiles that
-    /// nobody is waiting for, so it fans out and yields to the touch path. This is one or two tiles
-    /// the artist is about to look at, arriving in a burst that is nearly always a single cel: fanning
-    /// out would buy nothing and would put a second thumbnail render on a core the compositor wants
-    /// (an edit already costs ~310 ms of background render work on this two-big-core device). Serial
-    /// also means two flushes cannot interleave their installs.
+    /// **Serial, where the backfill's queue is concurrent**, and the difference is what the two are
+    /// for. The backfill is a whole project's worth of tiles that nobody is waiting for, so it fans
+    /// out. This is one or two tiles the artist is about to look at, arriving in a burst that is
+    /// nearly always a single cel: fanning out would buy nothing and would put a second thumbnail
+    /// render on a core the compositor wants. Serial also means two flushes cannot interleave their
+    /// installs.
+    ///
+    /// **`.utility`: a thumbnail is SCHEDULER.md's R2** — on screen, allowed to lag. At
+    /// `.userInitiated` it ran beside the stroke's own landing render (R1) at the same priority: the
+    /// owner's November 17 recording has its flatten at up to 794 ms of a 5000² cel while they drew.
     private static let thumbnailRegenQueue = DispatchQueue(
-        label: "com.paintapp.CanvasManager.thumbnailRegen", qos: .userInitiated)
+        label: "com.paintapp.CanvasManager.thumbnailRegen", qos: .utility)
 
     /// The debounced sink's flush: resolve on the main actor, render off it, install back on it.
     ///

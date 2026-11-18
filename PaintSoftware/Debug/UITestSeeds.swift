@@ -101,6 +101,27 @@ enum UITestSeeds {
     /// sleep is on the surface's own queue, after the clear, and nowhere else.
     ///
     /// Simulator-only, on `slowVectorRenderDelay`'s rule and for its reason.
+    /// **Reports shorter main-thread stalls than the device needs reporting** —
+    /// `-uiTestStallFloorMillis <n>`, armed from `PaintApp.init` into `MainThreadStallSampler`.
+    ///
+    /// The simulator runs this app several times faster than the owner's iPad 9, so a pass that is
+    /// 150 ms there is 20 ms here and under the device floor; a test comparing what the main thread
+    /// does before and after a change has to see those passes to compare them.
+    ///
+    /// Simulator-only, on `slowVectorRenderDelay`'s rule and for its reason.
+    static func applyStallFloorIfRequested() {
+        guard ProjectBackupManager.isSimulator
+        else { return }
+        let args = ProcessInfo.processInfo.arguments
+        guard let flag = args.firstIndex(of: "-uiTestStallFloorMillis"),
+              args.index(after: flag) < args.endIndex,
+              let millis = Int(args[args.index(after: flag)]), millis > 0 else { return }
+        MainThreadStallSampler.reportFloor = TimeInterval(millis) / 1000
+        MainThreadStallSampler.samplingFloor = min(MainThreadStallSampler.samplingFloor,
+                                                   TimeInterval(millis) / 2000)
+        MainThreadStallSampler.interval = 0.002
+    }
+
     static func applyWindowDrawDelayIfRequested() {
         guard ProjectBackupManager.isSimulator
         else { return }

@@ -478,12 +478,31 @@ final class ActionRecorder: ObservableObject {
                 ("pressToBaseMs", .num(picture.pressToBaseMs))
             ], inRing: false)
         }
+        for stall in MainThreadStallSampler.shared.drain() {
+            emit("mainStall", [
+                ("at", .num(stall.start - startTime)),
+                ("ms", .num(stall.ms)),
+                ("cpuMs", .num(stall.cpuMs)),
+                ("samples", .int(stall.samples)),
+                ("app", .str(stall.appFrames.map { "\($0.frame) x\($0.count)" }.joined(separator: " | "))),
+                ("leaf", .str(stall.leafFrames.map { "\($0.frame) x\($0.count)" }.joined(separator: " | "))),
+                ("stack", .str(stall.stack.joined(separator: " < ")))
+            ], inRing: false)
+        }
         guard !window.phases.isEmpty else { return }
         var fields: [(String, JSONValue)] = []
-        for phase in window.phases.prefix(8) {
-            fields.append((phase.phase, .str("\(Self.number(CGFloat(phase.totalMs)))/"
-                                            + "\(Self.number(CGFloat(phase.maxMs)))ms"
-                                            + " n=\(phase.count) main=\(phase.onMainCount)")))
+        // **Main-thread rows first, then off-main ones**, each largest first. Ranked together, five
+        // seconds of bake on its own queue pushed every main-thread row but the run-loop totals out of
+        // the eight a line keeps — the line hid exactly the rows it exists to show.
+        let onMain = window.phases.filter { $0.onMainCount > 0 }
+        let offMain = window.phases.filter { $0.onMainCount == 0 }
+        for phase in (onMain.prefix(8) + offMain.prefix(5)) {
+            var text = "\(Self.number(CGFloat(phase.totalMs)))/\(Self.number(CGFloat(phase.maxMs)))ms"
+                + " n=\(phase.count) main=\(phase.onMainCount)"
+            if phase.phase == PlaybackTrace.Phase.mainBusy.rawValue {
+                text += " cpu=\(Self.number(CGFloat(window.mainCpu.totalMs)))/\(Self.number(CGFloat(window.mainCpu.longestPassMs)))ms"
+            }
+            fields.append((phase.phase, .str(text)))
         }
         if window.ringHits + window.ringMisses > 0 {
             fields.append(("ringHit", .int(window.ringHits)))
@@ -500,6 +519,16 @@ final class ActionRecorder: ObservableObject {
 
     func model(_ key: String, _ value: String) {
         emit("model", [("key", .str(key)), ("value", .str(value))])
+    }
+
+    /// **One step of a vector layer's lift-to-base handoff** — the stroke's ink held over the base at
+    /// lift, retired when a base containing it is installed, or dropped for a reason. `revision` is the
+    /// content revision the step is about (`CelContentRevisions`), `held` how many pictures are still
+    /// held after it, and `detail` which base or which reason. A stroke that blinks off at lift shows
+    /// here as a `retired`/`dropped` whose time is before the `base` line that covers its revision.
+    func inkHandoff(_ step: String, layer: UUID?, revision: Int, held: Int, detail: String) {
+        emit("ink", [("step", .str(step)), ("layer", .str(layer.map { String($0.uuidString.prefix(8)) } ?? "none")),
+                     ("rev", .int(revision)), ("held", .int(held)), ("detail", .str(detail))])
     }
 
     /// A gesture recognizer changed state. **The single most valuable signal in the file**: the bug

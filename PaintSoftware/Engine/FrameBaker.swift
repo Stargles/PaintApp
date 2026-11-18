@@ -420,6 +420,13 @@ final class FrameBaker {
     /// dirty queue still owns every frame; coalescing requests to inspect it discards no frame.
     private func nextWork() -> LatestWins.Work? {
         guard !isSuspended, let manager else { return nil }
+        // **SCHEDULER.md rule 3: no bake starts while a touch is down or just lifted.** A bake is a
+        // whole-frame composite (5.3–8.8 s at the owner's 5000² on the iPad 9) of a picture the
+        // canvas is not showing while the artist edits; it looks again when the gate has settled.
+        guard !InteractionGate.shared.isClosed else {
+            lookAgainWhenTheGateSettles()
+            return nil
+        }
         bakeQueue.frameCount = manager.contentEndFrame
 
         // **The one substitution stage 6 makes.** With no export running this is the artist's
@@ -502,6 +509,19 @@ final class FrameBaker {
                     self.finish(frame: frame, key: key, outcome: outcome)
                 }
             }
+        }
+    }
+
+    private var gateRetryArmed = false
+
+    /// One deferred `kick` however many passes find the gate closed.
+    private func lookAgainWhenTheGateSettles() {
+        guard !gateRetryArmed else { return }
+        gateRetryArmed = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + InteractionGate.settle) { [weak self] in
+            guard let self else { return }
+            self.gateRetryArmed = false
+            self.kick()
         }
     }
 

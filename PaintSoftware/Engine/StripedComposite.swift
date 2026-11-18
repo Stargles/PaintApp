@@ -168,6 +168,8 @@ enum StripedCompositor {
                 let batchSize = 3
                 var start = 0
                 while start < visible.count, !declined {
+                    // SCHEDULER.md rule 3: a touch outranks the frame — wait here, between leaves.
+                    InteractionGate.shared.checkpoint()
                     let batch = Array(visible[start..<min(start + batchSize, visible.count)])
                     start += batchSize
                     autoreleasepool {
@@ -339,6 +341,8 @@ enum StripedCompositor {
         let image = UIGraphicsImageRenderer(bounds: frame, format: PixelOps.transparentFormat())
             .image { _ in
                 for strip in strips where !declined {
+                    // SCHEDULER.md rule 3: a touch outranks the frame — wait here, between strips.
+                    InteractionGate.shared.checkpoint()
                     autoreleasepool {
                         guard let composited = ChunkedCompositor.composite(recipe.windowed(to: strip.buffer),
                                                                            budgetBytes: budgetBytes) else {
