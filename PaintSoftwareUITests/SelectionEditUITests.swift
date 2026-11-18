@@ -51,9 +51,14 @@ final class SelectionEditUITests: PaintUITestCase {
         openLayerPanel(app)
         let poser = app.staticTexts["layerPanel.row.1"]
         XCTAssertTrue(poser.waitForExistence(timeout: 5))
+        // The first tap on a row only selects its layer; tapping the already-selected one opens its options
+        // (`LayerStackListView`'s didSelectRowAt). The ink layer is the selected one here, so it takes two.
+        poser.tap()
+        XCTAssertTrue(app.images["layerPanel.row.1.current"].waitForExistence(timeout: 5),
+                      "the first tap selected the transform layer")
         poser.tap()
         let move = app.buttons["layerOptions.transformMove"]
-        XCTAssertTrue(move.waitForExistence(timeout: 5))
+        XCTAssertTrue(move.waitForExistence(timeout: 5), "the second tap on the selected transform layer opens its options, with a Move row")
         move.tap()
         XCTAssertTrue(app.buttons["moveBar.doneButton"].waitForExistence(timeout: 5))
         dragOnCanvas(app, from: at(0.50, 0.34), to: at(0.18, 0.34))
