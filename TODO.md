@@ -35,6 +35,12 @@ could not be verified as open or closed; verify against `main` and `git log`, th
   watchdog replaced a stranded `canvas.pan` found `.ended` with 0 touches on `CanvasPlaneView`;
   lifetime repairs now 24. The watchdog repairs it; the root cause (a recognizer left out of
   `.possible`) is still open — see "Recurring canvas freezes" below.
+- [ ] **An open lasso selection acts as closed for every action (owner ruling, Nov 17).** Today an
+  open (unclosed) lasso lets Move work but the whole bottom selection bar — copy, duplicate to new
+  layer, etc. — does nothing. Owner: *"even if the lasso is open, it should still treat it as a closed
+  one. The circle to close it is for if the user wants to make a new selection."* Close the loop
+  implicitly (last point back to the start) for every consumer, and remove the Move-only special
+  case for open selections, which this makes redundant. Amends docs/LASSO_MOVE.md §5.29 — update it.
 - [ ] **Fix the November 16 audit findings** ([docs/AUDIT-2026-11-16.md](docs/AUDIT-2026-11-16.md), 18
   ranked). Repeating defect: RAM-derived budgets (192 MiB on iPad 9) tested at 2048² that silently
   decline, scale down or drop history at the owner's 5000². Silent refusals: done Nov 17 — artist-facing ones
