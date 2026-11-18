@@ -23,6 +23,10 @@ If `--ff-only` fails, rebase again — don't force-push, don't merge-commit. App
 [SESSION_LOG.md](SESSION_LOG.md): `Session N — YYYY-MM-DD: <what changed>`, and drop the oldest so
 only the last five remain — `git log` is the real history.
 
+**Real time is a requirement (owner, 2026-11-17).** Every piece of work follows
+[docs/SCHEDULER.md](docs/SCHEDULER.md): main never waits and never does canvas-sized work, a touch
+outranks everything, stale work is cancelled. A change that breaks a rule there is not done.
+
 ## Build and test
 
 **Build from a worktree outside `~/Desktop` (2026-09-24).** After the macOS 26.5.2 update `actool`
