@@ -27,11 +27,15 @@ final class FillSliderLiveUITests: PaintUITestCase {
         let paper = paperRect(in: canvas)
         func at(_ x: Double, _ y: Double) -> CGVector { onHost(visible, x, y) }
         let halfGap = 15.0 / 2048 * Double(paper.height) / Double(visible.height)
+        // The gap is in the LEFT wall: the Fill menu is a popover standing over the paper's upper right
+        // (on the owner's iPad and the iPad 9 simulator alike), and a probe placed outside a right-hand gap
+        // reads the popover's black, not the paper — "never reached the screen" for a reason that is the
+        // test's layout, not the fill's.
         drawLine(on: canvas, from: at(0.25, 0.2), to: at(0.65, 0.2))
+        drawLine(on: canvas, from: at(0.65, 0.2), to: at(0.65, 0.75))
         drawLine(on: canvas, from: at(0.65, 0.75), to: at(0.25, 0.75))
-        drawLine(on: canvas, from: at(0.25, 0.75), to: at(0.25, 0.2))
-        drawLine(on: canvas, from: at(0.65, 0.475 - halfGap), to: at(0.65, 0.17))
-        drawLine(on: canvas, from: at(0.65, 0.475 + halfGap), to: at(0.65, 0.78))
+        drawLine(on: canvas, from: at(0.25, 0.475 - halfGap), to: at(0.25, 0.17))
+        drawLine(on: canvas, from: at(0.25, 0.475 + halfGap), to: at(0.25, 0.78))
 
         setBrushColor(app, hex: "FF0000")
         let fillButton = app.buttons["toolbar.fillButton"]
@@ -44,18 +48,23 @@ final class FillSliderLiveUITests: PaintUITestCase {
         fillButton.tap()   // closes it
 
         let middle = at(0.45, 0.475)
-        let outside = at(0.69, 0.475)
+        let outside = at(0.21, 0.475)
         canvas.coordinate(withNormalizedOffset: middle).tap()
         XCTAssertNotNil(waitForPixel(canvas, at: outside, matches: { self.isRed($0) }),
                         "Fixture check: at 0 the fill pours out through the gap")
 
         // Just outside the gap: red while the fill pours out, paper once the slider seals it.
-        let probe = paperPatch(canvas, visible, x: 0.685...0.695, y: 0.47...0.48)
+        let probe = paperPatch(canvas, visible, x: 0.205...0.215, y: 0.47...0.48)
         XCTAssertFalse(readScreenNow(probe).contains { isWhitish($0) }, "Fixture check: the probe reads the poured fill")
 
         fillButton.tap()
         XCTAssertTrue(slider.waitForExistence(timeout: 5))
         Thread.sleep(forTimeInterval: 1)
+        let panel = slider.frame
+        let probeX = canvas.frame.minX + canvas.frame.width * CGFloat(outside.dx)
+        let probeY = canvas.frame.minY + canvas.frame.height * CGFloat(outside.dy)
+        XCTAssertFalse(panel.insetBy(dx: -40, dy: -400).contains(CGPoint(x: probeX, y: probeY)),
+                       "Setup: the probe (\(probeX), \(probeY)) is under the open Fill menu (\(panel)), so a read there is the menu's pixel")
         let passesBefore = try XCTUnwrap(Int(readField(app, "passes:")), "the canvas publishes `passes:`")
         let movesBefore = try XCTUnwrap(Int(readField(app, "moves:")), "the canvas publishes `moves:`")
         let held = samplesDuring(probe, "gap closing drag") {
