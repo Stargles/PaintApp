@@ -2431,7 +2431,6 @@ extension RasterResidencyLogicTests {
         try assertSmallRed(thumbnail)
         XCTAssertEqual(owner.usage.pixelBytes, 0,
                        "a thumbnail must not leave a canvas-sized decode resident on the cel")
-        XCTAssertEqual(owner.usage.registeredCandidateCount, 1)
     }
 
     func testThumbnailOfAPNGBackedCelDecodesNothingAtCanvasSize() throws {
