@@ -1187,6 +1187,7 @@ final class PerfBaselineTests: XCTestCase {
                        "The live preview must not rasterize the full vector canvas")
         XCTAssertEqual(scratch.windowPixelCount, 0,
                        "The ordered-list path must not allocate an ignored RasterLayerTexture")
+        scratch.settleCelContent()
         let shown = try XCTUnwrap(scratch.renderedCelContent)
         let windowPixels = Int(shown.window.width * shown.window.height)
         XCTAssertLessThan(windowPixels, Int(size.width * size.height),
