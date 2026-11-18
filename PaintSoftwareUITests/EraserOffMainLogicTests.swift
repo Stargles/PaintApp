@@ -54,4 +54,20 @@ final class EraserOffMainLogicTests: XCTestCase {
         XCTAssertFalse(scratch.hasPendingRender, "lift must leave no step pending")
         XCTAssertNotNil(scratch.renderedCelContent)
     }
+
+    func testHeldPictureIsReplacedInPlaceWhenTheNewestRenderLands() {
+        var held = UnlandedInk()
+        let footprint = CGPath(rect: CGRect(x: 0, y: 0, width: 10, height: 10), transform: nil)
+        held.hold(.init(id: 7, version: 3, windowRect: CGRect(x: 0, y: 0, width: 10, height: 10),
+                        replacing: footprint, contents: .image(UIImage())))
+        let newer = UIImage()
+        XCTAssertTrue(held.replace(id: 7, window: CGRect(x: 0, y: 0, width: 20, height: 20),
+                                   footprint: footprint, image: newer))
+        XCTAssertEqual(held.pictures.count, 1)
+        XCTAssertEqual(held.pictures[0].version, 3, "the swap must keep the picture's version")
+        XCTAssertEqual(held.pictures[0].windowRect.width, 20)
+        held.retire(upTo: 3)
+        XCTAssertFalse(held.replace(id: 7, window: .zero, footprint: footprint, image: newer),
+                       "a retired picture must not come back")
+    }
 }

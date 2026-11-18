@@ -233,6 +233,16 @@ struct UnlandedInk {
         pictures.append(picture)
     }
 
+    /// Swaps a held picture's pixels in place (same id and version) when its newer render lands. A
+    /// picture a base has already retired is gone, and the swap does nothing.
+    @discardableResult
+    mutating func replace(id: Int, window: CGRect, footprint: CGPath, image: UIImage) -> Bool {
+        guard let at = pictures.firstIndex(where: { $0.id == id }) else { return false }
+        pictures[at] = Picture(id: id, version: pictures[at].version, windowRect: window,
+                               replacing: footprint, contents: .image(image))
+        return true
+    }
+
     /// **A base rasterized at `version` has been installed, so everything it contains stops being
     /// un-landed.** `<=` rather than `==`: renders are dispatched per commit onto one serial queue
     /// and a later one is a superset, so a base can arrive that covers several held pictures at once
