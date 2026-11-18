@@ -97,9 +97,10 @@ final class InteractionHitchUITests: PaintUITestCase {
         let pt = paperPoints(app, canvas)
         var report: [String] = []
         var worst = 1.0
+        var judged = 0
         func shot() -> ScreenshotPixels? { ScreenshotPixels(XCUIScreen.main.screenshot().image) }
         for i in 0..<6 {
-            let y = 0.12 + Double(i) * 0.15
+            let y = 0.10 + Double(i) * 0.09
             let middle = pt(0.5, y)
             let probes = stride(from: -40.0, through: 40.0, by: 2).flatMap { dx in
                 stride(from: -8.0, through: 8.0, by: 2).map { CGPoint(x: middle.x + dx, y: middle.y + $0) }
@@ -131,13 +132,16 @@ final class InteractionHitchUITests: PaintUITestCase {
             let shown = Array(counts.dropFirst(firstShown))
             let low = shown.min { $0.1 < $1.1 } ?? (0.0, 0)
             let share = final > 0 ? (shown.isEmpty ? 0 : Double(low.1) / Double(final)) : 0
-            worst = min(worst, share)
+            // A stroke whose ink the probes barely see (it fell on a fixture line or under a bar)
+            // says nothing either way; it is reported and left out, and the test needs three that count.
+            if final > 20 { worst = min(worst, share); judged += 1 }
             report.append("stroke \(i): final=\(final) min=\(low.1) at +\(String(format: "%.2f", low.0))s "
                           + "samples=\(counts.count) [\(counts.map { String(format: "%.2f:%d", $0.0, $0.1) }.joined(separator: " "))]")
             if final <= 20 { report.append("PREMISE: stroke \(i) changed only \(final) probes once landed") }
         }
         print("FLICKER " + report.joined(separator: "\nFLICKER "))
         stopRecording(app)
+        XCTAssertGreaterThanOrEqual(judged, 3, "too few strokes showed ink under the probes to judge:\n" + report.joined(separator: "\n"))
         XCTAssertGreaterThanOrEqual(worst, 0.5, "a finished stroke left the screen between its lift and its base:\n"
                                     + report.joined(separator: "\n"))
     }
