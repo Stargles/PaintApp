@@ -31,8 +31,6 @@ could not be verified as open or closed; verify against `main` and `git log`, th
   size; three bitmaps per vector cel; unbounded static caches; commit/un-suppress still invalidates
   `.everything`; `renderIsolated` on the main thread. Add a gated 5000²×5-layer fixture for every budget
   consumer (`DeviceStressUITests` is the device half).
-- [ ] **`MoveBoxPrecisionUITests.testAFingerPressedBesideAVectorBoxDragMakesItAFifthAsFarAndLeavesTheCanvasAlone`
-  fails at its XCTUnwrap (line 54)** on an iPad 9 simulator. Triage stale vs real.
 - [ ] **Raster Undo at 5000² is one whole-cel step (190.7 MB) against the iPad 9's 192 MB budget**, so
   raster layers keep only the protected minimum of history. Price raster steps by dirty tiles, as vector
   steps already are (0.11 MB a stroke).
