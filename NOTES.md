@@ -55,3 +55,19 @@ for .replacing only answers a finished picture; settleCelContent() at lift (rend
 view swaps via onRenderLanded. New test EraserOffMainLogicTests (+pbxproj ids ...D2001/2).
 Next: build+run the test (UDID own sim, simlock), mutation-check, fast tier, measure, drive, commit, cleanup.
 Status (done): eraser renders off main; lift holds last landed picture/defers hold to first landing; tests added; fast tier green except PerfBaseline fix (committed, passes). Evidence: ~/PaintWork/nov18-eraser-evidence.
+
+## Frame-step mix — fixed (nov18-framestep)
+Cause confirmed, with a correction: it is not only the *active* layer. Any host handed a cel with no memo
+keeps the previous frame's picture until its off-main render lands, while hosts that hit their memo show the
+new frame at once. In the test (5000², iPad 9 budget, render slowed to 700 ms) the lagging host was the
+non-active bottom layer: readings "BA"/"AB" (top layer new/old, bottom old/new) for ~0.65 s per step.
+Fix (least code, memory-safe): `CanvasView.Coordinator.holdTheFrameWhileAHostAwaitsItsPicture` covers the
+canvas with a screen-sized snapshot of the last committed frame (`resizableSnapshotView`, afterScreenUpdates
+false, same main turn as the swap) while any host `isAwaitingFirstPicture` (pending render AND nothing of the
+new canvas shown yet — a stroke/eraser re-render of the same cel is not this); released by
+`StrokeCanvasView.onRenderSettled` when the last render settles, or after 3 s. Rejected: holding every host's
+old picture until all new ones are ready (needs old+new 5000² images resident for 5 layers), and the baked
+frame underneath (not necessarily baked yet). Not covered: pan/zoom during the ≤1 s hold leaves the cover
+where it was; no snapshot while playing.
+Test: InteractionHitchUITests.testSteppingFramesNeverShowsAMixOfTwoFrames (red 8 mixes before, 0 after;
+mutating `isAwaitingFirstPicture` to false turns it red again). Evidence: ~/PaintWork/nov18-framestep-evidence.
