@@ -1239,8 +1239,13 @@ class PaintUITestCase: XCTestCase {
         let scaleText = transform?.dropFirst("xform:".count).split(separator: ",").first
         let scale = try XCTUnwrap(scaleText.flatMap { Double($0) })
         XCTAssertGreaterThan(scale, 0.25, "PREMISE: 0.5 screen-point hold samples stay below 2 canvas points")
-        let start = canvas.coordinate(withNormalizedOffset: from).screenPoint
-        let end = canvas.coordinate(withNormalizedOffset: to).screenPoint
+        // The logical app-frame point, not `XCUICoordinate.screenPoint`: `fingerStroke` maps app-frame points
+        // into the device's portrait space itself, and `screenPoint` is already there when the window is
+        // rotated — mapped twice, a landscape line came out turned a quarter of a turn (vertical, near the
+        // dock) and never made the shape the test held.
+        let host = canvas.frame
+        let start = logicalAppPoint(in: host, normalizedOffset: from)
+        let end = logicalAppPoint(in: host, normalizedOffset: to)
         var points = (0...20).map { index in
             let fraction = CGFloat(index) / 20
             return CGPoint(x: start.x + (end.x - start.x) * fraction,
