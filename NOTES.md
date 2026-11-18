@@ -54,3 +54,4 @@ Done: StrokeScratch.replaceCelContent renders off main (LatestWins on a render q
 for .replacing only answers a finished picture; settleCelContent() at lift (renders sync only if stale);
 view swaps via onRenderLanded. New test EraserOffMainLogicTests (+pbxproj ids ...D2001/2).
 Next: build+run the test (UDID own sim, simlock), mutation-check, fast tier, measure, drive, commit, cleanup.
+Status (done): eraser renders off main; lift holds last landed picture/defers hold to first landing; tests added; fast tier green except PerfBaseline fix (committed, passes). Evidence: ~/PaintWork/nov18-eraser-evidence.
