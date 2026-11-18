@@ -52,6 +52,9 @@ own branch, so `main`'s HANDOFF.md can be behind.
   The root agent acts as project manager: delegate investigation, implementation and focused
   verification with clear acceptance criteria. Root coordinates the shared native lane, reviews
   results and makes integration/release decisions without pulling routine test detail into its context.
+- **Keep the project and the machine lean (2026-11-17).** Delete finished worktrees, branches,
+  simulators, evidence and old builds instead of archiving them; a lean workspace is cleaner as well
+  as smaller. Details in CLAUDE.md, "Keep storage lean".
 - **A real scene is 300–1000 drawn cels.** Design memory around a window or budget, never "load it
   all" (he named the YouTube-buffer shape himself).
 

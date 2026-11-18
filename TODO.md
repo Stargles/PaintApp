@@ -543,9 +543,6 @@ only after the native/source extraction boundary. None of these findings is phys
   The300/1000-cel Mend All fixture is light synthetic72² data, not dense artwork. The actual
   copy-only week-of-saving APFS measurement is already qualified; do not repeat or extrapolate it
   into a physical300–1000-cel claim. Exact metrics/pins live in HANDOFF and evidence packets.
-- **Storage:** latest owned56C cleanup archived/hash-verified11,112 container entries, removed only
-  two generated cache roots, reclaimed4,287,086,592bytes and verified artwork/active bundles after
-  boot. Receipt: `~/PaintWork/s55-recorded-regressions/owned56C-cache-cleanup-before-final-gates-20261029/`.
 - **macOS prompts:** Kevin sees requests for ChatGPT access to OneDrive/other app data. Cause is
   unproved. Scope work to explicit repository, PaintWork and owned-simulator paths; do not scan cloud
   folders or change privacy settings.
@@ -608,41 +605,6 @@ Detailed task sections below remain unchanged. Technical authority: HANDOFF.md a
 `~/PaintWork/s54-final-qualification/root-next-gates.json`.
 
 <!-- Status-preamble compaction only. Original bytes retained at ~/PaintWork/s55-recorded-regressions/status-preamble-compaction-17c00484/TODO-before.md and in Git. No task was closed. -->
-
-## Reclaim accumulated development and test storage — 2026-10-26
-
-October29 continuation: bounded inventories locate most growth in retained test results and video
-analysis frames, rather than compiler caches. A storage agent may inspect only the old closed
-`s49-liquify-logs`, `recolour-logs`, `evidence`, and `logs` roots initially. Current54/55 proof,
-compiled products, all artist packages/exports/ZIPs and original videos stay protected. A reversible
-single-file filesystem-compression trial is queued for the old generated
-`s49-liquify-logs/combined/batches/field-output.log`; bytes/ownership/mode/times/xattrs must be
-verified before replacement. Exact duplicate derived PNG frames are a separate path-preserving
-dedup proposal; any loss of distinct modification times requires explicit recorded review. Root reviewed the exact trial helper/plan and approves only its26-path/25-alias duplicate-frame
-trial plus the single verified log replacement. Derived-frame timestamp/inode sharing and the log's
-recorded creation-time/compression-flag change are accepted; all bytes/paths/permissions/provenance
-stay exact. Full batch remains conditional on observed positive reclaim and root review. No
-performance measurements run alongside cleanup IO. Concrete allowlists/receipts live in PaintWork.
-
-Kevin reports free disk fell from about70GB and asks for thorough cleanup before it causes more
-problems. Inventory storage created by current/past agent work: test simulators, checkouts, compiler
-caches and repeated evidence blobs. Keep real artwork/exports, required benchmark binaries and all
-needed source/evidence; prefer exact deduplication and verified archives. Delete only confirmed
-obsolete owned outputs/devices; do not touch unrelated personal files or other sessions' work.
-
-- [x] Inventory and first cleanup:10.11GiB actual simulator caches plus20.72GiB exact report
-      dedup recovered;~35GiB free. All app data/evidence paths/protected baselines verified.
-      PaintWork initially~76GiB attributed, results~60GiB;56C OS caches~10GiB.
-      Reclaim exact verified closed-result duplicate blobs and reviewed offline56C caches; retain
-      evidence paths/artwork/baselines. Verify actual free space and bounded phase-boundary cleanup.
-      External detailed plans/identity manifests live in resume-20261026/storage-inventory-20261026-vector.
-- [x] Five obsolete owned simulators deleted after independently verified data archives; all unlisted/
-      protected device identities exact. Actual DELETE-phase gain13.05GiB;47.06GiB/50.53GB free.
-      Keep820782758bytes of archives/manifests. RequiredProducts/shared/ambiguous devices remain held.
-- [x] Bound storage checks at native phase boundaries in CLAUDE.md. This item remains until merge;
-      no global/personal cleanup, mutable hardlinks or app background-cleanup service was added.
-
----
 
 ## Bound curve flattening before integer conversion — 2026-10-26
 

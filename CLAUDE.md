@@ -36,20 +36,14 @@ the sandbox disabled.
 Xcode lives at `/Applications/Xcode.app`; `xcodebuild`/`xcrun` are on PATH. Metal shaders need the
 toolchain once: `xcodebuild -downloadComponent MetalToolchain`.
 
-**Bound generated storage at native phase boundaries (2026-10-26).** Record free disk space before
-starting a batch; aim for at least10GiB, and pause new batches below5GiB. Repeated test installs can
-retain gigabytes in an owned simulator's symbolication cache and container-manager `Dead` bundles.
-If those exceed4GiB combined, finish/join the current native work before housekeeping: shut down only
-that owned device, archive/hash-verify its app containers, validate exact generated cache targets,
-clean those targets, then boot the same device and verify retained artwork/bundles. Never purge
-live caches, erase a library, or remove a parent/global cache. These thresholds are operational
-margins, not measured worst-case bounds. The reviewed56C example and preservation receipts are under
-`~/PaintWork/s54-final-qualification/resume-20261026/owned56C-offline-cache-cleanup`.
-Closed immutable xcresult blobs may be deduplicated only after full byte/hash, mode, uid/gid,
-flags/xattr and dependency checks; preserve every result path and query representative results
-before/after. Never hardlink mutable source, Products or artwork. Measure actual free-space gain;
-APFS clones and hardlinks make `du` attribution an unreliable reclaim forecast. Use the existing
-phase handoff for this work; no automatic app service or background cleanup daemon is needed.
+**Keep storage lean — delete, do not archive (owner, 2026-11-17).** The owner wants low storage and
+a clean workspace. When a task merges, delete its worktree, branch, simulator and any evidence,
+xcresults, logs and device builds it no longer needs; no archive bundles or "preservation" copies —
+`git log` and origin are the history. Keep only what an open TODO item cites, and the one installed
+device build `resign_state` names. Write evidence into one folder per task under `~/PaintWork`
+(never loose files in its root), and delete it when the item closes. Never touch the owner's artwork,
+the iPad, or another live session's worktree or simulator. Aim for 10 GiB free and stop starting
+runs below 5 GiB.
 
 - **Fast tier (~14 min Debug, ~8 min Release, 4790 tests — MEASURED 2026-10-08)** — the pure-logic `*LogicTests` run headless. Use constantly.
 - **Full run (~76 min, MEASURED 2026-10-11)** — XCUITests are 99% of the runtime. Phase boundaries only, and
