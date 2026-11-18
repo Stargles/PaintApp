@@ -24,8 +24,9 @@ could not be verified as open or closed; verify against `main` and `git log`, th
   circle's outer boundary), rapid draw/Undo, orange bars on entering Test1.
 - [ ] **Fix the November 16 audit findings** ([docs/AUDIT-2026-11-16.md](docs/AUDIT-2026-11-16.md), 18
   ranked). Repeating defect: RAM-derived budgets (192 MiB on iPad 9) tested at 2048² that silently
-  decline, scale down or drop history at the owner's 5000². **Open:** ~20 silent
-  `hasHeadroom … return nil` refusals need a notice; the canvas-size ceiling measures the app, not
+  decline, scale down or drop history at the owner's 5000². Silent refusals: done Nov 17 — artist-facing ones
+  already noticed except warp/posed raster (Move, warp, posed bake), which now say "Not enough memory
+  to do that"; Liquify's notice still says only "couldn't be prepared". **Open:** the canvas-size ceiling measures the app, not
   backboardd's 1,850 MiB; `CALayer.contents` installs outside the paced path; raster thumbnails at canvas
   size; three bitmaps per vector cel; unbounded static caches; commit/un-suppress still invalidates
   `.everything`; `renderIsolated` on the main thread. Add a gated 5000²×5-layer fixture for every budget
