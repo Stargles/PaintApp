@@ -860,8 +860,70 @@ class PaintUITestCase: XCTestCase {
         }
         let last = slider.normalizedSliderPosition
         if abs(last - position) <= tolerance { return }
-        XCTFail("The slider \(frame) will not stand within \(tolerance) of \(position): it went \(reached) and ended at \(last)",
+        // A short slider (the layer rows' 90 pt opacity) answers no correction smaller than about 10 pt
+        // and answers a longer one by less than the finger travelled, so the thumb above is never walked
+        // to a position in between. A drag that starts from the same place does answer the same way
+        // each time, though, so the travel is searched for from there instead (MEASURED on the iPad 9:
+        // 27 pt reads 0.33 three times in a row, 40 pt reads 0.46).
+        if frame.width > frame.height, position > 0, position < 1 {
+            let reachedFromTheStart = slideFromTheStart(slider, to: position, tolerance: tolerance, thumbInset: thumbInset)
+            if abs(reachedFromTheStart - position) <= tolerance { return }
+            reached.append(reachedFromTheStart)
+        }
+        XCTFail("The slider \(frame) will not stand within \(tolerance) of \(position): it went \(reached) and ended at \(slider.normalizedSliderPosition)",
                 file: file, line: line)
+    }
+
+    /// Takes a horizontal slider's thumb to its start, then drags it the finger travel that reads
+    /// `position`, found by a secant search over the travel — each probe begins from the same clamped
+    /// start, so each is repeatable. Returns where the thumb ended.
+    private func slideFromTheStart(_ slider: XCUIElement, to position: CGFloat, tolerance: CGFloat,
+                                   thumbInset: CGFloat) -> CGFloat {
+        let frame = slider.frame
+        let thumbCentreAtStart: CGFloat = 14
+        func atX(_ x: CGFloat) -> XCUICoordinate {
+            slider.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: frame.height / 2))
+        }
+        func probe(travel: CGFloat) -> CGFloat {
+            for _ in 0..<2 where slider.normalizedSliderPosition > 0.001 {
+                let thumb = thumbCentreAtStart + slider.normalizedSliderPosition * (frame.width - 2 * thumbCentreAtStart)
+                atX(thumb).press(forDuration: 0.1, thenDragTo: atX(-thumbInset - thumbCentreAtStart),
+                                 withVelocity: .slow, thenHoldForDuration: 0.1)
+            }
+            atX(thumbCentreAtStart).press(forDuration: 0.1, thenDragTo: atX(thumbCentreAtStart + travel),
+                                          withVelocity: .slow, thenHoldForDuration: 0.1)
+            return slider.normalizedSliderPosition
+        }
+        let longest = frame.width - thumbCentreAtStart
+        func quantised(_ travel: CGFloat) -> CGFloat { (min(max(travel, 14), longest) * 2).rounded() / 2 }
+        var tried: [(travel: CGFloat, value: CGFloat)] = []
+        var travel = quantised(40 + (position - 0.46) / 0.0099)
+        var value: CGFloat = 0
+        for _ in 0..<10 {
+            value = probe(travel: travel)
+            if abs(value - position) <= tolerance { return value }
+            tried.append((travel, value))
+            let below = tried.filter { $0.value < position }.max { $0.travel < $1.travel }
+            let above = tried.filter { $0.value > position }.min { $0.travel < $1.travel }
+            var next: CGFloat
+            if let below, let above, above.value > below.value {
+                // The answer lies between two probes: interpolate between them.
+                next = below.travel + (above.travel - below.travel) * (position - below.value) / (above.value - below.value)
+            } else if value == 0 {
+                // Below the dead zone nothing is read, so there is no slope to follow: widen the travel.
+                next = travel + 8
+            } else {
+                next = travel + (position - value) / 0.0099
+            }
+            next = quantised(next)
+            // Never re-send a travel already probed: step half a point toward the target instead.
+            while tried.contains(where: { $0.travel == next }) {
+                next = quantised(next + (position > value ? 0.5 : -0.5))
+                if next == travel || next >= longest || next <= 14 { break }
+            }
+            travel = next
+        }
+        return value
     }
 
     /// Polls the given point until it reads (or stops reading) whitish, since fill/undo re-render off the
