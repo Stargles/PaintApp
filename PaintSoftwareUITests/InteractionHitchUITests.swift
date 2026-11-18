@@ -121,8 +121,16 @@ final class InteractionHitchUITests: PaintUITestCase {
                 counts.append((Date().timeIntervalSince(lifted), changed(now)))
             }
             let final = counts.last?.1 ?? 0
-            let low = counts.min { $0.1 < $1.1 }!
-            let share = final > 0 ? Double(low.1) / Double(final) : 0
+            // **Only the samples from the first one that shows the stroke on.** A big brush stamps its
+            // live dabs on the main thread (the 'mainStall's in the recording: `DabImageCache.stamp`,
+            // ~380 ms), so the stroke is simply not drawn yet for a screenshot taken just after the
+            // finger lifted — that is first-appearance latency, a different thing from a stroke that
+            // was on screen leaving it. A dip is a sample below half of the landed ink *after* one at
+            // or above it.
+            let firstShown = counts.firstIndex { final > 0 && $0.1 * 2 >= final } ?? counts.count
+            let shown = Array(counts.dropFirst(firstShown))
+            let low = shown.min { $0.1 < $1.1 } ?? (0.0, 0)
+            let share = final > 0 ? (shown.isEmpty ? 0 : Double(low.1) / Double(final)) : 0
             worst = min(worst, share)
             report.append("stroke \(i): final=\(final) min=\(low.1) at +\(String(format: "%.2f", low.0))s "
                           + "samples=\(counts.count) [\(counts.map { String(format: "%.2f:%d", $0.0, $0.1) }.joined(separator: " "))]")
