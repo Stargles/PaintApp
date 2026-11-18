@@ -151,9 +151,19 @@ final class InteractionHitchUITests: PaintUITestCase {
     /// the iPad's pace. Every screenshot from the first stroke to well after the erase is read; ink
     /// that dips and comes back, or erased ink that comes back and goes, fails.
     func testLiveInkAndErasedInkHoldUntilTheMatchingBaseLands() throws {
+        try liveInkAndErasedInk(brush: 0.15)
+    }
+
+    /// The same pass with a pen thinner than the 20 px eraser, so the cut leaves a gap the probes can
+    /// see — at 0.15 the stroke's end caps close the cut and the erase changes no pixel (by design).
+    func testErasedGapStaysErasedWhileTheMatchingBaseLands() throws {
+        try liveInkAndErasedInk(brush: 0.03)
+    }
+
+    private func liveInkAndErasedInk(brush: CGFloat) throws {
         let app = XCUIApplication()
         app.launchArguments += ["-uiTestSlowVectorRenderMillis", "300"]
-        let canvas = openOwnersScene(brush: 0.15, app: app)
+        let canvas = openOwnersScene(brush: brush, app: app)
         defer { XCUIDevice.shared.orientation = .portrait }
         let pt = paperPoints(app, canvas)
         func shot() -> ScreenshotPixels? { ScreenshotPixels(XCUIScreen.main.screenshot().image) }
@@ -184,6 +194,9 @@ final class InteractionHitchUITests: PaintUITestCase {
         let erase = stride(from: 0.0, through: 1.0, by: 1.0 / 24).map { t in pt(0.5 + 0.02 * sin(t * 20), 0.12 + 0.66 * t) }
         try fingerStroke(through: erase, interval: 1.0 / 60)
         watch("erase", for: 2.5)
+        let shotAttachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shotAttachment.name = "after-erase"; shotAttachment.lifetime = .keepAlways
+        add(shotAttachment)
         stopRecording(app)
 
         let lines = timeline.map { "\($0.0): \($0.1.map(String.init).joined(separator: ","))" }
