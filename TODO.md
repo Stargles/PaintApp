@@ -31,6 +31,15 @@ could not be verified as open or closed; verify against `main` and `git log`, th
   background `bakeComposite` 5.3–8.8 s per frame and `thumbnailFlatten` up to 794 ms run alongside.
   Find what runs unattributed on main (stream frame handling, bake installs, `renderIsolated` on
   main, IOSurface waits) and move it off; attribute every main-thread span the recorder sees.
+  **Found Nov 18 (simulator, WIP `tmp/nov17-hitch` @ `8a7c2bce`, NOTES.md in that worktree):**
+  (1) the live eraser re-renders all ink under it **on main** every move (`StrokeScratch.replaceCelContent`
+  → `CelContentPicture.rendered`) — one pass down a 5000² × 5-layer scene froze main 6.1 s (Debug);
+  draw that window off main into `WindowSurfaceView` like held edits; (2) live stamping
+  (`DabImageCache.stamp`, high-quality resample + per-dab brush copy) runs on main — ~17 ms at 6 px,
+  550–713 ms per event at big sizes; (3) Core Animation converts every landed picture on main because
+  `RasterSurface`'s byte order is not CA-native. Built, not gated: a main-thread stall sampler
+  (`mainStall` lines name the code), lift→base `ink` log, the frame bake paused while a touch is down
+  (+250 ms), thumbnails at `.utility`. The stroke flicker did not reproduce on the simulator.
 - [ ] **Regression: a stroke briefly disappears after it is laid down, then reappears (owner, Nov 17
   evening, build 9792e799, Test1 5000², Rough Ink).** Owner bets on *"a gap between some kind of
   preview state and a baked state"*; this was fixed once before, so it is a regression — prime
@@ -46,6 +55,10 @@ could not be verified as open or closed; verify against `main` and `git log`, th
   of the active layer are drawn over parts of the other layers for up to ~1 s before the frame settles;
   a frame change must look near-instant. Likely regression. Rule for all three: the screen never shows
   a mix of old and new pictures — hold the last complete picture until every part of the new one is ready.
+  **Frame-change cause found (different mechanism):** on a frame step the active layer's new cel has
+  no cached picture (the iPad 9 budget holds two 5000² renders), so the layer deliberately keeps its
+  previous picture — the previous frame's ink — over the new frame for up to ~1 s. Fix: hold the whole
+  previous frame, or show the baked new frame, until every layer of the new frame is ready.
 - [ ] **Canvas freeze still recurs.** Flight `flight-20261117-191152` (Test, 2048², same folder): the
   watchdog replaced a stranded `canvas.pan` found `.ended` with 0 touches on `CanvasPlaneView`;
   lifetime repairs now 24. In that flight a two-finger pan's touch was cancelled and began again
