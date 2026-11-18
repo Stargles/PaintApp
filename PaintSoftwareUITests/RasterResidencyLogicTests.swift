@@ -2442,12 +2442,12 @@ extension RasterResidencyLogicTests {
         try XCTUnwrap(CanvasFixture.solidImage(.red, rect: CGRect(origin: .zero, size: size), size: size).pngData()).write(to: url)
         let owner = RasterResidency(budgetBytes: 512 * 256 * 4 * 8, hasHeadroom: { _ in true })
         let source = RasterSource.backed(by: try ProjectStore.RasterBacking.protect(url, using: owner).get(), using: owner)
-        // Unproven blankness: the ordinary decode is the route, because it is what proves (and heals)
-        // a legacy package's transparent PNG.
+        // Unproven blankness: one transient decode, because that is what proves (and heals) a legacy
+        // package's transparent PNG. It is not kept.
         _ = try source.thumbnailImage(size: CGSize(width: 64, height: 32), format: PixelOps.transparentFormat()).get()
         XCTAssertFalse(source.isCertainlyTransparent)
         XCTAssertEqual(owner.usage.allocations, 1, "PREMISE: the first thumbnail of an unproven file decodes it once")
-        XCTAssertTrue(source.releaseResidentPixels())
+        XCTAssertEqual(owner.usage.pixelBytes, 0, "…and that decode is not kept")
         let before = owner.usage
         let thumbnail = try source.thumbnailImage(size: CGSize(width: 64, height: 32),
                                                   format: PixelOps.transparentFormat()).get()

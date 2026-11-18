@@ -171,15 +171,16 @@ extension ProjectStore {
         }
 
         /// **This version's pixels at thumbnail size, without a canvas-sized bitmap being kept.**
-        /// A PNG backing is downsampled by ImageIO straight from the file, so no canvas-sized image is
-        /// ever decoded. A native backing has no scaled decode, so it is decoded into a lease that
-        /// lives only for the one draw — never stored on the source, which would hold it charged
-        /// against the residency until the next eviction pass.
-        func thumbnail(fitting size: CGSize, format: UIGraphicsImageRendererFormat,
+        /// When the version's blankness is already known and the file is a PNG, ImageIO downsamples
+        /// it straight from the file and no canvas-sized image is ever decoded. Otherwise the file is
+        /// decoded into a lease that lives only for the one draw — never stored on the source, which
+        /// would hold it charged against the residency until the next eviction pass — and what that
+        /// decode proves about blankness is handed back (`transparent`), because that proof is what
+        /// heals a legacy package's transparent PNG on load.
+        func thumbnail(fitting size: CGSize, format: UIGraphicsImageRendererFormat, blanknessKnown: Bool,
                        using residency: RasterResidency, excluding: Set<UUID>)
-            -> Result<UIImage, RasterResidency.Failure> {
-            switch payload {
-            case .png:
+            -> Result<(image: UIImage, transparent: Bool?), RasterResidency.Failure> {
+            if blanknessKnown, case .png = payload {
                 let longSide = max(size.width, size.height) * format.scale
                 let small: UIImage? = autoreleasepool {
                     guard let source = CGImageSourceCreateWithURL(url as CFURL,
@@ -194,15 +195,14 @@ extension ProjectStore {
                         UIImage(cgImage: cg).draw(in: CGRect(origin: .zero, size: size))
                     }
                 }
-                return small.map { .success($0) } ?? .failure(.unreadableBacking)
-            case .native:
-                return decode(using: residency, excluding: excluding).flatMap { decoded in
-                    autoreleasepool {
-                        decoded.lease.image().map { image in
-                            UIGraphicsImageRenderer(size: size, format: format).image { _ in
-                                image.draw(in: CGRect(origin: .zero, size: size))
-                            }
-                        }
+                return small.map { .success(($0, nil)) } ?? .failure(.unreadableBacking)
+            }
+            return decode(using: residency, excluding: excluding).flatMap { decoded in
+                autoreleasepool {
+                    decoded.lease.image().map { image in
+                        (UIGraphicsImageRenderer(size: size, format: format).image { _ in
+                            image.draw(in: CGRect(origin: .zero, size: size))
+                        }, decoded.isTransparent)
                     }
                 }
             }

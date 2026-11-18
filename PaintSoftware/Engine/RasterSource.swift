@@ -197,21 +197,24 @@ final class RasterSource: RasterResidencyCandidate {
 
     /// **A thumbnail of this version that never makes a canvas-sized picture resident.** Pixels
     /// already resident are drawn as they are (an alias, nothing new); a source that is only a file
-    /// whose blankness is already known is downsampled from it (`RasterBacking.thumbnail`) rather than decoded whole into
-    /// `image`, where it would sit charged against the residency for as long as it lasted.
+    /// is downsampled or decoded for the one draw (`RasterBacking.thumbnail`) rather than decoded
+    /// whole into `image`, where it would sit charged against the residency for as long as it lasted.
+    /// Its blankness proof is recorded either way, as `resolveImage` would have.
     func thumbnailImage(size: CGSize, format: UIGraphicsImageRendererFormat)
         -> Result<UIImage, RasterResidency.Failure> {
         lock.lock()
         let isResident = image != nil || lease != nil || loading != nil
         let backing = self.backing
-        // Whether this version's blankness is already known. **A decode of an unproven source is
-        // what heals a legacy package's transparent PNG** (`isCertainlyTransparent` is set by it, and
-        // the cel is then dropped on load); a downsample from the file cannot prove it, so until it
-        // is proven the ordinary decode stays the thumbnail's route.
-        let blankness = transparencyProven
+        let blanknessKnown = transparencyProven != nil
         lock.unlock()
-        if !isResident, blankness != nil, let backing {
-            return backing.thumbnail(fitting: size, format: format, using: residency, excluding: [residencyID])
+        if !isResident, let backing {
+            return backing.thumbnail(fitting: size, format: format, blanknessKnown: blanknessKnown,
+                                     using: residency, excluding: [residencyID]).map { result in
+                if let transparent = result.transparent {
+                    lock.lock(); if transparencyProven == nil { transparencyProven = transparent }; lock.unlock()
+                }
+                return result.image
+            }
         }
         return resolveImage().map { full in
             UIGraphicsImageRenderer(size: size, format: format).image { _ in
