@@ -46,16 +46,10 @@ HANDOFF.md is a navigation/checkpoint document, never the only record of an outs
   the paced path; raster thumbnails at canvas size; three bitmaps per vector cel; unbounded static
   caches; commit/un-suppress still invalidates `.everything`; `renderIsolated` on the main thread.
   Add a gated 5000²×5-layer fixture for every budget consumer (`DeviceStressUITests` is the device half).
-- [ ] **Seven UI tests are red on old `main` as well (found Nov 17, not caused by the fixes).**
-  Serial on an iPad 9 simulator, red at `6464761a` and at `d08d18a5` with the same messages:
-  BrushMenu photo tip (draws round, not the tall staged tip); SandwichCompositing layer drop into a
-  node (no "Mix 1"); OptionsPanel Tone Curve and Screen Picker (grey-patch premise); GraphEditorFinger
-  second finger (toolbar has no 44 pt empty gap at 1080 pt); BlendModes Chromatic Aberration (19.93
-  vs 20) and near-tie fade (slider stops at 0.33). A worker is on them (stale test vs real defect).
-  Five more were stale tests, fixed in the tests with the app unchanged: FillContainment
-  reference layer, FillSliderLive gap closing, ShapeRecovery, SelectionEdit readout and
-  FolderMoveScope. Causes: ink under the timeline or the Fill popover, a landscape point rotated
-  twice, a single tap that only selects a layer, and a toolbar tap that commits the Move.
+- [ ] **`MoveBoxPrecisionUITests.testAFingerPressedBesideAVectorBoxDragMakesItAFifthAsFarAndLeavesTheCanvasAlone`
+  fails at its XCTUnwrap (line 54)** on an iPad 9 simulator (seen Nov 17 while fixing the twelve
+  old UI reds, which are now all fixed: ten stale tests, a missing Photos fixture, and one real
+  defect — a graph key held to an axis jumped diagonally on release). Triage: stale vs real.
 - [ ] **Raster Undo at 5000² is one whole-cel step (190.7 MB) against the iPad 9's 192 MB
   budget**, so raster layers keep only the protected minimum of history. Price raster steps by
   their dirty tiles, as vector steps already are (0.11 MB a stroke).

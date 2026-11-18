@@ -48,7 +48,9 @@ runs below 5 GiB.
 - **Fast tier (~14 min Debug, ~8 min Release, 4790 tests — MEASURED 2026-10-08)** — the pure-logic `*LogicTests` run headless. Use constantly.
 - **Full run (~76 min, MEASURED 2026-10-11)** — XCUITests are 99% of the runtime. Phase boundaries only, and
   `simctl shutdown all` + `erase` the simulator *immediately before* it: leftover parallel clones
-  are the cause of nearly every mystery failure.
+  are the cause of nearly every mystery failure. After the erase run `tools/stage-photo-tip.sh <udid>`: the BrushMenu
+  photo-tip test needs its bar as the newest Photos item. Run the UI suite on an iPad (9th
+  generation) simulator — the owner's 1080×810 size premises fail on the 13" one.
 
 ### Why the full run costs what it does
 
