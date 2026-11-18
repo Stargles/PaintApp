@@ -6,7 +6,7 @@ UDID in evidence/udid (own iPad 9 sim, delete when done).
 
 ## Done
 - WIP commit 8a7c2bce plus InteractionGateLogicTests (5 tests, mutation-checked); Debug and Release fast tiers green (5691/0/4).
-- Open: InteractionHitchUITests.testAFinishedStrokeStaysOnScreenUntilItsBaseLands fails (0.0 < 0.5, InteractionHitchUITests.swift:133); other 2 pass.
+- RESOLVED (it was the TEST): testAFinishedStrokeStaysOnScreenUntilItsBaseLands failed because a 50 px brush stamps live dabs on main for ~380 ms (mainStall DabImageCache.stamp), so a screenshot at lift+0.2 s shows no ink YET (first-appearance latency, not a vanish; the ink log shows held at the recogniser end and retired+base in one main turn). Test now judges dips only after the stroke was first shown, skips strokes the probes cannot see, needs >=3 judged. Mutation (retire held ink at hold time) goes red; unmutated green 4x serially. Running all 3 tests in one xcodebuild session slowed the 3rd to ~60 s per tap (sim degradation); alone it is 155 s green.
 
 ## Proven (simulator)
 - Stall sampler names the cost: with a large Rough Ink brush, 550-713 ms main passes, cpu==wall, all in
@@ -46,4 +46,4 @@ the stale picture is not "the last complete one"; hold the whole previous frame 
 frame) until every host of the new frame is ready.
 
 ## Next
-1. Triage the failing stroke-stays-on-screen test, then fix the handoff (stroke/eraser/frame-step) and commit separately.
+1. (Triage done.) Real remaining work, not done: fix the handoff (stroke/eraser/frame-step) and commit separately.
