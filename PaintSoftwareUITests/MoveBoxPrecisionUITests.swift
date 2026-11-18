@@ -34,16 +34,20 @@ final class MoveBoxPrecisionUITests: PaintUITestCase {
         let start = try XCTUnwrap(settledMoveBox(app), "the import lifts the picture into a Move box")
         let transform = readTransform(app)
 
-        // Down from the box's centre, 150 points on a host that is about a thousand high.
+        // **Up** from the box's centre, 150 points on a host that is about a thousand high. Up, because the
+        // picture's box starts at 0.43 of the host and the docked timeline covers its lower part on an
+        // iPad 9 (the owner's size): a drag down puts the next drag's start under the dock, where the pen
+        // grabs the dock and not the box, and the finger beside it is then a plain tap away that puts the
+        // box down — which is the app being right and this test asking the dock for a drag.
         let centre = CGVector(dx: start.midX, dy: start.midY)
-        let drag = CGVector(dx: 0, dy: 150)
-        let aside = CGVector(dx: 0.12, dy: 0.30)
+        let drag = CGVector(dx: 0, dy: -150)
+        let aside = CGVector(dx: 0.12, dy: 0.20)
         let drift = CGVector(dx: 30, dy: 20)
 
         // 1. Control: nothing beside the drag.
         try dragWithAFingerHeldBeside(canvas, from: centre, delta: drag, holding: nil)
         let afterControl = try XCTUnwrap(settledMoveBox(app), "the control drag leaves the box up")
-        let controlTravel = afterControl.minY - start.minY
+        let controlTravel = start.minY - afterControl.minY
         XCTAssertGreaterThan(controlTravel, 0.10,
                              "PREMISE: an unaccompanied drag is not slowed (it travelled \(controlTravel))")
 
@@ -53,7 +57,7 @@ final class MoveBoxPrecisionUITests: PaintUITestCase {
         attachScreenshot(XCUIScreen.main, "vector-after-the-precise-drag")
         let afterPrecise = try XCTUnwrap(settledMoveBox(app),
                                          "the box is still up: the finger that lifted away from it did not commit it")
-        let preciseTravel = afterPrecise.minY - afterControl.minY
+        let preciseTravel = afterControl.minY - afterPrecise.minY
         XCTAssertEqual(readTransform(app), transform,
                        "the finger that slowed the drag did not pan the canvas: it is where it was (\(canvas.label))")
         XCTAssertEqual(preciseTravel / controlTravel, 0.2, accuracy: 0.06, canvas.label +
@@ -71,7 +75,7 @@ final class MoveBoxPrecisionUITests: PaintUITestCase {
         try dragWithAFingerHeldBeside(canvas, from: third, delta: drag, holding: aside)
         let afterStill = try XCTUnwrap(settledMoveBox(app),
                                        "the box is still up: a finger that lifts as a tap away from it did not commit it")
-        XCTAssertEqual((afterStill.minY - afterPrecise.minY) / controlTravel, 0.2, accuracy: 0.06,
+        XCTAssertEqual((afterPrecise.minY - afterStill.minY) / controlTravel, 0.2, accuracy: 0.06,
                        "…and it was slowed just the same")
         attachScreenshot(XCUIScreen.main, "vector-box-after-the-three-drags")
     }
