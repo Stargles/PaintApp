@@ -74,10 +74,12 @@ final class FolderMoveScopeUITests: PaintUITestCase {
             raiseTheFoldersMoveBox(app)
             let scope = app.segmentedControls["moveBar.folderScopePicker"]
             if allFrames { scope.buttons["All Frames"].tap() }
-            closeLayerRail(app)
+            // The rail stays open beside the bar: a toolbar tap — and the Layers button is one — commits an
+            // in-progress Move (`TopToolbar.toggle`), so closing the rail here would end the Move this test is
+            // about and the box would be gone. The drag starts left of the rail, which covers the right half.
             let paper = paperRect(in: canvas)
-            let box = try XCTUnwrap(settledMoveBox(app))
-            dragAcross(canvas, from: CGVector(dx: box.midX, dy: box.midY), paperDX: 0.1, paper: paper)
+            let box = try XCTUnwrap(settledMoveBox(app), "the folder's box is on the glass")
+            dragAcross(canvas, from: CGVector(dx: min(box.midX, box.minX + 0.08), dy: box.midY), paperDX: 0.1, paper: paper)
             app.buttons["timeline.stepForwardButton"].tap()
             XCTAssertEqual(frameNow(app), 2)
             let boxStayedOpen = app.buttons["moveBar.doneButton"].exists
@@ -88,6 +90,16 @@ final class FolderMoveScopeUITests: PaintUITestCase {
             XCTAssertTrue(scope.buttons[allFrames ? "All Frames" : "This Cel"].isSelected, "the accepted scope survives the step")
             attachScreenshot(XCUIScreen.main, "folder-step-standing-box-\(allFrames ? "all" : "this")-owner-landscape")
             app.buttons["moveBar.doneButton"].tap()
+            closeLayerRail(app)
+            // On a landscape iPad the timeline stands over the lower third of the square paper, and the
+            // outside layer's frame-2 line (0.7 of the paper's height) is under it: a read there is the
+            // timeline's pixel, not the line's. The transport has done its work, so fold the panel away.
+            let collapse = app.buttons["timeline.collapseButton"]
+            XCTAssertTrue(collapse.waitForExistence(timeout: 5), "the timeline's collapse chevron")
+            collapse.tap()
+            Thread.sleep(forTimeInterval: 0.6)
+            assertAboveTheDock(app, canvas, dy: Double(paper.minY + paper.height * row(layer: 2, frame: 1) + 0.04),
+                               "the outside layer's frame-2 line")
             let window = CGRect(x: paper.minX, y: paper.minY + paper.height * 0.12,
                                 width: paper.width, height: paper.height * 0.66)
             var probe = try settledProbe(canvas, window: window)
