@@ -46,8 +46,8 @@ could not be verified as open or closed; verify against `main` and `git log`, th
   decline, scale down or drop history at the owner's 5000². Silent refusals: done Nov 17 — artist-facing ones
   already noticed except warp/posed raster (Move, warp, posed bake), which now say "Not enough memory
   to do that"; Liquify's notice still says only "couldn't be prepared". **Open:** the canvas-size ceiling measures the app, not
-  backboardd's 1,850 MiB; `CALayer.contents` installs outside the paced path; raster thumbnails at canvas
-  size; three bitmaps per vector cel; unbounded static caches; commit/un-suppress still invalidates
+  backboardd's 1,850 MiB; (`CALayer.contents` installs audited Nov 17: each is one live surface
+  per layer; raster thumbnails no longer decode or keep a canvas-sized image); three bitmaps per vector cel; unbounded static caches; commit/un-suppress still invalidates
   `.everything`; `renderIsolated` on the main thread. Add a gated 5000²×5-layer fixture for every budget
   consumer (`DeviceStressUITests` is the device half).
 - [ ] **Raster Undo at 5000² is one whole-cel step (190.7 MB) against the iPad 9's 192 MB budget**, so
