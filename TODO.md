@@ -22,6 +22,19 @@ could not be verified as open or closed; verify against `main` and `git log`, th
   settings (owner: the missing settings were *a failure itself*). **Owner to confirm:** Undo lag, the
   circle-and-line Fill (Mend Gaps with Reach sufficient must cover beneath the line while keeping the
   circle's outer boundary), rapid draw/Undo, orange bars on entering Test1.
+- [ ] **Stroke latency and pan hitches on the Nov 17 build (owner, Nov 17 evening, Test1 5000²,
+  stream running).** Strokes sometimes lag noticeably and a canvas pan sometimes freezes for a split
+  second; owner suspects one underlying lag spike behind both. Owner: *"The main thread should never
+  freeze either way."* Recording `recording-20261117-220308` (in
+  `~/PaintWork/nov17-lag-evidence/`): main-thread run-loop passes of 113–796 ms every few seconds,
+  almost all in `sourcePhase` with no named span accounting for them (named main spans are ≤ 33 ms);
+  background `bakeComposite` 5.3–8.8 s per frame and `thumbnailFlatten` up to 794 ms run alongside.
+  Find what runs unattributed on main (stream frame handling, bake installs, `renderIsolated` on
+  main, IOSurface waits) and move it off; attribute every main-thread span the recorder sees.
+- [ ] **Canvas freeze still recurs.** Flight `flight-20261117-191152` (Test, 2048², same folder): the
+  watchdog replaced a stranded `canvas.pan` found `.ended` with 0 touches on `CanvasPlaneView`;
+  lifetime repairs now 24. The watchdog repairs it; the root cause (a recognizer left out of
+  `.possible`) is still open — see "Recurring canvas freezes" below.
 - [ ] **Fix the November 16 audit findings** ([docs/AUDIT-2026-11-16.md](docs/AUDIT-2026-11-16.md), 18
   ranked). Repeating defect: RAM-derived budgets (192 MiB on iPad 9) tested at 2048² that silently
   decline, scale down or drop history at the owner's 5000². Silent refusals: done Nov 17 — artist-facing ones
