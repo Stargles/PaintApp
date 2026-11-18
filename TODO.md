@@ -31,6 +31,13 @@ could not be verified as open or closed; verify against `main` and `git log`, th
   background `bakeComposite` 5.3–8.8 s per frame and `thumbnailFlatten` up to 794 ms run alongside.
   Find what runs unattributed on main (stream frame handling, bake installs, `renderIsolated` on
   main, IOSurface waits) and move it off; attribute every main-thread span the recorder sees.
+- [ ] **Regression: a stroke briefly disappears after it is laid down, then reappears (owner, Nov 17
+  evening, build 9792e799, Test1 5000², Rough Ink).** Owner bets on *"a gap between some kind of
+  preview state and a baked state"*; this was fixed once before, so it is a regression — prime
+  suspect the Nov 17 render pacing (`DeferredVectorRender`, 0.25 s) / `DisplayPin` changes letting the
+  live ink go before the paced base picture lands (`UnlandedInk` exists for exactly this handoff).
+  Recording `recording-20261117-225331` (`~/PaintWork/nov17-lag-evidence/`) shows the strokes and
+  rasterizes but the recorder does not log the live-ink → base-picture handoff — make it.
 - [ ] **Canvas freeze still recurs.** Flight `flight-20261117-191152` (Test, 2048², same folder): the
   watchdog replaced a stranded `canvas.pan` found `.ended` with 0 touches on `CanvasPlaneView`;
   lifetime repairs now 24. The watchdog repairs it; the root cause (a recognizer left out of
