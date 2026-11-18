@@ -4,12 +4,30 @@
 
 From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
 
-> Continue PaintSoftware from HANDOFF.md. Read AGENTS.md, CLAUDE.md, TODO.md and BUGS.md and verify
-> `main` equals `origin/main`. Start with the owner's re-test of the November 17 build on their
-> iPad (Test1: Undo lag, circle-and-line Fill, rapid draw/Undo, orange bars on entering). Then the
-> twelve UI tests red on old `main` too, raster Undo pricing, and the open audit findings in
-> TODO.md. Use focused delegation, keep TODO.md and HANDOFF.md current, and brief the owner in
-> terms of what they see in PaintApp.
+> Continue PaintSoftware from HANDOFF.md. Read AGENTS.md, CLAUDE.md and the top of TODO.md; verify
+> `main` equals `origin/main`. Usage is tight: one worker at a time, Sonnet unless the task needs Opus,
+> short briefs, no re-reading of what HANDOFF already says. Follow "Resume here" below.
+
+## Resume here — November 17, 2026, late (written at 94% weekly usage)
+
+1. **An Opus worker was fixing the owner's three newest reports** on branch `tmp/nov17-hitch`, worktree
+   `~/PaintWork/PaintApp-nov17-hitch` (evidence `~/PaintWork/nov17-hitch-evidence/`): main-thread
+   hitches while drawing/panning (stroke lag, pan stalls — the 5–9 s frame bake competing; it is
+   docs/SCHEDULER.md stage 1), strokes vanishing briefly after lift, and erased strokes reappearing
+   briefly (one live→base handoff bug). If the session was cut off, the worktree and its commits
+   survive: `git -C ~/PaintWork/PaintApp-nov17-hitch log --oneline origin/main..` and `git status`
+   there show what it reached. Finish only what is missing (Sonnet if it is just tests/gates).
+   The owner's recordings are in `~/PaintWork/nov17-lag-evidence/`.
+2. **Then gate and install:** Debug + Release fast tiers on an own iPad 9th-generation simulator,
+   the UI classes the change touches, then the CLAUDE.md "Deploy to iPad" steps from the worktree
+   (UUID only), update `~/.config/paintapp/resign_state`, merge `--ff-only` from the Desktop
+   worktree, push, delete the worktree/branch/simulator/evidence (owner: keep storage lean). `main`
+   already carries, uninstalled: the graph-editor axis-lock fix, the memory-refusal notices, the
+   thumbnail fix and twelve repaired UI tests — they ship in that same install.
+3. **Next owner ask, queued:** an open lasso acts as closed for every bottom-bar action (TODO.md item;
+   remove the Move-only open-lasso path).
+4. **Scheduler:** docs/SCHEDULER.md is ruled (owner delegated the rules); stages 2–5 wait for the owner,
+   who may get a larger plan first. Every change must keep its rules.
 
 ## Sign-off — November 17, 2026, Toronto
 
