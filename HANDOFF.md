@@ -8,17 +8,17 @@ From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
 > `main` equals `origin/main`. Usage is tight: one worker at a time, Sonnet unless the task needs Opus,
 > short briefs, no re-reading of what HANDOFF already says. Follow "Resume here" below.
 
-## Resume here — November 17, 2026, late (written at 94% weekly usage)
+## Resume here — November 18, 2026 (weekly limit reset; owner approved the scheduler + memory budget, staged)
 
-1. **An Opus worker was fixing the owner's three newest reports** on branch `tmp/nov17-hitch`, worktree
-   `~/PaintWork/PaintApp-nov17-hitch` (evidence `~/PaintWork/nov17-hitch-evidence/`): main-thread
-   hitches while drawing/panning (stroke lag, pan stalls — the 5–9 s frame bake competing; it is
-   docs/SCHEDULER.md stage 1), strokes vanishing briefly after lift, erased strokes reappearing
-   briefly, and (if same cause) the active layer drawn over others for ~1 s on a frame change — one
-   rule: never show a mix of old and new pictures (TODO.md). If the session was cut off, the worktree and its commits
-   survive: `git -C ~/PaintWork/PaintApp-nov17-hitch log --oneline origin/main..` and `git status`
-   there show what it reached. Finish only what is missing (Sonnet if it is just tests/gates).
-   The owner's recordings are in `~/PaintWork/nov17-lag-evidence/`.
+1. **One combined branch, `tmp/nov18-eraser`** (worktree `~/PaintWork/PaintApp-nov18-eraser`; it carries the
+   whole of `tmp/nov17-hitch`, whose worktree is gone — delete that branch at merge). Done on it:
+   main-stall sampler, bakes and strips pause while a touch is down (+250 ms), the live vector eraser
+   renders off main (big erase 6125 → 265 ms on the sim, no erased-ink flash), the stroke-handoff test
+   fixed (the "vanishing stroke" was the test). A Sonnet worker was adding the **frame-change fix** (never
+   show the old frame's active layer over the new frame's others) plus every gate; evidence
+   `~/PaintWork/nov18-framestep-evidence/`, notes in the worktree's NOTES.md. If cut off, read
+   `git log --oneline origin/main..` there and finish only what is missing. Recordings:
+   `~/PaintWork/nov17-lag-evidence/`. NOTES.md is scratch — delete it before the merge.
 2. **Then gate and install:** Debug + Release fast tiers on an own iPad 9th-generation simulator,
    the UI classes the change touches, then the CLAUDE.md "Deploy to iPad" steps from the worktree
    (UUID only), update `~/.config/paintapp/resign_state`, merge `--ff-only` from the Desktop
@@ -30,7 +30,7 @@ From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
 4. **Before calling any build done:** a full UI suite run on an iPad 9 simulator (Mac time, few tokens —
    read counts only), and the owner's 2-minute check on the iPad: draw, erase a lot, Undo, pan, change
    frames, play, fill. Pause new features until the mixed-picture fix is installed.
-5. **Scheduler:** docs/SCHEDULER.md is ruled (owner delegated the rules); stages 2–5 wait for the owner,
+5. **Scheduler (owner said go, 2026-11-18):** after this install, stage 2 = an Opus design page reviewed before code, then the core + R1 migration; stage 3 = one memory budget + a reuse pool for canvas-sized pictures; then stages 4–5. Usage-aware: clear context between stages,
    who may get a larger plan first. Every change must keep its rules.
 
 ## Sign-off — November 17, 2026, Toronto
