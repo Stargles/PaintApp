@@ -962,6 +962,7 @@ struct CanvasView: UIViewRepresentable {
                         self.handleStrokeMoved(sample, penTime: penTime, host: host)
                     }
                 }
+                host.strokeView.onRenderSettled = { [weak self] in self?.releaseFrameHoldIfComplete() }
                 host.strokeView.onBaseHoleChanged = { [weak host] hole in
                     host?.setBackingReplacementHole(hole)
                 }
@@ -1044,6 +1045,7 @@ struct CanvasView: UIViewRepresentable {
             PlaybackTrace.span(.layerHostRows, value: canvasManager.layers.count) {
                 reconcileLayerRows(touch: touch)
             }
+            holdTheFrameWhileAHostAwaitsItsPicture()
 
             // **RENDER.md §3.6's dirty sweep, at this pass's cadence and not on a hook** — see
             // `CanvasManager.syncFrameBake`, which carries the argument for why the pass *is* the
@@ -1147,6 +1149,49 @@ struct CanvasView: UIViewRepresentable {
             host.installBaked(source: picture.baked, image: picture.bakedImage)
             host.strokeView.installContent(raster: picture.raster, vector: vector, rasterImage: picture.rasterImage)
         }
+
+        /// **A frame step never shows a mix of two frames.** A host handed a cel with no memoised picture
+        /// rasterizes it off main and, until it lands, keeps the previous picture — the previous frame's
+        /// cel — while every host that did hit its memo already shows the new frame, so the old frame's
+        /// ink sat over the new frame's other layers for the render's length (up to ~1 s at 5000² on the
+        /// iPad 9). Holding every host's *old* picture would need the new ones resident beside the old
+        /// ones, which five 5000² layers cannot afford; so instead a snapshot of what is on screen —
+        /// the last committed frame, screen-sized, taken in the same main-thread turn as the swap and
+        /// before Core Animation commits it — covers the canvas until no host is still awaiting its
+        /// first picture. Never waits: the renders stay off main and the cover comes off when the last
+        /// lands, or after `frameHoldLimit` whatever happens.
+        private func holdTheFrameWhileAHostAwaitsItsPicture() {
+            guard layerHosts.values.contains(where: { $0.strokeView.isAwaitingFirstPicture }) else {
+                return releaseFrameHold()
+            }
+            guard frameHold == nil, !canvasManager.isPlaying, let host = hostView,
+                  let cover = host.resizableSnapshotView(from: host.bounds, afterScreenUpdates: false,
+                                                          withCapInsets: .zero) else { return }
+            cover.isUserInteractionEnabled = false
+            cover.accessibilityIdentifier = "canvas.frameHold"
+            host.addSubview(cover)
+            frameHold = cover
+            let limit = DispatchWorkItem { [weak self] in self?.releaseFrameHold() }
+            frameHoldLimit = limit
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.frameHoldSeconds, execute: limit)
+        }
+
+        private func releaseFrameHoldIfComplete() {
+            guard frameHold != nil,
+                  !layerHosts.values.contains(where: { $0.strokeView.isAwaitingFirstPicture }) else { return }
+            releaseFrameHold()
+        }
+
+        private func releaseFrameHold() {
+            frameHoldLimit?.cancel()
+            frameHoldLimit = nil
+            frameHold?.removeFromSuperview()
+            frameHold = nil
+        }
+
+        private var frameHold: UIView?
+        private var frameHoldLimit: DispatchWorkItem?
+        private static let frameHoldSeconds: TimeInterval = 3
 
         private func reconcileLayerRows(touch: CanvasTouchInputs) {
             // §5.5's source frames, once for the whole loop: under a Repeat layer a host shows —

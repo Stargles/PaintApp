@@ -425,6 +425,18 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// `pacedRender` is armed, the newest one it will start when the interval is up.
     private var pendingVectorRender: DeferredVectorRender.Revision?
 
+    /// **This view has been handed a different canvas and has nothing of it on screen yet** — its
+    /// render is off main and the base slot still holds the *previous* canvas's picture (the previous
+    /// frame's cel after a frame step). Not "a stroke's re-render is pending": that one has shown this
+    /// canvas before, so `displayedVectorVersion` is not `nothingDisplayed`.
+    var isAwaitingFirstPicture: Bool {
+        pendingVectorRender != nil && displayedVectorVersion == Self.nothingDisplayed
+    }
+
+    /// Called on the main thread after any off-main render of this view's canvas has been settled
+    /// (shown, superseded or refused), so `CanvasView` can re-ask whether the frame is complete.
+    var onRenderSettled: (() -> Void)?
+
     /// When this host may next start a canvas-sized render — `DeferredVectorRender.Pacing`.
     private var renderPacing = DeferredVectorRender.Pacing()
     /// The render held back by `renderPacing`, armed at most once.
@@ -1277,6 +1289,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                                     streamHadWindow: Bool) {
         // A different canvas is a different layer; this view has moved on and owes it nothing.
         guard canvas === vectorCanvas else { return }
+        defer { onRenderSettled?() }
         // Nil is a superseded or refused rasterize; neither can replace the displayed picture.
         // The same plan `refreshDisplay` reads: while a derived picture owns the base slot this
         // render has nowhere to land; `DeferredVectorRender.landing`'s `baseIsDerived` preserves it.
