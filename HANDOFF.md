@@ -13,8 +13,9 @@ From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
 1. **An Opus worker was fixing the owner's three newest reports** on branch `tmp/nov17-hitch`, worktree
    `~/PaintWork/PaintApp-nov17-hitch` (evidence `~/PaintWork/nov17-hitch-evidence/`): main-thread
    hitches while drawing/panning (stroke lag, pan stalls — the 5–9 s frame bake competing; it is
-   docs/SCHEDULER.md stage 1), strokes vanishing briefly after lift, and erased strokes reappearing
-   briefly (one live→base handoff bug). If the session was cut off, the worktree and its commits
+   docs/SCHEDULER.md stage 1), strokes vanishing briefly after lift, erased strokes reappearing
+   briefly, and (if same cause) the active layer drawn over others for ~1 s on a frame change — one
+   rule: never show a mix of old and new pictures (TODO.md). If the session was cut off, the worktree and its commits
    survive: `git -C ~/PaintWork/PaintApp-nov17-hitch log --oneline origin/main..` and `git status`
    there show what it reached. Finish only what is missing (Sonnet if it is just tests/gates).
    The owner's recordings are in `~/PaintWork/nov17-lag-evidence/`.
@@ -26,7 +27,10 @@ From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
    thumbnail fix and twelve repaired UI tests — they ship in that same install.
 3. **Next owner ask, queued:** an open lasso acts as closed for every bottom-bar action (TODO.md item;
    remove the Move-only open-lasso path).
-4. **Scheduler:** docs/SCHEDULER.md is ruled (owner delegated the rules); stages 2–5 wait for the owner,
+4. **Before calling any build done:** a full UI suite run on an iPad 9 simulator (Mac time, few tokens —
+   read counts only), and the owner's 2-minute check on the iPad: draw, erase a lot, Undo, pan, change
+   frames, play, fill. Pause new features until the mixed-picture fix is installed.
+5. **Scheduler:** docs/SCHEDULER.md is ruled (owner delegated the rules); stages 2–5 wait for the owner,
    who may get a larger plan first. Every change must keep its rules.
 
 ## Sign-off — November 17, 2026, Toronto
