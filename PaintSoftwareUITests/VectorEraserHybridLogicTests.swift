@@ -1195,6 +1195,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
             damage = damage.isNull ? changed : damage.union(changed)
             XCTAssertTrue(scratch.replaceVectorDisplay(elements: source.elements, rewriting: [], damage: damage),
                           "The current ordered list must publish after each real cut")
+            scratch.settleCelContent()
             XCTAssertTrue(scratch.hasCurrentReplacementWindow(covering: damage),
                           "The same owner query used by the view accepts each successfully rendered window")
             let shown = try XCTUnwrap(scratch.renderedCelContent)
@@ -1240,10 +1241,12 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         XCTAssertFalse(scratch.windowRect.contains(unrelatedDamage), "PREMISE: this separate damage is outside the admitted window")
         XCTAssertFalse(scratch.hasCurrentReplacementWindow(covering: unrelatedDamage),
                        "A window is not current for pixels outside its admitted bounds")
-        XCTAssertFalse(scratch.replaceCelContent(
+        // Off main, the call admits the growth and the lift's settle finds the source refuses it; the
+        // last valid picture must survive that.
+        _ = scratch.replaceCelContent(
             ink: .derived(DerivedCelContent(identity: "mode3-refused-growth", render: { _, _ in nil }), .full),
-            damage: CGRect(x: 112, y: 48, width: 8, height: 32)),
-            "A failed later window draw must not publish over the last valid picture")
+            damage: CGRect(x: 112, y: 48, width: 8, height: 32))
+        scratch.settleCelContent()
         XCTAssertTrue(scratch.windowRect.contains(damage), "A refused growth retains the last admitted window")
         XCTAssertFalse(scratch.hasCurrentReplacementWindow(covering: damage),
                        "A retained old picture after failed growth is not a current replacement")
@@ -1345,8 +1348,11 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let refused = scratch.replaceCelContent(
             ink: .derived(DerivedCelContent(identity: "refused-source", render: { _, _ in nil }), .full),
             damage: CGRect(x: 8, y: 8, width: 8, height: 8))
-        XCTAssertFalse(refused, "A refused source must not publish a partial replacement window")
-        XCTAssertTrue(scratch.windowRect.isNull, "A refused backdrop must not publish a partial window")
+        // The render is off main now, so the call cannot know the source refuses: it is admitted, and the
+        // refusal is what the lift's settle finds.
+        _ = refused
+        scratch.settleCelContent()
+        XCTAssertNil(scratch.renderedCelContent, "A refused source publishes no rendered picture")
         XCTAssertNil(scratch.image, "A refused source cannot publish a preview image")
         if case .success = scratch.lastMutationResult {
             XCTFail("The scratch must retain the source failure")
@@ -1378,6 +1384,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         XCTAssertGreaterThan(scratch.windowRect.height, 0)
         XCTAssertEqual(scratch.windowPixelCount, 0,
                        "Native replacement must not allocate a second raster scratch")
+        scratch.settleCelContent()
         let first = try XCTUnwrap(scratch.renderedCelContent,
                                   "The first damage rectangle publishes its rendered window")
         XCTAssertLessThan(first.window.width * first.window.height, 256 * 256,
@@ -1387,6 +1394,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
             ink: .ordinary(source: frozen, elements: elements, rewriting: Set(elements.map(\.id))),
             damage: CGRect(x: 700, y: 700, width: 32, height: 32)),
             "A later edit grows the existing geometric window without creating a raster scratch")
+        scratch.settleCelContent()
         let grown = try XCTUnwrap(scratch.renderedCelContent)
         XCTAssertGreaterThan(grown.window.width, first.window.width)
         XCTAssertGreaterThan(grown.window.height, first.window.height)
@@ -1446,6 +1454,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
 
         XCTAssertTrue(scratch.replaceVectorDisplay(elements: [], rewriting: [victim.id], damage: damage),
                       "The fully removed editable stroke publishes its bounded native replacement")
+        scratch.settleCelContent()
         let first = try XCTUnwrap(scratch.renderedCelContent)
         XCTAssertTrue(first.window.contains(CGPoint(x: 40, y: 130)),
                       "PREMISE: independently posed backing is inside the replacement footprint")
@@ -1477,6 +1486,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         XCTAssertTrue(scratch.replaceVectorDisplay(elements: [.stroke(replacement)], rewriting: [victim.id],
                                                     damage: damage),
                       "A later geometry update replaces the current presentation")
+        scratch.settleCelContent()
         let second = try XCTUnwrap(scratch.renderedCelContent)
         let secondBytes = try XCTUnwrap(RasterVectorParity.premultipliedBytes(of: second.image,
                                                                              size: second.window.size))
