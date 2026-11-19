@@ -2876,7 +2876,16 @@ struct CanvasView: UIViewRepresentable {
             guard picture !== bakedFramePicture || window != bakedFrameWindow else { return }
             bakedFramePicture = picture
             bakedFrameWindow = window
-            bakedFrameView?.present { [weak self] in self?.mintBakedFrame() }
+            guard let view = bakedFrameView else { return }
+            // **The first picture is drawn in this turn** (`presentFirst`): the pass that puts the
+            // bake up is the one that blanks the hosts or empties `belowView`, so a first draw off the
+            // main thread would show the paper for its length. One window-sized resample, once; every
+            // later picture is drawn off main while the one before it stays up.
+            if view.layer.contents == nil, let frame = mintBakedFrame() {
+                view.presentFirst(frame)
+            } else {
+                view.present { [weak self] in self?.mintBakedFrame() }
+            }
         }
 
         /// The host's pixels in canvas points, now.

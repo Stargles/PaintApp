@@ -121,7 +121,7 @@ final class PlaybackSurfaceUITests: PaintUITestCase {
             let before = Int(readField(app, "rasterizes:")) ?? -1
             forward.tap()
             var rasterizesWhenShown: Int?
-            var mixes = 0
+            var mixes = 0, blanks = 0
             let end = Date().addingTimeInterval(8)
             while Date() < end {
                 let shown = framesShown(app, canvas)
@@ -130,10 +130,12 @@ final class PlaybackSurfaceUITests: PaintUITestCase {
                     break
                 }
                 if Set(shown).count > 1 { mixes += 1 }
+                if shown.allSatisfy({ $0 == "-" }) { blanks += 1 }
             }
-            report.append("step \(step): rasterizes before=\(before) shown=\(String(describing: rasterizesWhenShown)) mixes=\(mixes)")
+            report.append("step \(step): rasterizes before=\(before) shown=\(String(describing: rasterizesWhenShown)) mixes=\(mixes) blanks=\(blanks)")
             if step == 1 { attachScreenshot(XCUIScreen.main, "first-step-shows-frame-2") }
             XCTAssertEqual(mixes, 0, "step \(step) showed two frames at once: \(report.last!)")
+            XCTAssertEqual(blanks, 0, "step \(step) showed no frame at all for a moment: \(report.last!)")
             guard let shown = rasterizesWhenShown else {
                 XCTFail("step \(step) never showed frame \(step + 1) whole: \(framesShown(app, canvas))")
                 continue
