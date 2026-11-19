@@ -3171,7 +3171,7 @@ final class CanvasManager: ObservableObject {
             let end = playbackEndFrame
             if next < start { next = end }
             if next > end { next = start }
-            currentFrame = next
+            goToFrame(next)
             return
         }
         // Not clamped to the scene either — `goToFrame` is the one place the playhead's bounds are
