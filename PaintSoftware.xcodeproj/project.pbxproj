@@ -161,6 +161,7 @@
 		E2FD2BA7D05AD14F3CB1094D /* PaintSoftware/Engine/PlaybackClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AC9AF3B2A180DCF5733729B /* PaintSoftware/Engine/PlaybackClock.swift */; };
 		F87038A716A7B10437327F08 /* PaintSoftware/Models/CanvasManager+Eraser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FD4CF75ACB8BD2252912D26 /* PaintSoftware/Models/CanvasManager+Eraser.swift */; };
 		02F9079C7F465179B1804C45 /* PaintSoftware/Views/Canvas/WindowSurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7DFD37AB80BD28D239573B8 /* PaintSoftware/Views/Canvas/WindowSurfaceView.swift */; };
+		2619E8F1B66DBD1701A08B6B /* PaintSoftware/Views/Canvas/BakedFrameWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 831EDE912619E8F1B66DBD17 /* PaintSoftware/Views/Canvas/BakedFrameWindow.swift */; };
 		7F08A9B1C2D34E56F708A901 /* PaintSoftware/Views/Canvas/LayerFillView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F08A9B1C2D34E56F708A902 /* PaintSoftware/Views/Canvas/LayerFillView.swift */; };
 		9F1D70F63B89C54F9EB9EBDE /* PaintSoftware/Views/HeldFrameLanding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 167392A3617FBE9497281159 /* PaintSoftware/Views/HeldFrameLanding.swift */; };
 		7EE82CA2B1D6CA711AD1CCBD /* PaintSoftware/Engine/LatestWins.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCD61ED5A18E54F7FD71DEC7 /* PaintSoftware/Engine/LatestWins.swift */; };
@@ -216,6 +217,7 @@
 		D40F0F1B4A53CCFAB8A3CFAF /* ColorWheelsEffectLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D610DBD8DD3BFC76AFF6B9B /* ColorWheelsEffectLogicTests.swift */; };
 		7F0746FFA4C1F781844464A1 /* ColorWheelsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 208D9968C1AACEAC412A9510 /* ColorWheelsUITests.swift */; };
 		3F3D7B5C751653CA37295DDB /* WindowSurfaceViewLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51B70E250BD9498FDB7CE518 /* WindowSurfaceViewLogicTests.swift */; };
+		5FABD5725D960C4726894187 /* BakedFrameWindowLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 958764975FABD5725D960C47 /* BakedFrameWindowLogicTests.swift */; };
 		778279A1A719871D8903393C /* LatestWinsLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B97005619669BBE5D461C18B /* LatestWinsLogicTests.swift */; };
 		E748D57AB79B0B2632FD9C00 /* VectorLayerEffectUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08A3C75537F85394C787A31B /* VectorLayerEffectUITests.swift */; };
 		1930421BD77B58AED1E84806 /* VectorLayerEffectLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 523EB63C9D093C688C522E4B /* VectorLayerEffectLogicTests.swift */; };
@@ -845,6 +847,7 @@
 		8AC9AF3B2A180DCF5733729B /* PaintSoftware/Engine/PlaybackClock.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/PlaybackClock.swift; sourceTree = "<group>"; };
 		5FD4CF75ACB8BD2252912D26 /* PaintSoftware/Models/CanvasManager+Eraser.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Models/CanvasManager+Eraser.swift"; sourceTree = "<group>"; };
 		C7DFD37AB80BD28D239573B8 /* PaintSoftware/Views/Canvas/WindowSurfaceView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Views/Canvas/WindowSurfaceView.swift"; sourceTree = "<group>"; };
+		831EDE912619E8F1B66DBD17 /* PaintSoftware/Views/Canvas/BakedFrameWindow.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Views/Canvas/BakedFrameWindow.swift"; sourceTree = "<group>"; };
 		7F08A9B1C2D34E56F708A902 /* PaintSoftware/Views/Canvas/LayerFillView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Views/Canvas/LayerFillView.swift"; sourceTree = "<group>"; };
 		167392A3617FBE9497281159 /* PaintSoftware/Views/HeldFrameLanding.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Views/HeldFrameLanding.swift"; sourceTree = "<group>"; };
 		CCD61ED5A18E54F7FD71DEC7 /* PaintSoftware/Engine/LatestWins.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/LatestWins.swift"; sourceTree = "<group>"; };
@@ -900,6 +903,7 @@
 		3D610DBD8DD3BFC76AFF6B9B /* ColorWheelsEffectLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ColorWheelsEffectLogicTests.swift; sourceTree = "<group>"; };
 		208D9968C1AACEAC412A9510 /* ColorWheelsUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ColorWheelsUITests.swift; sourceTree = "<group>"; };
 		51B70E250BD9498FDB7CE518 /* WindowSurfaceViewLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WindowSurfaceViewLogicTests.swift; sourceTree = "<group>"; };
+		958764975FABD5725D960C47 /* BakedFrameWindowLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BakedFrameWindowLogicTests.swift; sourceTree = "<group>"; };
 		B97005619669BBE5D461C18B /* LatestWinsLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "LatestWinsLogicTests.swift"; sourceTree = "<group>"; };
 		08A3C75537F85394C787A31B /* VectorLayerEffectUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorLayerEffectUITests.swift; sourceTree = "<group>"; };
 		523EB63C9D093C688C522E4B /* VectorLayerEffectLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VectorLayerEffectLogicTests.swift; sourceTree = "<group>"; };
@@ -1672,6 +1676,7 @@
 				3D610DBD8DD3BFC76AFF6B9B /* ColorWheelsEffectLogicTests.swift */,
 				208D9968C1AACEAC412A9510 /* ColorWheelsUITests.swift */,
 				51B70E250BD9498FDB7CE518 /* WindowSurfaceViewLogicTests.swift */,
+				958764975FABD5725D960C47 /* BakedFrameWindowLogicTests.swift */,
 				B97005619669BBE5D461C18B /* LatestWinsLogicTests.swift */,
 				08A3C75537F85394C787A31B /* VectorLayerEffectUITests.swift */,
 				523EB63C9D093C688C522E4B /* VectorLayerEffectLogicTests.swift */,
@@ -1913,6 +1918,7 @@
 				8AC9AF3B2A180DCF5733729B /* PaintSoftware/Engine/PlaybackClock.swift */,
 				5FD4CF75ACB8BD2252912D26 /* PaintSoftware/Models/CanvasManager+Eraser.swift */,
 				C7DFD37AB80BD28D239573B8 /* PaintSoftware/Views/Canvas/WindowSurfaceView.swift */,
+				831EDE912619E8F1B66DBD17 /* PaintSoftware/Views/Canvas/BakedFrameWindow.swift */,
 				7F08A9B1C2D34E56F708A902 /* PaintSoftware/Views/Canvas/LayerFillView.swift */,
 				167392A3617FBE9497281159 /* PaintSoftware/Views/HeldFrameLanding.swift */,
 				CCD61ED5A18E54F7FD71DEC7 /* PaintSoftware/Engine/LatestWins.swift */,
@@ -2414,6 +2420,7 @@
 				E2FD2BA7D05AD14F3CB1094D /* PaintSoftware/Engine/PlaybackClock.swift in Sources */,
 				F87038A716A7B10437327F08 /* PaintSoftware/Models/CanvasManager+Eraser.swift in Sources */,
 				02F9079C7F465179B1804C45 /* PaintSoftware/Views/Canvas/WindowSurfaceView.swift in Sources */,
+				2619E8F1B66DBD1701A08B6B /* PaintSoftware/Views/Canvas/BakedFrameWindow.swift in Sources */,
 				7F08A9B1C2D34E56F708A901 /* PaintSoftware/Views/Canvas/LayerFillView.swift in Sources */,
 				9F1D70F63B89C54F9EB9EBDE /* PaintSoftware/Views/HeldFrameLanding.swift in Sources */,
 				7EE82CA2B1D6CA711AD1CCBD /* PaintSoftware/Engine/LatestWins.swift in Sources */,
@@ -2474,6 +2481,7 @@
 				D40F0F1B4A53CCFAB8A3CFAF /* ColorWheelsEffectLogicTests.swift in Sources */,
 				7F0746FFA4C1F781844464A1 /* ColorWheelsUITests.swift in Sources */,
 				3F3D7B5C751653CA37295DDB /* WindowSurfaceViewLogicTests.swift in Sources */,
+				5FABD5725D960C4726894187 /* BakedFrameWindowLogicTests.swift in Sources */,
 				778279A1A719871D8903393C /* LatestWinsLogicTests.swift in Sources */,
 				E748D57AB79B0B2632FD9C00 /* VectorLayerEffectUITests.swift in Sources */,
 				1930421BD77B58AED1E84806 /* VectorLayerEffectLogicTests.swift in Sources */,

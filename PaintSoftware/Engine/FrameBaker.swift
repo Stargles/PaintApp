@@ -310,8 +310,10 @@ final class FrameBaker {
     /// frame land on time, it makes every frame after it late as well. The walk `kick` starts on
     /// the same pass decodes the frame off the main thread, and `finishRingFill` announces it
     /// through `notifyFrameFinished`, so the canvas showing the previous picture is told the moment
-    /// this one is resident. A scrub — playback stopped — still decodes synchronously: the artist
-    /// has landed on a frame and wants that frame, not the one before it.
+    /// this one is resident. **A frame step is a flip too until it settles**
+    /// (`CanvasManager.framesAreFlipping`): stepping through a 5000² scene decoded a 95 MiB frame on
+    /// the main thread per step, which SCHEDULER.md rule 2 forbids. Once the playhead has settled a
+    /// read decodes synchronously again: the artist has landed on a frame and wants that frame.
     func image(for key: FrameBakeKey) -> CGImage? {
         guard !isClosed else { return nil }
         // `value` is the ring's answer — 1 resident, 0 a miss — so a `PlaybackTrace` report carries
@@ -320,7 +322,7 @@ final class FrameBaker {
         if let resident = ring.frame(for: key.fileName) {
             return PlaybackTrace.span(.bakeRead, value: 1) { resident.makeImage() }
         }
-        guard manager?.isPlaying != true else {
+        guard manager?.framesAreFlipping != true else {
             PlaybackTrace.mark(.bakeRead, value: 0)
             ringWalk = nil
             kick()

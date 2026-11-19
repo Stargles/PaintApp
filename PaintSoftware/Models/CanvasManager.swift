@@ -1966,6 +1966,7 @@ final class CanvasManager: ObservableObject {
         } else {
             stopPlayback()
         }
+        endFrameStepSettle()
         interactionBegan.send()
     }
 
@@ -3081,7 +3082,40 @@ final class CanvasManager: ObservableObject {
     /// way. The scene is what has been drawn; the playhead reaching a frame is not a drawing
     /// reaching it.
     func goToFrame(_ frame: Int) {
-        currentFrame = max(0, frame)
+        let target = max(0, frame)
+        if target != currentFrame { noteFrameStep() }
+        currentFrame = target
+    }
+
+    /// **A frame step is a flip, until it settles** — the transport's step buttons, a tap or scrub on
+    /// the ruler. True from the step until `frameStepSettleSeconds` pass with no other step, and while
+    /// it is the canvas shows the frame from the bake as it does during playback
+    /// (`sandwichEngagesOnCanvas`): the owner, 2026-11-18, *"frames are already baked, so a step should
+    /// show the baked frame at once"*. Without it every step handed each layer host a new cel to
+    /// rasterize — at the owner's 5000² a second a layer on the iPad 9, and one 95 MiB picture each
+    /// for the render server — and the canvas waited for all of them.
+    @Published private(set) var frameStepIsSettling = false
+    private var frameStepSettle: DispatchWorkItem?
+    /// How long after the last step the layers are asked for their own pictures again.
+    static let frameStepSettleSeconds: TimeInterval = 0.5
+
+    /// **Whether the frames are flipping**: playing, or a step that has not settled.
+    var framesAreFlipping: Bool { isPlaying || frameStepIsSettling }
+
+    private func noteFrameStep() {
+        guard !isPlaying else { return }
+        if !frameStepIsSettling { frameStepIsSettling = true }
+        frameStepSettle?.cancel()
+        let settle = DispatchWorkItem { [weak self] in self?.endFrameStepSettle() }
+        frameStepSettle = settle
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.frameStepSettleSeconds, execute: settle)
+    }
+
+    /// Ends the settle at once — a touch that is about to edit needs the layers drawing themselves.
+    private func endFrameStepSettle() {
+        frameStepSettle?.cancel()
+        frameStepSettle = nil
+        if frameStepIsSettling { frameStepIsSettling = false }
     }
 
     /// `loopStartFrame`/`loopEndFrame` ordered, with a missing one standing in as the animation's own
@@ -3346,6 +3380,8 @@ final class CanvasManager: ObservableObject {
         guard !isPlaying else { return }
         // Through `goToFrame`, which is the one place the playhead's bounds are decided.
         goToFrame(playbackEntryFrame())
+        // Playing is the flip itself; the entry jump is not a step left to settle after it stops.
+        endFrameStepSettle()
         playbackClock = PlaybackClock(startedAt: playbackNow())
         isPlaying = true
         schedulePlaybackTimer()

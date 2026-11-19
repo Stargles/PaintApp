@@ -110,6 +110,9 @@ final class PlaybackTrace: @unchecked Sendable {
         /// main thread and drawn into the held frame's surface. Its count over a drag's seconds is the
         /// preview rate the device actually achieved.
         case heldFrameComposite
+        /// A baked frame resampled into the window-sized surface it reaches the screen in
+        /// (`BakedFrameWindow`), off the main thread — once per frame played or stepped to.
+        case bakedFrameDraw
         /// The baker encoding and writing one frame.
         case bakeWrite
         /// `CanvasManager.flushPendingThumbnailRegens` — the 400 ms debounced cel thumbnail.

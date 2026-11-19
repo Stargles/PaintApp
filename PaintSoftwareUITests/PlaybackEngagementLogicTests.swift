@@ -153,6 +153,38 @@ final class PlaybackEngagementLogicTests: XCTestCase {
                        "Stopping puts it back on the flat row, so nothing about editing changes")
     }
 
+    /// **A frame step is a flip until it settles** (2026-11-18): the owner's *"frames are already
+    /// baked, so a step should show the baked frame at once"*. A step engages the compositor — so the
+    /// canvas shows the bake and no host is handed a cel to rasterize — until the playhead has been
+    /// still for `frameStepSettleSeconds`, or a touch that edits arrives first.
+    func testAFrameStepEngagesTheCompositorUntilItSettlesOrATouchEdits() {
+        let manager = plainDocument(layers: 3, frames: 3, canvas: CGSize(width: 256, height: 256))
+        let tree = manager.renderTree(atFrame: 0)
+        XCTAssertFalse(manager.sandwichEngagesOnCanvas(tree: tree), "Setup: at rest the flat row")
+
+        manager.stepFrame(by: 1)
+        XCTAssertEqual(manager.currentFrame, 1, "Setup: the step moved the playhead")
+        XCTAssertTrue(manager.framesAreFlipping, "a step is a flip")
+        XCTAssertTrue(manager.sandwichEngagesOnCanvas(tree: manager.renderTree(atFrame: 1)),
+                      "a step shows the bake, as playback does")
+
+        RunLoop.main.run(until: Date().addingTimeInterval(CanvasManager.frameStepSettleSeconds + 0.3))
+        XCTAssertFalse(manager.framesAreFlipping, "a still playhead has settled")
+        XCTAssertFalse(manager.sandwichEngagesOnCanvas(tree: manager.renderTree(atFrame: 1)),
+                       "settled, the layers draw themselves again for editing")
+
+        manager.goToFrame(2)
+        XCTAssertTrue(manager.framesAreFlipping, "a ruler tap is a step too")
+        manager.canvasInteractionBegan()
+        XCTAssertFalse(manager.framesAreFlipping, "a touch that edits needs the layers at once")
+
+        manager.goToFrame(2)
+        XCTAssertFalse(manager.framesAreFlipping, "landing where the playhead already is is no step")
+        manager.play()
+        manager.stopPlayback()
+        XCTAssertFalse(manager.framesAreFlipping, "playing's entry jump leaves nothing to settle after it")
+    }
+
     /// **The scrub still refuses the compositor while playing**, which is not a detail: the guard
     /// under the first one is a gesture the composite cannot keep up with (`sandwichEngagesOnCanvas`),
     /// and a new clause above it must not reach past it.

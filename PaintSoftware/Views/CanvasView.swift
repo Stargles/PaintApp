@@ -962,7 +962,7 @@ struct CanvasView: UIViewRepresentable {
                         self.handleStrokeMoved(sample, penTime: penTime, host: host)
                     }
                 }
-                host.strokeView.onRenderSettled = { [weak self] in self?.releaseFrameHoldIfComplete() }
+                host.strokeView.onRenderSettled = { [weak self] in self?.coverTheHostsWithTheBakeWhileTheyRender() }
                 host.strokeView.onBaseHoleChanged = { [weak host] hole in
                     host?.setBackingReplacementHole(hole)
                 }
@@ -1033,6 +1033,7 @@ struct CanvasView: UIViewRepresentable {
                     for view in bandViews { container.bringSubviewToFront(view) }
                 }
                 if sandwichEngaged, let sandwichAboveView { container.bringSubviewToFront(sandwichAboveView) }
+                if let bakedFrameView { container.bringSubviewToFront(bakedFrameView) }
                 lastOrderedLayerIDs = orderedIDs
                 lastOrderedSandwichEngaged = sandwichEngaged
             }
@@ -1045,7 +1046,6 @@ struct CanvasView: UIViewRepresentable {
             PlaybackTrace.span(.layerHostRows, value: canvasManager.layers.count) {
                 reconcileLayerRows(touch: touch)
             }
-            holdTheFrameWhileAHostAwaitsItsPicture()
 
             // **RENDER.md §3.6's dirty sweep, at this pass's cadence and not on a hook** — see
             // `CanvasManager.syncFrameBake`, which carries the argument for why the pass *is* the
@@ -1149,49 +1149,6 @@ struct CanvasView: UIViewRepresentable {
             host.installBaked(source: picture.baked, image: picture.bakedImage)
             host.strokeView.installContent(raster: picture.raster, vector: vector, rasterImage: picture.rasterImage)
         }
-
-        /// **A frame step never shows a mix of two frames.** A host handed a cel with no memoised picture
-        /// rasterizes it off main and, until it lands, keeps the previous picture — the previous frame's
-        /// cel — while every host that did hit its memo already shows the new frame, so the old frame's
-        /// ink sat over the new frame's other layers for the render's length (up to ~1 s at 5000² on the
-        /// iPad 9). Holding every host's *old* picture would need the new ones resident beside the old
-        /// ones, which five 5000² layers cannot afford; so instead a snapshot of what is on screen —
-        /// the last committed frame, screen-sized, taken in the same main-thread turn as the swap and
-        /// before Core Animation commits it — covers the canvas until no host is still awaiting its
-        /// first picture. Never waits: the renders stay off main and the cover comes off when the last
-        /// lands, or after `frameHoldLimit` whatever happens.
-        private func holdTheFrameWhileAHostAwaitsItsPicture() {
-            guard layerHosts.values.contains(where: { $0.strokeView.isAwaitingFirstPicture }) else {
-                return releaseFrameHold()
-            }
-            guard frameHold == nil, !canvasManager.isPlaying, let host = hostView,
-                  let cover = host.resizableSnapshotView(from: host.bounds, afterScreenUpdates: false,
-                                                          withCapInsets: .zero) else { return }
-            cover.isUserInteractionEnabled = false
-            cover.accessibilityIdentifier = "canvas.frameHold"
-            host.addSubview(cover)
-            frameHold = cover
-            let limit = DispatchWorkItem { [weak self] in self?.releaseFrameHold() }
-            frameHoldLimit = limit
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.frameHoldSeconds, execute: limit)
-        }
-
-        private func releaseFrameHoldIfComplete() {
-            guard frameHold != nil,
-                  !layerHosts.values.contains(where: { $0.strokeView.isAwaitingFirstPicture }) else { return }
-            releaseFrameHold()
-        }
-
-        private func releaseFrameHold() {
-            frameHoldLimit?.cancel()
-            frameHoldLimit = nil
-            frameHold?.removeFromSuperview()
-            frameHold = nil
-        }
-
-        private var frameHold: UIView?
-        private var frameHoldLimit: DispatchWorkItem?
-        private static let frameHoldSeconds: TimeInterval = 3
 
         private func reconcileLayerRows(touch: CanvasTouchInputs) {
             // §5.5's source frames, once for the whole loop: under a Repeat layer a host shows —
@@ -1486,7 +1443,9 @@ struct CanvasView: UIViewRepresentable {
             func pixels(_ size: CGSize) -> String { "\(Int(size.width))x\(Int(size.height))" }
             if let surface = heldFrameSurface, !surface.isHidden { return "held@" + pixels(surface.surfaceWindow.size) }
             switch sandwichPresentation {
-            case .disengaged: return "hosts"
+            case .disengaged:
+                if let view = bakedFrameView, !view.isHidden { return "cover@" + pixels(view.surfaceWindow.size) }
+                return "hosts"
             case .rest: return sandwichFull.map { "bake@" + pixels($0.size) } ?? "none"
             case .live, .midStroke, .moving: return "live"
             }
@@ -1899,6 +1858,9 @@ struct CanvasView: UIViewRepresentable {
             }
 
             guard engaged else {
+                // Last, after the hosts have been handed this pass's cels and un-blanked: whatever
+                // they still have to render is what the bake covers.
+                defer { coverTheHostsWithTheBakeWhileTheyRender() }
                 let hasComposite = sandwichPresentation != .disengaged || livePicture != nil || sandwichFull != nil
                 if hasComposite {
                     switch prepareHostPictures(Set(layerHosts.keys)) {
@@ -2051,6 +2013,7 @@ struct CanvasView: UIViewRepresentable {
                       let below = picture.below else { return paperIsNowPaintedBy(false) }
                 if belowView.image !== below { belowView.image = below }
                 if aboveView.image !== picture.above { aboveView.image = picture.above }
+                showBakedFrame(nil)
                 showMovingBands(picture, editIsLive: edit != nil)
             case .live, .midStroke:
                 // Around the hosts, `above` is the upper half; over them (`LivePairCut.overHost`) the
@@ -2059,9 +2022,13 @@ struct CanvasView: UIViewRepresentable {
                 else { return paperIsNowPaintedBy(false) }
                 if belowView.image !== below { belowView.image = below }
                 if aboveView.image !== picture.above { aboveView.image = picture.above }
+                showBakedFrame(nil)
             case .rest, .disengaged:
                 guard let full = sandwichFull else { return paperIsNowPaintedBy(false) }
-                if belowView.image !== full { belowView.image = full }
+                // The bake reaches the screen through the window-sized surfaces, never as a
+                // canvas-sized bitmap on `belowView` — see `BakedFrameWindow`.
+                if belowView.image != nil { belowView.image = nil }
+                showBakedFrame(full)
                 // Nothing in the upper view at rest: the baked frame is the whole tree, so a second
                 // image over it would be everything above the active layer drawn a second time.
                 if aboveView.image != nil { aboveView.image = nil }
@@ -2844,6 +2811,123 @@ struct CanvasView: UIViewRepresentable {
             sandwichFullKey = key
         }
 
+        // MARK: The baked frame on screen
+
+        /// **Where the bake reaches the screen** — two surfaces the size of the host in pixels
+        /// (`BakedFrameWindow`), drawn off the main thread and alternated, so the render server is
+        /// handed the window once and nothing per frame however large the canvas. Above the hosts and
+        /// the halves, under the held frame, the onion skin and the chrome. It shows the bake while
+        /// the compositor rests on it (playback, a step, a document the flat row cannot draw), and
+        /// covers the hosts with it while they render the cels a step or a stop handed them. Made on
+        /// first use and dropped when nothing needs it, so its surfaces exist only while it shows.
+        private var bakedFrameView: WindowSurfaceView?
+        /// The picture `bakedFrameView` is showing or drawing; nil while it is down.
+        private var bakedFramePicture: UIImage?
+        /// The window the picture was last asked for at, so a moved canvas asks again.
+        private var bakedFrameWindow: BakedFrameWindow?
+        /// The bake file the cover's picture came from, so a pass with the same frame keeps it.
+        private var bakedFrameCoverName: String?
+        /// The baked frame's own lane: a draw is a window-sized resample, and must never queue behind
+        /// a canvas-sized composite on `sandwichQueue`.
+        private static let bakedFrameQueue = DispatchQueue(label: "com.paintapp.CanvasView.bakedFrame",
+                                                           qos: .userInitiated)
+
+        /// Shows `picture` — a whole baked frame — through the window surfaces, or takes them down.
+        private func showBakedFrame(_ picture: UIImage?) {
+            guard let picture, let container = containerView else {
+                bakedFramePicture = nil
+                bakedFrameWindow = nil
+                bakedFrameCoverName = nil
+                guard let view = bakedFrameView else { return }
+                view.removeFromSuperview()
+                bakedFrameView = nil
+                publishCanvasState()
+                return
+            }
+            if bakedFrameView == nil {
+                let view = WindowSurfaceView(queue: Coordinator.bakedFrameQueue)
+                // One surface pixel is one screen pixel when drawn; between a pan or a pinch and the
+                // redraw it asks for, plain bilinear — a mipmap of a surface is a copy of it.
+                view.layer.magnificationFilter = .linear
+                view.layer.minificationFilter = .linear
+                if let held = heldFrameSurface, held.superview === container {
+                    container.insertSubview(view, belowSubview: held)
+                } else if let onion = onionSkinView, onion.superview === container {
+                    container.insertSubview(view, belowSubview: onion)
+                } else {
+                    container.addSubview(view)
+                }
+                bakedFrameView = view
+            }
+            let window = currentBakedFrameWindow()
+            guard picture !== bakedFramePicture || window != bakedFrameWindow else { return }
+            bakedFramePicture = picture
+            bakedFrameWindow = window
+            bakedFrameView?.present { [weak self] in self?.mintBakedFrame() }
+        }
+
+        /// The host's pixels in canvas points, now.
+        private func currentBakedFrameWindow() -> BakedFrameWindow? {
+            guard let host = hostView, let container = containerView else { return nil }
+            let origin = container.convert(CGPoint.zero, from: host)
+            let x = container.convert(CGPoint(x: 1, y: 0), from: host)
+            let y = container.convert(CGPoint(x: 0, y: 1), from: host)
+            let hostToCanvas = CGAffineTransform(a: x.x - origin.x, b: x.y - origin.y,
+                                                 c: y.x - origin.x, d: y.y - origin.y,
+                                                 tx: origin.x, ty: origin.y)
+            return BakedFrameWindow(hostSize: host.bounds.size, screenScale: host.traitCollection.displayScale,
+                                    hostToCanvas: hostToCanvas)
+        }
+
+        /// One baked-frame draw, minted when the surface is free: the picture and the window as they
+        /// are now. A picture taken down before its draw lands is refused at the swap.
+        private func mintBakedFrame() -> WindowSurfaceView.Frame? {
+            guard let picture = bakedFramePicture, let image = picture.cgImage,
+                  let canvasSize = canvasManager.canvasSize, let geometry = currentBakedFrameWindow() else { return nil }
+            bakedFrameWindow = geometry
+            let backdrop = PaddingCoverView.marginGrey
+            return WindowSurfaceView.Frame(window: geometry.window, placement: geometry.placement, draw: { cg in
+                PlaybackTrace.span(.bakedFrameDraw) {
+                    geometry.draw(image, canvasSize: canvasSize, backdrop: backdrop, in: cg)
+                }
+                return geometry.window
+            }, canPresent: { [weak self] in self?.bakedFramePicture === picture }, finished: { [weak self] shown in
+                guard shown else { return }
+                self?.publishCanvasState()
+            })
+        }
+
+        /// A pan, zoom or turn of the canvas moves which part of the bake the window holds.
+        private func redrawBakedFrameForTheView() {
+            guard let picture = bakedFramePicture else { return }
+            showBakedFrame(picture)
+        }
+
+        /// **The bake stays over the hosts until they have the frame's pictures** — on the disengaged
+        /// canvas, after a step settles or playback stops, the hosts render the cels they were just
+        /// handed, off the main thread, a second a layer at the owner's 5000² on the iPad 9; the frame
+        /// they will draw is already baked, so that is what the artist sees meanwhile, and never a mix
+        /// of two frames. A frame with no bake keeps the picture already up (§2.10). Not while a
+        /// stroke is live: the stroke is drawn by its host.
+        private func coverTheHostsWithTheBakeWhileTheyRender() {
+            guard sandwichPresentation == .disengaged else { return }
+            showBakedFrame(bakedFrameCoveringTheHosts())
+        }
+
+        private func bakedFrameCoveringTheHosts() -> UIImage? {
+            guard !isSandwichStrokeLive, !canvasManager.strokeIsLive,
+                  layerHosts.values.contains(where: { $0.strokeView.isAwaitingFirstPicture }) else { return nil }
+            let frame = canvasManager.currentFrame
+            let baker = canvasManager.frameBaker
+            guard baker.isBaked(atFrame: frame), let key = baker.currentKey(atFrame: frame) else {
+                return bakedFramePicture
+            }
+            if key.fileName == bakedFrameCoverName, let shown = bakedFramePicture { return shown }
+            guard let image = baker.image(for: key) else { return bakedFramePicture }
+            bakedFrameCoverName = key.fileName
+            return UIImage(cgImage: image, scale: 1, orientation: .up)
+        }
+
         /// The baker's *"this frame is ready"*, wired to the canvas that is showing the previous one.
         ///
         /// Installed once from `makeUIView` — §2.10's other half. Without it a frame that lands
@@ -2919,7 +3003,7 @@ struct CanvasView: UIViewRepresentable {
             // raises the pass that warms them, and until then trap 1 keeps the canvas on the picture
             // it already has.
             let edit = movingBandsEdit
-            guard !canvasManager.isPlaying || edit != nil else { return nil }
+            guard !canvasManager.framesAreFlipping || edit != nil else { return nil }
             // Nil for a stale or non-leaf `activeLayerIndex`, runs that are not spans of this frame's
             // leaves, or a degenerate canvas — it does not fall back to `full`, deliberately, so that
             // a wrong cut is never composited. The canvas keeps showing whatever is cached (at most
@@ -4484,6 +4568,7 @@ struct CanvasView: UIViewRepresentable {
 
             container.transform = CGAffineTransform.identity.rotated(by: rotation).scaledBy(x: scale, y: scale)
             container.center = CGPoint(x: baseCenter.x + offset.width, y: baseCenter.y + offset.height)
+            redrawBakedFrameForTheView()
             if ActionRecorder.isFlying {
                 navigationTransformWrites += 1
                 if let navigation { navigationDelivery[navigation.rawValue].writes += 1 }

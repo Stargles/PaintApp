@@ -1115,12 +1115,16 @@ extension CanvasManager {
     /// does today; the composite takes over on the pass the first frame lands. Past that a frame the
     /// baker has not reached yet shows the frame before it, which is the ruling.
     ///
-    /// **Scrubbing the playhead by hand has the identical shape and is deliberately not covered** —
-    /// see PERFORMANCE.md §16.5. It is a gesture tracking a finger, where a stale frame is worse
-    /// than a late one, and nobody has measured it.
+    /// **A frame step is a flip too, until it settles** (`framesAreFlipping`, 2026-11-18). The
+    /// owner's Test1 at 5000² made the same arithmetic visible without playback: each step handed
+    /// five hosts a cel to rasterize, a second each on the iPad 9, and the canvas waited for them. A
+    /// step now shows the bake, and the hosts render again only once the playhead has been still for
+    /// `CanvasManager.frameStepSettleSeconds`, under the bake until they land
+    /// (`CanvasView.Coordinator.bakedFrameCoveringTheHosts`). A frame with no bake yet is §2.10's
+    /// miss: the picture before it stays up.
     @MainActor
     func sandwichEngagesOnCanvas(tree: [RenderNode]) -> Bool {
-        guard tree.needsCompositorOnCanvas || hasContainerPoseInForce || isPlaying
+        guard tree.needsCompositorOnCanvas || hasContainerPoseInForce || framesAreFlipping
                 || liveTransformEdit?.movesBands == true else { return false }
         return !isScrubbingInterpolation
     }
