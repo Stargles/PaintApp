@@ -5,7 +5,7 @@ The owner's asks, live. Recorded when they arrive, deleted whole when done **and
 record of an outstanding task. Items marked "(status unclear — check)" were carried from older notes and
 could not be verified as open or closed; verify against `main` and `git log`, then delete or fix.
 
-## Current — iPad build `2ecc771e` installed 2026-11-18 (late), owner re-test pending
+## Current — iPad build `bd52b37f` installed 2026-11-19, owner re-test pending
 
 - [ ] **Owner's check of `e88cba87` FAILED (Nov 18 late).** Owner: *"I have no idea how this ever managed
   to pass through all your tests, and if I caught this, then who knows what I did not catch."*

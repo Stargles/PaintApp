@@ -8,15 +8,15 @@ From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
 > `main` equals `origin/main`. Usage is tight: one worker at a time, Sonnet unless the task needs Opus,
 > short briefs, no re-reading of what HANDOFF already says. Follow "Resume here" below.
 
-## Resume here — November 18, 2026 (late)
+## Resume here — November 19, 2026
 
-1. **Installed on the iPad 2026-11-19: signed Release of `tmp/nov19-open`** (see `resign_state`).
-   Every layer, the onion skin and the bake now reach the render server through window-sized surfaces
-   (`CanvasPictureView`, `BakedFrameWindow`): the owner's whole routine hands it 283 MiB instead of
-   6,825 (iPad 9 simulator). The install gate is `PlaycheckGateUITests` (~4 min, budget 370 MiB, derived
-   from one crash, not a device measurement). Not run: full UI suite, device test (iPad locked).
-   Next, after the usage window resets: TODO.md's eraser items (c) To Cross slow + flicker and (d) the
-   circle cursor for Cut/Normal; then the crash-catcher ask. Still canvas-sized: the sandwich's live
+1. **Installed on the iPad 2026-11-19: signed Release `bd52b37f`** (see `resign_state`). On top of the
+   window-sized render-server surfaces (`CanvasPictureView`, `BakedFrameWindow`; the owner's routine hands
+   it 283 MiB instead of 6,825 on the iPad 9 simulator) it fixes To Cross: the live window is bounded to
+   the view and never dropped, so no whole-layer re-render while erasing and no erased ink coming back;
+   every vector eraser mode draws the ring. Gates: `PlaycheckGateUITests` (~4 min, budget 370 MiB, from
+   one crash) and `EraserFeedbackUITests` green; fast tier Debug and Release 5,704. Not run: full UI
+   suite, device test. Next: the crash-catcher ask (TODO.md). Still canvas-sized: the sandwich's live
    halves, the Move bands and the lasso float (only with blend modes/effects/transform layers).
 2. **Owner's 2-minute check is next:** draw, erase a lot, Undo, pan, change frames, play, fill. TODO.md's
    "Current" section names what each item is waiting for him to confirm, and the leftovers still open.
