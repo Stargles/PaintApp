@@ -406,6 +406,11 @@ final class StrokeCanvasView: CanvasPlaneView {
         hostIsBlanked = blanked
         if blanked {
             imageView.image = nil
+            // A render already running for this canvas would land into a masked view: a canvas-sized
+            // picture handed to the render server for pixels nobody sees — at the owner's 5000², one
+            // 95 MiB picture per host at the start of every play. Nothing awaits it now; it is
+            // memoised on the canvas, so the edge that comes back shows it with no second render.
+            pendingVectorRender = nil
             displayedRasterVersion = Self.nothingDisplayed
             displayedVectorVersion = Self.nothingDisplayed
             shownVectorVersion = Self.nothingDisplayed

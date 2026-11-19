@@ -268,12 +268,16 @@ final class BakeWiringUITests: PaintUITestCase {
                                     + "of this test a walk that never moves the playhead, which "
                                     + "passes for the wrong reason")
 
-        /// One step forward, waiting for the canvas to settle on the new frame's baked picture.
+        /// One step forward, waiting for the canvas to settle on the new frame's baked picture — and
+        /// for the step itself to settle: while the playhead is moving the live pair is not warmed at
+        /// all (`CanvasManager.framesAreFlipping`, 2026-11-18), so a frame is only asked for its pair
+        /// once the playhead has been still on it.
         func step() {
             next.tap()
             XCTAssertNotNil(waitForSandwich(app, "rest"),
                             "Every frame of this scene is baked, so the canvas has to reach rest on "
                             + "each of them before the next step is taken")
+            Thread.sleep(forTimeInterval: 0.9)
         }
 
         // **The control.** Frames 0→4 are the move: four distinct poses, so four distinct render
