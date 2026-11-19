@@ -2274,6 +2274,74 @@ class PaintUITestCase: XCTestCase {
     private static let tapAwayClearance: CGFloat = 44
 }
 
+// MARK: - The owner's Test1 scene and what the render server is handed
+
+/// **Test1's shape, as the owner draws on it**: 5000², five ordinary vector layers, each with a
+/// distinct cel on each of six frames (`UITestSeeds.seedPlainAnimationIfRequested`, `5x6`) — layer
+/// `L`'s stroke on frame `F` is the paper row `0.2 + rowStep * (L * 6 + F)`, which is how a
+/// screenshot says which frame is up. Opened at his 1080×810 landscape window under the iPad 9's memo
+/// budget (`-uiTestTextureBudgetBytes`; the simulator otherwise reads the Mac's memory) with
+/// `LayerContentsCensus` counting what the render server is handed.
+enum OwnersScene {
+    static let canvasSize = CGSize(width: 5000, height: 5000)
+    static let layers = 5, frames = 6
+    /// 3 GB / 16, `CompositorBudget.textureBudgetBytes` on the owner's iPad 9.
+    static let iPad9BudgetBytes = 201_326_592
+    static let rowStep = min(0.1, 0.6 / Double(layers * frames - 1))
+    static func row(layer: Int, frame: Int) -> Double { 0.2 + rowStep * Double(layer * frames + frame) }
+}
+
+extension PaintUITestCase {
+
+    /// Launches into the owner's scene (`OwnersScene`), its onion skin as a new document has it.
+    /// Returns once the editor is up — not once it is baked (`waitForEveryFrameBaked`), so a caller
+    /// can count what entering the document hands the render server.
+    func launchOwnersScene(_ extra: [String] = []) -> (XCUIApplication, XCUIElement) {
+        let app = XCUIApplication()
+        app.launchArguments += ["-resetGallery", "-uiTestSeedPlainAnimation",
+                                "-uiTestSeedAnimationShape", "\(OwnersScene.layers)x\(OwnersScene.frames)",
+                                "-uiTestTextureBudgetBytes", String(OwnersScene.iPad9BudgetBytes),
+                                "-uiTestContentsCensus"] + extra
+        XCTAssertTrue(launchIntoEditor(app, size: OwnersScene.canvasSize, orientationBeforeCreatingCanvas: .landscapeLeft),
+                      "setup: a 5000² document in landscape")
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10), "setup: the canvas")
+        XCTAssertEqual(readFrameLabel(app)?.total, OwnersScene.frames,
+                       "PREMISE: the seed laid \(OwnersScene.frames) frames down")
+        return (app, canvas)
+    }
+
+    /// Waits for every frame's bake: the owner's report is a baked scene.
+    func waitForEveryFrameBaked(_ app: XCUIApplication, timeout: TimeInterval = 300) {
+        let baked = NSPredicate { _, _ in self.bakeBarValue(app) == "" }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: baked, object: nil)], timeout: timeout),
+                       .completed, "PREMISE: all \(OwnersScene.frames) frames baked; bar reads \(bakeBarValue(app))")
+    }
+
+    /// `handedMiB:` — every picture's bytes the render server has been handed so far
+    /// (`LayerContentsCensus`, `-uiTestContentsCensus`).
+    func handedMiB(_ app: XCUIApplication) -> Int {
+        let value = Int(readField(app, "handedMiB:"))
+        XCTAssertNotNil(value, "PREMISE: -uiTestContentsCensus publishes handedMiB: on canvas.host")
+        return value ?? Int.max
+    }
+
+    /// Which frame each visible layer's ink in the owner's scene says is on screen, read `x` of the
+    /// way across the paper: one entry per layer whose rows are above the dock, `F` when exactly that
+    /// frame's row is inked, `-` otherwise.
+    func framesShown(_ app: XCUIApplication, _ canvas: XCUIElement, x: Double = 0.5) -> [String] {
+        let paper = paperRect(in: canvas, canvasSize: OwnersScene.canvasSize)
+        let visible = visiblePaperRect(app, in: canvas, canvasSize: OwnersScene.canvasSize)
+        guard let pixels = ScreenshotPixels(canvas.screenshot().image) else { return [] }
+        return (0..<OwnersScene.layers).compactMap { layer -> String? in
+            let rows = (0..<OwnersScene.frames).map { onHost(paper, x, OwnersScene.row(layer: layer, frame: $0)) }
+            guard rows.allSatisfy({ $0.dy > visible.minY && $0.dy < visible.maxY }) else { return nil }
+            let inked = rows.indices.filter { isInk(pixels.pixel(normalizedX: rows[$0].dx, normalizedY: rows[$0].dy)) }
+            return inked.count == 1 ? String(inked[0]) : "-"
+        }
+    }
+}
+
 /// The selector-level plumbing behind `twoFingerGesture`. Every object here is created through
 /// `alloc`/`init…` read off the runtime and handed back `Unmanaged` so ARC makes no assumption about
 /// ownership it cannot see; the few objects it leaks per gesture are a test process's to lose.

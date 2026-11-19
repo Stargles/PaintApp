@@ -16,11 +16,6 @@ import XCTest
 /// stroke on frame `F` is the row `L * 6 + F`, which is how a screenshot says which frame is up.
 final class PlaybackSurfaceUITests: PaintUITestCase {
 
-    private let canvasSize = CGSize(width: 5000, height: 5000)
-    private let layers = 5, frames = 6
-    /// 3 GB / 16, `CompositorBudget.textureBudgetBytes` on the owner's iPad 9.
-    private let iPad9BudgetBytes = 201_326_592
-
     /// **The bound, and why it is this number.** A frame shown from the bake reaches the screen
     /// through a pair of surfaces no larger than the window (`BakedFrameWindow`): at 1080×810 points
     /// on a 2× screen that is 2 × 13.3 MiB, made once and re-presented every flip at no cost to the
@@ -29,52 +24,18 @@ final class PlaybackSurfaceUITests: PaintUITestCase {
     /// however short the run. On `e88cba87` every played frame was a fresh 95 MiB bitmap.
     private let playbackHandedMiBBound = 64
 
-    private func launchOwnersScene(_ extra: [String] = []) -> (XCUIApplication, XCUIElement) {
-        let app = XCUIApplication()
-        app.launchArguments += ["-resetGallery", "-uiTestSeedPlainAnimation",
-                                "-uiTestSeedAnimationShape", "\(layers)x\(frames)",
-                                "-uiTestTextureBudgetBytes", String(iPad9BudgetBytes),
-                                "-uiTestContentsCensus"] + extra
-        XCTAssertTrue(launchIntoEditor(app, size: canvasSize, orientationBeforeCreatingCanvas: .landscapeLeft),
-                      "setup: a 5000² document in landscape")
-        let canvas = app.otherElements["canvas.host"]
-        XCTAssertTrue(canvas.waitForExistence(timeout: 10))
-        XCTAssertEqual(readFrameLabel(app)?.total, frames, "PREMISE: the seed laid \(frames) frames down")
+    /// The owner's scene, onion skin off, every frame baked before anything is measured.
+    private func launchBakedOwnersScene(_ extra: [String] = []) -> (XCUIApplication, XCUIElement) {
+        let (app, canvas) = launchOwnersScene(extra)
         let onion = app.buttons["timeline.onionSkinToggle"]
         if onion.waitForExistence(timeout: 5), onion.value as? String == "on" { onion.tap() }
-        // Every frame baked before anything is measured: the owner's report is a baked scene.
-        let baked = NSPredicate { _, _ in self.bakeBarValue(app) == "" }
-        let wait = XCTNSPredicateExpectation(predicate: baked, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [wait], timeout: 300), .completed,
-                       "PREMISE: all \(frames) frames baked; bar reads \(bakeBarValue(app))")
+        waitForEveryFrameBaked(app)
         return (app, canvas)
-    }
-
-    /// `handedMiB:` — what the render server has been handed so far (`LayerContentsCensus`).
-    private func handedMiB(_ app: XCUIApplication) -> Int {
-        let value = Int(readField(app, "handedMiB:"))
-        XCTAssertNotNil(value, "PREMISE: -uiTestContentsCensus publishes handedMiB: on canvas.host")
-        return value ?? Int.max
-    }
-
-    /// Which frame each visible layer's ink says is on screen: one entry per layer whose rows are
-    /// above the dock, `F` when exactly that frame's row is inked, `-` otherwise.
-    private func framesShown(_ app: XCUIApplication, _ canvas: XCUIElement) -> [String] {
-        let paper = paperRect(in: canvas, canvasSize: canvasSize)
-        let visible = visiblePaperRect(app, in: canvas, canvasSize: canvasSize)
-        let step = min(0.1, 0.6 / Double(layers * frames - 1))
-        guard let pixels = ScreenshotPixels(canvas.screenshot().image) else { return [] }
-        return (0..<layers).compactMap { layer -> String? in
-            let rows = (0..<frames).map { onHost(paper, 0.5, 0.2 + step * Double(layer * frames + $0)) }
-            guard rows.allSatisfy({ $0.dy > visible.minY && $0.dy < visible.maxY }) else { return nil }
-            let inked = rows.indices.filter { isInk(pixels.pixel(normalizedX: rows[$0].dx, normalizedY: rows[$0].dy)) }
-            return inked.count == 1 ? String(inked[0]) : "-"
-        }
     }
 
     /// **Playing the owner's scene hands the render server a bounded amount, however long it plays.**
     func testPlayingAFiveLayer5000SceneHandsTheRenderServerABoundedAmount() throws {
-        let (app, canvas) = launchOwnersScene()
+        let (app, canvas) = launchBakedOwnersScene()
         let play = app.buttons["timeline.playButton"]
         XCTAssertTrue(play.waitForExistence(timeout: 5))
         let before = handedMiB(app)
@@ -107,7 +68,7 @@ final class PlaybackSurfaceUITests: PaintUITestCase {
     /// read the moment the new frame is first on screen: a canvas that waits for its layers (the hold of
     /// `e88cba87`, or no hold at all) cannot show it before they have rendered.
     func testAStepOnABakedSceneShowsTheBakedFrameBeforeAnyLayerRenders() throws {
-        let (app, canvas) = launchOwnersScene(["-uiTestSlowVectorRenderMillis", "700"])
+        let (app, canvas) = launchBakedOwnersScene(["-uiTestSlowVectorRenderMillis", "700"])
         let forward = app.buttons["timeline.stepForwardButton"]
         XCTAssertTrue(forward.waitForExistence(timeout: 5))
         let settled = NSPredicate { _, _ in self.framesShown(app, canvas).allSatisfy { $0 == "0" } }
@@ -140,11 +101,11 @@ final class PlaybackSurfaceUITests: PaintUITestCase {
                 XCTFail("step \(step) never showed frame \(step + 1) whole: \(framesShown(app, canvas))")
                 continue
             }
-            XCTAssertLessThan(shown - before, layers,
+            XCTAssertLessThan(shown - before, OwnersScene.layers,
                               "step \(step)'s frame appeared only after \(shown - before) layer renders — "
                               + "the baked frame was not what the step showed")
             // Let the layers land before the next step, so every step starts from the hosts.
-            Thread.sleep(forTimeInterval: Double(layers) * 0.7 + 1)
+            Thread.sleep(forTimeInterval: Double(OwnersScene.layers) * 0.7 + 1)
         }
         let handed = handedMiB(app) - handedBefore
         print("FRAME-STEP " + report.joined(separator: " | ") + " handedMiB=\(handed)")
