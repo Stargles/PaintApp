@@ -55,6 +55,13 @@ own branch, so `main`'s HANDOFF.md can be behind.
 - **Keep the project and the machine lean (2026-11-17).** Delete finished worktrees, branches,
   simulators, evidence and old builds instead of archiving them; a lean workspace is cleaner as well
   as smaller. Details in CLAUDE.md, "Keep storage lean".
+- **The install gate runs without the iPad (owner, 2026-11-18).** The owner's 5-minute playcheck —
+  play, step frames, erase in all three modes, undo, pan, fill on a 5000² five-layer scene — is a
+  simulator test that asserts the iPad's limits (render-server bytes under backboardd's 1,850 MiB, the
+  baked frame shown on a step); no install without it green. Unlocking the iPad can cost him a drive,
+  so a device run happens only when it is already connected and unlocked — never wait or ask for it.
+  Every fix gets a test on the path the artist uses, not only on the code it changed: the play crash
+  shipped three times because each guard covered the edit path and nothing ever pressed Play.
 - **A real scene is 300–1000 drawn cels.** Design memory around a window or budget, never "load it
   all" (he named the YouTube-buffer shape himself).
 
