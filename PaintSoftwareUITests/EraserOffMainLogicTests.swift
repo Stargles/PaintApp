@@ -36,7 +36,7 @@ final class EraserOffMainLogicTests: XCTestCase {
 
         for i in 0..<12 {
             let damage = CGRect(x: 20 + CGFloat(i) * 6, y: 100, width: 30, height: 60)
-            XCTAssertTrue(scratch.replaceVectorDisplay(elements: canvas.elements, rewriting: [], damage: damage))
+            XCTAssertTrue(scratch.replaceVectorDisplay(elements: canvas.elements, rewriting: [], damage: damage, revision: i))
         }
         XCTAssertEqual(onMain, 0, "the eraser's move path rendered a cel on the main thread")
         XCTAssertTrue(scratch.hasPendingRender, "a move must return before its picture exists")
@@ -49,7 +49,7 @@ final class EraserOffMainLogicTests: XCTestCase {
     func testSettleAtLiftMakesTheShownPictureTheNewest() {
         let (scratch, canvas, _) = fixture()
         XCTAssertTrue(scratch.replaceVectorDisplay(elements: canvas.elements, rewriting: [],
-                                                   damage: CGRect(x: 40, y: 100, width: 60, height: 60)))
+                                                   damage: CGRect(x: 40, y: 100, width: 60, height: 60), revision: 1))
         scratch.settleCelContent()
         XCTAssertFalse(scratch.hasPendingRender, "lift must leave no step pending")
         XCTAssertNotNil(scratch.renderedCelContent)

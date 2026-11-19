@@ -20,7 +20,7 @@ import XCTest
 /// the same pattern applied to the file's siblings.
 ///
 /// Widened from `private` to `fileprivate` (rather than promoted to `internal` on
-/// `PaintUITestCase`) because both of these helpers are used only by tests in this file. The panel
+/// `PaintUITestCase`) because this helper is used only by tests in this file. The panel
 /// and mode-picker helpers are on `PaintUITestCase`, since other files drive the picker too.
 class VectorEraserTestSupport: PaintUITestCase {
 
@@ -32,16 +32,6 @@ class VectorEraserTestSupport: PaintUITestCase {
     fileprivate func setEraserSize(_ app: XCUIApplication, normalized: CGFloat) {
         setBrushSize(app, tool: "eraser", normalized: normalized)
         closeEraserPanel(app)
-    }
-
-    /// Reads `canvas.host`'s accessibility value, which `CanvasHostView` sources from
-    /// `StrokeCanvasView.lastVectorGestureTrace` — "<scratchRole>,<livePreviewFrames>" for the last
-    /// finished vector gesture.
-    fileprivate func gestureTrace(_ canvas: XCUIElement) -> (role: String, frames: Int)? {
-        guard let value = canvas.value as? String else { return nil }
-        let parts = value.split(separator: ",")
-        guard parts.count == 2, let frames = Int(parts[1]) else { return nil }
-        return (String(parts[0]), frames)
     }
 }
 

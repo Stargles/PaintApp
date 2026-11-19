@@ -543,7 +543,17 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// is stuck on the touch-down frame".
     ///
     /// Static because exactly one gesture is ever in flight, across every layer's stroke view.
-    static private(set) var lastVectorGestureTrace = "none,0"
+    static private(set) var lastVectorGestureTrace = "none,0,0,0,0"
+
+    /// The rest of the trace, per gesture: whole-layer base renders started while the finger was down,
+    /// how many times the picture on screen went back to an older revision of the cel than one it had
+    /// already shown (erased ink coming back), and the eraser ring's on-screen diameter in points.
+    private var gestureBaseRenders = 0
+    private var gestureRegressions = 0
+    private var gestureShownRevision: Int?
+    private var gestureRingDiameter: CGFloat = 0
+    /// The revision of the live window picture on screen over the base, or nil while none is.
+    private var shownWindowRevision: Int?
 
     /// Mode 3's cut-on-entry latch, reset at touch-down. The rule lives in
     /// `VectorEraser.IntersectionDriver`, covered by headless logic tests; this view only pumps
@@ -1266,6 +1276,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                                    streamHasWindow: Bool) {
         let coverage = contentRevisions.committed(canvas)
         let requirement = revision.requirement(streamHasWindow: streamHasWindow)
+        if scratch != nil { gestureBaseRenders += 1 }
         DeferredVectorRender.queue.async { [weak self] in
             // **Zero on every ordinary launch** — `-uiTestSlowVectorRenderMillis` and nothing else,
             // simulator only. See `UITestSeeds.slowVectorRenderDelay` for why the defect this file's
@@ -1338,6 +1349,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         // purpose: it is what `refreshDisplayIfStale` compares, and the newer render this frame is
         // standing in for has to be asked for again if it is ever dropped.
         if landing == .show { displayedVectorVersion = revision.display }
+        noteShownRevision()
         // **The raw scratch rather than a `VectorPreviewPlan`'s**, and it is the same answer: the one
         // role the plan would filter out is `.none`, which stamps nothing into its window, so its
         // `image` is nil and its `replacesBase` is false. Both branches below are then the no-ops
@@ -1509,6 +1521,14 @@ final class StrokeCanvasView: CanvasPlaneView {
         return (PixelOps.CelDisplay(windows: [ink]), ink.displayedBounds)
     }
 
+    /// Counts a live gesture's picture going back to an older revision of the cel than it showed.
+    private func noteShownRevision() {
+        guard scratch != nil, vectorCanvas != nil else { return }
+        let shown = shownWindowRevision ?? baseDocumentVersion
+        if let previous = gestureShownRevision, shown < previous { gestureRegressions += 1 }
+        gestureShownRevision = shown
+    }
+
     /// Direct display invalidation, separate from the playback trail and from SwiftUI publishing.
     var onDisplayInkChanged: (() -> Void)?
 
@@ -1557,6 +1577,8 @@ final class StrokeCanvasView: CanvasPlaneView {
             return
         }
         let image = shown?.image ?? scratch?.image
+        shownWindowRevision = scratch?.replacesBase == true && image != nil ? scratch?.shownRevision : nil
+        noteShownRevision()
         if shown != nil {
             if scratchView.superview !== self { insertSubview(scratchView, aboveSubview: poseSpace) }
         } else if scratchView.superview !== poseSpace { poseSpace.addSubview(scratchView) }
@@ -2588,6 +2610,11 @@ final class StrokeCanvasView: CanvasPlaneView {
         previewCuts = [:]
         previewDoomed = []
         livePreviewFrames = 0
+        gestureBaseRenders = 0
+        gestureRegressions = 0
+        gestureShownRevision = nil
+        gestureRingDiameter = 0
+        shownWindowRevision = nil
         pathFit.reset()
         let input = StrokeInput(touch: touch, in: poseSpace)
         stabilizer.reset(to: input.position)
@@ -2656,7 +2683,8 @@ final class StrokeCanvasView: CanvasPlaneView {
         guard usesSingleCelIntersectionWindow,
               let damage = vectorGestureDamage, !damage.isNull, damage.width > 0, damage.height > 0,
               let scratch else { return }
-        _ = scratch.replaceVectorDisplay(elements: canvas.elements, rewriting: [], damage: damage)
+        _ = scratch.replaceVectorDisplay(elements: canvas.elements, rewriting: [], damage: damage,
+                                         revision: canvas.documentVersion)
     }
 
     /// The current replacement is authoritative only while its admitted window contains the full
@@ -2832,7 +2860,8 @@ final class StrokeCanvasView: CanvasPlaneView {
         }
 
         // Recorded before `endScratch` resets the role and before `refreshDisplay` runs.
-        Self.lastVectorGestureTrace = "\(vectorScratchRole.traceName),\(livePreviewFrames)"
+        Self.lastVectorGestureTrace = "\(vectorScratchRole.traceName),\(livePreviewFrames),\(gestureBaseRenders),"
+            + "\(gestureRegressions),\(Int(gestureRingDiameter.rounded()))"
 
         // **The stroke's picture is not dropped here, and that is RENDER.md §2.13 in one line.** The
         // commit above put this stroke's ink in the display list and invalidated the render, so the
@@ -2951,6 +2980,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         ring.path = CGPath(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius,
                                              width: radius * 2, height: radius * 2), transform: nil)
         ring.isHidden = false
+        gestureRingDiameter = max(gestureRingDiameter, radius * 2 * scale)
     }
 
     /// One touch sample offered to the vector tier. `force` marks the lift point, which closes the
@@ -3033,7 +3063,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         guard let preview = canvas.wholeStrokePreviewElements(alongPath: increment, brush: profile.preset,
             size: gestureBrushSize, accumulating: &previewDoomed) else { return }
         _ = scratch.replaceVectorDisplay(elements: preview.elements, rewriting: preview.rewriting,
-                                         damage: preview.damage)
+                                         damage: preview.damage, revision: canvas.documentVersion)
     }
 
     /// Mode 2's live feedback: render the ordered geometry that the lift is going to commit.
@@ -3058,7 +3088,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         guard let preview = canvas.cutPreviewElements(alongPath: increment, brush: profile.preset,
             size: gestureBrushSize, accumulating: &previewCuts) else { return }
         _ = scratch.replaceVectorDisplay(elements: preview.elements, rewriting: preview.rewriting,
-                                         damage: preview.damage)
+                                         damage: preview.damage, revision: canvas.documentVersion)
     }
 
     private var isNoScratchRole: Bool {

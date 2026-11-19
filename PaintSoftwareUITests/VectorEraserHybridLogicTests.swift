@@ -1059,7 +1059,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                     }
                     XCTAssertTrue(preview.rewriting.contains(paint.id), "PREMISE: own stroke is rewritten")
                     XCTAssertTrue(scratch.replaceVectorDisplay(elements: preview.elements,
-                        rewriting: preview.rewriting, damage: preview.damage),
+                        rewriting: preview.rewriting, damage: preview.damage, revision: 1),
                         "PREMISE: the changed list is admitted into the bounded scratch window")
                     scratch.settleCelContent()
                     let shown = try XCTUnwrap(scratch.renderedCelContent,
@@ -1193,7 +1193,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                 return
             }
             damage = damage.isNull ? changed : damage.union(changed)
-            XCTAssertTrue(scratch.replaceVectorDisplay(elements: source.elements, rewriting: [], damage: damage),
+            XCTAssertTrue(scratch.replaceVectorDisplay(elements: source.elements, rewriting: [], damage: damage, revision: 1),
                           "The current ordered list must publish after each real cut")
             scratch.settleCelContent()
             XCTAssertTrue(scratch.hasCurrentReplacementWindow(covering: damage),
@@ -1245,7 +1245,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         // last valid picture must survive that.
         _ = scratch.replaceCelContent(
             ink: .derived(DerivedCelContent(identity: "mode3-refused-growth", render: { _, _ in nil }), .full),
-            damage: CGRect(x: 112, y: 48, width: 8, height: 32))
+            damage: CGRect(x: 112, y: 48, width: 8, height: 32), revision: 2)
         scratch.settleCelContent()
         XCTAssertTrue(scratch.windowRect.contains(damage), "A refused growth retains the last admitted window")
         XCTAssertFalse(scratch.hasCurrentReplacementWindow(covering: damage),
@@ -1347,7 +1347,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                 ink: .rendered(UIImage()), placement: .identity))
         let refused = scratch.replaceCelContent(
             ink: .derived(DerivedCelContent(identity: "refused-source", render: { _, _ in nil }), .full),
-            damage: CGRect(x: 8, y: 8, width: 8, height: 8))
+            damage: CGRect(x: 8, y: 8, width: 8, height: 8), revision: 1)
         // The render is off main now, so the call cannot know the source refuses: it is admitted, and the
         // refusal is what the lift's settle finds.
         _ = refused
@@ -1378,7 +1378,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                 placement: .identity))
         XCTAssertTrue(scratch.replaceCelContent(
             ink: .ordinary(source: frozen, elements: [.fill(fill)], rewriting: [distantFill.id]),
-            damage: CGRect(x: 8, y: 8, width: 32, height: 32)))
+            damage: CGRect(x: 8, y: 8, width: 32, height: 32), revision: 1))
         XCTAssertFalse(scratch.windowRect.isNull, "A changed native list publishes an admitted presentation window")
         XCTAssertGreaterThan(scratch.windowRect.width, 0)
         XCTAssertGreaterThan(scratch.windowRect.height, 0)
@@ -1392,7 +1392,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
 
         XCTAssertTrue(scratch.replaceCelContent(
             ink: .ordinary(source: frozen, elements: elements, rewriting: Set(elements.map(\.id))),
-            damage: CGRect(x: 700, y: 700, width: 32, height: 32)),
+            damage: CGRect(x: 700, y: 700, width: 32, height: 32), revision: 2),
             "A later edit grows the existing geometric window without creating a raster scratch")
         scratch.settleCelContent()
         let grown = try XCTUnwrap(scratch.renderedCelContent)
@@ -1452,7 +1452,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
             celContent: StrokeScratch.CelContent(backing: snapshot, ink: sourceInk, placement: placement))
         let damage = CGRect(x: 32, y: 92, width: 56, height: 16)
 
-        XCTAssertTrue(scratch.replaceVectorDisplay(elements: [], rewriting: [victim.id], damage: damage),
+        XCTAssertTrue(scratch.replaceVectorDisplay(elements: [], rewriting: [victim.id], damage: damage, revision: 1),
                       "The fully removed editable stroke publishes its bounded native replacement")
         scratch.settleCelContent()
         let first = try XCTUnwrap(scratch.renderedCelContent)
@@ -1484,7 +1484,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
             color: CodableColor(red: 0.05, green: 0.9, blue: 0.15, alpha: 1), size: 8, opacity: 1,
             samples: victim.samples, seed: victim.seed)
         XCTAssertTrue(scratch.replaceVectorDisplay(elements: [.stroke(replacement)], rewriting: [victim.id],
-                                                    damage: damage),
+                                                    damage: damage, revision: 2),
                       "A later geometry update replaces the current presentation")
         scratch.settleCelContent()
         let second = try XCTUnwrap(scratch.renderedCelContent)

@@ -143,7 +143,7 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
 
         // A vector layer to draw on, so the stroke half can be read off `canvas.host`'s value
-        // (`StrokeCanvasView.lastVectorGestureTrace`, "none,0" until a vector stroke lands) rather
+        // (`StrokeCanvasView.lastVectorGestureTrace`, "none,0,0,0,0" until a vector stroke lands) rather
         // than off undo state, which a fresh document already leaves enabled.
         openLayerPanel(app)
         addVectorLayerFromOpenPanel(app)
@@ -156,12 +156,12 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
         try assertPinchMovesCanvas(app, canvas,
                                    "THE BUG: the canvas stopped transforming after a two-finger pinch under a presentation")
 
-        // The stroke half: `lastVectorGestureTrace` stays "none,0" if the recognizer never fed a
+        // The stroke half: `lastVectorGestureTrace` stays "none,0,0,0,0" if the recognizer never fed a
         // vector stroke, and reads a live scratch role once one lands.
-        XCTAssertEqual(canvas.value as? String, "none,0",
+        XCTAssertEqual(canvas.value as? String, "none,0,0,0,0",
                        "PREMISE: no vector stroke before this one")
         drawShortStroke(on: canvas)
-        XCTAssertNotEqual(canvas.value as? String, "none,0",
+        XCTAssertNotEqual(canvas.value as? String, "none,0,0,0,0",
                           "THE BUG (other half): the stroke recognizer was stranded by the same gesture, so the stroke drew nothing")
     }
 

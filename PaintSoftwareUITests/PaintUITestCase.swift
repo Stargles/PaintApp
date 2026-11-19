@@ -1449,6 +1449,24 @@ class PaintUITestCase: XCTestCase {
         app.segmentedControls["eraserPanel.vectorModePicker"]
     }
 
+    /// What the last finished vector gesture did while the pen was down, from `canvas.host`'s value
+    /// (`StrokeCanvasView.lastVectorGestureTrace`): the live picture's role and how many frames of it
+    /// reached the screen, whole-layer base renders started, how many times the picture went back to
+    /// an older revision of the cel, and the eraser ring's on-screen diameter in points.
+    struct VectorGestureTrace {
+        let role: String
+        let frames: Int, baseRenders: Int, regressions: Int, ringDiameter: Int
+    }
+
+    func gestureTrace(_ canvas: XCUIElement) -> VectorGestureTrace? {
+        guard let value = canvas.value as? String else { return nil }
+        let parts = value.split(separator: ",").map(String.init)
+        let numbers = parts.dropFirst().compactMap { Int($0) }
+        guard parts.count == 5, numbers.count == 4 else { return nil }
+        return VectorGestureTrace(role: parts[0], frames: numbers[0], baseRenders: numbers[1],
+                                  regressions: numbers[2], ringDiameter: numbers[3])
+    }
+
     /// Taps the named segment of the mode picker in the (open) eraser panel.
     func pickVectorEraserMode(_ app: XCUIApplication, _ segment: String) {
         let picker = vectorEraserModePicker(app)

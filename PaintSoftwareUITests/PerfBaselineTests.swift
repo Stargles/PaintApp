@@ -1172,7 +1172,7 @@ final class PerfBaselineTests: XCTestCase {
                 changedUpdates += 1
                 changedStrokes = max(changedStrokes, preview.rewriting.count)
                 if !scratch.replaceVectorDisplay(elements: preview.elements,
-                    rewriting: preview.rewriting, damage: preview.damage) {
+                    rewriting: preview.rewriting, damage: preview.damage, revision: 1) {
                     replacementRefused = true
                 }
                 finalPreview = preview

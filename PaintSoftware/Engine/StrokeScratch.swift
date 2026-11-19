@@ -115,10 +115,15 @@ final class StrokeScratch: DabTarget {
     /// Whether a newer display list than the picture on screen has been admitted.
     var hasPendingRender: Bool { requestedRender != shownRender }
 
+    /// The caller's revision of the display list the finished picture was drawn from (the canvas's
+    /// `documentVersion` for an edit), so the view can tell an older picture from a newer one.
+    private var requestedRevision = 0
+    private(set) var shownRevision: Int?
+
     /// Replaces the frozen display list and admits its measured damage into the existing geometric
     /// window. The window's picture is drawn off the main thread (latest wins); until it lands
     /// `renderedCelContent` keeps answering the last finished one, never an older or blank one.
-    func replaceCelContent(ink: CelContentPicture.Ink, damage: CGRect) -> Bool {
+    func replaceCelContent(ink: CelContentPicture.Ink, damage: CGRect, revision contentRevision: Int) -> Bool {
         guard case .replacing = role, let celContent,
               let next = nextWindowRect(containing: damage) else { return false }
         let updated = CelContent(backing: celContent.backing, ink: ink,
@@ -128,6 +133,7 @@ final class StrokeScratch: DabTarget {
         self.celContent = updated
         windowRect = next
         requestedRender += 1
+        requestedRevision = contentRevision
         let revision = requestedRender
         let placement = updated.placement
         let renders = self.renders ?? MainActor.assumeIsolated { LatestWins(queue: Self.renderQueue) }
@@ -147,6 +153,7 @@ final class StrokeScratch: DabTarget {
                         self.failure = nil
                         self.contentPresentation = (-1, rendered)
                         self.shownRender = revision
+                        self.shownRevision = contentRevision
                         self.onRenderLanded?()
                     }
                 }
@@ -171,11 +178,13 @@ final class StrokeScratch: DabTarget {
         failure = nil
         contentPresentation = (-1, rendered)
         shownRender = requestedRender
+        shownRevision = requestedRevision
     }
 
     /// Reuses the touch-down reference frames and their original display-list slots while replacing
     /// only editable geometry. `contentPresentation` is the one invalidated image memo.
-    func replaceVectorDisplay(elements: [VectorElement], rewriting: Set<UUID>, damage: CGRect) -> Bool {
+    func replaceVectorDisplay(elements: [VectorElement], rewriting: Set<UUID>, damage: CGRect,
+                              revision: Int) -> Bool {
         guard let celContent,
               case .ordinary(let source, let captured, _) = celContent.ink else { return false }
         let references = Dictionary(uniqueKeysWithValues: captured.filter(\.isReference).map { ($0.id, $0) })
@@ -186,7 +195,7 @@ final class StrokeScratch: DabTarget {
         let frozen = source.replacingDisplayElements(ordered, rewriting: rewriting,
                                                       referenceIDs: referenceIDs)
         return replaceCelContent(ink: .ordinary(source: frozen, elements: ordered, rewriting: rewriting),
-                                 damage: damage)
+                                 damage: damage, revision: revision)
     }
 
     /// Whether this replacement currently contains a successfully rendered picture for all of the
