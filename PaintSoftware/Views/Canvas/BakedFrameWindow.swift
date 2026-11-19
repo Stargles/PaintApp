@@ -1,8 +1,9 @@
 import UIKit
 
-/// **Where a baked frame is drawn for the screen: the host's own pixels, wherever the canvas sits
-/// under them** — so the picture Core Animation is handed is the size of the screen, never the size
-/// of the canvas.
+/// **Where a whole-canvas picture is drawn for the screen: the host's own pixels, wherever the canvas
+/// sits under them** — so the picture Core Animation is handed is the size of the screen, never the
+/// size of the canvas. The bake's (below) and, through `CanvasPictureView`, every layer's and the
+/// onion skin's.
 ///
 /// The bake is a whole frame at the canvas's size: 95 MiB at the owner's 5000². Handed to a layer as a
 /// bitmap, every frame shown is a fresh picture of that size for the render server to copy and keep,
@@ -40,21 +41,31 @@ struct BakedFrameWindow: Equatable {
     /// Canvas points per surface pixel: above 1 the draw shrinks the canvas, below 1 it magnifies.
     var canvasPointsPerPixel: CGFloat { sqrt(abs(placement.a * placement.d - placement.b * placement.c)) }
 
-    /// Draws `image` — the whole canvas at whatever resolution it was baked — into a UIKit context
+    /// Draws `image` — the whole canvas at whatever resolution it was made — into a UIKit context
     /// whose origin is the window's top-left (`WindowSurfaceView`'s draw), the canvas filled with
-    /// `backdrop` first: the bake carries the paper but not what is behind it, and the surface is
-    /// cleared between frames.
-    func draw(_ image: CGImage, canvasSize: CGSize, backdrop: UIColor, in cg: CGContext) {
+    /// `backdrop` first when there is one: the bake carries the paper but not what is behind it, and
+    /// the surface is cleared between frames. A layer's picture has no backdrop.
+    ///
+    /// Shrinking samples a filtered neighbourhood so thin ink survives; magnifying stays crisp, as
+    /// the hosts' nearest-neighbour filter keeps it, unless `smoothWhenMagnified` — the onion skin's
+    /// soft ghost, which may be made well below canvas resolution (`OnionSkinBudget`). `clip`'s alpha,
+    /// over the same canvas, cuts the picture (the onion skin's `OnionSkinClip`).
+    func draw(_ image: CGImage, canvasSize: CGSize, backdrop: UIColor?, smoothWhenMagnified: Bool = false,
+              clip: CGImage? = nil, in cg: CGContext) {
         guard placement.a * placement.d - placement.b * placement.c != 0 else { return }
         cg.saveGState()
         cg.concatenate(placement.inverted())
         let canvas = CGRect(origin: .zero, size: canvasSize)
-        backdrop.setFill()
-        cg.fill(canvas)
-        // Shrinking samples a filtered neighbourhood so thin ink survives; magnifying stays crisp, as
-        // the hosts' nearest-neighbour filter keeps it.
-        cg.interpolationQuality = canvasPointsPerPixel > 1 ? .medium : .none
+        if let backdrop {
+            backdrop.setFill()
+            cg.fill(canvas)
+        }
+        let imagePixelsPerPixel = canvasPointsPerPixel * CGFloat(image.width) / max(1, canvasSize.width)
+        cg.interpolationQuality = imagePixelsPerPixel > 1 ? .medium : (smoothWhenMagnified ? .low : .none)
         UIImage(cgImage: image, scale: 1, orientation: .up).draw(in: canvas)
+        if let clip {
+            UIImage(cgImage: clip, scale: 1, orientation: .up).draw(in: canvas, blendMode: .destinationIn, alpha: 1)
+        }
         cg.restoreGState()
     }
 }

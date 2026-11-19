@@ -179,6 +179,16 @@ final class WindowSurfaceView: UIView {
     /// A refusal keeps the previous front. `finished` runs on the main queue when the draw is over
     /// and reports whether it became the layer's contents, so a caller waiting for it may stop
     /// waiting (a base hole punched before it would show the pixels under it for a frame).
+    /// **Takes the picture down and keeps the two surfaces**, so the next picture is presented into
+    /// surfaces the render server has already been handed — a host blanked for playback and shown
+    /// again hands it nothing new (`CanvasPictureView`).
+    func takeDown() {
+        draws.cancel()
+        presented = nil
+        layer.contents = nil
+        isHidden = true
+    }
+
     struct Frame {
         let window: CGRect
         let placement: CGAffineTransform

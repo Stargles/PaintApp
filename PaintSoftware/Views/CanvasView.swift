@@ -570,7 +570,7 @@ struct CanvasView: UIViewRepresentable {
         /// The ghost, at one height under both placements — over every layer host and over
         /// `sandwichAbove`, fronted by `updateOnionSkin`. Behind is a mask, not a slot: see
         /// `OnionSkinClip`.
-        weak var onionSkinView: UIImageView?
+        weak var onionSkinView: CanvasPictureView?
         weak var guideOverlay: GuideOverlayView?
         /// The guide under the pen right now, pushed up from `StrokeCanvasView` per sample. Held here
         /// so `updateGuideOverlay` stays a pure function of coordinator state.
@@ -2919,8 +2919,11 @@ struct CanvasView: UIViewRepresentable {
             })
         }
 
-        /// A pan, zoom or turn of the canvas moves which part of the bake the window holds.
-        private func redrawBakedFrameForTheView() {
+        /// A pan, zoom or turn of the canvas moves which part of the bake, of every layer's picture and
+        /// of the onion skin the window holds.
+        private func redrawWindowPicturesForTheView() {
+            for host in layerHosts.values { host.strokeView.windowMoved() }
+            onionSkinView?.windowMoved()
             guard let picture = bakedFramePicture else { return }
             showBakedFrame(picture)
         }
@@ -4003,19 +4006,15 @@ struct CanvasView: UIViewRepresentable {
 
         // MARK: - Onion skin
 
-        /// One of the two onion-skin views. Both are plain image views over the whole container; the
-        /// only difference is where they were added, which is what "Behind"/"In Front" means.
-        static func makeOnionSkinView() -> UIImageView {
-            let view = UIImageView()
-            view.contentMode = .scaleAspectFit
-            // A ghost is artwork — neighbouring frames' drawings — so it loses thin ink to
-            // un-mipmapped minification exactly the way the live layers do (`LayerHostView.init`
-            // carries the measurement), and a reference the artist cannot see is not a reference.
-            // This is the one place `.trilinear` also agrees with the *magnification* choice: the
-            // ghost is deliberately left on the default bilinear there (see `makeUIView`), because
-            // a soft ghost is what is wanted at both ends of the zoom.
-            view.layer.minificationFilter = .trilinear
-            view.isUserInteractionEnabled = false
+        /// The onion-skin view, over the whole container: a whole-canvas picture shown through the
+        /// window (`CanvasPictureView`), so a ghost re-made on every frame step hands the render
+        /// server nothing new. A ghost is artwork — neighbouring frames' drawings — so it is shrunk
+        /// filtered like the layers' ink, and it is magnified bilinear on purpose (`makeUIView`): a
+        /// soft ghost is what is wanted at both ends of the zoom, and `OnionSkinBudget` may make it
+        /// well below canvas resolution.
+        static func makeOnionSkinView() -> CanvasPictureView {
+            let view = CanvasPictureView()
+            view.smoothWhenMagnified = true
             view.translatesAutoresizingMaskIntoConstraints = false
             return view
         }
@@ -4066,22 +4065,6 @@ struct CanvasView: UIViewRepresentable {
         /// comment. Cleared whenever the key is, so nothing outlives the entry it protects.
         private var onionSkinKeyImages: [UIImage] = []
         private var onionSkinKeyMask: CGImage?
-        /// The clip installed on whichever onion view is showing, so the same mask is not re-assigned
-        /// to Core Animation on every SwiftUI pass. Same reasoning as `LayerHostView.contentMaskImage`.
-        private var onionSkinMaskImage: CGImage?
-        private let onionSkinMaskLayer: CALayer = {
-            let layer = CALayer()
-            // **Bilinear, matching the view it clips, and that is a correction rather than a
-            // preference.** This used to be `.nearest` on `LayerHostView.makeContentMask`'s
-            // reasoning — a crisp composite deserves a crisp clip. It is not clipping a composite:
-            // it is clipping the ghost, which `makeOnionSkinView` leaves bilinear on purpose and
-            // which `OnionSkinBudget` may render well below canvas resolution. `OnionSkinClip` now
-            // builds the clip at that same reduced size, so nearest would hand a soft ghost a
-            // hard-edged, visibly blocky cut-out.
-            layer.magnificationFilter = .linear
-            return layer
-        }()
-
         /// **Everything the ghost is made of, in one value the main thread can compare without
         /// drawing anything.** `ghosts` is the stack of neighbouring drawings; `ink` names the
         /// current layer's own picture that the Behind placement subtracts, unrendered; `inkOpacity`
@@ -4143,12 +4126,11 @@ struct CanvasView: UIViewRepresentable {
             // `LayerHostView.setContentMask` already keep, so an idle pass costs comparisons rather
             // than Core Animation traffic.
             func blank() {
-                // The view holds nothing while it is off: a canvas-sized image left on a hidden
-                // `UIImageView` is still resident, and on a 4K document that is the whole onion-skin
-                // budget parked where nobody can see it.
+                // The view holds nothing while it is off: a ghost left on a hidden view is still
+                // resident, and on a 4K document that is the whole onion-skin budget parked where
+                // nobody can see it.
                 if !view.isHidden { view.isHidden = true }
-                if view.image != nil { view.image = nil }
-                applyOnionSkinMask(nil, to: view, canvasSize: canvasManager.canvasSize ?? .zero)
+                view.show(nil)
                 onionSkinKeyImages = []
                 onionSkinKeyMask = nil
                 onionRequestedKey = nil
@@ -4223,14 +4205,14 @@ struct CanvasView: UIViewRepresentable {
                                     inkOpacity: canvasManager.onionSkinInkOpacity)
             }
 
-            applyOnionSkin(to: view, canvasSize: canvasSize)
+            applyOnionSkin(to: view)
         }
 
         /// Puts whatever the last rebuild produced on screen. **The only place the ghost's three
         /// Core Animation properties are written**, so a rebuild landing between two SwiftUI passes
         /// shows up without one — the same reason `FrameBaker.onFrameFinished` exists for the
         /// composite.
-        private func applyOnionSkin(to view: UIImageView, canvasSize: CGSize) {
+        private func applyOnionSkin(to view: CanvasPictureView) {
             // **Nothing to show yet is hidden, not blanked.** `blank()` drops the pending request
             // too, so using it here would cancel the rebuild that is about to answer. One hop with
             // no ghost on the very first engage is RENDER.md §2.13's ruling reaching the ghost:
@@ -4238,16 +4220,17 @@ struct CanvasView: UIViewRepresentable {
             // there is no previous picture.
             guard let composite = onionSkinComposite else {
                 if !view.isHidden { view.isHidden = true }
-                if view.image != nil { view.image = nil }
+                view.show(nil)
                 return
             }
-            if view.image !== composite { view.image = composite }
+            // The ghost and its cut together: the clip is drawn into the window with the ghost, so
+            // neither is a picture of its own for the render server.
+            view.show(composite, clip: onionSkinClipImage)
             // **Always 1, and this used to be a bug.** `OnionSkinFrame.composite` already draws
             // every frame at its own opacity, and the line here previously multiplied a single
             // frame's opacity in a second time — so the shipped one-skin default rendered at
             // 0.3 × 0.3 = 0.09 while the comment above it said the opposite was happening.
             if view.alpha != 1 { view.alpha = 1 }
-            applyOnionSkinMask(onionSkinClipImage, to: view, canvasSize: canvasSize)
             if view.isHidden { view.isHidden = false }
         }
 
@@ -4289,47 +4272,7 @@ struct CanvasView: UIViewRepresentable {
             // `showsOnionSkin` rather than `isOnionSkinEnabled`, and the difference is a real race
             // rather than tidiness: a rebuild in flight when the artist presses play would otherwise
             // put its ghost on screen *after* `blank()` had taken the last one off.
-            if let view = onionSkinView, let canvasSize = canvasManager.canvasSize,
-               canvasManager.showsOnionSkin {
-                applyOnionSkin(to: view, canvasSize: canvasSize)
-            }
-        }
-
-        /// Installs (or removes) the clip on whichever onion view is showing.
-        ///
-        /// **The frame is `canvasSize`, not `view.bounds`, and that is not a shortcut.** A mask
-        /// layer's frame is in its owner's coordinate space, the onion views are pinned to a
-        /// container whose bounds `hostBoundsDidChange` sets to exactly `canvasSize`, and this runs
-        /// from `updateUIView` — which on the very first pass is *before* autolayout has sized
-        /// anything. Reading `view.bounds` there gives `.zero`, and a zero-frame mask hides the layer
-        /// completely rather than visibly wrongly. The canvas size is known here and is fixed for a
-        /// document's life, so it is both the correct answer and the one available early.
-        ///
-        /// Implicit animation is off for `LayerHostView.setContentMask`'s reason: Core Animation's
-        /// default would fade a clip in over a quarter second, on a change the artist did not make.
-        private func applyOnionSkinMask(_ image: CGImage?, to view: UIImageView, canvasSize: CGSize) {
-            // Three things have to agree, and the third is what a plain "has the image changed"
-            // check misses: one `CALayer` can be the mask of only one layer at a time, so switching
-            // placement has to re-install a mask image that has not itself changed.
-            let installedHere = view.layer.mask === onionSkinMaskLayer
-            let wanted = image != nil
-            let frame = CGRect(origin: .zero, size: canvasSize)
-            if onionSkinMaskImage === image, installedHere == wanted {
-                if wanted, onionSkinMaskLayer.frame != frame { onionSkinMaskLayer.frame = frame }
-                return
-            }
-            onionSkinMaskImage = image
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            if let image {
-                onionSkinMaskLayer.contents = image
-                onionSkinMaskLayer.frame = frame
-                view.layer.mask = onionSkinMaskLayer
-            } else {
-                if installedHere { view.layer.mask = nil }
-                onionSkinMaskLayer.contents = nil
-            }
-            CATransaction.commit()
+            if let view = onionSkinView, canvasManager.showsOnionSkin { applyOnionSkin(to: view) }
         }
 
         // MARK: - Smart-shape detection (hold-to-detect: accumulate stroke points, fire after ~1s idle)
@@ -4590,7 +4533,7 @@ struct CanvasView: UIViewRepresentable {
 
             container.transform = CGAffineTransform.identity.rotated(by: rotation).scaledBy(x: scale, y: scale)
             container.center = CGPoint(x: baseCenter.x + offset.width, y: baseCenter.y + offset.height)
-            redrawBakedFrameForTheView()
+            redrawWindowPicturesForTheView()
             if ActionRecorder.isFlying {
                 navigationTransformWrites += 1
                 if let navigation { navigationDelivery[navigation.rawValue].writes += 1 }

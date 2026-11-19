@@ -126,7 +126,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     ///
     /// Replaced only by `replaceStrokeRecognizerIfStranded`, and wired by `wire(_:)` either way.
     private(set) var strokeRecognizer = StrokeGestureRecognizer(target: nil, action: nil)
-    private let imageView = UIImageView()
+    private let imageView = CanvasPictureView()
 
     /// The live vector-stroke preview, in a layer of its own directly above `imageView` — item 11's
     /// whole change, and the reason `VectorPreviewPlan` has no way to say "composited".
@@ -333,10 +333,10 @@ final class StrokeCanvasView: CanvasPlaneView {
     }
 
     private func installRasterImage(_ image: UIImage?) {
-        if imageView.image !== image { imageView.image = image }
+        let covered = contentRevisions.current
+        imageView.show(image) { [weak self] in self?.retireUnlandedInk(coveredByRevision: covered, base: "raster picture") }
         displayedRasterVersion = raster?.version ?? Self.nothingDisplayed
         baseDocumentVersion = Self.nothingDisplayed
-        retireUnlandedInk(coveredByRevision: contentRevisions.current, base: "raster picture")
         showOverlays(scratch)
     }
 
@@ -405,7 +405,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         guard hostIsBlanked != blanked else { return }
         hostIsBlanked = blanked
         if blanked {
-            imageView.image = nil
+            imageView.show(nil)
             // A render already running for this canvas would land into a masked view: a canvas-sized
             // picture handed to the render server for pixels nobody sees — at the owner's 5000², one
             // 95 MiB picture per host at the start of every play. Nothing awaits it now; it is
@@ -435,8 +435,11 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// frame's cel after a frame step). Not "a stroke's re-render is pending": that one has shown this
     /// canvas before, so `displayedVectorVersion` is not `nothingDisplayed`.
     var isAwaitingFirstPicture: Bool {
-        pendingVectorRender != nil && displayedVectorVersion == Self.nothingDisplayed
+        (pendingVectorRender != nil && displayedVectorVersion == Self.nothingDisplayed) || !imageView.isShowingImage
     }
+
+    /// A pan, zoom or turn of the canvas: the base draws what the window now shows of it.
+    func windowMoved() { imageView.windowMoved() }
 
     /// Called on the main thread after any off-main render of this view's canvas has been settled
     /// (shown, superseded or refused), so `CanvasView` can re-ask whether the frame is complete.
@@ -609,15 +612,9 @@ final class StrokeCanvasView: CanvasPlaneView {
         // interrupt a pencil stroke. See that guard, which ships in the same change and is not
         // optional alongside this line.
         isMultipleTouchEnabled = true
-        imageView.contentMode = .scaleToFill
-        imageView.isUserInteractionEnabled = false
-        // Native-resolution raster content should zoom blocky, not bilinearly blurred.
-        imageView.layer.magnificationFilter = .nearest
-        // And should *shrink* filtered, which is a different setting and the opposite answer — see
-        // `LayerHostView.init`, which carries the measurement. This is the view the artist's own
-        // finished ink reaches the screen through, so it is the one that decides whether a stroke
-        // on a 4096² canvas seen at fit zoom exists at all.
-        imageView.layer.minificationFilter = .trilinear
+        // The artist's own finished ink reaches the screen through `imageView` as the window, drawn
+        // crisp when magnified and filtered when shrunk (`BakedFrameWindow.draw`) — which decides
+        // whether a stroke on a 4096² canvas seen at fit zoom exists at all (`LayerHostView.init`).
         // Laid out by hand with `poseSpace`, for its reason: on a raster layer this *is* the
         // layer's own pixels, and they are shown through the pose exactly as the scratch over them
         // is (`adoptPose`).
@@ -705,6 +702,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         let base = vectorCanvas == nil ? transform : CATransform3DIdentity
         if !CATransform3DEqualToTransform(imageView.layer.transform, base) {
             imageView.layer.transform = base
+            imageView.windowMoved()
         }
     }
 
@@ -1209,16 +1207,17 @@ final class StrokeCanvasView: CanvasPlaneView {
                 return false
             }
         }
-        // **Before the base is installed and in the same main-thread turn**, so Core Animation
-        // commits the new base and the removal of the ink it now contains together — otherwise the
-        // artist sees one frame with the stroke drawn twice, once in each.
-        retireUnlandedInk(coveredByRevision: installedRevision,
-                          base: renderedSynchronously ? "synchronous render" : "\(plan.base) memo")
-        // Identity-checked because the committed render is memoized on the canvas's `version` and an
-        // `.overlay` stroke does not touch the canvas until lift: every touch-move of a paint stroke
-        // hands back the *same* image, and re-assigning it would put a Core Animation contents
-        // change on the frame for nothing.
-        if imageView.image !== base { imageView.image = base }
+        // **In the main-thread turn the base reaches the screen** (`CanvasPictureView.show`'s
+        // `landed`), so Core Animation commits the new base and the removal of the ink it now
+        // contains together — otherwise the artist sees one frame with the stroke drawn twice, once
+        // in each, or one with it in neither. `show` is identity-checked: the committed render is
+        // memoized on the canvas's `version` and an `.overlay` stroke does not touch the canvas until
+        // lift, so every touch-move of a paint stroke hands back the *same* image and draws nothing.
+        let baseName = renderedSynchronously ? "synchronous render" : "\(plan.base) memo"
+        let covered = installedRevision
+        imageView.show(base) { [weak self] in
+            self?.retireUnlandedInk(coveredByRevision: covered, base: baseName)
+        }
         if plan.base == .committedRender { baseDocumentVersion = documentVersion }
         showOverlays(plan.showsScratchLayer ? scratch : nil)
         if PlaybackTrace.isOn, plan.base == .committedRender {
@@ -1321,13 +1320,16 @@ final class StrokeCanvasView: CanvasPlaneView {
             return
         }
         if landing == .show { pendingVectorRender = nil }
-        // **Before the assignment and in the same main-thread turn**, so Core Animation commits the
-        // new base and the removal of the ink it now contains together. One turn apart is one frame
+        // **In the main-thread turn the base reaches the screen**, so Core Animation commits the new
+        // base and the removal of the ink it now contains together. One turn apart is one frame
         // with the stroke drawn twice. Right for an intermediate frame too: it is a base rasterized
         // at `version`, so everything held up to `version` is in it and everything held after stays
         // drawn over it.
-        retireUnlandedInk(coveredByRevision: coverage, base: landing == .show ? "render" : "intermediate render")
-        if imageView.image !== image { imageView.image = image }
+        let baseName = landing == .show ? "render" : "intermediate render"
+        imageView.show(image) { [weak self] in
+            self?.retireUnlandedInk(coveredByRevision: coverage, base: baseName)
+            self?.onRenderSettled?()
+        }
         noteInk("base", revision: coverage, detail: landing == .show ? "render landed" : "intermediate render landed")
         baseDocumentVersion = revision.document
         shownVectorVersion = revision.display

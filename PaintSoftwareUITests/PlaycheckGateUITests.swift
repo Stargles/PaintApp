@@ -7,7 +7,7 @@ final class PlaycheckGateUITests: PaintUITestCase {
     private let clock: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm:ss.S"; return f }()
 
     private func mark(_ app: XCUIApplication, _ phase: String) {
-        let line = "\(clock.string(from: Date())) \(phase): census:\(readField(app, "census:")) handedMiB:\(readField(app, "handedMiB:")) held:\(readField(app, "held:")) by:\(readField(app, "handedBy:")) fg=\(app.state == .runningForeground)"
+        let line = "\(clock.string(from: Date())) \(phase): census:\(readField(app, "census:")) handedMiB:\(readField(app, "handedMiB:")) holding:\(readField(app, "holding:")) by:\(readField(app, "handedBy:")) fg=\(app.state == .runningForeground)"
         phases.append(line)
         print("PLAYCHECK " + line)
     }
