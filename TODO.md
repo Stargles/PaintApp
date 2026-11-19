@@ -25,6 +25,14 @@ could not be verified as open or closed; verify against `main` and `git log`, th
   `~/PaintWork/nov18-play-evidence/device.log`). The render-server census gate covers play and steps
   only; extend it to open + first bake + seeding, find the producer, fix, then re-run the device test.
   Likely the same family as Nov 16's "orange bars on entering a document".
+  **Found and fixed on `tmp/nov19-open`, not merged, device not yet re-run:** not the seed — every layer
+  host showed its cel as a canvas-sized bitmap (95 MiB at 5000²), so entering the scene handed the
+  render server 476 MiB of layers plus 47 of onion skin at once, every settled frame step five more,
+  every edit and undo one more: 6,825 MiB over the playcheck routine on the iPad 9 simulator. Layers,
+  the host's baked raster and the onion skin now reach the server as window-sized surfaces
+  (`CanvasPictureView`): 161 MiB entering, ~260 over the routine. Gate: `PlaycheckGateUITests` (the
+  owner's routine, budget 370 MiB over the whole session). Still canvas-sized bitmaps: the sandwich's
+  live halves and Move bands (blend-mode/effect/transform documents only), the lasso float.
   **(a) and (b) fixed and installed in `2ecc771e`, play not yet confirmed on the device:** the bake reached the screen as a fresh
   95 MiB bitmap per played frame (`belowView.image`) — 10,586 MiB handed to the render server in 12 s
   of playback on the iPad 9 simulator; now a pair of window-sized surfaces (`BakedFrameWindow`), 25 MiB.
