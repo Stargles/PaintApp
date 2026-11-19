@@ -21,6 +21,14 @@ import UIKit
 ///   picture handed and released them only once the run of them stopped; `busiest` is the most
 ///   handed within any one second, which is the rate that decides whether it keeps up.
 ///
+/// - `handedMiB` — **every picture's bytes the render server is handed**, canvas-sized or not: a
+///   bitmap counts each time a new one appears in the tree; an `IOSurface` counts the first time it
+///   appears and never again, because the server maps a surface once and a later `contents`
+///   assignment of the same surface hands it nothing (`WindowSurfaceView`). This is the quantity that
+///   killed the iPad 9's server at 1,850 MiB during playback on 2026-11-18, where each played frame
+///   was a fresh 95 MiB bitmap — the large-picture count alone would also see that, but not a run of
+///   pictures just under `largeBytes`.
+///
 /// Armed only by `-uiTestContentsCensus` on a simulator. It walks the tree every display frame,
 /// which an ordinary launch must never pay.
 @MainActor
@@ -32,6 +40,8 @@ final class LayerContentsCensus {
         var bytes = 0
         /// The distinct contents objects at least `largeBytes` each — canvas-sized pictures.
         var large: [AnyObject] = []
+        /// The distinct contents objects at least `pictureBytes` each.
+        var pictures: [AnyObject] = []
 
         static func == (a: Reading, b: Reading) -> Bool {
             a.bytes == b.bytes && a.large.count == b.large.count
@@ -59,13 +69,21 @@ final class LayerContentsCensus {
     /// The previous frame's large contents, held so an address cannot be reused by a new picture
     /// between two looks and be mistaken for the old one.
     private var previous: [AnyObject] = []
+    /// Bytes of pictures handed to the render server over the run — see the type's comment.
+    private(set) var handedBytes = 0
+    /// The previous frame's bitmaps of `pictureBytes` or more, held for `previous`'s reason.
+    private var previousPictures: [AnyObject] = []
+    /// Every surface the tree has carried, by `IOSurfaceID`: the server has each of these mapped.
+    private var seenSurfaces = Set<IOSurfaceID>()
+    /// Contents smaller than this are chrome (icons, glyphs) and not counted in `handedBytes`.
+    static let pictureBytes = 1 << 20
     private weak var window: UIWindow?
     private var link: CADisplayLink?
     /// Called when a figure changes, so the canvas label can be republished.
     var onChange: (() -> Void)?
 
     /// `census:<peak MiB>,<peak large>,<handed>,<busiest second>` for `canvas.host`'s label.
-    var field: String { "census:\(peakBytes >> 20),\(peakLarge),\(handed),\(busiest)" }
+    var field: String { "census:\(peakBytes >> 20),\(peakLarge),\(handed),\(busiest) handedMiB:\(handedBytes >> 20)" }
 
     func attach(to window: UIWindow?) {
         guard let window, self.window !== window else { return }
@@ -82,14 +100,23 @@ final class LayerContentsCensus {
         let now = CACurrentMediaTime()
         let new = reading.large.filter { object in !previous.contains { $0 === object } }.count
         previous = reading.large
+        let pictures = reading.pictures.filter { CFGetTypeID($0) != IOSurfaceGetTypeID() }
+        let newBitmaps = pictures.filter { object in !previousPictures.contains { $0 === object } }
+        previousPictures = pictures
+        var newBytes = newBitmaps.reduce(0) { $0 + Self.bytes(of: $1) }
+        for object in reading.pictures where CFGetTypeID(object) == IOSurfaceGetTypeID() {
+            let surface = unsafeBitCast(object, to: IOSurfaceRef.self)
+            if seenSurfaces.insert(IOSurfaceGetID(surface)).inserted { newBytes += Self.bytes(of: object) }
+        }
         recent.removeAll { now - $0 > 1 }
         recent.append(contentsOf: repeatElement(now, count: new))
-        let figures = (peakBytes, peakLarge, handed, busiest)
+        let figures = (peakBytes, peakLarge, handed, busiest, handedBytes >> 20)
+        handedBytes += newBytes
         peakBytes = max(peakBytes, reading.bytes)
         peakLarge = max(peakLarge, reading.large.count)
         handed += new
         busiest = max(busiest, recent.count)
-        if figures != (peakBytes, peakLarge, handed, busiest) { onChange?() }
+        if figures != (peakBytes, peakLarge, handed, busiest, handedBytes >> 20) { onChange?() }
     }
 
     /// The distinct contents a tree references, its masks included. Pure apart from the read.
@@ -104,6 +131,7 @@ final class LayerContentsCensus {
                     let bytes = Self.bytes(of: object)
                     reading.bytes += bytes
                     if bytes >= largeBytes { reading.large.append(object) }
+                    if bytes >= pictureBytes { reading.pictures.append(object) }
                 }
             }
             if let mask = layer.mask { stack.append(mask) }

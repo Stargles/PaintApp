@@ -414,19 +414,27 @@ enum UITestSeeds {
     ///
     /// One distinct stroke per cel, at a distinct height, so that no two cels render to the same
     /// picture and nothing can dedupe them by accident.
+    ///
+    /// `-uiTestSeedAnimationShape <layers>x<frames>` changes the shape — the owner's November 18 Test1
+    /// is five layers, and a loop long enough that every flip is a different picture.
     static func seedPlainAnimationIfRequested(into canvasManager: CanvasManager) {
         guard ProcessInfo.processInfo.arguments.contains("-uiTestSeedPlainAnimation"),
               let size = canvasManager.canvasSize else { return }
-        let layerCount = 3, frameCount = 2
+        let shape = (UserDefaults.standard.string(forKey: "uiTestSeedAnimationShape") ?? "3x2")
+            .split(separator: "x").compactMap { Int($0) }
+        let layerCount = shape.count == 2 ? max(1, shape[0]) : 3
+        let frameCount = shape.count == 2 ? max(1, shape[1]) : 2
+        // A tenth of the canvas between strokes, closer when there are more than six to fit in.
+        let step = min(0.1, 0.6 / CGFloat(max(1, layerCount * frameCount - 1)))
         var brush = canvasManager.toolProfiles.brush.preset
-        brush.size = size.height / 24
+        brush.size = size.height * min(1 / 24, step / 2)
         // `createCanvas` has already added the first one.
         for _ in 1..<layerCount { canvasManager.addVectorLayer() }
         for layerIndex in 0..<layerCount {
             canvasManager.layers[layerIndex].cels = (0..<frameCount).map { frame in
                 let cel = Cel(id: UUID(), startFrame: frame, frameCount: 1,
                               raster: .empty(size: size), vector: .empty(size: size))
-                let y = size.height * (0.2 + 0.1 * CGFloat(layerIndex * frameCount + frame))
+                let y = size.height * (0.2 + step * CGFloat(layerIndex * frameCount + frame))
                 cel.vector?.addStroke(VectorStroke(
                     id: UUID(), brush: brush,
                     color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
