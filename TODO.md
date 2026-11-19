@@ -135,6 +135,12 @@ could not be verified as open or closed; verify against `main` and `git log`, th
 
 ## Open reports and asks
 
+- [ ] **Catch iPad crashes without the owner (owner, Nov 19).** *"I shouldn't have been the one to catch
+  that iPad crash."* The app cannot catch a backboardd Jetsam in-process, but: (1) on launch, detect that
+  the last session ended uncleanly and save the flight recorder's last 90 s (persist it periodically so a
+  kill doesn't lose it) plus a "the iPad crashed last time" note; (2) MetricKit exit/crash diagnostics;
+  (3) a Mac-side pull of new `JetsamEvent-*.ips` / app crash logs via `devicectl` whenever the iPad is
+  reachable (e.g. from the hourly resign daemon), flagged in the next session. Design with the owner first.
 - [ ] **Intermittent whole-iPad failures during rapid edits.** Owner: black screen and brief restart
   during draw → Undo → draw; also a crash after repeated Fill (Nov 11); Kevin confirms **rapid To Cross
   erasing on Test1 (4096²) triggers the failure**. Coincided with rapid activity and a running stream.
