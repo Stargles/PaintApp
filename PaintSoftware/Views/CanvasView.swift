@@ -2859,10 +2859,10 @@ struct CanvasView: UIViewRepresentable {
             }
             if bakedFrameView == nil {
                 let view = WindowSurfaceView(queue: Coordinator.bakedFrameQueue)
-                // One surface pixel is one screen pixel when drawn; between a pan or a pinch and the
-                // redraw it asks for, plain bilinear — a mipmap of a surface is a copy of it.
+                // One surface pixel is one screen pixel when drawn; between a zoom and the redraw it
+                // asks for, bilinear rather than blocks. Minifying keeps the surface view's trilinear
+                // filter, so thin ink survives a pinch out until then (`CanvasLayerFilterLogicTests`).
                 view.layer.magnificationFilter = .linear
-                view.layer.minificationFilter = .linear
                 if let held = heldFrameSurface, held.superview === container {
                     container.insertSubview(view, belowSubview: held)
                 } else if let onion = onionSkinView, onion.superview === container {
