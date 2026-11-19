@@ -39,6 +39,11 @@ final class PlaycheckGateUITests: PaintUITestCase {
         phases.append(line)
         print("PLAYCHECK " + line)
         XCTAssertEqual(app.state, .runningForeground, "the app left the foreground during \(name)")
+        // After every phase, so a red names the first phase that went over the session's budget.
+        let handed = handedMiB(app)
+        XCTAssertLessThanOrEqual(handed, sessionHandedMiBBudget,
+                                 "by \(name) the routine had handed the render server \(handed) MiB — the iPad 9's "
+                                 + "backboardd dies at 1,850 MiB; by phase:\n" + phases.joined(separator: "\n"))
     }
 
     /// Steps until the frame label reads `frame` (1-based).
@@ -129,14 +134,9 @@ final class PlaycheckGateUITests: PaintUITestCase {
         attachScreenshot(XCUIScreen.main, "playcheck-zoomed")
         phase(app, "zoom in and out")
 
-        let report = phases.joined(separator: "\n")
-        let attachment = XCTAttachment(string: report)
+        let attachment = XCTAttachment(string: phases.joined(separator: "\n"))
         attachment.name = "Render-server census by phase"
         attachment.lifetime = .keepAlways
         add(attachment)
-        let handed = handedMiB(app)
-        XCTAssertLessThanOrEqual(handed, sessionHandedMiBBudget,
-                                 "the routine handed the render server \(handed) MiB — the iPad 9's backboardd dies "
-                                 + "at 1,850 MiB; by phase:\n\(report)")
     }
 }

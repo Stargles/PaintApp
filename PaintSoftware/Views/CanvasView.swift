@@ -2922,7 +2922,7 @@ struct CanvasView: UIViewRepresentable {
         /// A pan, zoom or turn of the canvas moves which part of the bake, of every layer's picture and
         /// of the onion skin the window holds.
         private func redrawWindowPicturesForTheView() {
-            for host in layerHosts.values { host.strokeView.windowMoved() }
+            for host in layerHosts.values { host.windowMoved() }
             onionSkinView?.windowMoved()
             guard let picture = bakedFramePicture else { return }
             showBakedFrame(picture)

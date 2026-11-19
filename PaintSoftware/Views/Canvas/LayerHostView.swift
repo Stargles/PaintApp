@@ -9,7 +9,7 @@ final class LayerHostView: CanvasPlaneView {
     /// (see `Cel.bakedImage`), or the transient "hole" preview while that cel's content is lifted
     /// into a floating piece. The **bottom** of the three, below `strokeView`'s live strokes and
     /// below the fill's preview.
-    let bakedImageView = UIImageView()
+    let bakedImageView = CanvasPictureView()
     private(set) var displayedBakedSource: RasterSource?
     let strokeView = StrokeCanvasView()
 
@@ -42,25 +42,13 @@ final class LayerHostView: CanvasPlaneView {
         strokeView.translatesAutoresizingMaskIntoConstraints = false
 
         // The whole layer stack is magnified via a CGAffineTransform scale on the container (see
-        // Coordinator.applyTransform), not by re-rasterizing at a higher resolution — Core Animation's
-        // default magnificationFilter (.linear) would bilinearly blur these raster layers' textures as
-        // the user zooms in. Nearest-neighbor keeps pixels crisp/blocky at high zoom instead. strokeView
-        // sets this on its own internal image view (see StrokeCanvasView.init), and the fill's surface
-        // on its own layer (`WindowSurfaceView.init`).
-        bakedImageView.layer.magnificationFilter = .nearest
-
-        // **Minification is the opposite problem and takes the opposite answer.** Zoomed *out* — and
-        // the canvas opens at `fitScale`, so that is where the artist starts — these views are
-        // canvas-resolution images sampled down to a few hundred points. Core Animation's default
-        // `.linear` has no mipmap chain, so past about 2:1 it degenerates to point sampling: it reads
-        // one texel per screen pixel and ink thinner than the sampling step is not faint, it is
-        // absent. MEASURED (BUGS.md, PERFORMANCE.md §9 item 2, 2026-09-02): the default 5-point brush
-        // leaves 800 pixels of ink at 2048² and **zero** at 4096², 8192² and 12288²; box-filtered it
-        // survives at every size. `.trilinear` is the mipmapped filter, so a thin line reaches the
-        // screen as a faint line instead of as nothing. It costs Core Animation a mipmap chain,
-        // about a third more texture per displayed layer, which `CompositorBudget` does not account
-        // for — see PERFORMANCE.md §9 item 5, which is that gap in general.
-        bakedImageView.layer.minificationFilter = .trilinear
+        // Coordinator.applyTransform), not by re-rasterizing at a higher resolution. Both of the
+        // host's whole-canvas pictures reach the screen as the window (`CanvasPictureView`), drawn
+        // nearest-neighbour when magnified, so pixels stay crisp at high zoom, and filtered when shrunk:
+        // the canvas opens at `fitScale`, and unfiltered minification loses thin ink outright —
+        // MEASURED (BUGS.md, PERFORMANCE.md §9 item 2, 2026-09-02), the default 5-point brush left 800
+        // pixels of ink at 2048² and **zero** at 4096², 8192² and 12288². The fill's surface sets
+        // its own (`WindowSurfaceView.init`).
 
         // `fillPlane` shows the *live* fill-tool preview (a committed fill is flattened into the
         // cel's `raster` tier), and it is **the topmost of the three**: LASSO_FILL.md §2a — a fill
@@ -87,8 +75,15 @@ final class LayerHostView: CanvasPlaneView {
 
     func installBaked(source: RasterSource?, image: UIImage?) {
         displayedBakedSource = source
-        if bakedImageView.image !== image { bakedImageView.image = image }
+        bakedImageView.show(image)
         bakedImageView.isHidden = image == nil
+    }
+
+    /// A pan, zoom or turn of the canvas: both of the host's whole-canvas pictures draw what the
+    /// window now shows of them (`CanvasPictureView`).
+    func windowMoved() {
+        bakedImageView.windowMoved()
+        strokeView.windowMoved()
     }
 
     @discardableResult
@@ -114,6 +109,7 @@ final class LayerHostView: CanvasPlaneView {
             let backing = newValue.backing.flatMap { $0.inverse == nil ? nil : $0 }
             fillPlane.layer.transform = ink?.layerTransform ?? CATransform3DIdentity
             bakedImageView.layer.transform = backing?.layerTransform ?? CATransform3DIdentity
+            bakedImageView.windowMoved()
             alignContentMasks()
         }
     }
