@@ -55,6 +55,10 @@ own branch, so `main`'s HANDOFF.md can be behind.
 - **Keep the project and the machine lean (2026-11-17).** Delete finished worktrees, branches,
   simulators, evidence and old builds instead of archiving them; a lean workspace is cleaner as well
   as smaller. Details in CLAUDE.md, "Keep storage lean".
+- **Keep going until you genuinely need him or the queue is done (owner, 2026-11-16, restated
+  2026-11-18).** After a merge or install, start the next TODO item in the same turn. Asking "start the
+  next one?" when it is already queued is not a genuine need; a ruling, an appearance trade-off or
+  something only he can do is.
 - **The install gate runs without the iPad (owner, 2026-11-18).** The owner's 5-minute playcheck —
   play, step frames, erase in all three modes, undo, pan, fill on a 5000² five-layer scene — is a
   simulator test that asserts the iPad's limits (render-server bytes under backboardd's 1,850 MiB, the
