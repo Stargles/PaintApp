@@ -10,15 +10,24 @@ From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
 
 ## Resume here — November 18, 2026 (weekly limit reset; owner approved the scheduler + memory budget, staged)
 
-1. **One combined branch, `tmp/nov18-eraser`** (worktree `~/PaintWork/PaintApp-nov18-eraser`; it carries the
-   whole of `tmp/nov17-hitch`, whose worktree is gone — delete that branch at merge). Done on it:
-   main-stall sampler, bakes and strips pause while a touch is down (+250 ms), the live vector eraser
-   renders off main (big erase 6125 → 265 ms on the sim, no erased-ink flash), the stroke-handoff test
-   fixed (the "vanishing stroke" was the test). A Sonnet worker was adding the **frame-change fix** (never
-   show the old frame's active layer over the new frame's others) plus every gate; evidence
-   `~/PaintWork/nov18-framestep-evidence/`, notes in the worktree's NOTES.md. If cut off, read
-   `git log --oneline origin/main..` there and finish only what is missing. Recordings:
-   `~/PaintWork/nov17-lag-evidence/`. NOTES.md is scratch — delete it before the merge.
+1. **Ready to ship: `tmp/nov18-eraser` at `cfcea918`** (worktree `~/PaintWork/PaintApp-nov18-eraser`; it
+   contains all of `tmp/nov17-hitch` — delete both branches at merge). On it: main-stall sampler; bakes and
+   strips pause while a touch is down (+250 ms); the live vector eraser renders off main (big erase 6125 →
+   265 ms on the sim); the stroke-handoff test fixed (the "vanishing stroke" was the test); **frame-change
+   fix** — while any layer awaits its first picture of the new frame a screen-sized snapshot of the old
+   frame covers the canvas, so the screen is wholly old or wholly new (`InteractionHitchUITests.
+   testSteppingFramesNeverShowsAMixOfTwoFrames`: 8 mixed → 0, mutation-checked). All 5 InteractionHitch
+   tests pass alone; EraserOffMainLogicTests 3/3; VectorEraserHybridLogicTests updated for the off-main
+   eraser (a refused source is now found at the lift's settle, not by `replaceCelContent`'s return).
+   **A final Debug + Release fast-tier gate was running** (`~/PaintWork/nov18-gate/gate.sh`, output
+   `~/PaintWork/nov18-gate/gate.out`, ends with `GATE-DONE`; it deletes its own simulator). If it is not
+   finished, wait on it with one blocking command; if it never printed GATE-DONE, re-run the script.
+   Pass = 0 failed in both. Then: rebase the branch onto `origin/main` (main is ahead by docs only), build
+   the signed Release for the device from the rebased head, install, update resign_state with that SHA,
+   merge `--ff-only`, push, delete the worktree, both branches, `~/PaintWork/nov18-*` and
+   `~/PaintWork/nov17-*` evidence, then ask the owner for the 2-minute check. Record in TODO.md as open:
+   a pan/zoom during the frame hold leaves the cover where it was; the lift's `settleCelContent()` still
+   renders one window-sized eraser picture on main when the background one has not landed.
 2. **Then gate and install:** Debug + Release fast tiers on an own iPad 9th-generation simulator,
    the UI classes the change touches, then the CLAUDE.md "Deploy to iPad" steps from the worktree
    (UUID only), update `~/.config/paintapp/resign_state`, merge `--ff-only` from the Desktop
