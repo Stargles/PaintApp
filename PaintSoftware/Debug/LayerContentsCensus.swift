@@ -42,6 +42,9 @@ final class LayerContentsCensus {
         var large: [AnyObject] = []
         /// The distinct contents objects at least `pictureBytes` each.
         var pictures: [AnyObject] = []
+        /// For each of `pictures`, the view that put it in the tree — its layer's own view, or the
+        /// nearest view above a bare sublayer.
+        var owners: [String] = []
 
         static func == (a: Reading, b: Reading) -> Bool {
             a.bytes == b.bytes && a.large.count == b.large.count
@@ -59,6 +62,8 @@ final class LayerContentsCensus {
     }()
 
     private(set) var peakBytes = 0
+    /// Distinct contents bytes referenced by the tree at the last look.
+    private(set) var heldBytes = 0
     private(set) var peakLarge = 0
     /// Canvas-sized pictures that have appeared in the tree, over the run.
     private(set) var handed = 0
@@ -71,6 +76,8 @@ final class LayerContentsCensus {
     private var previous: [AnyObject] = []
     /// Bytes of pictures handed to the render server over the run — see the type's comment.
     private(set) var handedBytes = 0
+    /// `handedBytes` by the view that handed them, so a red bound names its producer.
+    private(set) var handedByOwner: [String: Int] = [:]
     /// The previous frame's bitmaps of `pictureBytes` or more, held for `previous`'s reason.
     private var previousPictures: [AnyObject] = []
     /// Every surface the tree has carried, by `IOSurfaceID`: the server has each of these mapped.
@@ -83,7 +90,16 @@ final class LayerContentsCensus {
     var onChange: (() -> Void)?
 
     /// `census:<peak MiB>,<peak large>,<handed>,<busiest second>` for `canvas.host`'s label.
-    var field: String { "census:\(peakBytes >> 20),\(peakLarge),\(handed),\(busiest) handedMiB:\(handedBytes >> 20)" }
+    var field: String {
+        "census:\(peakBytes >> 20),\(peakLarge),\(handed),\(busiest) handedMiB:\(handedBytes >> 20)"
+            + " held:\(heldBytes >> 20) handedBy:\(producers)"
+    }
+
+    /// `handedByOwner`'s three largest, `View=MiB` joined by `;` — one space-free field.
+    var producers: String {
+        let top = handedByOwner.sorted { $0.value > $1.value }.prefix(3)
+        return top.isEmpty ? "none" : top.map { "\($0.key)=\($0.value >> 20)" }.joined(separator: ";")
+    }
 
     func attach(to window: UIWindow?) {
         guard let window, self.window !== window else { return }
@@ -100,44 +116,64 @@ final class LayerContentsCensus {
         let now = CACurrentMediaTime()
         let new = reading.large.filter { object in !previous.contains { $0 === object } }.count
         previous = reading.large
-        let pictures = reading.pictures.filter { CFGetTypeID($0) != IOSurfaceGetTypeID() }
-        let newBitmaps = pictures.filter { object in !previousPictures.contains { $0 === object } }
-        previousPictures = pictures
-        var newBytes = newBitmaps.reduce(0) { $0 + Self.bytes(of: $1) }
-        for object in reading.pictures where CFGetTypeID(object) == IOSurfaceGetTypeID() {
-            let surface = unsafeBitCast(object, to: IOSurfaceRef.self)
-            if seenSurfaces.insert(IOSurfaceGetID(surface)).inserted { newBytes += Self.bytes(of: object) }
+        var newBytes = 0
+        for (object, owner) in zip(reading.pictures, reading.owners) {
+            let handedNow: Bool
+            if CFGetTypeID(object) == IOSurfaceGetTypeID() {
+                handedNow = seenSurfaces.insert(IOSurfaceGetID(unsafeBitCast(object, to: IOSurfaceRef.self))).inserted
+            } else {
+                handedNow = !previousPictures.contains { $0 === object }
+            }
+            guard handedNow else { continue }
+            let bytes = Self.bytes(of: object)
+            newBytes += bytes
+            handedByOwner[owner, default: 0] += bytes
         }
+        previousPictures = reading.pictures.filter { CFGetTypeID($0) != IOSurfaceGetTypeID() }
         recent.removeAll { now - $0 > 1 }
         recent.append(contentsOf: repeatElement(now, count: new))
-        let figures = (peakBytes, peakLarge, handed, busiest, handedBytes >> 20)
+        let figures = (peakBytes, peakLarge, handed, busiest, handedBytes >> 20, heldBytes >> 20)
         handedBytes += newBytes
+        heldBytes = reading.bytes
         peakBytes = max(peakBytes, reading.bytes)
         peakLarge = max(peakLarge, reading.large.count)
         handed += new
         busiest = max(busiest, recent.count)
-        if figures != (peakBytes, peakLarge, handed, busiest, handedBytes >> 20) { onChange?() }
+        if figures != (peakBytes, peakLarge, handed, busiest, handedBytes >> 20, heldBytes >> 20) { onChange?() }
     }
 
     /// The distinct contents a tree references, its masks included. Pure apart from the read.
     static func reading(of root: CALayer) -> Reading {
         var seen = Set<ObjectIdentifier>()
         var reading = Reading()
-        var stack = [root]
-        while let layer = stack.popLast() {
+        var stack = [(root, "window")]
+        while let (layer, above) = stack.popLast() {
+            let owner = (layer.delegate as? UIView).map { Self.name(of: $0) } ?? above
             if let contents = layer.contents {
                 let object = contents as AnyObject
                 if seen.insert(ObjectIdentifier(object)).inserted {
                     let bytes = Self.bytes(of: object)
                     reading.bytes += bytes
                     if bytes >= largeBytes { reading.large.append(object) }
-                    if bytes >= pictureBytes { reading.pictures.append(object) }
+                    if bytes >= pictureBytes {
+                        reading.pictures.append(object)
+                        reading.owners.append(owner)
+                    }
                 }
             }
-            if let mask = layer.mask { stack.append(mask) }
-            if let sublayers = layer.sublayers { stack.append(contentsOf: sublayers) }
+            if let mask = layer.mask { stack.append((mask, owner)) }
+            if let sublayers = layer.sublayers { stack.append(contentsOf: sublayers.map { ($0, owner) }) }
         }
         return reading
+    }
+
+    /// `Superview.View` — type names with any generic arguments dropped, so it is one label field and
+    /// a plain `UIImageView` still says whose it is.
+    static func name(of view: UIView) -> String {
+        func bare(_ view: UIView) -> String {
+            String(String(describing: type(of: view)).prefix { $0 != "<" && $0 != " " })
+        }
+        return view.superview.map { bare($0) + "." + bare(view) } ?? bare(view)
     }
 
     static func bytes(of contents: AnyObject) -> Int {
