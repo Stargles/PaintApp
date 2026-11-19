@@ -7,6 +7,18 @@ could not be verified as open or closed; verify against `main` and `git log`, th
 
 ## Current — iPad build `e88cba87` installed 2026-11-18, owner re-test pending
 
+- [ ] **Owner's check of `e88cba87` FAILED (Nov 18 late).** Owner: *"I have no idea how this ever managed
+  to pass through all your tests, and if I caught this, then who knows what I did not catch."*
+  (a) **Play → heavy lag, then the iPad crashes** — the *third* time this regression has shipped;
+  prime suspect the new frame-change hold (a screen-sized snapshot per frame step, so per played frame).
+  (b) **Frame switching is not instant** — owner: frames are already baked, so a step should show the
+  baked frame at once; the hold covers the gap instead of removing it.
+  (c) **To Cross eraser still slow and the erased strokes flicker back** — recording saved on the iPad
+  (newest in Documents/Recordings).
+  (d) **Cut and Normal erasers draw no circle cursor**; To Cross does — all three need it.
+  Gap to close with the fixes: no test played a baked scene on a 5000² document at the owner's size and
+  watched memory, and none timed a frame step against the baked frame.
+
 - [ ] **November 16 iPad test failed (owner, Test1, 5000², 5 vector layers).** Undo lag; the
   circle-and-line Fill gap; rapid draw→Undo and rapid drawing blacked out / restarted the iPad; entering
   a document showed orange bars ~10 s per frame. Owner: *a build this faulty must never reach the iPad;
