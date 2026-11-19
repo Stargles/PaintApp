@@ -8,39 +8,23 @@ From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
 > `main` equals `origin/main`. Usage is tight: one worker at a time, Sonnet unless the task needs Opus,
 > short briefs, no re-reading of what HANDOFF already says. Follow "Resume here" below.
 
-## Resume here — November 18, 2026 (weekly limit reset; owner approved the scheduler + memory budget, staged)
+## Resume here — November 18, 2026 (late)
 
-1. **Ready to ship: `tmp/nov18-eraser` at `cfcea918`** (worktree `~/PaintWork/PaintApp-nov18-eraser`; it
-   contains all of `tmp/nov17-hitch` — delete both branches at merge). On it: main-stall sampler; bakes and
-   strips pause while a touch is down (+250 ms); the live vector eraser renders off main (big erase 6125 →
-   265 ms on the sim); the stroke-handoff test fixed (the "vanishing stroke" was the test); **frame-change
-   fix** — while any layer awaits its first picture of the new frame a screen-sized snapshot of the old
-   frame covers the canvas, so the screen is wholly old or wholly new (`InteractionHitchUITests.
-   testSteppingFramesNeverShowsAMixOfTwoFrames`: 8 mixed → 0, mutation-checked). All 5 InteractionHitch
-   tests pass alone; EraserOffMainLogicTests 3/3; VectorEraserHybridLogicTests updated for the off-main
-   eraser (a refused source is now found at the lift's settle, not by `replaceCelContent`'s return).
-   **A final Debug + Release fast-tier gate was running** (`~/PaintWork/nov18-gate/gate.sh`, output
-   `~/PaintWork/nov18-gate/gate.out`, ends with `GATE-DONE`; it deletes its own simulator). If it is not
-   finished, wait on it with one blocking command; if it never printed GATE-DONE, re-run the script.
-   Pass = 0 failed in both. Then: rebase the branch onto `origin/main` (main is ahead by docs only), build
-   the signed Release for the device from the rebased head, install, update resign_state with that SHA,
-   merge `--ff-only`, push, delete the worktree, both branches, `~/PaintWork/nov18-*` and
-   `~/PaintWork/nov17-*` evidence, then ask the owner for the 2-minute check. Record in TODO.md as open:
-   a pan/zoom during the frame hold leaves the cover where it was; the lift's `settleCelContent()` still
-   renders one window-sized eraser picture on main when the background one has not landed.
-2. **Then gate and install:** Debug + Release fast tiers on an own iPad 9th-generation simulator,
-   the UI classes the change touches, then the CLAUDE.md "Deploy to iPad" steps from the worktree
-   (UUID only), update `~/.config/paintapp/resign_state`, merge `--ff-only` from the Desktop
-   worktree, push, delete the worktree/branch/simulator/evidence (owner: keep storage lean). `main`
-   already carries, uninstalled: the graph-editor axis-lock fix, the memory-refusal notices, the
-   thumbnail fix and twelve repaired UI tests — they ship in that same install.
+1. **Installed on the iPad 2026-11-18: signed Release `e88cba87`** (`tmp/nov18-eraser` merged; binary
+   UUID `3A6A147F-049E-3B9F-B2DF-0BE7206608BA`, profile through Nov 20 07:09 UTC) from
+   `~/PaintWork/device-e88cba87-Release/`; `resign_state` updated. Fast tiers at the pre-rebase head
+   `cfcea918` (rebase was docs-only): Debug and Release each 5,698 = 5,694 passed + 4 skipped, 0 failed.
+   It carries the off-main live eraser, the main-stall sampler, the bake pause under a touch and the
+   frame-change hold, plus main's uninstalled graph-editor axis-lock fix, memory notices, thumbnail fix
+   and twelve repaired UI tests. **Not run:** the full UI suite on an iPad 9 simulator.
+2. **Owner's 2-minute check is next:** draw, erase a lot, Undo, pan, change frames, play, fill. TODO.md's
+   "Current" section names what each item is waiting for him to confirm, and the leftovers still open.
 3. **Next owner ask, queued:** an open lasso acts as closed for every bottom-bar action (TODO.md item;
    remove the Move-only open-lasso path).
-4. **Before calling any build done:** a full UI suite run on an iPad 9 simulator (Mac time, few tokens —
-   read counts only), and the owner's 2-minute check on the iPad: draw, erase a lot, Undo, pan, change
-   frames, play, fill. Pause new features until the mixed-picture fix is installed.
-5. **Scheduler (owner said go, 2026-11-18):** after this install, stage 2 = an Opus design page reviewed before code, then the core + R1 migration; stage 3 = one memory budget + a reuse pool for canvas-sized pictures; then stages 4–5. Usage-aware: clear context between stages,
-   since a fresh context is cheaper than a long one. Every change must keep its rules.
+4. **Scheduler (owner said go, 2026-11-18):** stage 2 = an Opus design page reviewed before code, then the
+   core + R1 migration; stage 3 = one memory budget + a reuse pool for canvas-sized pictures; then stages
+   4–5. Clear context between stages. Every change must keep docs/SCHEDULER.md's rules.
+5. The Mac may be busy with the owner's own work — check running processes before any timing run.
 
 ## Sign-off — November 17, 2026, Toronto
 

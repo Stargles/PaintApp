@@ -5,7 +5,7 @@ The owner's asks, live. Recorded when they arrive, deleted whole when done **and
 record of an outstanding task. Items marked "(status unclear — check)" were carried from older notes and
 could not be verified as open or closed; verify against `main` and `git log`, then delete or fix.
 
-## Current — iPad build `9792e799` installed 2026-11-17, owner re-test pending
+## Current — iPad build `e88cba87` installed 2026-11-18, owner re-test pending
 
 - [ ] **November 16 iPad test failed (owner, Test1, 5000², 5 vector layers).** Undo lag; the
   circle-and-line Fill gap; rapid draw→Undo and rapid drawing blacked out / restarted the iPad; entering
@@ -40,6 +40,10 @@ could not be verified as open or closed; verify against `main` and `git log`, th
   `RasterSurface`'s byte order is not CA-native. Built, not gated: a main-thread stall sampler
   (`mainStall` lines name the code), lift→base `ink` log, the frame bake paused while a touch is down
   (+250 ms), thumbnails at `.utility`. The stroke flicker did not reproduce on the simulator.
+  **Installed Nov 18 (`e88cba87`), owner to confirm:** (1) is fixed — the live eraser renders off main
+  (big erase 6125 → 265 ms, simulator) — plus the stall sampler and the bake pause. **Still open:** (2)
+  live stamping on main; (3) the CA conversion; and the lift's `settleCelContent()` still renders one
+  window-sized eraser picture on main when the background one has not landed.
 - [ ] **Regression: a stroke briefly disappears after it is laid down, then reappears (owner, Nov 17
   evening, build 9792e799, Test1 5000², Rough Ink).** Owner bets on *"a gap between some kind of
   preview state and a baked state"*; this was fixed once before, so it is a regression — prime
@@ -59,6 +63,11 @@ could not be verified as open or closed; verify against `main` and `git log`, th
   no cached picture (the iPad 9 budget holds two 5000² renders), so the layer deliberately keeps its
   previous picture — the previous frame's ink — over the new frame for up to ~1 s. Fix: hold the whole
   previous frame, or show the baked new frame, until every layer of the new frame is ready.
+  **Installed Nov 18 (`e88cba87`), owner to confirm:** while any layer awaits its first picture of the
+  new frame, a screen-sized snapshot of the old frame covers the canvas
+  (`InteractionHitchUITests.testSteppingFramesNeverShowsAMixOfTwoFrames`: 8 mixed → 0). The simulator's
+  "vanishing stroke" was the test, not the app; the owner's stroke and erase flicker still need his
+  check. **Open:** a pan or zoom during the frame hold leaves the cover where it was.
 - [ ] **Canvas freeze still recurs.** Flight `flight-20261117-191152` (Test, 2048², same folder): the
   watchdog replaced a stranded `canvas.pan` found `.ended` with 0 touches on `CanvasPlaneView`;
   lifetime repairs now 24. In that flight a two-finger pan's touch was cancelled and began again
