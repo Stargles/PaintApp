@@ -1890,6 +1890,9 @@ final class CanvasManager: ObservableObject {
     ///     what a caller that has not thought about it expects, and what every logic test written
     ///     before this parameter asserts.
     func canvasInteractionBegan(mayContinueTake: Bool = false, mayBeATransform: Bool = false) {
+        // Any touch on the canvas ends a step's settle at once — a finger that turns out to draw must
+        // land on a host that is drawing itself, and one that pans is not stepping either.
+        endFrameStepSettle()
         guard mayBeATransform else {
             touchSettle.supersede()
             endSettleWindow()
@@ -1966,7 +1969,6 @@ final class CanvasManager: ObservableObject {
         } else {
             stopPlayback()
         }
-        endFrameStepSettle()
         interactionBegan.send()
     }
 
