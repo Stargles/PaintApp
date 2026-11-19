@@ -18,6 +18,12 @@ could not be verified as open or closed; verify against `main` and `git log`, th
   (d) **Cut and Normal erasers draw no circle cursor**; To Cross does — all three need it.
   Gap to close with the fixes: no test played a baked scene on a 5000² document at the owner's size and
   watched memory, and none timed a frame step against the baked frame.
+  **(a) and (b) fixed on `tmp/nov18-play`, not installed:** the bake reached the screen as a fresh
+  95 MiB bitmap per played frame (`belowView.image`) — 10,586 MiB handed to the render server in 12 s
+  of playback on the iPad 9 simulator; now a pair of window-sized surfaces (`BakedFrameWindow`), 25 MiB.
+  A step is a flip until it settles (`CanvasManager.framesAreFlipping`): it shows the bake, the hosts
+  render only once the playhead is still, under the bake; the snapshot hold is deleted. Gate:
+  `PlaybackSurfaceUITests` (red on `e88cba87`'s code). Owner to confirm play and steps on Test1.
 
 - [ ] **November 16 iPad test failed (owner, Test1, 5000², 5 vector layers).** Undo lag; the
   circle-and-line Fill gap; rapid draw→Undo and rapid drawing blacked out / restarted the iPad; entering
