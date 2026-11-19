@@ -9,7 +9,11 @@ import XCTest
 /// `-resetBrushLibrary`, `-resetGallery` — and never edits a brush or the palette: it draws with
 /// whatever brush the app already has.
 ///
-/// It owns exactly two gallery fixtures, both created through the gallery UI: a folder named
+/// A second run plays and steps the owner's November 18 crash shape — Test1's five vector layers at
+/// 5000², six frames, baked — laid into its own new scene by `-uiTestSeedPlainAnimation`, which
+/// writes ink into that scene only and touches no setting or library.
+///
+/// Each run owns exactly two gallery fixtures, both created through the gallery UI: a folder named
 /// `ZZ-stress-<timestamp>` and the one scene inside it. Teardown, even after a failure, moves only the
 /// scene (to Recently Deleted) and then removes that now-empty folder, through the gallery UI. It does
 /// not empty Recently Deleted and touches nothing else.
@@ -41,36 +45,8 @@ final class DeviceStressUITests: PaintUITestCase {
     // MARK: - The run
 
     func testRapidDrawUndoAndFillOnFiveVectorLayersAtFullSize() throws {
-        let app = XCUIApplication()
-        self.app = app
-        // No launch arguments at all. The simulator proof adds the iPad 9's memo budget because the
-        // simulator otherwise reads the Mac's RAM; on the device the real budget applies.
-        #if targetEnvironment(simulator)
-        app.launchArguments += ["-uiTestTextureBudgetBytes", "201326592"]
-        #endif
         let t0 = Date()
-        app.launch()
-        rotateDevice(app, to: .landscapeLeft)
-        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 30), "setup: the gallery")
-
-        // The fixtures: a folder, entered, and a 5000² scene made inside it. First remove any folder an
-        // earlier run of this harness created and could not clean up (named in the env, empty only).
-        goToTopOfGallery(app)
-        removeStaleOwnedFolders(app)
-        app.buttons["gallery.newFolderButton"].tap()
-        let field = app.textFields["gallery.folderRenameField"]
-        XCTAssertTrue(field.waitForExistence(timeout: 10), "New Folder puts the tile's name into edit")
-        field.typeText("\(ownedFolder)\n")
-        let tile = app.buttons["gallery.folderTile.\(ownedFolder)"]
-        XCTAssertTrue(tile.waitForExistence(timeout: 10), "the owned folder exists")
-        tile.tap()
-        XCTAssertEqual(app.staticTexts["gallery.breadcrumbPath"].label.hasSuffix(ownedFolder), true,
-                       "inside the owned folder")
-        XCTAssertTrue(openNewCanvasOnDevice(app), "a 5000² scene inside the owned folder")
-        print("DEVICE-STRESS fixtures folder=\(ownedFolder) scene=Untitled setup=\(Date().timeIntervalSince(t0))s")
-
-        let canvas = app.otherElements["canvas.host"]
-        XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+        let (app, canvas) = try openOwnedScene()
         for _ in 0..<4 { addVectorLayer(app) }   // the scene's first layer is vector: five in all
         let visible = visiblePaperRect(app, in: canvas, canvasSize: canvasSize)
         func at(_ dx: Double, _ dy: Double) -> CGVector { onHost(visible, dx, dy) }
@@ -135,6 +111,88 @@ final class DeviceStressUITests: PaintUITestCase {
 
         strokesThenUndos("(d) strokes+undos again")
         print("DEVICE-STRESS done total=\(Date().timeIntervalSince(t0))s")
+    }
+
+    /// **The owned fixtures, made through the gallery UI**: a folder, entered, and a 5000² scene inside
+    /// it — with `extraArguments` (never a reset of any kind) on the launch.
+    private func openOwnedScene(_ extraArguments: [String] = []) throws -> (XCUIApplication, XCUIElement) {
+        let app = XCUIApplication()
+        self.app = app
+        // No reset argument at all. The simulator proof adds the iPad 9's memo budget because the
+        // simulator otherwise reads the Mac's RAM; on the device the real budget applies.
+        #if targetEnvironment(simulator)
+        app.launchArguments += ["-uiTestTextureBudgetBytes", "201326592"]
+        #endif
+        app.launchArguments += extraArguments
+        let t0 = Date()
+        app.launch()
+        rotateDevice(app, to: .landscapeLeft)
+        XCTAssertTrue(app.buttons["gallery.newCanvasButton"].waitForExistence(timeout: 30), "setup: the gallery")
+
+        // The fixtures: a folder, entered, and a 5000² scene made inside it. First remove any folder an
+        // earlier run of this harness created and could not clean up (named in the env, empty only).
+        goToTopOfGallery(app)
+        removeStaleOwnedFolders(app)
+        app.buttons["gallery.newFolderButton"].tap()
+        let field = app.textFields["gallery.folderRenameField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "New Folder puts the tile's name into edit")
+        field.typeText("\(ownedFolder)\n")
+        let tile = app.buttons["gallery.folderTile.\(ownedFolder)"]
+        XCTAssertTrue(tile.waitForExistence(timeout: 10), "the owned folder exists")
+        tile.tap()
+        XCTAssertEqual(app.staticTexts["gallery.breadcrumbPath"].label.hasSuffix(ownedFolder), true,
+                       "inside the owned folder")
+        XCTAssertTrue(openNewCanvasOnDevice(app), "a 5000² scene inside the owned folder")
+        print("DEVICE-STRESS fixtures folder=\(ownedFolder) scene=Untitled setup=\(Date().timeIntervalSince(t0))s")
+
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+        return (app, canvas)
+    }
+
+    /// **The owner's November 18 crash: Play on Test1's shape, then frame steps** — five vector layers
+    /// of 5000², a distinct cel on each of six frames (`-uiTestSeedPlainAnimation` with the `5x6`
+    /// shape, which only lays ink into the new owned scene), baked, played for 25 s and stepped
+    /// quickly and slowly. On `e88cba87` playing this killed the iPad's `backboardd` at 1,850 MiB
+    /// within seconds: each played frame was a fresh 95 MiB picture for the render server.
+    func testPlayAndStepFiveVectorLayersAtFullSize() throws {
+        let t0 = Date()
+        let (app, _) = try openOwnedScene(["-uiTestSeedPlainAnimation", "-uiTestSeedAnimationShape", "5x6"])
+        XCTAssertEqual(readFrameLabel(app)?.total, 6, "PREMISE: the seed laid six frames down")
+        let baked = NSPredicate { _, _ in self.bakeBarValue(app) == "" }
+        let bakeStart = Date()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: baked, object: nil)], timeout: 300),
+                       .completed, "PREMISE: all six frames baked; bar reads \(bakeBarValue(app))")
+        print("DEVICE-STRESS (e) baked six 5000² frames in \(Date().timeIntervalSince(bakeStart))s")
+
+        let play = app.buttons["timeline.playButton"]
+        XCTAssertTrue(play.waitForExistence(timeout: 5))
+        play.tap()
+        var frames = Set<Int>()
+        let playStart = Date()
+        while Date().timeIntervalSince(playStart) < 25 {
+            if let frame = readFrameLabel(app)?.current { frames.insert(frame) }
+            assertForeground(app, "while playing")
+            Thread.sleep(forTimeInterval: 1)
+        }
+        play.tap()
+        print("DEVICE-STRESS (e) played 25s frames seen=\(frames.sorted())")
+        XCTAssertGreaterThanOrEqual(frames.count, 2, "the playhead moved while playing")
+        assertForeground(app, "after 25 s of playback")
+
+        let forward = app.buttons["timeline.stepForwardButton"]
+        let back = app.buttons["timeline.stepBackButton"]
+        let quick = Date()
+        for i in 0..<24 { (i % 8 < 4 ? forward : back).tap() }
+        print("DEVICE-STRESS (f) 24 quick steps in \(Date().timeIntervalSince(quick))s")
+        assertForeground(app, "after quick steps")
+        for _ in 0..<8 {
+            forward.tap()
+            Thread.sleep(forTimeInterval: 1.5)
+        }
+        Thread.sleep(forTimeInterval: 3)
+        assertForeground(app, "after settled steps")
+        print("DEVICE-STRESS (f) done total=\(Date().timeIntervalSince(t0))s")
     }
 
     /// The shared `openNewCanvas` types both sizes back to back, which works on a simulator (hardware

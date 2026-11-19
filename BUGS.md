@@ -1061,19 +1061,6 @@ a render a host is displaying is not an eviction candidate, which is a change to
 policy and wants its own measurement: at 6000² a single layer's picture is 137 MB, so "never evict
 what is displayed" is a floor of `layers × canvasBytes` that the budget cannot refuse.
 
-## Scrubbing the playhead pays the per-layer render that playback no longer does (2026-09-09)
-
-Dragging the playhead changes the cel set exactly as a playback tick does, so it pays one
-canvas-sized vector render per layer per frame crossed — MEASURED at **3.00 a flip, 115.9 ms** on a
-three-layer 4096² document under an iPad 9's budget (PERFORMANCE.md §16.2), and it never converges,
-because the memo holds two of the six renders such a document needs.
-
-`CanvasManager.sandwichEngagesOnCanvas` gained `|| isPlaying` on 2026-09-09 and deliberately did not
-gain a scrub clause: a scrub is a gesture tracking a finger, where showing a stale baked frame is
-worse than showing a late correct one, and **nobody has measured that drag**. That is the same
-argument §14.6 makes for the cel-channel half of TODO (53), and it wants the same thing first — a
-measurement of what the artist sees under their own finger, not another arithmetic.
-
 ## Above 2048x1024 the decoded-frame ring holds fewer than one frame, so playback decodes on the tick (2026-09-09)
 
 RENDER.md §3.5: *"Play never decodes on the display thread: the scheduler decodes ahead into the ring

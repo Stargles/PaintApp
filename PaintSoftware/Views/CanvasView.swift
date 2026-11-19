@@ -1847,6 +1847,7 @@ struct CanvasView: UIViewRepresentable {
         /// `isHidden`/`alpha`/interaction settled — and again from the far end of each rebuild.
         private func updateSandwich(tree: [RenderNode], engaged: Bool) {
             defer { reconcileStreamDisplay() }
+            defer { frameOfTheLastPass = canvasManager.currentFrame }
             guard let belowView = sandwichBelowView, let aboveView = sandwichAboveView else { return }
 
             /// Every exit from this function agrees with the view stack about who is painting the
@@ -2802,7 +2803,17 @@ struct CanvasView: UIViewRepresentable {
         /// has a great many passes that change nothing.
         private func refreshBakedFull(for key: SandwichKey) {
             guard sandwichFullKey != key else { return }
-            guard let image = canvasManager.frameBaker.image(atFrame: canvasManager.currentFrame) else {
+            let baker = canvasManager.frameBaker
+            guard let image = baker.image(atFrame: canvasManager.currentFrame) else {
+                // **§2.10 from a standing start**: the first engaged pass of a step or a play has no
+                // picture held yet, and a frame not baked (or not resident) would leave the hosts
+                // drawing — each swapping to its new cel as its render lands, a mix of two frames. The
+                // frame the canvas is leaving is the last complete picture; it is held, unclaimed by
+                // `sandwichFullKey`, until this frame's bake lands.
+                if sandwichFull == nil, let left = frameOfTheLastPass, left != canvasManager.currentFrame,
+                   let previous = baker.image(atFrame: left) {
+                    sandwichFull = UIImage(cgImage: previous, scale: 1, orientation: .up)
+                }
                 return
             }
             sandwichFull = PlaybackTrace.span(.bakeImageWrap) {
@@ -2825,6 +2836,8 @@ struct CanvasView: UIViewRepresentable {
         private var bakedFramePicture: UIImage?
         /// The window the picture was last asked for at, so a moved canvas asks again.
         private var bakedFrameWindow: BakedFrameWindow?
+        /// The playhead's frame at the end of the last `updateSandwich` — the frame a step is leaving.
+        private var frameOfTheLastPass: Int?
         /// The bake file the cover's picture came from, so a pass with the same frame keeps it.
         private var bakedFrameCoverName: String?
         /// The baked frame's own lane: a draw is a window-sized resample, and must never queue behind

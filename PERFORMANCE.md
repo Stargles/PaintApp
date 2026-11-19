@@ -4548,11 +4548,12 @@ not reached shows the frame before it — RENDER.md §2.10, an owner ruling.
 
 ### 16.5 What this does not fix, with numbers
 
-**Scrubbing the playhead by hand has the identical shape and is not covered.** A drag across the
-timeline changes the cel set exactly as playback does, so it pays the same 3.00 renders a flip at
-4096². It is left alone because it is a gesture tracking a finger, where a stale frame is worse than a
-late one, and because nobody has measured that drag — the same reason §14.6 gives for the cel-channel
-half of TODO (53).
+**Scrubbing and stepping are covered since 2026-11-18**: a frame step is a flip until the playhead
+has been still for 0.5 s (`CanvasManager.framesAreFlipping`), so it shows the bake and hands no host a
+cel; and the bake reaches the screen through window-sized surfaces (`BakedFrameWindow`) instead of a
+canvas-sized bitmap per frame — MEASURED on the iPad 9 simulator at the owner's 5000² × 5 layers,
+12 s of playback handed the render server 10,586 MiB before and 25 MiB after
+(`PlaybackSurfaceUITests`).
 
 **At 4096² and above the decoded-frame ring cannot hold the frames playback is about to ask for, so
 the tick decodes.** `CanvasManager.frameRingByteBudget` is 96 MB; one decoded 4096² frame is 67 MB
