@@ -300,8 +300,9 @@ final class RegionRepairLogicTests: XCTestCase {
         let unmeasuredCut = neverDrawnToCross.cutToIntersection(atCanvasPoint: Self.cellCentre(0),
                                                                  brush: Self.brush(), size: 14)
         XCTAssertEqual(unmeasuredCut.outcome, .cut, "the unmeasured To Cross fixture must still cut")
-        XCTAssertEqual(neverDrawnToCross.lastDamage, .everything,
-                       "An unrendered victim has no measured bounds, so Mode 3 must keep its conservative fallback")
+        XCTAssertTrue(isRegion(neverDrawnToCross.lastDamage),
+                      "Mode 3 measures an unrendered victim at the cut rather than widening a per-sample edit "
+                      + "to the whole cel (owner, Nov 18; VectorCanvas.measurePaintedBounds)")
     }
 
     // MARK: - (2) Byte identity, three ways
