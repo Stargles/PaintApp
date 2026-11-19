@@ -10,13 +10,14 @@ From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
 
 ## Resume here — November 18, 2026 (late)
 
-1. **Installed on the iPad 2026-11-18: signed Release `e88cba87`** (`tmp/nov18-eraser` merged; binary
-   UUID `3A6A147F-049E-3B9F-B2DF-0BE7206608BA`, profile through Nov 20 07:09 UTC) from
-   `~/PaintWork/device-e88cba87-Release/`; `resign_state` updated. Fast tiers at the pre-rebase head
-   `cfcea918` (rebase was docs-only): Debug and Release each 5,698 = 5,694 passed + 4 skipped, 0 failed.
-   It carries the off-main live eraser, the main-stall sampler, the bake pause under a touch and the
-   frame-change hold, plus main's uninstalled graph-editor axis-lock fix, memory notices, thumbnail fix
-   and twelve repaired UI tests. **Not run:** the full UI suite on an iPad 9 simulator.
+1. **Installed on the iPad 2026-11-18 (late): signed Release `2ecc771e`** from
+   `~/PaintWork/device-2ecc771e-Release/`, `resign_state` updated. It replaced `e88cba87`, whose Play
+   crashed the iPad. It carries the play/frame-step fix (`tmp/nov18-play`, merged): render-server bytes
+   during 12 s of play went 10,586 → 25 MiB on the iPad 9 simulator (`PlaybackSurfaceUITests`), and a
+   frame step shows the bake at once. Fast tiers at the pre-rebase head `f3efb618`: Debug and Release
+   5,698 + 4 skipped, 0 failed. **Open and first in line:** the device test crashed the iPad (backboardd
+   at 1,850 MiB) while seeding a 5000² 5×6 scene, before Play — TODO.md's first item. Then the eraser
+   items (c) and (d). Install gate: AGENTS.md, "The install gate runs without the iPad".
 2. **Owner's 2-minute check is next:** draw, erase a lot, Undo, pan, change frames, play, fill. TODO.md's
    "Current" section names what each item is waiting for him to confirm, and the leftovers still open.
 3. **Next owner ask, queued:** an open lasso acts as closed for every bottom-bar action (TODO.md item;

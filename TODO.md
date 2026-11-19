@@ -5,7 +5,7 @@ The owner's asks, live. Recorded when they arrive, deleted whole when done **and
 record of an outstanding task. Items marked "(status unclear — check)" were carried from older notes and
 could not be verified as open or closed; verify against `main` and `git log`, then delete or fix.
 
-## Current — iPad build `e88cba87` installed 2026-11-18, owner re-test pending
+## Current — iPad build `2ecc771e` installed 2026-11-18 (late), owner re-test pending
 
 - [ ] **Owner's check of `e88cba87` FAILED (Nov 18 late).** Owner: *"I have no idea how this ever managed
   to pass through all your tests, and if I caught this, then who knows what I did not catch."*
@@ -18,7 +18,14 @@ could not be verified as open or closed; verify against `main` and `git log`, th
   (d) **Cut and Normal erasers draw no circle cursor**; To Cross does — all three need it.
   Gap to close with the fixes: no test played a baked scene on a 5000² document at the owner's size and
   watched memory, and none timed a frame step against the baked frame.
-  **(a) and (b) fixed on `tmp/nov18-play`, not installed:** the bake reached the screen as a fresh
+  **NEW — the iPad crashes while a 5000² scene is being seeded/opened (Nov 18, 23:33).** The opt-in
+  `DeviceStressUITests.testPlayAndStepFiveVectorLayersAtFullSize` (Debug build of the play fix) never
+  reached Play: ~34 s in, creating a 5000² canvas seeded 5 layers × 6 frames, backboardd was killed at
+  1,850 MiB (`~/PaintWork/nov18-owner-check/crash/JetsamEvent-2026-11-18-233341.ips`, log
+  `~/PaintWork/nov18-play-evidence/device.log`). The render-server census gate covers play and steps
+  only; extend it to open + first bake + seeding, find the producer, fix, then re-run the device test.
+  Likely the same family as Nov 16's "orange bars on entering a document".
+  **(a) and (b) fixed and installed in `2ecc771e`, play not yet confirmed on the device:** the bake reached the screen as a fresh
   95 MiB bitmap per played frame (`belowView.image`) — 10,586 MiB handed to the render server in 12 s
   of playback on the iPad 9 simulator; now a pair of window-sized surfaces (`BakedFrameWindow`), 25 MiB.
   A step is a flip until it settles (`CanvasManager.framesAreFlipping`): it shows the bake, the hosts
