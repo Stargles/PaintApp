@@ -1030,7 +1030,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
                     let displayInk = CelContentPicture.Ink.ordinary(
                         source: source.freezeDisplay(referenceIDs: references),
                         elements: sourceElements, rewriting: [])
-                    let scratch = StrokeScratch(canvasSize: size, role: .replacing,
+                    let scratch = StrokeScratch(canvasSize: size, role: .replacing(.fullResolution),
                         celContent: StrokeScratch.CelContent(backing: nil, ink: displayInk, placement: .identity))
 
                     let previewResult: VectorCanvas.EraserPreview?
@@ -1173,7 +1173,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         let baseRasterizations = source.rasterizations
         let original = source.elements
         let frozen = source.freezeDisplay(referenceIDs: [reference.id])
-        let scratch = StrokeScratch(canvasSize: size, role: .replacing,
+        let scratch = StrokeScratch(canvasSize: size, role: .replacing(.fullResolution),
             celContent: StrokeScratch.CelContent(backing: nil,
                 ink: .ordinary(source: frozen, elements: original, rewriting: []), placement: .identity))
         var driver = VectorEraser.IntersectionDriver()
@@ -1196,8 +1196,6 @@ final class VectorEraserHybridLogicTests: XCTestCase {
             XCTAssertTrue(scratch.replaceVectorDisplay(elements: source.elements, rewriting: [], damage: damage, revision: 1),
                           "The current ordered list must publish after each real cut")
             scratch.settleCelContent()
-            XCTAssertTrue(scratch.hasCurrentReplacementWindow(covering: damage),
-                          "The same owner query used by the view accepts each successfully rendered window")
             let shown = try XCTUnwrap(scratch.renderedCelContent)
             XCTAssertTrue(shown.window.contains(damage), "The admitted window covers all cuts so far")
             XCTAssertEqual(scratch.windowPixelCount, 0,
@@ -1235,12 +1233,6 @@ final class VectorEraserHybridLogicTests: XCTestCase {
         }
         let lastWindow = try XCTUnwrap(scratch.renderedCelContent)
         XCTAssertNotNil(firstWindow)
-        XCTAssertFalse(scratch.hasCurrentReplacementWindow(covering: .null),
-                       "Unknown damage must never validate an otherwise healthy replacement window")
-        let unrelatedDamage = CGRect(x: 400, y: 400, width: 8, height: 8)
-        XCTAssertFalse(scratch.windowRect.contains(unrelatedDamage), "PREMISE: this separate damage is outside the admitted window")
-        XCTAssertFalse(scratch.hasCurrentReplacementWindow(covering: unrelatedDamage),
-                       "A window is not current for pixels outside its admitted bounds")
         // Off main, the call admits the growth and the lift's settle finds the source refuses it; the
         // last valid picture must survive that.
         _ = scratch.replaceCelContent(
@@ -1248,13 +1240,44 @@ final class VectorEraserHybridLogicTests: XCTestCase {
             damage: CGRect(x: 112, y: 48, width: 8, height: 32), revision: 2)
         scratch.settleCelContent()
         XCTAssertTrue(scratch.windowRect.contains(damage), "A refused growth retains the last admitted window")
-        XCTAssertFalse(scratch.hasCurrentReplacementWindow(covering: damage),
-                       "A retained old picture after failed growth is not a current replacement")
         XCTAssertTrue(scratch.renderedCelContent?.image === lastWindow.image,
-                      "The retained image is stale after refusal and production must fall back to the canvas render")
+                      "A refused growth keeps the last good picture on screen — never an older base")
         if case .failure = scratch.lastMutationResult {} else {
-            XCTFail("The refused growth must stay latched so the old image is not treated as current")
+            XCTFail("The refused growth must stay latched")
         }
+    }
+
+    /// **A To Cross cut of a stroke no render has walked yet stays bounded** (owner, Nov 18). The cut
+    /// runs once per touch sample, and its damage is what the live window grows to; a victim with no
+    /// measured footprint used to widen the cut to `.everything`, which ended the window for the rest
+    /// of the drag and re-rendered the whole layer under the pen.
+    func testAToCrossCutOfAStrokeNoRenderHasMeasuredDeclaresItsOwnFootprint() throws {
+        let size = CGSize(width: 512, height: 384)
+        let victim = VectorStroke(brush: TestBrushes.hardRound,
+            color: CodableColor(red: 0.08, green: 0.24, blue: 0.92, alpha: 1), size: 12, opacity: 1,
+            samples: StrokeSamples([VectorSample(x: 256, y: 20, pressure: 1),
+                                    VectorSample(x: 256, y: 200, pressure: 1)], channels: .pressureOnly), seed: 7)
+        let barrier = VectorStroke(brush: TestBrushes.hardRound,
+            color: CodableColor(red: 0.12, green: 0.82, blue: 0.18, alpha: 1), size: 4, opacity: 1,
+            samples: StrokeSamples([VectorSample(x: 100, y: 80, pressure: 1),
+                                    VectorSample(x: 420, y: 80, pressure: 1)], channels: .pressureOnly), seed: 8)
+        let distant = VectorStroke(brush: TestBrushes.hardRound,
+            color: CodableColor(red: 0.9, green: 0.1, blue: 0.1, alpha: 1), size: 12, opacity: 1,
+            samples: StrokeSamples([VectorSample(x: 40, y: 300, pressure: 1),
+                                    VectorSample(x: 470, y: 360, pressure: 1)], channels: .pressureOnly), seed: 9)
+        let source = VectorCanvas(size: size, elements: [.stroke(victim), .stroke(barrier), .stroke(distant)])
+        XCTAssertEqual(source.measuredFootprintCount, 0, "PREMISE: no render has measured anything")
+
+        let cut = source.cutToIntersection(atCanvasPoint: CGPoint(x: 256, y: 150), brush: TestBrushes.hardRound, size: 24)
+        XCTAssertEqual(cut.outcome, .cut, "PREMISE: the nib takes the victim below its crossing")
+        guard case .region(let damage) = source.lastDamage else {
+            XCTFail("An unmeasured victim widened the cut to \(source.lastDamage)")
+            return
+        }
+        XCTAssertTrue(damage.contains(CGPoint(x: 256, y: 190)), "the damage covers the ink the cut removed")
+        XCTAssertFalse(damage.intersects(CGRect(x: 40, y: 300, width: 430, height: 60)),
+                       "…and stops at the victim's own footprint: \(damage)")
+        XCTAssertEqual(source.rasterizations, 0, "measuring the victim renders no canvas")
     }
 
     func testConsecutiveToCrossCutsSeedFreshFragmentBoundsWithoutCanvasRender() throws {
@@ -1342,7 +1365,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
 
     func testScratchRefusedDisplaySourcePublishesNoWindowAndReturnsFailure() {
         let size = CGSize(width: 32, height: 32)
-        let scratch = StrokeScratch(canvasSize: size, role: .replacing,
+        let scratch = StrokeScratch(canvasSize: size, role: .replacing(.fullResolution),
             celContent: StrokeScratch.CelContent(backing: nil,
                 ink: .rendered(UIImage()), placement: .identity))
         let refused = scratch.replaceCelContent(
@@ -1372,7 +1395,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
             XCTFail("PREMISE: this nonempty canvas has no full-image memo")
         }
         let frozen = canvas.freeze(quality: .full)
-        let scratch = StrokeScratch(canvasSize: size, role: .replacing,
+        let scratch = StrokeScratch(canvasSize: size, role: .replacing(.fullResolution),
             celContent: StrokeScratch.CelContent(backing: nil,
                 ink: .ordinary(source: frozen, elements: [.fill(fill)], rewriting: [distantFill.id]),
                 placement: .identity))
@@ -1448,7 +1471,7 @@ final class VectorEraserHybridLogicTests: XCTestCase {
             ink: PoseMap(CGAffineTransform(translationX: 80, y: 0)),
             backing: PoseMap(CGAffineTransform(translationX: 0, y: 32)))
         let sourceInk = CelContentPicture.Ink.ordinary(source: frozen, elements: original, rewriting: [])
-        let scratch = StrokeScratch(canvasSize: size, role: .replacing,
+        let scratch = StrokeScratch(canvasSize: size, role: .replacing(.fullResolution),
             celContent: StrokeScratch.CelContent(backing: snapshot, ink: sourceInk, placement: placement))
         let damage = CGRect(x: 32, y: 92, width: 56, height: 16)
 

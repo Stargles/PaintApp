@@ -20,17 +20,19 @@ final class EraserFeedbackUITests: PaintUITestCase {
         waitForEveryFrameBaked(app)
         let paper = paperRect(in: canvas, canvasSize: OwnersScene.canvasSize)
         let crossing = OwnersScene.row(layer: 0, frame: 0)
-        let top = crossing - 0.06, cutRow = crossing + 0.05, bottom = crossing + 0.09
+        let top = crossing - 0.06, cutRow = crossing + 0.05, bottom = 0.96
         assertBelowTheToolbar(app, canvas, dy: onHost(paper, 0.5, top).dy, "the lines' top ends")
-        assertAboveTheDock(app, canvas, dy: onHost(paper, 0.5, bottom).dy, "the lines' bottom ends")
+        assertAboveTheDock(app, canvas, dy: onHost(paper, 0.5, cutRow).dy, "the eraser's row")
 
-        // Six long lines down across frame 1's stroke on the active layer: each crosses it once, so
-        // To Cross takes each line's lower part, from the crossing to its end.
+        // Six lines down the scene across frame 1's stroke on the active layer — each crosses it once,
+        // so To Cross takes each line's lower part, from the crossing to its end. Their ends run on
+        // under the dock: the owner's strokes cross his whole 5000² canvas, and what a cut changes is
+        // the cut stroke's whole footprint, so one drag's cuts together span most of the scene.
         setBrushSize(app, tool: "brush", normalized: 0.3)
         app.buttons["toolbar.brushButton"].tap()
         XCTAssertTrue(app.scrollViews["brushPanel.groupList"].waitForNonExistence(timeout: 5),
                       "PREMISE: the brushes menu closes, leaving the canvas to draw on")
-        let columns = [0.3, 0.38, 0.46, 0.54, 0.62, 0.7]
+        let columns = [0.1, 0.26, 0.42, 0.58, 0.74, 0.9]
         for x in columns {
             drawLine(on: canvas, from: onHost(paper, x, top), to: onHost(paper, x, bottom))
         }
@@ -42,7 +44,7 @@ final class EraserFeedbackUITests: PaintUITestCase {
         selectVectorEraserMode(app, "To Cross")
         setBrushSize(app, tool: "eraser", normalized: 0.35)
         closeEraserPanel(app)
-        dragOnCanvas(app, from: onHost(paper, 0.22, cutRow), to: onHost(paper, 0.78, cutRow))
+        dragOnCanvas(app, from: onHost(paper, 0.04, cutRow), to: onHost(paper, 0.96, cutRow))
 
         let trace = try XCTUnwrap(gestureTrace(canvas), "the drag left a vector gesture trace")
         print("ERASER TRACE \(canvas.value as? String ?? "nil")")
@@ -57,8 +59,12 @@ final class EraserFeedbackUITests: PaintUITestCase {
         for x in columns {
             XCTAssertTrue(waitUntil(canvas, onHost(paper, x, cutRow), { !self.isInk($0) }, timeout: 20),
                           "the To Cross drag took the line at \(x) below its crossing")
-            XCTAssertTrue(waitUntil(canvas, onHost(paper, x, top + 0.02), isInk),
-                          "…and left the line at \(x) above the crossing")
+            // Frame 1's stroke runs from 0.15 to 0.85 of the paper (`UITestSeeds`), so the outer two
+            // lines cross nothing and To Cross takes them whole.
+            let crossesTheStroke = x > 0.15 && x < 0.85
+            XCTAssertTrue(waitUntil(canvas, onHost(paper, x, top + 0.02), crossesTheStroke ? isInk : { !self.isInk($0) }),
+                          crossesTheStroke ? "…and left the line at \(x) above the crossing"
+                                           : "…and took the line at \(x), which crosses nothing, whole")
         }
     }
 

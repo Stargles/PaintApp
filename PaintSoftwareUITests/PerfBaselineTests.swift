@@ -1148,7 +1148,7 @@ final class PerfBaselineTests: XCTestCase {
         let fullDabCount = canvas.lastRenderDabCount
         let rasterizationsBeforePreview = canvas.rasterizations
         let source = canvas.freezeDisplay(referenceIDs: [])
-        let scratch = StrokeScratch(canvasSize: size, role: .replacing,
+        let scratch = StrokeScratch(canvasSize: size, role: .replacing(.fullResolution),
             celContent: StrokeScratch.CelContent(backing: nil,
                 ink: .ordinary(source: source, elements: elements, rewriting: []), placement: .identity))
 

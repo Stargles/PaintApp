@@ -147,7 +147,7 @@ final class LiquifyProcedure {
             } else { ink = nil }
             picture = CelContentPicture(size: size, window: inkWindow, backing: pixelSnapshot,
                                         patch: pixels, ink: ink)
-            if !failed { presentation = picture?.rendered(placement: placement) }
+            if !failed { presentation = picture?.rendered(placement: placement, scale: 1) }
             failed = failed || presentation == nil
         }
         let result = Resolved(elements: elements, shown: shown, changed: changed, pixels: pixels,

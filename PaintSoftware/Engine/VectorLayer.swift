@@ -2683,6 +2683,19 @@ final class VectorCanvas {
         return .region(union)
     }
 
+    /// Records `stroke`'s footprint from the bounds-only walk (`paintedBounds(of:)`, the drawing walk's
+    /// geometry without a canvas image) when no render has measured it yet. A stroke the walk cannot
+    /// measure stays absent, so an edit of it still widens to `.everything` through
+    /// `regionDamage(replacing:)`. Caller must hold `lock`.
+    private func measurePaintedBounds(of stroke: VectorStroke) {
+        guard paintedBounds[stroke.id] == nil else { return }
+        let bounds = Self.paintedBounds(of: [.stroke(stroke)])
+        guard !bounds.isNull, !bounds.isInfinite, bounds.width > 0, bounds.height > 0,
+              bounds.minX.isFinite, bounds.minY.isFinite, bounds.maxX.isFinite, bounds.maxY.isFinite
+        else { return }
+        paintedBounds[stroke.id] = bounds
+    }
+
     /// The union of what `ids` last painted, or nil if any of them has no measured footprint — in
     /// which case the caller cannot bound its own damage and must declare `.everything`.
     /// Caller must hold `lock`.
@@ -5543,28 +5556,21 @@ final class VectorCanvas {
                                         parameters: run.parameters)
                 pieces.append(.stroke(stroke))
 
-                // The fragment has a new id. Seed the existing map with the same bounds-only walk
-                // used by `paintedBounds`, without allocating a canvas image. If the walk cannot
-                // measure it, leave the id absent; a later edit of that fragment safely widens to
-                // `.everything` through `regionDamage(replacing:)`.
-                let bounds = Self.paintedBounds(of: [.stroke(stroke)])
-                let isMeasured = !bounds.isNull && !bounds.isInfinite
-                    && bounds.width > 0 && bounds.height > 0
-                    && bounds.minX.isFinite && bounds.minY.isFinite
-                    && bounds.maxX.isFinite && bounds.maxY.isFinite
-                if isMeasured {
-                    // The canvas lock remains held through the splice and invalidation, so the
-                    // fresh ID cannot be observed before its element is in the ordered list.
-                    paintedBounds[stroke.id] = bounds
-                }
+                // The fragment has a new id. The canvas lock remains held through the splice and
+                // invalidation, so the fresh ID cannot be observed before its element is in the list.
+                measurePaintedBounds(of: stroke)
             }
             splices.append((victim.index, pieces))
         }
         guard !splices.isEmpty else { return (.unchanged, underTip, .everything) }
 
         // The ids about to stop existing, and what they last put on the canvas. Taken *before* the
-        // splice, because afterwards the list no longer holds them.
+        // splice, because afterwards the list no longer holds them. **A victim no render has walked
+        // yet is measured here** rather than widening the cut to `.everything`: this runs once per
+        // touch sample, and one unmeasured stroke used to make the rest of a To Cross drag unbounded
+        // — the live window gave up and the whole layer re-rendered under the pen (owner, Nov 18).
         let replaced = splices.compactMap { _elements[$0.index].stroke }
+        for stroke in replaced { measurePaintedBounds(of: stroke) }
         let damage = regionDamage(replacing: replaced)
 
         // Descending, so an earlier splice cannot invalidate a later index.

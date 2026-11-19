@@ -21,7 +21,7 @@ final class EraserOffMainLogicTests: XCTestCase {
         let canvas = VectorCanvas(size: size, elements: [.stroke(paint)])
         let ink = CelContentPicture.Ink.ordinary(source: canvas.freezeDisplay(referenceIDs: []),
                                                  elements: canvas.elements, rewriting: [])
-        let scratch = StrokeScratch(canvasSize: size, role: .replacing,
+        let scratch = StrokeScratch(canvasSize: size, role: .replacing(.fullResolution),
             celContent: StrokeScratch.CelContent(backing: nil, ink: ink, placement: .identity))
         return (scratch, canvas, paint)
     }

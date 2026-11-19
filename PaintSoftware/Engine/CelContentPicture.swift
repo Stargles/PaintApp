@@ -79,19 +79,22 @@ final class CelContentPicture {
         }
     }
 
-    func rendered(placement: CelContentPlacement = .identity) -> RenderedWindow? {
+    /// The window drawn at `scale` pixels a canvas point (1 is the cel's own resolution; a live
+    /// eraser window is drawn at the screen's, `StrokeScratch.Presentation`).
+    func rendered(placement: CelContentPlacement = .identity, scale: CGFloat) -> RenderedWindow? {
         let path = footprint(placement: placement)
         let output = path.boundingBoxOfPath.integral.intersection(CGRect(origin: .zero, size: size))
         guard !output.isNull, !output.isEmpty else { return nil }
         // The image/provider and the presenter's two surfaces share this window's lifetime.
-        let workingBytes = CompositorBudget.textureBytes(for: output.size) * 4
+        let workingBytes = CompositorBudget.textureBytes(
+            for: CGSize(width: output.width * scale, height: output.height * scale)) * 4
         guard workingBytes <= CompositorBudget.textureBudgetBytes,
               CompositorBudget.hasHeadroom(for: workingBytes) else {
             MemoryPressure.signal(.allocationRefused)
             return nil
         }
         var completed = true
-        let image = UIGraphicsImageRenderer(size: output.size, format: PixelOps.transparentFormat()).image { context in
+        let image = UIGraphicsImageRenderer(size: output.size, format: PixelOps.transparentFormat(scale: scale)).image { context in
             completed = draw(into: context.cgContext,
                 content: CGRect(origin: CGPoint(x: -output.minX, y: -output.minY), size: size), placement: placement)
         }

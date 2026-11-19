@@ -15,7 +15,17 @@ could not be verified as open or closed; verify against `main` and `git log`, th
   baked frame at once; the hold covers the gap instead of removing it.
   (c) **To Cross eraser still slow and the erased strokes flicker back** — recording saved on the iPad
   (newest in Documents/Recordings).
+  **Fixed on `tmp/nov19-eraser`, not merged, owner to confirm on Test1:** a To Cross cut changes the
+  cut stroke's whole footprint, so one drag's live window grew to most of the 5000² canvas; past 12.6
+  million pixels its render was refused on the iPad 9 (192 MiB texture budget), the window was dropped
+  for the rest of the drag, the layer's older picture came back (the flicker) and the whole layer was
+  re-rendered every 0.25 s under the pen (the slowness). A victim no render had measured did the same.
+  Now the window is bounded to what the screen shows at the screen's resolution, an unmeasured victim
+  is measured at the cut, and a To Cross drag never falls back to re-rendering the layer.
+  `EraserFeedbackUITests` (red on main: 4 layer renders and 1 flicker-back in one drag).
   (d) **Cut and Normal erasers draw no circle cursor**; To Cross does — all three need it.
+  **Fixed on `tmp/nov19-eraser`:** every vector eraser mode draws To Cross's ring (Cut and Erase at
+  the pen's pressure, To Cross at full size, as each resolves).
   Gap to close with the fixes: no test played a baked scene on a 5000² document at the owner's size and
   watched memory, and none timed a frame step against the baked frame.
   **NEW — the iPad crashes while a 5000² scene is being seeded/opened (Nov 18, 23:33).** The opt-in

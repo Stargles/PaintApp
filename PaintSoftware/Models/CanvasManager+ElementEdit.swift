@@ -101,7 +101,7 @@ struct LiveCelContentEdit {
 
     func presentation(placement: CelContentPlacement) -> CelContentPicture.RenderedWindow? {
         if let procedure { return procedure.presentation(elements, placement: placement) }
-        return contentPicture()?.rendered(placement: placement)
+        return contentPicture()?.rendered(placement: placement, scale: 1)
     }
 
     @discardableResult

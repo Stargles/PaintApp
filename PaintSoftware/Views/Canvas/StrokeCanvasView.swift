@@ -217,8 +217,8 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// `selectionClipPath`, which is in canvas points, in the layer's space.
     private var gestureClipPath: CGPath?
 
-    /// Mode 3's reach, outlined on the canvas under the finger while the gesture is live. Created on
-    /// first use, so every other tool pays nothing for it. See `updateEraserFootprint(at:)`.
+    /// The vector eraser's nib, outlined on the canvas under the finger while the gesture is live.
+    /// Created on first use, so every other tool pays nothing for it. See `updateEraserFootprint`.
     private var eraserFootprintLayer: CAShapeLayer?
     /// **The live tier's walk for the gesture in flight** — `BrushStamper.LiveWalk`, which lays down
     /// evenly-spaced dabs between input samples rather than one dot per sample (otherwise a fast
@@ -1153,11 +1153,14 @@ final class StrokeCanvasView: CanvasPlaneView {
             installedRevision = interpolationPresentation.coverage?.revision
             if installedRevision == nil, heldEdit == nil { dropUnlandedInk("derived base") }
         case .committedRender:
-            // A single-cel To Cross cut has already changed the ordered document list. While its
-            // bounded replacement window still covers every measured cut, that picture is the
-            // authoritative display for the changed area; asking the canvas for a full base on
-            // every UIKit sample would duplicate the same work at canvas resolution.
-            if hasCurrentIntersectionWindow {
+            // **A single-cel To Cross drag is shown by its live window alone, never by a new base.**
+            // Each cut changes the document under the pen, and a base for it is the whole layer
+            // re-rendered (150-170 ms at 5000² on the iPad 9, every 0.25 s) — and while that base
+            // stood in for the window it was older than cuts the window had already shown, so
+            // erased ink came back (owner, Nov 18). Until the window's first picture lands the
+            // touch-down base stays, which is only the cut not shown yet; the lift hands the
+            // window to `unlandedInk` until the base that contains every cut lands.
+            if usesSingleCelIntersectionWindow, scratch != nil {
                 showOverlays(scratch)
                 return false
             }
@@ -1533,7 +1536,6 @@ final class StrokeCanvasView: CanvasPlaneView {
     var onDisplayInkChanged: (() -> Void)?
 
     private func showOverlays(_ scratch: StrokeScratch?) {
-        let scratch = showableScratch(scratch)
         let shown = scratch?.renderedCelContent
         guard scratch?.celContent == nil || shown != nil else { return }
         defer { onDisplayInkChanged?() }
@@ -2590,7 +2592,8 @@ final class StrokeCanvasView: CanvasPlaneView {
                     ? StrokeScratch(canvasSize: vectorCanvas.size, role: .subtractive(backdrop: backdrop),
                                     opacity: CGFloat(profile.opacity), texture: profile.preset.texture,
                                     celContent: celContent)
-                    : StrokeScratch(canvasSize: vectorCanvas.size, role: .replacing,
+                    : StrokeScratch(canvasSize: vectorCanvas.size,
+                                    role: .replacing(liveWindowPresentation(canvasSize: vectorCanvas.size)),
                                     celContent: celContent)
             }
             return StrokeScratch(canvasSize: vectorCanvas.size, role: .additive,
@@ -2620,6 +2623,21 @@ final class StrokeCanvasView: CanvasPlaneView {
         stabilizer.reset(to: input.position)
         recordVectorSample(input, at: input.position)
         refreshDisplay()
+    }
+
+    /// The part of this cel the artist can see now and the screen's pixels a canvas point there —
+    /// what a live replacement window is drawn within (`StrokeScratch.Presentation`). In `poseSpace`,
+    /// the space the gesture and the window are in, so the canvas transform and the layer's pose are
+    /// both in it.
+    private func liveWindowPresentation(canvasSize: CGSize) -> StrokeScratch.Presentation {
+        guard let window else { return .fullResolution }
+        let cel = CGRect(origin: .zero, size: canvasSize)
+        let visible = poseSpace.convert(window.bounds, from: window).integral.intersection(cel)
+        let origin = poseSpace.convert(CGPoint.zero, to: window)
+        let unit = poseSpace.convert(CGPoint(x: 1, y: 0), to: window)
+        let pointsPerCanvasPoint = hypot(unit.x - origin.x, unit.y - origin.y)
+        return StrokeScratch.Presentation(visible: visible,
+                                          scale: min(1, pointsPerCanvasPoint * traitCollection.displayScale))
     }
 
     /// Which preview strategy a gesture on a vector layer uses — see `VectorScratchRole`.
@@ -2671,35 +2689,20 @@ final class StrokeCanvasView: CanvasPlaneView {
         }
     }
 
-    /// Refreshes the current single-cel To Cross result through the existing bounded replacement
-    /// owner. A refused render leaves the previous window unpublished for this gesture; the normal
-    /// committed renderer then supplies the fallback.
+    /// A single-cel To Cross gesture shows its cuts through the bounded replacement window.
     private var usesSingleCelIntersectionWindow: Bool {
         strokeTool == .eraser && vectorEraserMode == .cutToIntersection
             && inBetweenCelID == nil && !gestureIsUniversal
     }
 
+    /// Admits the cuts so far into the live window: the gesture's measured damage, or the whole cel
+    /// when a cut could not be measured — either way no more than the artist can see
+    /// (`StrokeScratch.Presentation`).
     private func updateIntersectionWindow(in canvas: VectorCanvas) {
-        guard usesSingleCelIntersectionWindow,
-              let damage = vectorGestureDamage, !damage.isNull, damage.width > 0, damage.height > 0,
-              let scratch else { return }
+        guard usesSingleCelIntersectionWindow, let scratch else { return }
+        let damage = vectorGestureDamage ?? CGRect(origin: .zero, size: canvas.size)
         _ = scratch.replaceVectorDisplay(elements: canvas.elements, rewriting: [], damage: damage,
                                          revision: canvas.documentVersion)
-    }
-
-    /// The current replacement is authoritative only while its admitted window contains the full
-    /// measured damage and the latest native draw succeeded. This is derived from existing gesture,
-    /// scratch and damage state; no second preview version or cache is kept.
-    private var hasCurrentIntersectionWindow: Bool {
-        guard usesSingleCelIntersectionWindow, vectorContentChanged,
-              let damage = vectorGestureDamage, !damage.isNull, damage.width > 0, damage.height > 0,
-              let scratch else { return false }
-        return scratch.hasCurrentReplacementWindow(covering: damage)
-    }
-
-    private func showableScratch(_ candidate: StrokeScratch?) -> StrokeScratch? {
-        guard usesSingleCelIntersectionWindow else { return candidate }
-        return hasCurrentIntersectionWindow ? candidate : nil
     }
 
     /// `resolveIntersectionCut` under the universal eraser: every session's cel, each with its own
@@ -2878,7 +2881,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         // so the *next* stroke's scratch cannot take this one's place on screen. Nothing is held for
         // an in-between, whose base is a derived frame with a version of its own.
         if vectorContentChanged, inBetweenCelID == nil {
-            holdUnlandedInk(from: showableScratch(scratch), at: vectorCanvas.version)
+            holdUnlandedInk(from: scratch, at: vectorCanvas.version)
         }
         endScratch()
         currentVectorSamples = StrokeSamples(channels: .captured)
@@ -2935,28 +2938,26 @@ final class StrokeCanvasView: CanvasPlaneView {
         endGesture()
     }
 
-    /// Shows Mode 3's footprint ring at `point` in canvas space, or hides it.
+    /// Shows the vector eraser's footprint ring at `point` in canvas space, or hides it — **one ring
+    /// for every mode** (owner, 2026-11-18: Cut and Erase drew none, To Cross did).
     ///
-    /// The universal Mode 3 route has no single-cel preview window and paints nothing during a drag,
-    /// which was tolerable while the eraser's size only decided how far it could *reach*. Since 2026-08-18
-    /// Mode 3's size **is** its selection radius — every stroke whose centreline the circle covers is
-    /// cut, and every crossing inside it is erased through — so an unseen radius turns the tool into
-    /// guesswork: the artist would be aiming a 50-point selection circle they cannot see. Modes 1 and
-    /// 2 need none of this: each shows the ink going away under the finger as it goes (Mode 2 since
-    /// 2026-08-22 — see `previewCutSpans`), and only Mode 3 acts at a distance from its own
-    /// footprint.
+    /// Each mode removes ink by a different rule, but every rule starts from the same nib, and an
+    /// unseen nib turns the tool into guesswork: To Cross acts at a distance from it (every stroke
+    /// whose centreline the circle covers is cut out to its crossings), and Cut and Erase act on the
+    /// ink under it, which the artist's own hand hides.
+    ///
+    /// The radius is the one the mode resolves with: To Cross's is the brush size whatever the
+    /// pressure (`VectorCanvas.cutToIntersection(atCanvasPoint:…)`), so its ring is an exact promise;
+    /// the other modes' footprint is the pressure-driven capsule chain `BrushStamper` would stamp, so
+    /// their ring is the dab at this sample's pressure.
     ///
     /// Drawn in `poseSpace`, the space the gesture is read in — `StrokeInput` takes
-    /// `touch.location(in:)` there, and that same point is what `cutToIntersection` resolves
-    /// against — so the canvas transform and the layer's pose scale the ring with the artwork and the
-    /// circle shown is exactly the circle used. Only the outline width is divided back out, measured
-    /// against the window rather than read off a transform, so it stays a hairline at any zoom.
-    ///
-    /// Drawn at full size, and the cut is resolved at full size to match: Mode 3's radius is the brush
-    /// size and does not thin under a light pencil, which is what lets this ring be an exact promise
-    /// rather than an upper bound. See `VectorCanvas.cutToIntersection(atCanvasPoint:…)`.
-    private func updateEraserFootprint(at point: CGPoint?) {
-        guard let point, strokeTool == .eraser, vectorCanvas != nil, vectorEraserMode == .cutToIntersection else {
+    /// `touch.location(in:)` there, and that same point is what the eraser resolves against — so the
+    /// canvas transform and the layer's pose scale the ring with the artwork and the circle shown is
+    /// exactly the circle used. Only the outline width is divided back out, measured against the
+    /// window rather than read off a transform, so it stays a hairline at any zoom.
+    private func updateEraserFootprint(at point: CGPoint?, pressure: CGFloat = 1) {
+        guard let point, strokeTool == .eraser, vectorCanvas != nil else {
             eraserFootprintLayer?.isHidden = true
             return
         }
@@ -2972,7 +2973,9 @@ final class StrokeCanvasView: CanvasPlaneView {
             eraserFootprintLayer = created
             return created
         }()
-        let radius = StrokeGeometry.stampRadius(forPressure: 1, brush: profile.preset, size: gestureBrushSize)
+        let modeInForce = inBetweenCelID != nil ? VectorEraserMode.erase : vectorEraserMode
+        let radius = StrokeGeometry.stampRadius(forPressure: modeInForce == .cutToIntersection ? 1 : pressure,
+                                                brush: profile.preset, size: gestureBrushSize)
         let origin = poseSpace.convert(CGPoint.zero, to: nil)
         let unit = poseSpace.convert(CGPoint(x: 1, y: 0), to: nil)
         let scale = max(hypot(unit.x - origin.x, unit.y - origin.y), 0.01)
@@ -2996,7 +2999,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// the *pen*, which was half a dab spacing and so 3 pt on a 60 pt brush.
     private func recordVectorSample(_ input: StrokeInput, at point: CGPoint, force: Bool = false) {
         // The ring is where the finger is, not where the last stored knot was.
-        updateEraserFootprint(at: point)
+        updateEraserFootprint(at: point, pressure: input.pressure)
         // Δt is measured between *offered* samples here; `StrokePathFit` re-bases it onto stored ones
         // by absorbing the intervals of the samples it drops. See `StrokePathFit.offer`.
         let seconds = lastSampleTime.map { input.timestamp - $0 } ?? 0

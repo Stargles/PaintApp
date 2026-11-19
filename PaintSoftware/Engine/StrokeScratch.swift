@@ -61,7 +61,26 @@ final class StrokeScratch: DabTarget {
         /// A bounded native display-list replacement used while vector geometry is being edited.
         /// Its pixels are rendered directly from `celContent` into `windowRect`; no raster scratch
         /// is allocated alongside that presentation window.
-        case replacing
+        case replacing(Presentation)
+    }
+
+    /// **What a `.replacing` window may cover and at how many pixels a canvas point** — the part of
+    /// the cel the artist can see at touch-down, at the screen's own resolution.
+    ///
+    /// The window grows to the union of every change the gesture made, and a To Cross cut changes
+    /// the cut stroke's whole footprint, so on the owner's 5000² scene one drag's window reached most
+    /// of the canvas: past 12.6 million pixels its render is refused on the iPad 9
+    /// (`CelContentPicture.rendered`'s working bytes against the 192 MiB texture budget), and before
+    /// that each render was canvas-sized work for a picture the screen shows at a third of the
+    /// resolution. Bounded by the view, the window is never more than the screen's own pixels.
+    struct Presentation {
+        /// The part of the cel the window may cover, in canvas points (integral); nil for all of it.
+        let visible: CGRect?
+        /// Pixels a canvas point the window is drawn at — at most 1, the cel's own resolution.
+        let scale: CGFloat
+
+        /// The whole cel at its own resolution.
+        static let fullResolution = Presentation(visible: nil, scale: 1)
     }
 
     let canvasSize: CGSize
@@ -91,7 +110,7 @@ final class StrokeScratch: DabTarget {
             picture = CelContentPicture(size: canvasSize, window: windowRect,
                 backing: celContent.backing, patch: nil, ink: celContent.ink, inkPatch: image)
         }
-        guard let rendered = picture.rendered(placement: celContent.placement) else { return nil }
+        guard let rendered = picture.rendered(placement: celContent.placement, scale: 1) else { return nil }
         contentPresentation = (version, rendered)
         return rendered
     }
@@ -124,8 +143,10 @@ final class StrokeScratch: DabTarget {
     /// window. The window's picture is drawn off the main thread (latest wins); until it lands
     /// `renderedCelContent` keeps answering the last finished one, never an older or blank one.
     func replaceCelContent(ink: CelContentPicture.Ink, damage: CGRect, revision contentRevision: Int) -> Bool {
-        guard case .replacing = role, let celContent,
-              let next = nextWindowRect(containing: damage) else { return false }
+        guard case .replacing(let presentation) = role, let celContent,
+              let grown = nextWindowRect(containing: damage.intersection(presentation.visible ?? .infinite))
+        else { return false }
+        let next = grown.intersection(presentation.visible ?? .infinite)
         let updated = CelContent(backing: celContent.backing, ink: ink,
                                  placement: celContent.placement)
         let picture = CelContentPicture(size: canvasSize, window: next,
@@ -143,7 +164,7 @@ final class StrokeScratch: DabTarget {
                 guard self != nil else { return nil }
                 return {
                     Self.renderObserver?(Thread.isMainThread)
-                    let rendered = picture.rendered(placement: placement)
+                    let rendered = picture.rendered(placement: placement, scale: presentation.scale)
                     return { [weak self] in
                         guard let self, revision == self.requestedRender else { return }
                         guard let rendered else {
@@ -166,12 +187,13 @@ final class StrokeScratch: DabTarget {
     /// has not landed, so a finished stroke is never handed off one step behind (erased ink would come
     /// back). One window-sized render at pen-up, not one per move.
     func settleCelContent() {
-        guard case .replacing = role, hasPendingRender, let celContent, !windowRect.isNull else { return }
+        guard case .replacing(let presentation) = role, hasPendingRender, let celContent,
+              !windowRect.isNull else { return }
         MainActor.assumeIsolated { renders?.cancel() }
         let picture = CelContentPicture(size: canvasSize, window: windowRect,
             backing: celContent.backing, patch: nil, ink: celContent.ink)
         Self.renderObserver?(Thread.isMainThread)
-        guard let rendered = picture.rendered(placement: celContent.placement) else {
+        guard let rendered = picture.rendered(placement: celContent.placement, scale: presentation.scale) else {
             failure = picture.hasFailed ? .unreadableBacking : .allocationRefused
             return
         }
@@ -196,20 +218,6 @@ final class StrokeScratch: DabTarget {
                                                       referenceIDs: referenceIDs)
         return replaceCelContent(ink: .ordinary(source: frozen, elements: ordered, rewriting: rewriting),
                                  damage: damage, revision: revision)
-    }
-
-    /// Whether this replacement currently contains a successfully rendered picture for all of the
-    /// supplied damage. The admitted window and its existing failure latch are the validity record;
-    /// a refused later growth can retain an older image, but that image is not current for the new
-    /// damage and must not be presented or handed off.
-    func hasCurrentReplacementWindow(covering damage: CGRect) -> Bool {
-        guard case .replacing = role, !damage.isNull, !damage.isInfinite,
-              damage.width > 0, damage.height > 0,
-              case .success = lastMutationResult,
-              windowRect.contains(damage) else { return false }
-        // The picture may be one step behind the display list while the background render runs;
-        // the last finished one stays up, and lift settles it (`settleCelContent`).
-        return renderedCelContent != nil
     }
 
     /// **The stroke's own opacity — BRUSH.md §2.11's cap, applied once when the window merges.**
