@@ -10,14 +10,14 @@ From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
 
 ## Resume here — November 18, 2026 (late)
 
-1. **Installed on the iPad 2026-11-18 (late): signed Release `2ecc771e`** from
-   `~/PaintWork/device-2ecc771e-Release/`, `resign_state` updated. It replaced `e88cba87`, whose Play
-   crashed the iPad. It carries the play/frame-step fix (`tmp/nov18-play`, merged): render-server bytes
-   during 12 s of play went 10,586 → 25 MiB on the iPad 9 simulator (`PlaybackSurfaceUITests`), and a
-   frame step shows the bake at once. Fast tiers at the pre-rebase head `f3efb618`: Debug and Release
-   5,698 + 4 skipped, 0 failed. **Open and first in line:** the device test crashed the iPad (backboardd
-   at 1,850 MiB) while seeding a 5000² 5×6 scene, before Play — TODO.md's first item. Then the eraser
-   items (c) and (d). Install gate: AGENTS.md, "The install gate runs without the iPad".
+1. **Installed on the iPad 2026-11-19: signed Release of `tmp/nov19-open`** (see `resign_state`).
+   Every layer, the onion skin and the bake now reach the render server through window-sized surfaces
+   (`CanvasPictureView`, `BakedFrameWindow`): the owner's whole routine hands it 283 MiB instead of
+   6,825 (iPad 9 simulator). The install gate is `PlaycheckGateUITests` (~4 min, budget 370 MiB, derived
+   from one crash, not a device measurement). Not run: full UI suite, device test (iPad locked).
+   Next, after the usage window resets: TODO.md's eraser items (c) To Cross slow + flicker and (d) the
+   circle cursor for Cut/Normal; then the crash-catcher ask. Still canvas-sized: the sandwich's live
+   halves, the Move bands and the lasso float (only with blend modes/effects/transform layers).
 2. **Owner's 2-minute check is next:** draw, erase a lot, Undo, pan, change frames, play, fill. TODO.md's
    "Current" section names what each item is waiting for him to confirm, and the leftovers still open.
 3. **Next owner ask, queued:** an open lasso acts as closed for every bottom-bar action (TODO.md item;
