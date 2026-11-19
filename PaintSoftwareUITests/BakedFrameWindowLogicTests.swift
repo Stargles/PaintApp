@@ -67,6 +67,21 @@ final class BakedFrameWindowLogicTests: XCTestCase {
         XCTAssertEqual(pixels.pixel(x: 250, y: 250)?.alpha, 0, "nothing drawn outside the canvas")
     }
 
+    /// **A layer's picture and the onion skin's** (`CanvasPictureView`): no backdrop, so the window
+    /// outside the ink stays clear for the layers under it, and the onion skin's clip cuts the ghost
+    /// where its alpha is zero — the clip drawn into the window rather than handed over as a mask.
+    func testALayerPictureHasNoBackdropAndItsClipCutsIt() throws {
+        let canvas = CGSize(width: 100, height: 100)
+        let image = try XCTUnwrap(Self.canvasImage(size: canvas, red: CGRect(x: 0, y: 0, width: 100, height: 100)))
+        let clip = try XCTUnwrap(Self.clip(size: canvas, keeping: CGRect(x: 0, y: 0, width: 50, height: 100)))
+        let window = try XCTUnwrap(BakedFrameWindow(hostSize: canvas, screenScale: 1, hostToCanvas: .identity))
+        let pixels = try XCTUnwrap(Self.draw(window, image: image, canvasSize: canvas, backdrop: nil, clip: clip))
+        XCTAssertEqual(pixels.pixel(x: 25, y: 50)?.isRed, true, "the picture where the clip keeps it")
+        XCTAssertEqual(pixels.pixel(x: 75, y: 50)?.alpha, 0, "cut where the clip's alpha is zero")
+        let unclipped = try XCTUnwrap(Self.draw(window, image: image, canvasSize: canvas, backdrop: nil, clip: nil))
+        XCTAssertEqual(unclipped.pixel(x: 75, y: 50)?.isRed, true, "PREMISE: without the clip the picture is there")
+    }
+
     // MARK: - Fixtures
 
     private static func canvasImage(size: CGSize, red: CGRect) -> CGImage? {
@@ -96,7 +111,19 @@ final class BakedFrameWindowLogicTests: XCTestCase {
 
     /// The draw as `WindowSurfaceView` makes it: 8-bit premultiplied BGRA, flipped to UIKit's
     /// orientation, pushed as the current context.
-    private static func draw(_ window: BakedFrameWindow, image: CGImage, canvasSize: CGSize) -> Pixels? {
+    /// An alpha-only clip: opaque over `keeping`, clear elsewhere.
+    private static func clip(size: CGSize, keeping: CGRect) -> CGImage? {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.black.setFill()
+            context.fill(keeping)
+        }.cgImage
+    }
+
+    private static func draw(_ window: BakedFrameWindow, image: CGImage, canvasSize: CGSize,
+                             backdrop: UIColor? = .gray, clip: CGImage? = nil) -> Pixels? {
         let width = Int(window.window.width), height = Int(window.window.height)
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
         let drawn: Bool = bytes.withUnsafeMutableBytes { buffer in
@@ -107,7 +134,7 @@ final class BakedFrameWindowLogicTests: XCTestCase {
             cg.translateBy(x: 0, y: CGFloat(height))
             cg.scaleBy(x: 1, y: -1)
             UIGraphicsPushContext(cg)
-            window.draw(image, canvasSize: canvasSize, backdrop: .gray, in: cg)
+            window.draw(image, canvasSize: canvasSize, backdrop: backdrop, clip: clip, in: cg)
             UIGraphicsPopContext()
             return true
         }
