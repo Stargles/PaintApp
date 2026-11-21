@@ -300,7 +300,7 @@ enum ImageWarp {
     static func rasterImage(plan: RasterPlan, maximumWorkingBytes: Int = CompositorBudget.textureBudgetBytes,
                             source: (CGRect) -> CGImage?) -> CGImage? {
         guard plan.workingBytes <= maximumWorkingBytes,
-              CompositorBudget.hasHeadroom(for: plan.workingBytes) else {
+              MemoryBudget.shared.makeRoom(for: plan.workingBytes) else {
             // A warped or posed picture the budget would not let be made: the caller discards its
             // partial picture and the artist's tap does nothing, so say so.
             MemoryPressure.signal(.workRefused)

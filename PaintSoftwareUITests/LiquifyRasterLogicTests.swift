@@ -628,7 +628,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
 
     @MainActor
     func testLandingAllocationRefusalKeepsHeldPixelsAndAcceptsValidTransparency() throws {
-        defer { CompositorBudget.availableMemoryOverrideBytes = nil }
+        defer { MemoryBudget.shared.availableOverrideBytes = nil }
         let blank = CanvasFixture.manager()
         blank.beginMove()
         XCTAssertNotNil(blank.floatingPiece, "PREMISE: transparent pixels can be a valid held image")
@@ -643,7 +643,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
         let piece = try XCTUnwrap(manager.floatingPiece)
         XCTAssertNil(piece.landingPose, "PREMISE: this checks the final texture allocation after unposed rendering")
         let original = manager.layers[0].cels[0]
-        CompositorBudget.availableMemoryOverrideBytes = 1
+        MemoryBudget.shared.availableOverrideBytes = 1
         XCTAssertFalse(manager.commitFloatingPieceIfNeeded())
         XCTAssertTrue(manager.floatingPiece?.pieceImage === piece.pieceImage)
         XCTAssertTrue(manager.layers[0].cels[0].raster === original.raster)
@@ -653,9 +653,9 @@ final class LiquifyRasterLogicTests: XCTestCase {
 
     @MainActor
     func testRefusedLandingSurvivesAnotherMoveDuplicateOrBake() throws {
-        defer { CompositorBudget.availableMemoryOverrideBytes = nil }
+        defer { MemoryBudget.shared.availableOverrideBytes = nil }
         for action in ["move", "duplicate", "bake"] {
-            CompositorBudget.availableMemoryOverrideBytes = nil
+            MemoryBudget.shared.availableOverrideBytes = nil
             let manager = CanvasFixture.manager(layerCount: 0)
             manager.addVectorLayer(name: "Native ink")
             let vector = try XCTUnwrap(manager.layers[0].cels[0].vector)
@@ -680,7 +680,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
             XCTAssertEqual(plan.layers.map(\.layerID), [manager.layers[0].id])
             let ids = manager.layers.map(\.id), selected = manager.selection?.path
             manager.history.removeAll()
-            CompositorBudget.availableMemoryOverrideBytes = 1
+            MemoryBudget.shared.availableOverrideBytes = 1
             switch action {
             case "move": manager.beginMove()
             case "duplicate": manager.beginDuplicate()
@@ -699,9 +699,9 @@ final class LiquifyRasterLogicTests: XCTestCase {
 
     @MainActor
     func testRefusedLandingPreservesDocumentContextSizeAndTool() throws {
-        defer { CompositorBudget.availableMemoryOverrideBytes = nil }
+        defer { MemoryBudget.shared.availableOverrideBytes = nil }
         for action in ["resize", "frame", "layer", "eyedropper", "delete"] {
-            CompositorBudget.availableMemoryOverrideBytes = nil
+            MemoryBudget.shared.availableOverrideBytes = nil
             let manager = CanvasFixture.manager(layerCount: 2)
             manager.currentLayerIndex = 0
             manager.layers[0].cels[0].bakedImage = try CanvasFixture.rasterSource(image())
@@ -712,7 +712,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
             XCTAssertNil(manager.activeCelID(inLayer: 0, atFrame: original.endFrame),
                 "PREMISE: the frame action leaves the held cel rather than ticking inside it")
             manager.history.removeAll()
-            CompositorBudget.availableMemoryOverrideBytes = 1
+            MemoryBudget.shared.availableOverrideBytes = 1
             switch action {
             case "resize": XCTAssertFalse(manager.resizeCanvas(to: CGSize(width: 96, height: 96)))
             case "frame": manager.currentFrame = original.endFrame
@@ -735,7 +735,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
 
     @MainActor
     func testRefusedLandingCompletesWithNilWithoutSnapshottingTheHeldPicture() throws {
-        defer { CompositorBudget.availableMemoryOverrideBytes = nil }
+        defer { MemoryBudget.shared.availableOverrideBytes = nil }
         let manager = CanvasFixture.manager()
         manager.layers[0].cels[0].bakedImage = try CanvasFixture.rasterSource(image())
         manager.beginMove()
@@ -747,7 +747,7 @@ final class LiquifyRasterLogicTests: XCTestCase {
         let url = directory.appendingPathComponent("Held.paintproj")
         var completionCalls = 0
         var landed: URL?
-        CompositorBudget.availableMemoryOverrideBytes = 1
+        MemoryBudget.shared.availableOverrideBytes = 1
         let decision = ProjectStore.save(manager, to: url) { destination in
             completionCalls += 1
             landed = destination
@@ -762,14 +762,14 @@ final class LiquifyRasterLogicTests: XCTestCase {
 
     @MainActor
     func testLiquifyFinalAllocationRefusalPreservesSourceAndHistory() throws {
-        defer { CompositorBudget.availableMemoryOverrideBytes = nil }
+        defer { MemoryBudget.shared.availableOverrideBytes = nil }
         let manager = CanvasFixture.manager()
         manager.layers[0].cels[0].bakedImage = try CanvasFixture.rasterSource(image())
         manager.history.removeAll()
         let source = manager.layers[0].cels[0]
         let session = try held(manager, layer: 0)
         XCTAssertNil(session.placement.backing, "PREMISE: the final allocation follows an unposed pixel picture")
-        CompositorBudget.availableMemoryOverrideBytes = 1
+        MemoryBudget.shared.availableOverrideBytes = 1
         manager.commitLiquify(session)
         XCTAssertTrue(manager.layers[0].cels[0].raster === source.raster)
         XCTAssertTrue(manager.layers[0].cels[0].bakedImage === source.bakedImage)

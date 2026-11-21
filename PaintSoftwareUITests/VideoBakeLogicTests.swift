@@ -547,7 +547,7 @@ extension VideoBakeLogicTests {
         XCTAssertTrue(manager.insertVideo(at: try clip()))
         let (layerIndex, video) = try importedVideo(manager)
         weak var observed: RasterResidency?
-        let owner = RasterResidency(budgetBytes: 1024 * 1024, hasHeadroom: { _ in
+        let owner = RasterResidency(budgetBytes: 1024 * 1024, makeRoom: { _ in
             (observed?.usage.allocations ?? 0) < 3
         })
         observed = owner

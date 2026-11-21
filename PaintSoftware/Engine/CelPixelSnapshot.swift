@@ -65,7 +65,7 @@ struct CelPixelSnapshot {
         let sourceRect = rect.insetBy(dx: -1, dy: -1).intersection(canvas)
         let workingBytes = Self.liquifyWorkingBytes(sourceSize: sourceRect.size, destinationSize: rect.size)
         guard workingBytes <= CompositorBudget.textureBudgetBytes,
-              CompositorBudget.hasHeadroom(for: workingBytes) else { return nil }
+              MemoryBudget.shared.makeRoom(for: workingBytes) else { return nil }
         guard case .success(let working) = residency.admitWorking(workingBytes) else { return nil }
         defer { withExtendedLifetime(working) {} }
         guard let source = replacementWindow(in: sourceRect) else { return nil }

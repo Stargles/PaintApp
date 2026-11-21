@@ -321,7 +321,7 @@ extension VectorMendSupport {
                 try meter.retainArray(Input.self, count: maximumRecords)
                 try meter.retainArray(CGRect.self, count: maximumRecords)
                 try meter.visit(maximumRecords)
-                guard CompositorBudget.hasHeadroom(for: meter.bytes) else { throw .exceedsBudget }
+                guard MemoryBudget.shared.makeRoom(for: meter.bytes) else { throw .exceedsBudget }
                 inputs.reserveCapacity(maximumRecords); unknown.reserveCapacity(maximumRecords)
                 try meter.checkCapacity(inputs, chargedCount: maximumRecords)
                 try meter.checkCapacity(unknown, chargedCount: maximumRecords)
@@ -352,7 +352,7 @@ extension VectorMendSupport {
                             let inputBytes = fill.pathData.count
                             try meter.visit(inputBytes)
                             try meter.retain(inputBytes, stride: 1)
-                            guard CompositorBudget.hasHeadroom(for: inputBytes) else { throw .exceedsBudget }
+                            guard MemoryBudget.shared.makeRoom(for: inputBytes) else { throw .exceedsBudget }
                             footprint = autoreleasepool {
                                 VectorCanvas.derivedFootprint(of: element, lowestResolution: 1)
                             }
@@ -6991,8 +6991,8 @@ nonisolated final class VectorCanvas {
         // Hoisted so the walk's findings can be read once the (synchronous) renderer closure below
         // has finished drawing — and nil afterwards exactly when it never ran.
         var walked: Walk?
-        let image = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat(scale: resolution)).image { ctx in
-            let cg = ctx.cgContext
+        // Into the buffer the picture wraps, admitted by the one budget — no second copy at the end.
+        let image = PixelOps.drawImage(size: size, scale: resolution) { cg in
             // 1:1 into a context of the same size, format and scale, over transparent black — so
             // every destination pixel is `0`, source-over leaves the source exactly as it was, and
             // this is a copy rather than a composite. `renderLocalContent` is the only place that
@@ -7011,8 +7011,9 @@ nonisolated final class VectorCanvas {
             }
             walked = drawLocalContent(into: cg, elements: elements, quality: quality,
                                       clippedTo: clip, known: knownBounds)
+            return walked != nil
         }
-        guard let walked, image.cgImage != nil else {
+        guard let walked, let image, image.cgImage != nil else {
             MemoryPressure.signal(.allocationRefused)
             return nil
         }

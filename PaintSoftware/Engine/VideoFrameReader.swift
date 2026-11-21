@@ -438,7 +438,7 @@ final class VideoFrameSource {
          readerLimit: Int = VideoFrameSource.defaultReaderLimit) {
         self.byteBudget = max(0, byteBudget)
         self.readerLimit = max(1, readerLimit)
-        residency = Residency(ring: DecodedFrameRing(byteBudget: byteBudget))
+        residency = Residency(ring: DecodedFrameRing(byteBudget: byteBudget, budgetName: "VideoFrameSource"))
         pressureToken = MemoryPressure.register("VideoFrameSource") { [weak self] level in self?.respond(to: level) }
         MemoryPressure.startObservingSystemEvents()
     }
@@ -485,7 +485,7 @@ final class VideoFrameSource {
             ring.byteBudget = byteBudget
         } else {
             old.ring.removeAll()
-            ring = DecodedFrameRing(byteBudget: byteBudget)
+            ring = DecodedFrameRing(byteBudget: byteBudget, budgetName: "VideoFrameSource")
         }
         residency = Residency(ring: ring)
         return retired

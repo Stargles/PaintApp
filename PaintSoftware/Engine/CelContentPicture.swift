@@ -89,7 +89,7 @@ nonisolated final class CelContentPicture {
         let workingBytes = CompositorBudget.textureBytes(
             for: CGSize(width: output.width * scale, height: output.height * scale)) * 4
         guard workingBytes <= CompositorBudget.textureBudgetBytes,
-              CompositorBudget.hasHeadroom(for: workingBytes) else {
+              MemoryBudget.shared.makeRoom(for: workingBytes) else {
             MemoryPressure.signal(.allocationRefused)
             return nil
         }

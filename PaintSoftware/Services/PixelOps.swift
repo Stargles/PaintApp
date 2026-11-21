@@ -23,6 +23,54 @@ enum PixelOps {
         return format
     }
 
+    /// **A picture drawn straight into the buffer the image wraps** — what `UIGraphicsImageRenderer
+    /// .image {}` does, without the second canvas-sized copy it makes of its bitmap when the picture
+    /// is taken (MEASURED in the playcheck's memgraphs, 2026-11-21: every vector render briefly held
+    /// two 95 MiB copies at 5000²). The same pixels as `transparentFormat(scale:)`: sRGB, 8 bits,
+    /// premultiplied BGRA, a flipped UIKit context made current so `UIImage.draw` works inside.
+    ///
+    /// **Admitted by the one budget first** (`MemoryBudget`, in the calling thread's lane): nil when
+    /// the bytes are refused, which every caller already reads as a refused render and keeps what it
+    /// had. The grant is held by the image's pixels and given back when they are freed, so a cache
+    /// that keeps the picture registers an uncharged entry — the handle that frees it — not a second
+    /// charge. `draw` returns false to abandon the picture.
+    static func drawImage(size: CGSize, scale: CGFloat = 1, _ draw: (CGContext) -> Bool) -> UIImage? {
+        let width = Int((size.width * scale).rounded(.up)), height = Int((size.height * scale).rounded(.up))
+        guard width > 0, height > 0 else { return nil }
+        let bytesPerRow = width * 4, count = bytesPerRow * height
+        guard let grant = MemoryBudget.shared.admit(count) else {
+            MemoryPressure.signal(.allocationRefused)
+            return nil
+        }
+        guard let buffer = calloc(count, 1) else { return nil }
+        let info = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        guard let cg = CGContext(data: buffer, width: width, height: height, bitsPerComponent: 8,
+                                 bytesPerRow: bytesPerRow, space: sRGBColorSpace, bitmapInfo: info) else {
+            free(buffer); return nil
+        }
+        cg.translateBy(x: 0, y: CGFloat(height))
+        cg.scaleBy(x: scale, y: -scale)
+        UIGraphicsPushContext(cg)
+        let completed = draw(cg)
+        UIGraphicsPopContext()
+        // The grant lives as long as the pixels: the provider releases both together, so the one
+        // budget counts this picture until it is really gone — wherever it was handed to meanwhile.
+        let held = Unmanaged.passRetained(grant)
+        guard completed, let provider = CGDataProvider(dataInfo: held.toOpaque(), data: buffer, size: count,
+                                                       releaseData: { info, data, _ in
+            free(UnsafeMutableRawPointer(mutating: data))
+            info.map { Unmanaged<MemoryBudget.Grant>.fromOpaque($0).release() }
+        }) else { held.release(); free(buffer); return nil }
+        guard let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                                  bytesPerRow: bytesPerRow, space: sRGBColorSpace,
+                                  bitmapInfo: CGBitmapInfo(rawValue: info), provider: provider, decode: nil,
+                                  shouldInterpolate: true, intent: .defaultIntent) else { return nil }
+        return UIImage(cgImage: image, scale: scale, orientation: .up)
+    }
+
+    /// The space `transparentFormat` renders in, shared by `drawImage` so the two make the same bytes.
+    static let sRGBColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+
     /// A fully transparent image of `size`, at scale 1.
     ///
     /// One spelling for what several call sites were writing as a bare renderer with an empty body,
@@ -164,7 +212,7 @@ enum PixelOps {
             return rasterizeUncached(FrozenCel(cel: cel, identity: identity, derived: derived,
                                                pose: pose, quality: quality),
                                      canvasSize: canvasSize, quality: quality,
-                                     derivedResolution: derivedResolution)
+                                     derivedResolution: derivedResolution)?.image
         }
         let key = RasterizeKey(cel: identity, canvasSize: canvasSize, quality: quality,
                                window: nil, derivedResolution: derivedResolution)
@@ -172,11 +220,12 @@ enum PixelOps {
         // Frozen only after the memo has missed, so a hit never touches either tier — the tiers'
         // own memos are not free to fill (`RasterLayerTexture.renderToUIImage` pins the context's
         // buffer copy-on-write) and a warm flatten has no business filling them.
-        let image = rasterizeUncached(FrozenCel(cel: cel, identity: identity, derived: derived,
-                                                pose: pose, quality: quality),
-                                      canvasSize: canvasSize, quality: quality, derivedResolution: derivedResolution)
-        if let image { rasterizeCache.store(image, for: key) }
-        return image
+        let made = rasterizeUncached(FrozenCel(cel: cel, identity: identity, derived: derived,
+                                               pose: pose, quality: quality),
+                                     canvasSize: canvasSize, quality: quality, derivedResolution: derivedResolution)
+        // A picture handed through is its owner's memo, not this one's.
+        if let made, made.copied { rasterizeCache.store(made.image, for: key) }
+        return made?.image
     }
 
     /// The same flatten over values a caller froze earlier — `FrameRecipe`'s half of this function,
@@ -196,9 +245,9 @@ enum PixelOps {
         let key = RasterizeKey(cel: frozen.identity, canvasSize: canvasSize, quality: quality,
                                window: window)
         if let hit = rasterizeCache.value(for: key) { return hit }
-        let image = rasterizeUncached(frozen, canvasSize: canvasSize, quality: quality, window: window)
-        if let image { rasterizeCache.store(image, for: key) }
-        return image
+        let made = rasterizeUncached(frozen, canvasSize: canvasSize, quality: quality, window: window)
+        if let made, made.copied { rasterizeCache.store(made.image, for: key) }
+        return made?.image
     }
 
     /// One cel's render inputs, frozen as immutable handles. An unresolved recipe does not decode
@@ -356,112 +405,83 @@ enum PixelOps {
     /// here rather than through its own store. Read-only; the cache is still the only writer.
     static let sharedRasterizeEntryLimit = 24
 
-    /// Small and bounded on purpose: one canvas-sized image is 16.8 MB at 2048² and 64 MB at 4000²
-    /// (§5.3), so this holds a working set — the layers of the current frame, plus the neighbours a
-    /// scrub touches — and not a history. Evicts in insertion order, which for a cache read in
-    /// bottom-to-top stack order is near enough to LRU to not be worth the bookkeeping.
+    /// The flatten memo. **Its bytes are the one budget's** (SCHEDULER.md rule 5, `MemoryBudget`):
+    /// every stored flatten is a `.cache` entry there, evicted lowest priority and least recently
+    /// used first across every cache in the app — it owns no byte figure of its own. The entry count
+    /// is kept as a working-set ceiling for small canvases, where the bytes never bind and a
+    /// superseded flatten (the key carries `rasterVersion`, so every finished stroke mints a new one)
+    /// would otherwise stay until something needed the room.
     ///
-    /// **The entry count alone was not a bound, and on a 4K canvas it was not close to one.** Twenty
-    /// four entries is 403 MB at 2048² and **1.61 GB at 4096²** — more than a 3 GB iPad's whole
-    /// process limit, from a cache whose stated job is to hold "a working set". Nor is it hard to
-    /// fill: the key carries `rasterVersion`, so every stroke the artist finishes mints a fresh entry
-    /// and the one it supersedes stays until twenty-three more have been drawn. The byte budget below
-    /// is what actually bounds it; the entry count is kept as a second ceiling for small canvases,
-    /// where 24 canvas-sized images is a sane working set and the bytes would never bind.
-    ///
-    /// **It borrows `CompositorBudget.textureBudgetBytes` rather than inventing a second number**, and
-    /// that is the right relationship rather than a shortcut: this is the CPU-side twin of the GPU's
-    /// upload cache — the same canvas-sized flattens, one memo away from being uploaded — so the two
-    /// should scale with the device on the same rule. It does mean the pair can hold twice the budget
-    /// between them, which is accounted for: the budget is one sixteenth of the device precisely so
-    /// that the whole compositing subsystem is about one eighth of it.
+    /// A vector-only cel is not stored at all: its flatten *is* the canvas's memo
+    /// (`rasterizeUncached`), already an entry under `VectorRenderCache`.
     private static let rasterizeCache = RasterizeCache(limit: sharedRasterizeEntryLimit)
 
     private nonisolated final class RasterizeCache {
         private let limit: Int
-        private var entries: [RasterizeKey: (image: UIImage, bytes: Int)] = [:]
+        private var entries: [RasterizeKey: (image: UIImage, charge: MemoryBudget.Entry)] = [:]
         private var order: [RasterizeKey] = []
-        private var residentBytes = 0
         private let lock = NSLock()
-        private var pressureToken: MemoryPressure.Token?
 
         init(limit: Int) {
             self.limit = limit
-            // **Nothing dropped these before.** `clearRasterizeCache` existed for tests and its doc
-            // comment said "and for a memory warning" — but no code anywhere subscribed, so the
-            // largest CPU-side cache in the app was the one thing a memory warning could not reach.
-            // Registered here rather than in a view or the app delegate because this is what knows it
-            // is a cache: the responder's lifetime is the cache's, and both are the process's.
-            //
-            // **One seam rather than two `UIApplication` notifications** — RENDER.md §2.6, and
-            // BUGS.md's census item 6, which counts six caches each naming the same two constants.
-            // `MemoryPressure` owns the subscription now; this owns the response.
-            //
-            // **A warning trims and does not clear, which is a change.** Dropping the whole memo is
-            // right for a backgrounded app and wrong for a live one: the entries this cache is most
-            // likely to be asked for next are the ones it stored most recently, so halving under
-            // `MemoryPressurePolicy` gives the bytes back and leaves the current frame's flattens in
-            // place, where `removeAll()` charged the artist a full re-flatten on the exact turn the
-            // device was struggling.
-            MemoryPressure.startObservingSystemEvents()
-            pressureToken = MemoryPressure.register("PixelOps.rasterizeCache") { [weak self] level in
-                self?.trim(toBytes: MemoryPressurePolicy.budget(level, normalBytes: CompositorBudget.textureBudgetBytes))
-            }
         }
 
         func value(for key: RasterizeKey) -> UIImage? {
-            lock.lock(); defer { lock.unlock() }
-            return entries[key]?.image
+            lock.lock()
+            let hit = entries[key]
+            lock.unlock()
+            hit?.charge.touch()
+            return hit?.image
         }
 
         func store(_ image: UIImage, for key: RasterizeKey) {
-            lock.lock(); defer { lock.unlock() }
             let bytes = (image.cgImage?.bytesPerRow ?? 0) * (image.cgImage?.height ?? 0)
-            if let replaced = entries.updateValue((image, bytes), forKey: key) {
-                residentBytes -= replaced.bytes
-            } else {
-                order.append(key)
+            let owner = MemoryBudget.EntryRef()
+            // Uncharged: every stored flatten is a `drawImage` picture, whose pixels hold their own grant.
+            let charge = MemoryBudget.shared.entry("PixelOps.rasterizeCache", priority: .cache, charged: false) { [weak self] in
+                self?.remove(key, charge: owner.entry)
             }
-            residentBytes += bytes
-            // The byte budget first, then the count. Never evicts the entry just stored, however far
-            // over budget one image on its own puts this: the caller is about to return it either
-            // way, and a cache that refuses to hold a single canvas is a cache that has stopped
-            // memoizing the thing it exists for.
-            let budget = CompositorBudget.textureBudgetBytes
-            while order.count > 1, order.count > limit || residentBytes > budget {
-                let evicted = order.removeFirst()
-                if let removed = entries.removeValue(forKey: evicted) { residentBytes -= removed.bytes }
+            owner.entry = charge
+            lock.lock()
+            if entries.updateValue((image, charge), forKey: key) == nil { order.append(key) }
+            var dropped: [MemoryBudget.Entry] = []
+            while order.count > limit {
+                if let removed = entries.removeValue(forKey: order.removeFirst()) { dropped.append(removed.charge) }
             }
+            lock.unlock()
+            dropped.forEach { $0.update(bytes: 0) }
+            charge.update(bytes: bytes)
+            MemoryBudget.shared.settle(keeping: charge)
+        }
+
+        /// The budget evicted `key`'s entry.
+        private func remove(_ key: RasterizeKey, charge: MemoryBudget.Entry?) {
+            lock.lock()
+            if let charge, entries[key]?.charge === charge {
+                entries.removeValue(forKey: key)
+                order.removeAll { $0 == key }
+            }
+            lock.unlock()
         }
 
         func removeAll() {
-            lock.lock(); defer { lock.unlock() }
-            entries.removeAll(); order.removeAll(); residentBytes = 0
-        }
-
-        /// Evicts oldest-first until the cache holds at most `bytes` — the memory-pressure response,
-        /// and the only place `removeAll()`'s wholesale drop is *not* what happens.
-        ///
-        /// **No "never evict the entry just stored" exemption here**, unlike `store`. That rule exists
-        /// so a caller's own return value is memoized however large it is; nothing is being returned
-        /// on this path, and a device asking for memory is not the moment to keep an entry that on its
-        /// own exceeds what it is being asked to fit into.
-        func trim(toBytes bytes: Int) {
-            lock.lock(); defer { lock.unlock() }
-            while residentBytes > bytes, !order.isEmpty {
-                let evicted = order.removeFirst()
-                if let removed = entries.removeValue(forKey: evicted) { residentBytes -= removed.bytes }
-            }
+            lock.lock()
+            let charges = entries.values.map(\.charge)
+            entries.removeAll(); order.removeAll()
+            lock.unlock()
+            charges.forEach { $0.update(bytes: 0) }
         }
 
         var bytesResident: Int {
-            lock.lock(); defer { lock.unlock() }
-            return residentBytes
+            lock.lock()
+            let charges = entries.values.map(\.charge)
+            lock.unlock()
+            return charges.reduce(0) { $0 + $1.bytes }
         }
     }
 
     /// Drops every memoized flatten. For tests that need to measure the uncached cost, and for a
-    /// memory warning — which now actually calls it; see `RasterizeCache.init`.
+    /// memory warning, which reaches it through `MemoryBudget`.
     static func clearRasterizeCache() { rasterizeCache.removeAll() }
 
     /// What the flatten memo is holding, for `PerfBaselineTests`. Nothing in the render path reads it.
@@ -551,12 +571,13 @@ enum PixelOps {
     /// combined cels, so these two pictures never use its keys or occupy its budget.
     static func rasterize(_ tier: CelTier, of cel: FrozenCel, canvasSize: CGSize,
                           quality: RenderQuality) -> CGImage? {
-        rasterizeUncached(cel, canvasSize: canvasSize, quality: quality, tier: tier)?.cgImage
+        rasterizeUncached(cel, canvasSize: canvasSize, quality: quality, tier: tier)?.image.cgImage
     }
 
     private static func rasterizeUncached(_ cel: FrozenCel, canvasSize: CGSize,
                                           quality: RenderQuality, window: StripWindow? = nil,
-                                          tier: CelTier = .combined, derivedResolution: CGFloat = 1) -> UIImage? {
+                                          tier: CelTier = .combined,
+                                          derivedResolution: CGFloat = 1) -> (image: UIImage, copied: Bool)? {
         let bounds = CGRect(origin: .zero, size: canvasSize)
         let content = window.map {
             CGRect(origin: CGPoint(x: -$0.origin.x, y: -$0.origin.y), size: $0.frameSize)
@@ -584,9 +605,17 @@ enum PixelOps {
                 strokesImage = try cel.strokesImage?.resolveImage().get()
             } else { bakedImage = nil; strokesImage = nil }
         } catch { return nil }
+        // **A cel that is only its vector picture is that picture** — the canvas's own memo, already
+        // charged to the one budget — so it is handed back rather than drawn into a second
+        // canvas-sized copy (MEASURED: 95 MiB a layer at 5000², held twice by the memo next door).
+        if tier != .backing, let vectorImage, replacingBase == nil, bakedImage == nil, strokesImage == nil,
+           cel.display == nil, content == bounds, vectorImage.scale == 1,
+           let picture = vectorImage.cgImage, picture.width == Int(bounds.width.rounded()),
+           picture.height == Int(bounds.height.rounded()) {
+            return (vectorImage, copied: false)
+        }
         var completed = true
-        let image = UIGraphicsImageRenderer(bounds: bounds, format: transparentFormat()).image { context in
-            let cg = context.cgContext
+        let image = drawImage(size: bounds.size) { cg in
             if let replacement = replacingBase { replacement.draw(in: content) }
             else {
                 if let pose = cel.pose, !pose.isIdentity, bakedImage != nil || strokesImage != nil {
@@ -597,7 +626,7 @@ enum PixelOps {
                             source.replacementWindow(in: $0)
                         }
                     }
-                    guard completed else { return }
+                    guard completed else { return false }
                 } else {
                     bakedImage?.draw(in: content)
                     strokesImage?.draw(in: content)
@@ -606,18 +635,20 @@ enum PixelOps {
                 if let vectorImage { vectorImage.draw(in: content) }
                 else if tier != .backing, let vector = cel.vector {
                     guard vector.draw(into: cg, frameRect: content, quality: quality) != nil else {
-                        completed = false; return
+                        completed = false; return false
                     }
                 }
             }
-            if let overlays = cel.display?.drawOverlays, !overlays(cg, content) { completed = false; return }
+            if let overlays = cel.display?.drawOverlays, !overlays(cg, content) { completed = false; return false }
             for ink in cel.display?.windows ?? [] {
                 guard drawWindow(ink.image, rect: ink.rect, canvasSize: ink.canvasSize, through: ink.pose,
                                  into: cg, content: content, opacity: ink.opacity,
-                                 replacing: ink.replacesBase) else { completed = false; return }
+                                 replacing: ink.replacesBase) else { completed = false; return false }
             }
+            return true
         }
-        return completed ? image : nil
+        guard completed, let image else { return nil }
+        return (image, copied: true)
     }
 
     // `compositeCanvas` lived here: a flat walk of `layers` that drew each visible layer's active cel

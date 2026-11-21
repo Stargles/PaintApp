@@ -147,7 +147,7 @@ final class CanvasManager: ObservableObject {
 
     /// Forces `deviceMemoryBudgetBytes` to a fixed value, for a test. `nil` (the default) reads the
     /// process's own signal. A dedicated seam rather than reusing
-    /// `CompositorBudget.availableMemoryOverrideBytes`: that one is a live valve, read mid-composite
+    /// `MemoryBudget.shared.availableOverrideBytes`: that one is a live valve, read mid-composite
     /// and meant to model memory pressure changing *during* a session; this is the device's overall
     /// ceiling, read once per canvas decision, and a test arming one must not silently perturb the
     /// other. Restored to `nil` in `tearDown`, exactly as suites already do for `Compositor.backend`.
@@ -3549,7 +3549,7 @@ final class CanvasManager: ObservableObject {
     /// on a 3 GB iPad 9 alongside the bake's own compositing killed the app with **signal 9** —
     /// jetsam — during this pass, at the largest canvas `maxCanvasExtent` allows. So the two-frame
     /// floor is bounded by `CompositorBudget.textureBudgetBytes`, the device fraction this app
-    /// already argues for (§2.6: portable, `physicalMemory / 16`, 192 MB here), and above the size
+    /// already argues for — now a share of the one `MemoryBudget` — and above the size
     /// where two frames stop fitting the ring is switched off outright rather than left holding one.
     ///
     /// Holding one is strictly worse than holding none: the flip misses either way — MEASURED at
@@ -3560,12 +3560,19 @@ final class CanvasManager: ObservableObject {
     /// The cliff is at **~4900²** on this device, and above it playback decodes on the display
     /// thread. That is the one place RENDER.md §3.5's promise is still void, and PERFORMANCE.md §17
     /// carries the measurement of what it costs.
-    static func frameRingByteBudget(forFrameBytes frameBytes: Int) -> Int {
+    static func frameRingByteBudget(forFrameBytes frameBytes: Int,
+                                    sharedBudgetBytes: Int = MemoryBudget.shared.totalBytes) -> Int {
         guard frameBytes > 0 else { return minimumFrameRingByteBudget }
         let twoFrames = 2 * frameBytes
-        guard twoFrames <= CompositorBudget.textureBudgetBytes else { return 0 }
+        guard twoFrames <= sharedBudgetBytes / frameRingShareDivisor else { return 0 }
         return max(minimumFrameRingByteBudget, twoFrames)
     }
+
+    /// **The ring's share of the one budget** (`MemoryBudget`, SCHEDULER.md rule 5): a quarter. Its
+    /// frames are charged there as `.current` like everything else; the share only decides whether
+    /// two frames — the least a flip can use — are worth holding at all. On the iPad 9's 888 MiB
+    /// budget that is 222 MiB, two frames up to ~5,270² (two 5000² frames are 191 MiB).
+    static let frameRingShareDivisor = 4
 
     /// This document's decoded frame in bytes — BGRA at the size the knob actually renders, which is
     /// what `DecodedFrame.byteCount` sums and therefore the only quantity the ring's budget can be

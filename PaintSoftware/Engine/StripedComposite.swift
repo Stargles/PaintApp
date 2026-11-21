@@ -149,7 +149,7 @@ enum StripedCompositor {
                   node.blendMode == .normal else { return nil }
         }
         let frame = CGRect(origin: .zero, size: recipe.canvasSize)
-        guard CompositorBudget.hasHeadroom(for: CompositorBudget.textureBytes(for: recipe.canvasSize) * 4)
+        guard MemoryBudget.shared.makeRoom(for: CompositorBudget.textureBytes(for: recipe.canvasSize) * 4)
         else { return nil }
         var declined = false
         let image = UIGraphicsImageRenderer(bounds: frame, format: PixelOps.transparentFormat())

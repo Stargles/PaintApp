@@ -34,84 +34,45 @@ import UIKit
 /// the old rule did not: an onion skin reaching *behind* the playhead keeps its sources warm, and a
 /// cel the artist keeps coming back to is not evicted for being three frames away.
 ///
-/// **The bytes bind and the count is a second ceiling**, which is `PixelOps.rasterizeCache`'s
-/// arrangement verbatim, borrowed rather than re-derived because the two hold the same cel at the
-/// same size one memo apart. On the owner's iPad 9 the budget is 183.7 MB and their canvas is 8 MB an
-/// entry, so **22 entries' worth of budget against a ceiling of 12 — the count still binds and
-/// nothing about the owner's documents changes.** At 4096² it is 2 entries against the same 12, and
-/// the 768 MB is gone.
+/// **The bytes are the one budget's** (SCHEDULER.md rule 5, `MemoryBudget`): each canvas holding a
+/// memo is an entry there — `.shown` while a layer host shows it (`pin`), `.cache` otherwise — and
+/// eviction is the budget's, lowest priority and least recently used first across every cache in the
+/// app. This type no longer owns a byte figure or an entry count of its own; it is the registry that
+/// knows which canvas an entry frees.
 enum VectorRenderCache {
 
-    /// The second ceiling, for canvases small enough that the bytes never bind — `CanvasManager
-    /// .vectorRenderCacheLimit`'s old value, kept at its old number so a document at the owner's
-    /// canvas behaves exactly as it did.
-    static let entryLimit = 12
+    /// The name every canvas's entry carries in `MemoryBudget`.
+    static let budgetName = "VectorRenderCache"
 
-    /// What memoized vector renders may hold in total.
-    ///
-    /// **Borrowed from `CompositorBudget` rather than invented**, for the reason `PixelOps` gives
-    /// where it borrows the same number: this is the same working set as the flatten memo seen one
-    /// step earlier — a vector cel's own render, which `PixelOps.rasterize` then composites into a
-    /// flatten — so the two should scale with the device on one rule. It does mean the pair can hold
-    /// twice the budget between them, which is the accounting `CompositorBudget`'s own doc comment
-    /// makes for the CPU and GPU memos and is why the divisor is a sixteenth of the device.
-    static var budgetBytes: Int { CompositorBudget.textureBudgetBytes }
-
-    /// **A canvas has just memoized a render.** Registers what it now holds and evicts the least
-    /// recently used canvases until the whole set is inside the budget — never the one just stored,
-    /// for `PixelOps.RasterizeCache.store`'s reason: the caller is about to return it either way.
-    ///
-    /// Called with **no canvas lock held** (see `VectorCanvas.render(quality:)`), which is what makes
-    /// the eviction below safe: victims are chosen under this type's lock, the lock is released, and
-    /// only then is `dropCachedImage()` called on each — so a canvas lock is never taken while this
-    /// lock is held, and the one nesting that does exist (`dropCachedImage` → `noteDropped`) runs the
-    /// other way round.
     /// **A layer host has started showing `canvas`'s committed picture**, and its image view now
     /// holds whatever that canvas memoizes. Paired with `unpin`.
     ///
-    /// **A pinned canvas is neither charged nor evicted, because evicting it frees nothing.** The
-    /// image the memo names is the one on screen, retained by the view whether or not the memo
+    /// **A pinned canvas is charged as `.shown` and never evicted, because evicting it frees nothing.**
+    /// The image the memo names is the one on screen, retained by the view whether or not the memo
     /// keeps it, so dropping it reclaims no byte — and it throws away the base the next edit on that
-    /// layer repairs or appends to. MEASURED on 2026-11-16 at the owner's shape — 5000², five vector
-    /// layers, the iPad 9's 192 MiB budget, which holds two such renders: every undo on a visible
-    /// layer found its memo evicted and re-walked the whole cel (0.71 s on the owner's iPad), and
-    /// every bake of the frame on screen re-walked the other four layers (2.2–7.4 s a frame, the
-    /// orange bars). The budget bounds what is held *beyond* what is shown; what is shown is bounded
-    /// by the layers on screen, and is the display's to account for.
+    /// layer repairs or appends to. MEASURED on 2026-11-16 at the owner's shape: every undo on a
+    /// visible layer found its memo evicted and re-walked the whole cel (0.71 s on the owner's iPad),
+    /// and every bake of the frame on screen re-walked the other four layers. It is charged, though:
+    /// what is shown is memory, and the budget leaves the caches only what the screen does not hold.
     static func pin(_ canvas: VectorCanvas) {
-        let key = ObjectIdentifier(canvas)
         lock.lock()
-        defer { lock.unlock() }
-        if var pin = pins[key], pin.canvas === canvas {
-            pin.count += 1
-            pins[key] = pin
-        } else {
-            pins[key] = Pin(canvas: canvas, count: 1)
-        }
-        // Its bytes leave the budget while it is on screen.
-        if let entry = entries[key], entry.canvas === canvas, !entry.pinned {
-            residentTotal -= entry.bytes
-            pinnedEntries += 1
-            entries[key]?.pinned = true
-        }
+        let entry = recordLocked(canvas)
+        records[ObjectIdentifier(canvas)]?.pins += 1
+        lock.unlock()
+        entry.setPriority(.shown)
     }
 
-    /// The host has stopped showing `canvas`. Its memo is an ordinary cache entry again — charged,
-    /// and the first to go if the budget is over, since it is the least recently used of anything
-    /// that was on screen.
+    /// The host has stopped showing `canvas`. Its memo is an ordinary cache entry again — the first to
+    /// go when room is needed, since it is the least recently used of anything that was on screen.
     static func unpin(_ canvas: VectorCanvas) {
         let key = ObjectIdentifier(canvas)
         lock.lock()
-        defer { lock.unlock() }
-        guard var pin = pins[key], pin.canvas === canvas else { return }
-        pin.count -= 1
-        if pin.count > 0 { pins[key] = pin; return }
-        pins.removeValue(forKey: key)
-        if let entry = entries[key], entry.canvas === canvas, entry.pinned {
-            residentTotal += entry.bytes
-            pinnedEntries -= 1
-            entries[key]?.pinned = false
-        }
+        guard var record = records[key], record.canvas === canvas else { lock.unlock(); return }
+        record.pins -= 1
+        records[key] = record
+        let entry = record.pins > 0 ? nil : record.entry
+        lock.unlock()
+        entry?.setPriority(.cache)
     }
 
     /// `pin` for as long as this lives — what a host holds while it shows a canvas, so letting go of
@@ -129,208 +90,115 @@ enum VectorRenderCache {
     static func isPinned(_ canvas: VectorCanvas) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        return isPinnedLocked(ObjectIdentifier(canvas), canvas)
+        guard let record = records[ObjectIdentifier(canvas)], record.canvas === canvas else { return false }
+        return record.pins > 0
     }
 
+    /// **A canvas has just memoized a render.** Charges what it now holds and lets the budget settle —
+    /// never at the cost of the one just stored, for `PixelOps`' reason: the caller is about to
+    /// return it either way.
+    ///
+    /// Called with **no canvas lock held** (see `VectorCanvas.render(quality:)`), which is what makes
+    /// the settle safe: an eviction takes the victim canvas's lock through `dropCachedImage()`.
     static func noteRendered(_ canvas: VectorCanvas) {
-        // Before the lock. Touching a lazy `static let` runs its initialiser, which registers with
-        // `MemoryPressure` and takes *that* type's lock; doing it while holding this one would put a
-        // `swift_once` inside a critical section for no reason. There is no cycle either way —
-        // `MemoryPressure.signal` releases its lock before calling a responder — but the shorter
-        // holding time is free and the reasoning is one step simpler.
-        _ = pressureToken
         let bytes = canvas.cachedImageBytes
         lock.lock()
-        clock += 1
-        setLocked(ObjectIdentifier(canvas), canvas: canvas, bytes: bytes, touching: true)
-        let victims = victimsLocked(keeping: ObjectIdentifier(canvas))
+        let entry = recordLocked(canvas)
         lock.unlock()
-        for victim in victims { victim.dropCachedImage() }
+        entry.update(bytes: bytes)
+        MemoryBudget.shared.settle(keeping: entry)
     }
 
     /// **What a canvas holds has changed without a render happening** — an invalidation that dropped
     /// the memo but kept an incremental or region base, which is still a canvas-sized bitmap.
     ///
-    /// **Updates the figure and never evicts**, and that restriction is the whole reason it is a
-    /// separate entry point: this one *is* called with the canvas's lock held
-    /// (`VectorCanvas.invalidateRenderOnly`), so taking another canvas's lock from here would be the
-    /// nesting the ordering rule forbids. The bytes are corrected now; the next render evicts.
+    /// **Updates the figure and never evicts**: this one *is* called with the canvas's lock held
+    /// (`VectorCanvas.invalidateRenderOnly`), so evicting another canvas from here would take a second
+    /// canvas lock under the first. The bytes are corrected now; the next admission evicts.
     static func noteBytes(_ canvas: VectorCanvas, _ bytes: Int) {
         lock.lock()
-        defer { lock.unlock() }
-        setLocked(ObjectIdentifier(canvas), canvas: canvas, bytes: bytes, touching: false)
+        let entry = bytes > 0 ? recordLocked(canvas) : existingLocked(canvas)
+        lock.unlock()
+        entry?.update(bytes: bytes)
     }
 
-    /// **A memo was read rather than made** — moves the canvas to the head of the use order without
-    /// touching the bytes. Without this the cache would be insertion-ordered, and a cel the artist
-    /// keeps returning to would age out behind cels they rendered once.
+    /// **A memo was read rather than made** — moves the canvas to the head of the use order.
     static func noteUsed(_ canvas: VectorCanvas) {
-        let key = ObjectIdentifier(canvas)
         lock.lock()
-        defer { lock.unlock() }
-        guard entries[key] != nil else { return }
-        clock += 1
-        entries[key]?.lastUsed = clock
+        let entry = existingLocked(canvas)
+        lock.unlock()
+        entry?.touch()
     }
 
-    /// **A canvas has given its pixels back** — by eviction here, by `dropCachedImage()` from
-    /// anywhere else, or by an invalidation. Idempotent.
+    /// **A canvas has given its pixels back** — by eviction, by `dropCachedImage()` from anywhere
+    /// else, or by an invalidation. Idempotent.
     static func noteDropped(_ canvas: VectorCanvas) {
         lock.lock()
-        defer { lock.unlock() }
-        removeLocked(ObjectIdentifier(canvas))
+        let entry = existingLocked(canvas)
+        lock.unlock()
+        entry?.update(bytes: 0)
     }
 
-    /// Bytes of memoized vector render the app is holding beyond what layer hosts are showing
-    /// (`pin`), across every live canvas that has registered one — the figure the budget binds.
-    /// The instrument `PixelOps.rasterizeCacheBytes` is for the memo next door.
+    /// Bytes of memoized vector render held beyond what layer hosts are showing — the part the
+    /// budget may evict.
     static var residentBytes: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        pruneLocked()
-        return residentTotal
+        MemoryBudget.shared.entryBytes(named: budgetName, priority: .cache)
     }
 
-    /// How many canvases are holding a memoized render.
+    /// How many live canvases are holding a memoized render, shown or not.
     static var entryCount: Int {
         lock.lock()
-        defer { lock.unlock() }
         pruneLocked()
-        return entries.count
+        let live = records.values.map(\.entry)
+        lock.unlock()
+        return live.filter { $0.bytes > 0 }.count
     }
 
-    /// Drops every memoized render this knows about. For tests, and for the memory-pressure
-    /// responder below.
+    /// Drops every memoized render this knows about. For tests.
     static func removeAll() {
         lock.lock()
-        let all = entries.values.compactMap(\.canvas)
-        entries.removeAll()
-        residentTotal = 0
-        pinnedEntries = 0
+        let all = records.values.compactMap(\.canvas)
         lock.unlock()
         for canvas in all { canvas.dropCachedImage() }
     }
 
-    /// Evicts least-recently-used canvases until at most `bytes` remain — the memory-pressure
-    /// response, and the same shape `PixelOps.RasterizeCache.trim(toBytes:)` takes.
-    static func trim(toBytes bytes: Int) {
-        lock.lock()
-        let victims = victimsLocked(keeping: nil, budgetBytes: bytes, entryLimit: Int.max)
-        lock.unlock()
-        for victim in victims { victim.dropCachedImage() }
-    }
-
     // MARK: - Internals
 
-    private struct Entry {
+    private struct Record {
         weak var canvas: VectorCanvas?
-        var bytes: Int
-        var lastUsed: UInt64
-        /// On screen — see `pin`. Its bytes are not in `residentTotal` and it is never a victim.
-        var pinned = false
-    }
-
-    private struct Pin {
-        weak var canvas: VectorCanvas?
-        var count: Int
-    }
-
-    /// Canvases a host is showing, with how many hosts are — see `pin`.
-    private static var pins: [ObjectIdentifier: Pin] = [:]
-    /// How many of `entries` are pinned, maintained beside `residentTotal` for its O(1) reason.
-    private static var pinnedEntries = 0
-
-    /// Caller must hold `lock`.
-    private static func isPinnedLocked(_ key: ObjectIdentifier, _ canvas: VectorCanvas) -> Bool {
-        guard let pin = pins[key] else { return false }
-        return pin.canvas === canvas
+        let entry: MemoryBudget.Entry
+        var pins = 0
     }
 
     private static let lock = NSLock()
-    private static var entries: [ObjectIdentifier: Entry] = [:]
-    private static var clock: UInt64 = 0
+    private static var records: [ObjectIdentifier: Record] = [:]
 
-    /// **The sum of `entries`' bytes, maintained rather than recomputed** — and that is a performance
-    /// decision rather than tidiness. `noteRendered` runs on **every** call to `VectorCanvas.render`,
-    /// including the memo hits that are most of them, so the common case has to be O(1): one dictionary
-    /// write and one comparison against the budget. Summing the values there instead, as the first
-    /// version of this did, put an O(entries) walk plus a dictionary rebuild on the display path.
-    private static var residentTotal = 0
-
-    /// Registered once, lazily, by the first canvas to memoize anything — there is no instance here
-    /// whose initialiser could do it. A warning halves and a background clears, exactly as the two
-    /// caches either side of this one; see `MemoryPressurePolicy`.
-    private static let pressureToken: MemoryPressure.Token = {
-        MemoryPressure.startObservingSystemEvents()
-        return MemoryPressure.register("VectorRenderCache") { level in
-            trim(toBytes: MemoryPressurePolicy.budget(level, normalBytes: budgetBytes))
+    /// The canvas's record, made if it has none. **The record is this canvas's only if the canvas is
+    /// the one it names**: `ObjectIdentifier` is an address, and a canvas allocated where a dead one
+    /// was must not inherit its entry. Caller holds `lock`.
+    private static func recordLocked(_ canvas: VectorCanvas) -> MemoryBudget.Entry {
+        let key = ObjectIdentifier(canvas)
+        if let record = records[key], record.canvas === canvas { return record.entry }
+        if records.count >= pruneThreshold { pruneLocked() }
+        // Uncharged: a memo is a `PixelOps.drawImage` picture, whose pixels hold their own grant.
+        let entry = MemoryBudget.shared.entry(budgetName, priority: .cache, charged: false) { [weak canvas] in
+            canvas?.dropCachedImage()
         }
-    }()
-
-    /// Inserts or updates one entry, keeping `residentTotal` right. Caller must hold `lock`.
-    /// `touching` moves it to the head of the use order; `noteBytes` does not, because correcting a
-    /// figure is not a use.
-    private static func setLocked(_ key: ObjectIdentifier, canvas: VectorCanvas, bytes: Int,
-                                  touching: Bool) {
-        guard bytes > 0 else { return removeLocked(key) }
-        // **The entry is this canvas's only if the canvas is the one it names.** `ObjectIdentifier` is
-        // an address and a canvas leaves no `deinit` hook behind, so a dead canvas's entry stays until
-        // a prune — and the next canvas the allocator puts at that address finds it under its own key.
-        // Treated as its continuation, the entry keeps the dead owner's nil reference, the next prune
-        // drops it as dead, and a live canvas holds a memo no eviction can ever reach.
-        if var existing = entries[key], existing.canvas === canvas {
-            if !existing.pinned { residentTotal += bytes - existing.bytes }
-            existing.bytes = bytes
-            if touching { existing.lastUsed = clock }
-            entries[key] = existing
-        } else {
-            if let dead = entries[key] {
-                if dead.pinned { pinnedEntries -= 1 } else { residentTotal -= dead.bytes }
-            }
-            if !touching { clock += 1 }
-            let pinned = isPinnedLocked(key, canvas)
-            entries[key] = Entry(canvas: canvas, bytes: bytes, lastUsed: clock, pinned: pinned)
-            if pinned { pinnedEntries += 1 } else { residentTotal += bytes }
-        }
+        records[key] = Record(canvas: canvas, entry: entry)
+        return entry
     }
 
-    /// Caller must hold `lock`.
-    private static func removeLocked(_ key: ObjectIdentifier) {
-        guard let removed = entries.removeValue(forKey: key) else { return }
-        if removed.pinned { pinnedEntries -= 1 } else { residentTotal -= removed.bytes }
+    private static func existingLocked(_ canvas: VectorCanvas) -> MemoryBudget.Entry? {
+        guard let record = records[ObjectIdentifier(canvas)], record.canvas === canvas else { return nil }
+        return record.entry
     }
 
-    /// Forgets entries whose canvas has been deallocated. A deleted cel must not hold a slot, and a
-    /// weak reference is what makes that automatic rather than something `deleteCel` has to remember.
-    ///
-    /// **Called only when the budget looks full**, never on the hot path: a dead entry's bytes are
-    /// charged until then, which can only make eviction *earlier* than it needs to be, and the one
-    /// moment that matters — being about to evict a live cel — is exactly when this runs.
+    /// Forgets records whose canvas is gone, so a deleted cel stops being charged. Run when the table
+    /// has grown, never on the hot path.
     private static func pruneLocked() {
-        for (key, entry) in entries where entry.canvas == nil { removeLocked(key) }
-        for (key, pin) in pins where pin.canvas == nil { pins.removeValue(forKey: key) }
+        records = records.filter { $0.value.canvas != nil }
+        pruneThreshold = max(64, records.count * 2)
     }
 
-    /// Entries the count ceiling applies to — a pinned one is on screen and is not the cache's.
-    /// Caller must hold `lock`.
-    private static var unpinnedCount: Int { entries.count - pinnedEntries }
-
-    private static func victimsLocked(keeping keep: ObjectIdentifier?,
-                                      budgetBytes: Int? = nil,
-                                      entryLimit: Int? = nil) -> [VectorCanvas] {
-        let budget = budgetBytes ?? Self.budgetBytes
-        let limit = entryLimit ?? Self.entryLimit
-        // The O(1) gate. Everything below it is O(entries) and runs only at the bound.
-        guard residentTotal > budget || unpinnedCount > limit else { return [] }
-        pruneLocked()
-        guard residentTotal > budget || unpinnedCount > limit else { return [] }
-        var victims: [VectorCanvas] = []
-        for (key, entry) in entries.sorted(by: { $0.value.lastUsed < $1.value.lastUsed }) {
-            guard residentTotal > budget || unpinnedCount > limit else { break }
-            guard key != keep, !entry.pinned, let canvas = entry.canvas else { continue }
-            victims.append(canvas)
-            removeLocked(key)
-        }
-        return victims
-    }
+    private static var pruneThreshold = 64
 }

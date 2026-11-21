@@ -544,16 +544,16 @@ final class LiveTransformEditLogicTests: XCTestCase {
         let edit = LiveTransformEdit.cel(layerID: manager.layers[index].id)
         let runs = manager.liveTransformRuns(edit, atFrame: 0)
         let recipe = try XCTUnwrap(manager.makeSandwichRecipe(atFrame: 0, runs: runs))
-        let previousHeadroom = CompositorBudget.availableMemoryOverrideBytes
-        defer { CompositorBudget.availableMemoryOverrideBytes = previousHeadroom }
+        let previousHeadroom = MemoryBudget.shared.availableOverrideBytes
+        defer { MemoryBudget.shared.availableOverrideBytes = previousHeadroom }
         let bytes = CompositorBudget.textureBytes(for: recipe.canvasSize)
-        CompositorBudget.availableMemoryOverrideBytes = bytes * 6
+        MemoryBudget.shared.availableOverrideBytes = bytes * 6
         let fallback = try XCTUnwrap(recipe.compositeMovingBands(for: edit, budgetBytes: bytes * 32))
         XCTAssertNil(fallback.cel, "the budget can fit the split, but current headroom refuses it")
         let expected = try XCTUnwrap(recipe.compositeBands(budgetBytes: bytes * 32))
         XCTAssertEqual(maxChannelDelta(try XCTUnwrap(fallback.images[1]), try XCTUnwrap(expected[1])), 0)
         XCTAssertNotNil(fallback.images[0], "the fallback publishes a complete cut")
-        CompositorBudget.availableMemoryOverrideBytes = 0
+        MemoryBudget.shared.availableOverrideBytes = 0
         XCTAssertNotNil(recipe.compositeMovingBands(for: edit, budgetBytes: bytes * 32)?.cel,
                         "a later mint can split the same content when there is headroom")
     }

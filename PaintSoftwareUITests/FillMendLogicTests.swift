@@ -1480,7 +1480,7 @@ final class FillMendLogicTests: XCTestCase {
         try XCTUnwrap(CanvasFixture.solidImage(.blue, rect: CGRect(x: 90, y: 60, width: 1, height: 1),
                                              size: sceneSize).pngData()).write(to: paintedURL)
         for order in [[blankURL], [blankURL, paintedURL], [paintedURL, blankURL]] {
-            let owner = RasterResidency(budgetBytes: 96 * 96 * 4 * 16, hasHeadroom: { _ in true })
+            let owner = RasterResidency(budgetBytes: 96 * 96 * 4 * 16, makeRoom: { _ in true })
             let manager = CanvasManager(); manager.canvasSize = sceneSize
             var sources: [RasterSource] = []
             for url in order {

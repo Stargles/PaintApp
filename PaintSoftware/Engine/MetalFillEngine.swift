@@ -171,9 +171,10 @@ final class MetalFillEngine {
                              sampleReferenceColours: ([UInt8]) -> (SIMD4<Float>, SIMD4<Float>?)) -> SessionOutcome {
         let needed = MetalFillSession.predictedBytes(width: width, height: height,
                                                      isLasso: lassoMask != nil)
-        guard CompositorBudget.hasHeadroom(for: needed) else {
-            return .noHeadroom(needed: needed,
-                               available: CompositorBudget.availableMemoryOverrideBytes ?? os_proc_available_memory())
+        // Admitted by the one budget (SCHEDULER.md rule 5) and held for the session's life — a fill is
+        // an R1 answer, so a refusal is said at once, never waited out.
+        guard let grant = MemoryBudget.shared.admit(needed, lane: .answer) else {
+            return .noHeadroom(needed: needed, available: MemoryBudget.shared.freeBytes)
         }
         guard width > 0, height > 0, width <= 16_383, height <= 16_383,
               referenceRGBA.count >= width * height * 4,
@@ -192,6 +193,7 @@ final class MetalFillEngine {
                                              gapWidthLimit: gapWidthLimit) else {
             return .unavailable(needed: needed)
         }
+        session.memoryGrant = grant
         return .ready(session)
     }
 
@@ -302,6 +304,9 @@ final class MetalFillEngine {
 /// the painted region as premultiplied RGBA bytes (transparent where unfilled), ready to composite
 /// onto the destination layer.
 nonisolated final class MetalFillSession {
+
+    /// The one budget's grant for this session's buffers, given back when the session goes.
+    fileprivate var memoryGrant: MemoryBudget.Grant?
     private let engine: MetalFillEngine
     let width: Int
     let height: Int
@@ -328,7 +333,7 @@ nonisolated final class MetalFillSession {
         let bytes = reference.retainedBytes
         guard reference.width == width, reference.height == height,
               bytes <= MetalFillEngine.fillBudgetBytes - allocatedBytes,
-              CompositorBudget.hasHeadroom(for: bytes) else { return }
+              MemoryBudget.shared.makeRoom(for: bytes) else { return }
         vectorSupport = .waiting(reference)
     }
 
@@ -350,7 +355,7 @@ nonisolated final class MetalFillSession {
         // A completed packet already owns its CPU rows. The native lazy constructor still
         // needs its construction allowance; prepared rows only need the actual upload below.
         if reference.preparedPacket == nil,
-           !CompositorBudget.hasHeadroom(for: available + cutReserve) { return }
+           !MemoryBudget.shared.makeRoom(for: available + cutReserve) { return }
         do throws(VectorMendSupport.Failure) {
             let packet: VectorMendSupport.Packet
             if let prepared = reference.preparedPacket { packet = prepared }
@@ -363,7 +368,7 @@ nonisolated final class MetalFillSession {
                                max(4, UndoBudget.payloadBytes(count: packet.canonicalCoverage.count,
                                                             stride: MemoryLayout<VectorMendSupport.Span>.stride))]
                 .reduce(0, UndoBudget.addingCost)
-            guard uploadBytes <= available, CompositorBudget.hasHeadroom(for: uploadBytes) else { return }
+            guard uploadBytes <= available, MemoryBudget.shared.makeRoom(for: uploadBytes) else { return }
             func upload<T>(_ rows: [T]) -> MTLBuffer? {
                 let (length, overflow) = rows.count.multipliedReportingOverflow(by: MemoryLayout<T>.stride)
                 guard !overflow else { return nil }
@@ -856,7 +861,7 @@ nonisolated final class MetalFillSession {
             let outer = 2 * structure.passes.count * MemoryLayout<[UInt8]>.stride + 48
             let cutPrice = structure.passes.reduce(outer) { $0 + 2 * $1.basins.basinCount + 48 }
             if supportBuffers != nil && (cutPrice > MetalFillEngine.fillBudgetBytes - allocatedBytes
-                || !CompositorBudget.hasHeadroom(for: cutPrice)) {
+                || !MemoryBudget.shared.makeRoom(for: cutPrice)) {
                 vectorSupport = .unavailable
                 completedMendCut = nil
             }

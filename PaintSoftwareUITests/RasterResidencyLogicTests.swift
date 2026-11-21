@@ -26,7 +26,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testTransientSourcesRetireTheirEvictionRegistrationsWithoutWaitingForPressure() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, makeRoom: { _ in true })
         weak var retired: RasterSource?
         for _ in 0..<256 {
             try autoreleasepool {
@@ -47,7 +47,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testTransientTexturesRetireTheirEvictionRegistrationsWithoutWaitingForPressure() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, makeRoom: { _ in true })
         weak var retired: RasterLayerTexture?
         for _ in 0..<256 {
             try autoreleasepool {
@@ -72,7 +72,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testRetiringASourceRegistrationKeepsAnEscapedProviderCharged() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, makeRoom: { _ in true })
         weak var retired: RasterSource?
         var escaped: CGImage?
         try autoreleasepool {
@@ -94,7 +94,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testALiveColdSourceKeepsItsRegistrationForTheNextEviction() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, makeRoom: { _ in true })
         var live: RasterSource?
         try autoreleasepool {
             let surface = try surface(owner)
@@ -123,7 +123,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testExtractedCGImageKeepsItsPixelsChargedAfterSurfaceAndUIImageAreReleased() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, makeRoom: { _ in true })
         var escaped: CGImage?
         try autoreleasepool {
             let surface = try surface(owner)
@@ -140,7 +140,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testRenderingModeAliasKeepsItsPixelsChargedAfterTheOriginalWrapperIsReleased() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, makeRoom: { _ in true })
         var alias: UIImage?
         try autoreleasepool {
             let surface = try surface(owner)
@@ -154,7 +154,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testEditingAnEscapedVersionCopiesBeforeWritingAndChargesBothExactPictures() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 4, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 4, makeRoom: { _ in true })
         var current = try surface(owner)
         weak var oldWrapper: UIImage?
         try autoreleasepool {
@@ -182,7 +182,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testAnUnresolvedImmutableSourcePinsItsOldPixelsBeforeEditingBegins() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 4, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 4, makeRoom: { _ in true })
         var current = try surface(owner)
         var frozen: RasterSource? = RasterSource.snapshot(of: current,
             size: CGSize(width: width, height: height))
@@ -203,7 +203,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testRefusedCopyPreservesThePreviousDrawnPictureAndItsOnlyAllocation() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, makeRoom: { _ in true })
         let current = try surface(owner)
         let old = try current.image().get()
         XCTAssertThrowsError(try current.preparedForWrite().get()) { error in
@@ -230,7 +230,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testAdmissionEvictsTheLeastRecentPictureAndKeepsColdRegistrationsEligible() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 4, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 4, makeRoom: { _ in true })
         let first = CachedPicture()
         let second = CachedPicture()
         try autoreleasepool {
@@ -267,7 +267,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testAdmissionDefersACallbackRegistrationUntilTheNextRequest() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, makeRoom: { _ in true })
         var held: RasterResidency.Allocation? = try owner.admitWorking(owner.budgetBytes).get()
         var visits: [String] = []
         let later = CachedPicture(onRelease: { visits.append("later"); held = nil; return true })
@@ -293,7 +293,7 @@ final class RasterResidencyLogicTests: XCTestCase {
 
     func testAdmissionSkipsCandidatesTouchedOrReregisteredDuringItsPass() throws {
         for reregister in [false, true] {
-            let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+            let owner = RasterResidency(budgetBytes: pictureBytes * 3, makeRoom: { _ in true })
             var held: RasterResidency.Allocation? = try owner.admitWorking(owner.budgetBytes).get()
             var visits: [String] = []
             let recent = CachedPicture(onRelease: { visits.append("recent"); held = nil; return true })
@@ -322,7 +322,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testRefusedMutationPreservesPixelsAndDefersNewRegistrationsUntilRetry() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, makeRoom: { _ in true })
         let current = try surface(owner)
         current.allocation.markDurable()
         var held: RasterResidency.Allocation? = try owner.admitWorking(pictureBytes).get()
@@ -360,7 +360,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testBusyAndColdCandidatesAreTriedOncePerPassAndRemainRegistered() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes, makeRoom: { _ in true })
         let held = try owner.admitWorking(pictureBytes).get()
         var visits: [Int] = []
         let cold = (0..<64).map { index in
@@ -380,7 +380,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testEvictingAWrapperCannotPretendAnEscapedCGImageGaveItsBytesBack() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, makeRoom: { _ in true })
         var escaped: CGImage?
         var cached: CachedPicture!
         try autoreleasepool {
@@ -403,7 +403,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testHeadroomRefusalAndOverflowNeverAdmitAnAllocation() {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in false })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, makeRoom: { _ in false })
         XCTAssertThrowsError(try RasterSurface.allocate(width: width, height: height, using: owner).get()) { error in
             XCTAssertEqual(error as? RasterResidency.Failure, .allocationRefused)
         }
@@ -415,7 +415,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testDirtyPicturesKeepOneCheckpointWorkspaceBeforeTheyCanFillTheBudget() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 5, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 5, makeRoom: { _ in true })
         let pictures = try (0..<3).map { _ in try surface(owner) }
         XCTAssertEqual(owner.usage.pixelBufferCount, 3)
         XCTAssertEqual(owner.usage.reservedCheckpointBytes, pictureBytes * 2,
@@ -437,7 +437,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testWritingACheckpointedBufferMustReadmitItsWorkspaceBeforeChangingPixels() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 3, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 3, makeRoom: { _ in true })
         var current = try surface(owner)
         current.allocation.markDurable()
         XCTAssertEqual(owner.usage.reservedCheckpointBytes, 0)
@@ -460,7 +460,7 @@ final class RasterResidencyLogicTests: XCTestCase {
             rect: CGRect(x: 0, y: 0, width: width, height: height), size: CGSize(width: width, height: height))
         let bytes = try XCTUnwrap(red.pngData())
         try bytes.write(to: original)
-        let owner = RasterResidency(budgetBytes: pictureBytes * 8, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 8, makeRoom: { _ in true })
         let source = RasterSource.backed(by: try ProjectStore.RasterBacking.protect(original, using: owner).get(),
                                          using: owner)
         XCTAssertEqual(owner.usage.allocations, 0, "Protecting a PNG must not decode an editable bitmap")
@@ -485,7 +485,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("raster-checkpoint-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let owner = RasterResidency(budgetBytes: pictureBytes * 4, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 4, makeRoom: { _ in true })
         var source: RasterSource!
         try autoreleasepool { source = RasterSource.snapshot(of: try surface(owner), size: CGSize(width: width, height: height)) }
         XCTAssertEqual(owner.usage.pixelBufferCount, 1)
@@ -512,7 +512,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         let sentinel = Data([1, 3, 5, 7])
         try sentinel.write(to: blocked)
         let storage = ProjectStore.RasterStorage(url: blocked)
-        let owner = RasterResidency(budgetBytes: pictureBytes * 4, storage: storage, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 4, storage: storage, makeRoom: { _ in true })
         var source: RasterSource!
         try autoreleasepool { source = RasterSource.snapshot(of: try surface(owner), size: CGSize(width: width, height: height)) }
         let destination = root.appendingPathComponent("must-not-appear.png")
@@ -531,7 +531,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("raster-blank-proof-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let owner = RasterResidency(budgetBytes: pictureBytes * 8, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 8, makeRoom: { _ in true })
         let size = CGSize(width: width, height: height)
         let blankURL = root.appendingPathComponent("blank.png")
         try XCTUnwrap(PixelOps.transparentImage(size: size).pngData()).write(to: blankURL)
@@ -558,7 +558,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testPinnedBlankProofIsAdmittedOnceAndCannotCrossIntoANewPaintedVersion() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 8, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 8, makeRoom: { _ in true })
         let size = CGSize(width: width, height: height)
         var current = try RasterSurface.allocate(width: width, height: height, using: owner).get()
         let blank = RasterSource.snapshot(of: current, size: size)
@@ -739,7 +739,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         let side = 4096
         let bytes = side * side * 4
         let budget = CompositorBudget.textureBudgetBytes(physicalMemory: 3 * 1024 * 1024 * 1024) * 2
-        let owner = RasterResidency(budgetBytes: budget, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: budget, makeRoom: { _ in true })
         var current = try RasterSurface.allocate(width: side, height: side, using: owner).get()
         try current.mutate { context in
             context.setFillColor(UIColor.red.cgColor)
@@ -763,7 +763,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     }
 
     func testOwnedEditDrawingKeepsAsymmetricRowsThroughCropAndFlip() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 12, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 12, makeRoom: { _ in true })
         let input = try RasterSource.render(size: CGSize(width: width, height: height), using: owner) { context in
             context.setFillColor(UIColor.red.cgColor)
             context.fill(CGRect(x: 0, y: 0, width: 2, height: 1))
@@ -798,7 +798,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         }
         let liveURL = root.appendingPathComponent("PaintRasterSources-\(UUID().uuidString)")
         let storage = ProjectStore.RasterStorage(url: liveURL)
-        let owner = RasterResidency(budgetBytes: pictureBytes * 6, storage: storage, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 6, storage: storage, makeRoom: { _ in true })
         let original = root.appendingPathComponent("original.png")
         let originalBytes = try XCTUnwrap(CanvasFixture.solidImage(.red,
             rect: CGRect(x: 0, y: 0, width: width, height: height), size: CGSize(width: width, height: height)).pngData())
@@ -820,7 +820,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     @MainActor
     func testRasterUndoRefusalPreservesBothStacksPixelsAndCountsAndRepeatedLandingsReleaseTheirPreparedVersions() throws {
         var allowed = true
-        let owner = RasterResidency(budgetBytes: pictureBytes * 6, hasHeadroom: { _ in allowed })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 6, makeRoom: { _ in allowed })
         let before = RasterSource.snapshot(of: try surface(owner), size: CGSize(width: width, height: height))
         let after = RasterSource.snapshot(of: try surface(owner, color: .blue), size: CGSize(width: width, height: height))
         let raster = RasterLayerTexture(size: before.size, source: after, strokeCount: 4)
@@ -888,7 +888,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         var outputs = 0
         let destination = CGSize(width: 32, height: 16)
         let outputBytes = 32 * 16 * 4
-        let owner = RasterResidency(budgetBytes: outputBytes * 6, hasHeadroom: { bytes in
+        let owner = RasterResidency(budgetBytes: outputBytes * 6, makeRoom: { bytes in
             if bytes == outputBytes { outputs += 1; return outputs < 3 }
             return true
         })
@@ -935,7 +935,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("raster-thousand-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let owner = RasterResidency(budgetBytes: pictureBytes * 40, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 40, makeRoom: { _ in true })
         let size = CGSize(width: width, height: height)
         let png = root.appendingPathComponent("source.png")
         try XCTUnwrap(CanvasFixture.solidImage(.red, rect: CGRect(origin: .zero, size: size), size: size).pngData()).write(to: png)
@@ -1012,7 +1012,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         let png = try XCTUnwrap(CanvasFixture.solidImage(.red,
             rect: CGRect(origin: .zero, size: size), size: size).pngData())
         try png.write(to: original)
-        let authoredOwner = RasterResidency(budgetBytes: pictureBytes * 24, hasHeadroom: { _ in true })
+        let authoredOwner = RasterResidency(budgetBytes: pictureBytes * 24, makeRoom: { _ in true })
         let protected = try ProjectStore.RasterBacking.protect(original, using: authoredOwner).get()
         let source = RasterSource.backed(by: protected, using: authoredOwner)
         let authored = CanvasFixture.manager()
@@ -1030,7 +1030,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         XCTAssertEqual(ProjectStore.lastSaveProfile?.pngsReused, celCount * 2)
         try FileManager.default.removeItem(at: original)
 
-        let owner = RasterResidency(budgetBytes: pictureBytes * 24, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 24, makeRoom: { _ in true })
         let loaded = await ProjectStore.loadInBackground(from: url, residency: owner)
         let opened = try XCTUnwrap(loaded)
         defer { opened.closeFrameBaker(); authored.closeFrameBaker() }
@@ -1090,7 +1090,7 @@ final class RasterResidencyLogicTests: XCTestCase {
             try? FileManager.default.removeItem(at: root)
         }
         let size = CGSize(width: width, height: height)
-        let owner = RasterResidency(budgetBytes: pictureBytes * 12, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 12, makeRoom: { _ in true })
         let manager = CanvasFixture.manager()
         manager.projectName = "Checkpoint refusal"
         manager.canvasSize = size
@@ -1108,7 +1108,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         let blocker = root.appendingPathComponent("not-a-source-directory")
         try Data([1, 2, 3]).write(to: blocker)
         let refusedOwner = RasterResidency(budgetBytes: pictureBytes * 12,
-            storage: ProjectStore.RasterStorage(url: blocker), hasHeadroom: { _ in true })
+            storage: ProjectStore.RasterStorage(url: blocker), makeRoom: { _ in true })
         let red = RasterSource.snapshot(of: try surface(refusedOwner), size: size)
         manager.layers[0].cels[0].raster = RasterLayerTexture(size: size, source: red, strokeCount: 4)
         let identity = CelContentIdentity(manager.layers[0].cels[0])
@@ -1143,7 +1143,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         var counting = false
         var outputs = 0
         var refuseThird = true
-        let owner = RasterResidency(budgetBytes: bytes * 12, hasHeadroom: { requested in
+        let owner = RasterResidency(budgetBytes: bytes * 12, makeRoom: { requested in
             if counting, requested == bytes {
                 outputs += 1
                 if refuseThird, outputs == 3 { return false }
@@ -1358,7 +1358,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         let size = CGSize(width: 64, height: 64)
         let bytes = 64 * 64 * 4
         var refusing = false
-        let owner = RasterResidency(budgetBytes: bytes * 32, hasHeadroom: { _ in !refusing })
+        let owner = RasterResidency(budgetBytes: bytes * 32, makeRoom: { _ in !refusing })
         let source = try RasterSource.render(size: size, using: owner) { context in
             context.setFillColor(UIColor.red.cgColor)
             context.fill(CGRect(x: 20, y: 18, width: 9, height: 12))
@@ -1448,7 +1448,7 @@ final class RasterResidencyLogicTests: XCTestCase {
     @MainActor
     func testLiveMaskAdmissionUsesTheSameStagedFillAsTheNewStrokeWithoutLandingItEarly() throws {
         let size = CGSize(width: 64, height: 64)
-        let owner = RasterResidency(budgetBytes: 64 * 64 * 4 * 16, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: 64 * 64 * 4 * 16, makeRoom: { _ in true })
         let source = try RasterSource.render(size: size, using: owner) { context in
             context.setFillColor(UIColor.red.cgColor)
             context.fill(CGRect(x: 0, y: 0, width: 32, height: 64))
@@ -1497,7 +1497,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         let budget = CompositorBudget.textureBudgetBytes(physicalMemory: 3 * 1024 * 1024 * 1024) * 2
         for erasing in [false, true] {
             try autoreleasepool {
-                let owner = RasterResidency(budgetBytes: budget, hasHeadroom: { _ in true })
+                let owner = RasterResidency(budgetBytes: budget, makeRoom: { _ in true })
                 let red = try RasterSource.render(size: size, using: owner) { context in
                     context.setFillColor(UIColor.red.cgColor)
                     context.fill(CGRect(origin: .zero, size: size))
@@ -1541,7 +1541,7 @@ final class RasterResidencyLogicTests: XCTestCase {
             let size = CGSize(width: 4096, height: 4096)
             let bytes = 4096 * 4096 * 4
             let budget = CompositorBudget.textureBudgetBytes(physicalMemory: 3 * 1024 * 1024 * 1024) * 2
-            let owner = RasterResidency(budgetBytes: budget, hasHeadroom: { _ in true })
+            let owner = RasterResidency(budgetBytes: budget, makeRoom: { _ in true })
             let red = try RasterSource.render(size: size, using: owner) { context in
                 context.setFillColor(UIColor.red.cgColor)
                 context.fill(CGRect(x: 20, y: 20, width: 12, height: 12))
@@ -1572,7 +1572,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         try autoreleasepool {
             let size = CGSize(width: 4096, height: 4096)
             let budget = CompositorBudget.textureBudgetBytes(physicalMemory: 3 * 1024 * 1024 * 1024) * 2
-            let owner = RasterResidency(budgetBytes: budget, hasHeadroom: { _ in true })
+            let owner = RasterResidency(budgetBytes: budget, makeRoom: { _ in true })
             let red = try RasterSource.render(size: size, using: owner) { context in
                 context.setFillColor(UIColor.red.cgColor)
                 context.fill(CGRect(x: 20, y: 18, width: 9, height: 12))
@@ -1608,7 +1608,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         var allowed = true
-        let owner = RasterResidency(budgetBytes: pictureBytes * 24, hasHeadroom: { _ in allowed })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 24, makeRoom: { _ in allowed })
         let size = CGSize(width: width, height: height)
         func backed(_ color: UIColor, name: String) throws -> RasterSource {
             let url = root.appendingPathComponent(name + ".png")
@@ -1835,7 +1835,7 @@ extension RasterResidencyLogicTests {
         for family in 0..<8 {
             for orientation in orientations {
                 for scale in [CGFloat(1), 2] {
-                    let owner = RasterResidency(budgetBytes: 4096, hasHeadroom: { _ in true })
+                    let owner = RasterResidency(budgetBytes: 4096, makeRoom: { _ in true })
                     let original = NativeReleaseCount()
                     var source: RasterSource?, escaped: CGImage?
                     var fields: NativeImageFields?, samples = Data(), drawing = Data()
@@ -1926,7 +1926,7 @@ extension RasterResidencyLogicTests {
 extension RasterResidencyLogicTests {
     func testPlacedSourceWindowAndLogicalHistoryStayBoundedAfterEviction() throws {
         let extent = width * height * 4
-        let owner = RasterResidency(budgetBytes: extent * 5, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: extent * 5, makeRoom: { _ in true })
         let ring = DecodedFrameRing(byteBudget: extent)
         var versions: [RasterSource] = []
         for index in 0..<4 {
@@ -1966,7 +1966,7 @@ extension RasterResidencyLogicTests {
     }
 
     func testPlacedSourceHistoryTrimsLogicalVersionsAndDeletesOnlyTheirLastBackingReferences() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 5, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 5, makeRoom: { _ in true })
         var urls: [URL] = []
         func version(_ colour: UIColor) throws -> RasterSource {
             let pixels = try surface(owner, color: colour)
@@ -2017,7 +2017,7 @@ extension RasterResidencyLogicTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let blocked = directory.appendingPathComponent("blocked")
         try Data([9]).write(to: blocked)
-        let owner = RasterResidency(budgetBytes: 4096, storage: ProjectStore.RasterStorage(url: blocked), hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: 4096, storage: ProjectStore.RasterStorage(url: blocked), makeRoom: { _ in true })
         let released = NativeReleaseCount()
         let fixture = try nativeFixture(2, releases: released)
         let source = try RasterSource.capturePlaced(UIImage(cgImage: fixture.image), using: owner).get()
@@ -2082,7 +2082,7 @@ extension RasterResidencyLogicTests {
     }
 
     func testNativeProviderExtractionIsPreAdmittedAndOversizedProvidersAreHonestlyChargedOrRefused() throws {
-        let owner = RasterResidency(budgetBytes: pictureBytes * 10, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: pictureBytes * 10, makeRoom: { _ in true })
         let (image, probe) = try readProbe(owner, providerBytes: pictureBytes * 2)
         try autoreleasepool {
             let source = try RasterSource.capturePlaced(image, using: owner).get()
@@ -2092,7 +2092,7 @@ extension RasterResidencyLogicTests {
             XCTAssertEqual(owner.usage.pixelBytes, pictureBytes * 2, "Returned provider bytes, including excess ownership, are actually priced")
         }
         XCTAssertEqual(owner.usage.chargedBytes, 0)
-        let refused = RasterResidency(budgetBytes: pictureBytes * 2 - 1, hasHeadroom: { _ in true })
+        let refused = RasterResidency(budgetBytes: pictureBytes * 2 - 1, makeRoom: { _ in true })
         let (unread, refusedProbe) = try readProbe(refused, providerBytes: pictureBytes)
         XCTAssertThrowsError(try RasterSource.capturePlaced(unread, using: refused).get())
         XCTAssertTrue(refusedProbe.observedWorking.isEmpty, "Insufficient header workspace refuses before forcing opaque data")
@@ -2100,7 +2100,7 @@ extension RasterResidencyLogicTests {
     }
 
     func testCommonPNGAlphaProofAndCroppedNativePictureUseTheirActualLayouts() throws {
-        let owner = RasterResidency(budgetBytes: 4096, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: 4096, makeRoom: { _ in true })
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("native-layout-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -2143,7 +2143,7 @@ extension RasterResidencyLogicTests {
 extension RasterResidencyLogicTests {
     func testPlacedImageEditMeasurementUsesColdMetadataWhileActualDrawRefusesTheWholePicture() throws {
         var allowPixels = true
-        let owner = RasterResidency(budgetBytes: 4096, hasHeadroom: { _ in allowPixels })
+        let owner = RasterResidency(budgetBytes: 4096, makeRoom: { _ in allowPixels })
         let fixture = try nativeFixture(1, releases: NativeReleaseCount())
         let source = try RasterSource.capturePlaced(UIImage(cgImage: fixture.image), using: owner).get()
         try autoreleasepool {
@@ -2208,7 +2208,7 @@ extension RasterResidencyLogicTests {
             XCTUnwrap(fixture.image.cgImage), width: 3, height: 2))
         XCTAssertTrue(stride(from: 3, to: drawn.count, by: 4).allSatisfy { drawn[$0] == 0 },
                       "PREMISE: the actual explicit monochrome-alpha fixture draws fully transparent")
-        let owner = RasterResidency(budgetBytes: 4096, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: 4096, makeRoom: { _ in true })
         let source = try RasterSource.capturePlaced(fixture.image, using: owner).get()
         let before = owner.usage
         var scans = 0
@@ -2238,7 +2238,7 @@ extension RasterResidencyLogicTests {
         let painted = stride(from: 3, to: drawn.count, by: 4).filter { drawn[$0] != 0 }
         XCTAssertEqual(painted.count, 1, "PREMISE: the actual native fixture draws exactly one painted sample")
         XCTAssertEqual(drawn[(1 * 3 + 1) * 4 + 3], 255)
-        let owner = RasterResidency(budgetBytes: 4096, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: 4096, makeRoom: { _ in true })
         let source = try RasterSource.capturePlaced(fixture.image, using: owner).get()
         var scans = 0
         XCTAssertFalse(try source.prepareTransparencyProof { count in
@@ -2290,7 +2290,7 @@ extension RasterResidencyLogicTests {
             }
         }
         XCTAssertTrue(LZ4Block.compressesWithinCheckpoint(count), "PREMISE: both payloads enter the real compression attempt")
-        let owner = RasterResidency(budgetBytes: max(count * 5, count * 2 + decodingScratch), hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: max(count * 5, count * 2 + decodingScratch), makeRoom: { _ in true })
         let result = try autoreleasepool {
             let provider = try NativeFixtureBytes(bytes, releases: NativeReleaseCount()).provider()
             let cg = try XCTUnwrap(CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
@@ -2362,7 +2362,7 @@ extension RasterResidencyLogicTests {
             let exactBudget = fixture.bytes.count + expectedWorkspace
             var requests: [(bytes: Int, working: Int, pixels: Int)] = []
             weak var observed: RasterResidency?
-            let tight = RasterResidency(budgetBytes: exactBudget - 1, hasHeadroom: { count in
+            let tight = RasterResidency(budgetBytes: exactBudget - 1, makeRoom: { count in
                 let usage = observed?.usage
                 requests.append((count, usage?.workingBytes ?? -1, usage?.pixelBytes ?? -1))
                 return true
@@ -2380,7 +2380,7 @@ extension RasterResidencyLogicTests {
             XCTAssertEqual(tight.usage.chargedBytes, 0, "A refused read releases its preadmitted workspace")
             XCTAssertEqual(tight.usage.reservedCheckpointBytes, 0)
             XCTAssertEqual(tight.usage.highWaterBytes, expectedWorkspace)
-            let exact = RasterResidency(budgetBytes: exactBudget, hasHeadroom: { _ in true })
+            let exact = RasterResidency(budgetBytes: exactBudget, makeRoom: { _ in true })
             let admitted = RasterSource.backed(by: fixture.backing, using: exact)
             try autoreleasepool {
                 let image = try admitted.resolveImage().get()
@@ -2423,7 +2423,7 @@ extension RasterResidencyLogicTests {
 
     func testThumbnailOfANativeBackedCelLeavesNothingCanvasSizedResident() throws {
         let canvas = 512 * 256 * 4
-        let owner = RasterResidency(budgetBytes: canvas * 8, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: canvas * 8, makeRoom: { _ in true })
         let (texture, size) = try thumbnailFixture(owner)
         XCTAssertTrue(ProjectStore.serializingPackageMutation { texture.releaseResidentPixels() })
         XCTAssertEqual(owner.usage.pixelBytes, 0, "PREMISE: the cel is now only a native file")
@@ -2440,7 +2440,7 @@ extension RasterResidencyLogicTests {
         let size = CGSize(width: 512, height: 256)
         let url = root.appendingPathComponent("cel.png")
         try XCTUnwrap(CanvasFixture.solidImage(.red, rect: CGRect(origin: .zero, size: size), size: size).pngData()).write(to: url)
-        let owner = RasterResidency(budgetBytes: 512 * 256 * 4 * 8, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: 512 * 256 * 4 * 8, makeRoom: { _ in true })
         let source = RasterSource.backed(by: try ProjectStore.RasterBacking.protect(url, using: owner).get(), using: owner)
         // Unproven blankness: one transient decode, because that is what proves (and heals) a legacy
         // package's transparent PNG. It is not kept.

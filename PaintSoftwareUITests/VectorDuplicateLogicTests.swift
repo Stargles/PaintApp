@@ -233,7 +233,7 @@ final class VectorDuplicateLogicTests: XCTestCase {
             [255, 0, 0, 255, 0, 0, 255, 255, 0, 255, 0, 255, 255, 255, 0, 255, 0, 255, 255, 255, 255, 0, 255, 255],
             width: 3, height: 2))
         var admitsEncoding = true
-        let pictureOwner = RasterResidency(budgetBytes: 1024 * 1024, hasHeadroom: { _ in admitsEncoding })
+        let pictureOwner = RasterResidency(budgetBytes: 1024 * 1024, makeRoom: { _ in admitsEncoding })
         var picture = VectorImageElement(source: try CanvasFixture.placedSource(
             UIImage(cgImage: raw, scale: 2, orientation: .right), using: pictureOwner),
             transform: LayerTransform(position: CGPoint(x: 42, y: 40), scale: 10, rotation: 0))
@@ -433,7 +433,7 @@ final class VectorDuplicateLogicTests: XCTestCase {
             let resourcePayload = SelectionClipboard(version: SelectionClipboard.currentVersion, frameCount: 1,
                 brushes: BrushTable(), drawing: pictureData,
                 images: Dictionary(uniqueKeysWithValues: refs.map { ($0.fileName, png) }), textures: [:])
-            let tinyOwner = RasterResidency(budgetBytes: 1, hasHeadroom: { _ in true })
+            let tinyOwner = RasterResidency(budgetBytes: 1, makeRoom: { _ in true })
             XCTAssertThrowsError(try SelectionClipboard.prepare(JSONEncoder().encode(resourcePayload), using: tinyOwner)) { error in
                 XCTAssertTrue(error is SelectionClipboard.Failure,
                               "decoded-size admission refuses the complete resource set before any native pixel admission")

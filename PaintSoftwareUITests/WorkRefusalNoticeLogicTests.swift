@@ -8,12 +8,12 @@ import UIKit
 /// as a tap that did nothing. The refusal now raises `MemoryPressure.Level.workRefused`, which
 /// `CanvasManager` turns into `CanvasNotice.Kind.workNeedsMoreMemory`.
 ///
-/// The seam is `CompositorBudget.availableMemoryOverrideBytes` (the valve's reading, imposed): on the
+/// The seam is `MemoryBudget.shared.availableOverrideBytes` (the valve's reading, imposed): on the
 /// simulator the real reading is 0 and the valve is inert.
 final class WorkRefusalNoticeLogicTests: XCTestCase {
 
     override func tearDown() {
-        CompositorBudget.availableMemoryOverrideBytes = nil
+        MemoryBudget.shared.availableOverrideBytes = nil
         super.tearDown()
     }
 
@@ -44,7 +44,7 @@ final class WorkRefusalNoticeLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 1)   // registers the notice's responder
         let image = solid(64)
         let plan = try plan(side: 64)
-        CompositorBudget.availableMemoryOverrideBytes = 1
+        MemoryBudget.shared.availableOverrideBytes = 1
 
         manager.notice = nil
         XCTAssertNil(ImageWarp.rasterImage(plan: plan, source: { image.cropping(to: $0) }),
@@ -62,7 +62,7 @@ final class WorkRefusalNoticeLogicTests: XCTestCase {
         let manager = CanvasFixture.manager(layerCount: 1)
         let image = solid(64)
         let plan = try plan(side: 64)
-        CompositorBudget.availableMemoryOverrideBytes = Int.max / 4
+        MemoryBudget.shared.availableOverrideBytes = Int.max / 4
 
         manager.notice = nil
         _ = ImageWarp.rasterImage(plan: plan, source: { image.cropping(to: $0) })
@@ -101,7 +101,7 @@ final class WorkRefusalNoticeLogicTests: XCTestCase {
         let pose = PoseMap(CGAffineTransform(translationX: 7, y: 3).rotated(by: 0.2))
         XCTAssertNotNil(PixelOps.rasterize(cel: cel, canvasSize: size, memoize: false, pose: pose),
                         "control: with room the posed picture exists")
-        CompositorBudget.availableMemoryOverrideBytes = 1
+        MemoryBudget.shared.availableOverrideBytes = 1
         let undoBefore = manager.history.undoStack.count
 
         manager.notice = nil

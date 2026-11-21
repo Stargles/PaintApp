@@ -310,7 +310,7 @@ struct SandwichRecipe {
         let inkWorkingBytes = CompositorBudget.textureBytes(for: cel.size) * 3
         let workingBytes = outputBytes + inkWorkingBytes
         guard outputBytes > 0, workingBytes <= budgetBytes,
-              CompositorBudget.hasHeadroom(for: workingBytes) else { return nil }
+              MemoryBudget.shared.makeRoom(for: workingBytes) else { return nil }
         guard let backing = PixelOps.rasterize(.backing, of: cel, canvasSize: canvasSize, quality: quality),
               let ink = PixelOps.rasterize(.ink, of: cel, canvasSize: canvasSize, quality: quality),
               let images = compositeBands(budgetBytes: budgetBytes - outputBytes, skipping: 1) else { return nil }

@@ -141,6 +141,13 @@ nonisolated final class DecodedFrameRing {
 
     private var frames: [String: DecodedFrame] = [:]
 
+    /// Each resident frame's charge in the one budget (`MemoryBudget`), which may evict it.
+    private var charges: [String: MemoryBudget.Entry] = [:]
+
+    /// The name and priority this ring's frames carry in the one budget.
+    private let budgetName: String
+    private let budgetPriority: MemoryBudget.Priority
+
     /// Digests least-recently-used first. An array rather than a heap or a linked list because the
     /// ring holds `byteBudget / frameBytes` entries — single digits to low tens at any realistic
     /// budget and frame size — so the O(n) touch is a handful of pointer moves and the alternative
@@ -154,8 +161,10 @@ nonisolated final class DecodedFrameRing {
     /// - Parameter byteBudget: the ceiling. Clamped at zero; a zero budget is a legal, working
     ///   ring that holds nothing, which is what a device under memory pressure should be able to
     ///   ask for without the caller needing a second code path.
-    init(byteBudget: Int) {
+    init(byteBudget: Int, budgetName: String = "DecodedFrameRing", priority: MemoryBudget.Priority = .current) {
         budget = max(byteBudget, 0)
+        self.budgetName = budgetName
+        budgetPriority = priority
     }
 
     /// The ceiling, in bytes. **Lowering it evicts immediately** rather than at the next insert:
@@ -168,9 +177,10 @@ nonisolated final class DecodedFrameRing {
         }
         set {
             lock.lock()
-            defer { lock.unlock() }
             budget = max(newValue, 0)
-            evictLocked()
+            let released = evictLocked()
+            lock.unlock()
+            released.forEach { $0.update(bytes: 0) }
         }
     }
 
@@ -204,8 +214,7 @@ nonisolated final class DecodedFrameRing {
     @discardableResult
     func insert(_ frame: DecodedFrame, for digest: String, keeping kept: Set<String> = []) -> Bool {
         lock.lock()
-        defer { lock.unlock() }
-        guard frame.byteCount <= budget else { return false }
+        guard frame.byteCount <= budget else { lock.unlock(); return false }
         let alreadyResident = frames[digest]?.byteCount ?? 0
         var shortfall = residentBytes - alreadyResident + frame.byteCount - budget
         var evicting: [String] = []
@@ -213,17 +222,33 @@ nonisolated final class DecodedFrameRing {
             evicting.append(candidate)
             shortfall -= frames[candidate]?.byteCount ?? 0
         }
-        guard shortfall <= 0 else { return false }
-        for candidate in evicting { removeLocked(candidate) }
-        removeLocked(digest)
+        guard shortfall <= 0 else { lock.unlock(); return false }
+        var released = evicting.compactMap { removeLocked($0) }
+        if let replaced = removeLocked(digest) { released.append(replaced) }
         frames[digest] = frame
         recency.append(digest)
         residentBytes += frame.byteCount
+        let owner = MemoryBudget.EntryRef()
+        let charge = MemoryBudget.shared.entry(budgetName, priority: budgetPriority) { [weak self] in
+            self?.evicted(digest, charge: owner.entry)
+        }
+        owner.entry = charge
+        charges[digest] = charge
+        lock.unlock()
+        released.forEach { $0.update(bytes: 0) }
+        charge.update(bytes: frame.byteCount)
+        MemoryBudget.shared.settle(keeping: charge)
         return true
     }
 
-    /// The frame for `digest`, marking it most recently used. Nil is the ordinary case, not an
-    /// error: RENDER §2.10 keeps the previous picture up.
+    /// The one budget took `digest`'s frame back to make room.
+    private func evicted(_ digest: String, charge: MemoryBudget.Entry?) {
+        lock.lock()
+        let released = charge != nil && charges[digest] === charge ? removeLocked(digest) : nil
+        lock.unlock()
+        released?.update(bytes: 0)
+    }
+
     func frame(for digest: String) -> DecodedFrame? {
         lock.lock()
         defer { lock.unlock() }
@@ -232,6 +257,7 @@ nonisolated final class DecodedFrameRing {
             recency.remove(at: index)
             recency.append(digest)
         }
+        charges[digest]?.touch()
         return frame
     }
 
@@ -246,23 +272,33 @@ nonisolated final class DecodedFrameRing {
     /// Drops everything. The document closing, or the store being dumped.
     func removeAll() {
         lock.lock()
-        defer { lock.unlock() }
+        let released = Array(charges.values)
         frames.removeAll()
+        charges.removeAll()
         recency.removeAll()
         residentBytes = 0
+        lock.unlock()
+        released.forEach { $0.update(bytes: 0) }
     }
 
     // MARK: - Under the lock
 
-    private func evictLocked() {
+    /// Returns the charges of what it evicted, to be released with the lock dropped.
+    private func evictLocked() -> [MemoryBudget.Entry] {
+        var released: [MemoryBudget.Entry] = []
         while residentBytes > budget, let oldest = recency.first {
-            removeLocked(oldest)
+            guard frames[oldest] != nil else { recency.removeFirst(); continue }
+            if let charge = removeLocked(oldest) { released.append(charge) }
         }
+        return released
     }
 
-    private func removeLocked(_ digest: String) {
-        guard let frame = frames.removeValue(forKey: digest) else { return }
+    /// Removes `digest` and returns its charge, to be released with the lock dropped.
+    @discardableResult
+    private func removeLocked(_ digest: String) -> MemoryBudget.Entry? {
+        guard let frame = frames.removeValue(forKey: digest) else { return nil }
         residentBytes -= frame.byteCount
         if let index = recency.firstIndex(of: digest) { recency.remove(at: index) }
+        return charges.removeValue(forKey: digest)
     }
 }

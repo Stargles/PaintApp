@@ -639,7 +639,7 @@ final class CompositorMetalEngine {
         let missingWalk = max(0, textureCounts.walk - (pools[size]?.reusableCount ?? 0))
         let missingIntermediates = max(0, textureCounts.intermediates - (effects?.residentIntermediateCount(at: size) ?? 0))
         let additionalBytes = (missingWalk + missingIntermediates + 1) * canvasBytes
-        guard CompositorBudget.hasHeadroom(for: additionalBytes) else {
+        guard MemoryBudget.shared.makeRoom(for: additionalBytes) else {
             lastAdmission = .noHeadroom(wantedBytes: wanted)
             // Give back what is held before declining. The CPU reference is about to composite this
             // same frame and will want a canvas-sized buffer or three of its own, and everything this

@@ -1869,7 +1869,7 @@ final class SelectionEditLogicTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("repeat-clipboard-refusal-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let owner = RasterResidency(budgetBytes: 64 * 64 * 4 * 8, hasHeadroom: { _ in true })
+        let owner = RasterResidency(budgetBytes: 64 * 64 * 4 * 8, makeRoom: { _ in true })
         let png = root.appendingPathComponent("owned-fixture.png")
         try XCTUnwrap(CanvasFixture.solidImage(.red, rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)).pngData()).write(to: png)
         let backing = try ProjectStore.RasterBacking.protect(png, using: owner).get()

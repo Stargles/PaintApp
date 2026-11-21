@@ -6,8 +6,12 @@ import UIKit
 /// Derived composites keep their existing compositor/cache budgets.
 final class RasterResidency {
     // Includes both source buffers and the workspace needed to checkpoint dirty versions.
-    static let shared = RasterResidency(budgetBytes: CompositorBudget.textureBudgetBytes(
-        physicalMemory: ProcessInfo.processInfo.physicalMemory) * 2)
+    /// **Half the one budget is the share source pixels may hold** (SCHEDULER.md rule 5,
+    /// `MemoryBudget`), and what they hold is charged there as one `.shown` entry: this owner already
+    /// evicts its own candidates least recently used first within its share, and its checkpoint
+    /// bookkeeping is what makes an eviction safe, so the one budget counts it and leaves the choice here.
+    static let shared = RasterResidency(budgetBytes: MemoryBudget.shared.totalBytes / 2,
+                                        charge: MemoryBudget.shared.entry("RasterResidency", priority: .shown) {})
 
     enum Failure: Error, Equatable {
         case invalidSize
@@ -61,7 +65,9 @@ final class RasterResidency {
 
     let budgetBytes: Int
     let storage: ProjectStore.RasterStorage
-    private let hasHeadroom: (Int) -> Bool
+    private let makeRoom: (Int) -> Bool
+    /// What this owner holds, in the one budget — `shared`'s only.
+    private let charge: MemoryBudget.Entry?
     private let lock = NSLock()
     private var pixelBytes = 0
     private var workingBytes = 0
@@ -75,10 +81,12 @@ final class RasterResidency {
     private var candidates: [UUID: Candidate] = [:]
 
     init(budgetBytes: Int, storage: ProjectStore.RasterStorage = ProjectStore.RasterStorage(),
-         hasHeadroom: @escaping (Int) -> Bool = CompositorBudget.hasHeadroom(for:)) {
+         makeRoom: @escaping (Int) -> Bool = { MemoryBudget.shared.makeRoom(for: $0) },
+         charge: MemoryBudget.Entry? = nil) {
+        self.charge = charge
         self.budgetBytes = max(0, budgetBytes)
         self.storage = storage
-        self.hasHeadroom = hasHeadroom
+        self.makeRoom = makeRoom
     }
 
     var usage: Usage {
@@ -132,7 +140,7 @@ final class RasterResidency {
         let required = LZ4Block.checkpointWorkingBytes(bytes)
         guard kind != .pixels || required != nil else { return .failure(.invalidSize) }
         let checkpointBytes = durable ? 0 : required ?? 0
-        guard hasHeadroom(bytes) else { return .failure(.allocationRefused) }
+        guard makeRoom(bytes) else { return .failure(.allocationRefused) }
         return withEvictionPass(excluding: excluding) {
             let dirtyNeed = max(dirtyAllocations.values.max() ?? 0, kind == .pixels ? checkpointBytes : 0)
             let fitsActualBytes = bytes <= budgetBytes - pixelBytes - workingBytes
@@ -148,6 +156,7 @@ final class RasterResidency {
                 case .checkpoint: workingBytes += bytes; checkpointWorkingBytes += bytes
                 }
                 highWaterBytes = max(highWaterBytes, pixelBytes + workingBytes)
+                charge?.update(bytes: pixelBytes + workingBytes)
                 return allocation
             }
             return nil
@@ -216,6 +225,7 @@ final class RasterResidency {
         case .checkpoint: workingBytes -= bytes; checkpointWorkingBytes -= bytes
         }
         precondition(pixelBytes >= 0 && workingBytes >= 0 && pixelBufferCount >= 0)
+        charge?.update(bytes: pixelBytes + workingBytes)
     }
 }
 

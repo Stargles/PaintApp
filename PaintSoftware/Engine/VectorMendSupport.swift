@@ -421,7 +421,7 @@ enum VectorMendSupport {
             try retain(1, stride: 32 + 16)
             // This seam precedes a container's reservation, never a pixel/visit or spare-slot
             // append. Zero-count headers allocate no payload; their later growth pays here.
-            guard count == 0 || CompositorBudget.hasHeadroom(for: bytes - before) else { throw .exceedsBudget }
+            guard count == 0 || MemoryBudget.shared.makeRoom(for: bytes - before) else { throw .exceedsBudget }
         }
         func checkCapacity<T>(_ array: [T], chargedCount: Int) throws(Failure) {
             try checkCapacity(array.capacity, stride: MemoryLayout<T>.stride,
@@ -458,7 +458,7 @@ enum VectorMendSupport {
             try meter.retain(input.stroke.samples.count, stride: 2 * MemoryLayout<VectorSample>.stride)
             try meter.retain(input.stroke.lattice?.samples.count ?? 0, stride: 2 * MemoryLayout<VectorSample>.stride)
             if input.stroke.restWalk == nil, input.stroke.placement != nil {
-                guard CompositorBudget.hasHeadroom(for: meter.bytes - sampleStart) else { throw .exceedsBudget }
+                guard MemoryBudget.shared.makeRoom(for: meter.bytes - sampleStart) else { throw .exceedsBudget }
             }
             let walk = VectorStrokeRenderWalk(input.stroke)
             if input.stroke.opacity <= 0 || walk.samples.isEmpty {
@@ -485,7 +485,7 @@ enum VectorMendSupport {
         let captureStart = meter.bytes
         try meter.retain(upperDabs, stride: 2 * MemoryLayout<Dab>.stride)
         // All collectors coexist; admit their forthcoming payload together, not once per dab.
-        guard CompositorBudget.hasHeadroom(for: meter.bytes - captureStart) else { throw .exceedsBudget }
+        guard MemoryBudget.shared.makeRoom(for: meter.bytes - captureStart) else { throw .exceedsBudget }
         var captured: [Captured] = []
         captured.reserveCapacity(inputs.count)
         for (input, recipe) in zip(inputs, recipes) {
@@ -974,7 +974,7 @@ enum VectorMendSupport {
         let rowStart = meter.bytes
         try meter.retain(rowCount, stride: MemoryLayout<Span>.stride * 2)
         try meter.retain(patchCount, stride: 2 * (MemoryLayout<Patch>.stride + MemoryLayout<Address>.stride))
-        guard CompositorBudget.hasHeadroom(for: meter.bytes - rowStart) else { throw .exceedsBudget }
+        guard MemoryBudget.shared.makeRoom(for: meter.bytes - rowStart) else { throw .exceedsBudget }
         var patches: [Patch] = [], spans: [Span] = [], addresses: [Address] = []
         patches.reserveCapacity(patchCount); spans.reserveCapacity(rowCount); addresses.reserveCapacity(patchCount)
         try meter.checkCapacity(patches, chargedCount: patchCount)

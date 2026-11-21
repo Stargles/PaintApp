@@ -168,9 +168,9 @@ final class RasterSamplingLogicTests: XCTestCase {
 
     func testBudgetAndHeadroomRefuseBeforeRequestingSourceOrPublishingPixels() {
         var reads = 0, pictures = 0
-        defer { CompositorBudget.availableMemoryOverrideBytes = nil }
+        defer { MemoryBudget.shared.availableOverrideBytes = nil }
         for lowHeadroom in [false, true] {
-            CompositorBudget.availableMemoryOverrideBytes = lowHeadroom ? 1 : nil
+            MemoryBudget.shared.availableOverrideBytes = lowHeadroom ? 1 : nil
             let result = ImageWarp.drawRaster(sourceSize: size, destination: CGRect(x: 0, y: 0, width: 1, height: 1),
                 inverseTexelMap: .scale(x: 96, y: 96), maximumWorkingBytes: lowHeadroom ? 1_000_000 : 12,
                 source: { _ in reads += 1; return nil }, consume: { _, _ in pictures += 1 })

@@ -235,7 +235,7 @@ final class VideoImportLogicTests: XCTestCase {
                     // admit the finish or floating Move before a picked file can be moved.
                     let size = CanvasFixture.canvasSize
                     let owner = RasterResidency(budgetBytes: 64 * 64 * 4 * 32,
-                                                hasHeadroom: { _ in allowsPixels })
+                                                makeRoom: { _ in allowsPixels })
                     let source = try RasterSource.render(size: size, using: owner) { context in
                         context.setFillColor(UIColor.red.cgColor)
                         context.fill(CGRect(x: 20, y: 18, width: 9, height: 12))
@@ -305,7 +305,7 @@ final class VideoImportLogicTests: XCTestCase {
             try Data("not a directory".utf8).write(to: staging)
             VideoImportStore.directoryOverride = staging
             let manager = CanvasFixture.manager(layerCount: 1)
-            let owner = RasterResidency(budgetBytes: 64 * 64 * 4 * 32, hasHeadroom: { _ in true })
+            let owner = RasterResidency(budgetBytes: 64 * 64 * 4 * 32, makeRoom: { _ in true })
             let source = try RasterSource.render(size: CanvasFixture.canvasSize, using: owner) { context in
                 context.setFillColor(UIColor.red.cgColor)
                 context.fill(CGRect(x: 20, y: 18, width: 9, height: 12))

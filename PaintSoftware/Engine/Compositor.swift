@@ -196,56 +196,9 @@ enum CompositorBudget {
         }
     }
 
-    /// The bytes `hasHeadroom(for:)` reads as available, imposed by a test, or nil for the process's
-    /// own `os_proc_available_memory()`. The seam `budgetOverrideBytes` is, for the valve: on the
-    /// simulator the real reading is 0 and the valve is inert, so nothing short of this can drive
-    /// the refusal a nearly-full iPad makes. Locked for the same reason, restored to nil the same way.
-    static var availableMemoryOverrideBytes: Int? {
-        get {
-            overrideLock.lock()
-            defer { overrideLock.unlock() }
-            return storedAvailableMemoryOverrideBytes
-        }
-        set {
-            overrideLock.lock()
-            defer { overrideLock.unlock() }
-            storedAvailableMemoryOverrideBytes = newValue
-        }
-    }
-
     private static let overrideLock = NSLock()
     private static var storedBudgetOverrideBytes: Int?
-    private static var storedAvailableMemoryOverrideBytes: Int?
 
-    /// Whether the process can afford `bytes` of new allocation *right now*.
-    ///
-    /// `os_proc_available_memory()` is how many bytes remain before this process hits the limit
-    /// jetsam kills it at. It returns 0 where the concept does not apply — the simulator, and any
-    /// non-app process, which includes the fast test tier — and 0 is read as "no information" rather
-    /// than as "no memory", so this is inert everywhere it cannot be trusted. That is deliberate: a
-    /// valve that closed on the simulator would make every logic-tier composite take the CPU path and
-    /// the parity tests would stop testing the GPU.
-    ///
-    /// **Twice `bytes`, because the textures are not the whole cost of the frame they belong to.**
-    /// A composite that allocates `bytes` of texture then reads a canvas-sized image back out of it,
-    /// hands that to the view layer, and Core Animation copies it again — none of which is freed
-    /// before the next composite starts. Asking for exactly what the textures cost would let a frame
-    /// begin that cannot finish.
-    static func hasHeadroom(for bytes: Int) -> Bool {
-        hasHeadroom(for: bytes, available: availableMemoryOverrideBytes ?? os_proc_available_memory())
-    }
-
-    /// The rule above **as a function of its argument, so a test can ask what a nearly-full iPad
-    /// would decide while running on a Mac** — `textureBudgetBytes(physicalMemory:)`'s split, one
-    /// valve along, and here for the same reason: the thing under test is a decision about a device
-    /// that no test host is, and on the simulator `os_proc_available_memory()` answers 0.
-    ///
-    /// `available == 0` is "no information" rather than "no memory", which is what keeps this inert
-    /// on the simulator and in the fast tier.
-    static func hasHeadroom(for bytes: Int, available: Int) -> Bool {
-        guard available > 0 else { return true }
-        return available > bytes * 2
-    }
 }
 
 /// Counts composites, and the size each was asked for — the instrument behind "how many of these did

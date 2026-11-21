@@ -1319,7 +1319,7 @@ extension CanvasManager {
         let listBytes = fillReferenceListBytes(references.count)
         guard reservedBytes >= 0, reservedBytes < MetalFillEngine.fillBudgetBytes,
               listBytes < MetalFillEngine.fillBudgetBytes - reservedBytes,
-              CompositorBudget.hasHeadroom(for: listBytes) else { return nil }
+              MemoryBudget.shared.makeRoom(for: listBytes) else { return nil }
         return drawFillReference(snapshots: freezeFillReferences(references), window: window,
                           excludingElement: excludingElement, isLasso: isLasso,
                           supportOverride: window.scale < 1 || !certifiesMend ? .unavailable(width: window.workingWidth,
@@ -1342,7 +1342,7 @@ extension CanvasManager {
         guard reservedBytes >= 0, reservedBytes < MetalFillEngine.fillBudgetBytes else { return nil }
         let budget = MetalFillEngine.fillBudgetBytes - reservedBytes
         let listBytes = fillReferenceListBytes(references.count)
-        guard listBytes < budget, CompositorBudget.hasHeadroom(for: listBytes) else { return nil }
+        guard listBytes < budget, MemoryBudget.shared.makeRoom(for: listBytes) else { return nil }
         let snapshots = freezeFillReferences(references)
         let size = original.canvasSize
         guard size.width > 0, size.height > 0, size.width <= 16_383, size.height <= 16_383,
@@ -1532,7 +1532,7 @@ extension CanvasManager {
                          acceptedOverride?.retainedBytes ?? 0].reduce(0, UndoBudget.addingCost)
             guard fixed < MetalFillEngine.fillBudgetBytes else { return nil }
             tileAllowance = min(tileAllowance, MetalFillEngine.fillBudgetBytes - fixed)
-            guard tileAllowance > 0, CompositorBudget.hasHeadroom(for: fixed) else { return nil }
+            guard tileAllowance > 0, MemoryBudget.shared.makeRoom(for: fixed) else { return nil }
         }
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: PixelOps.transparentFormat())
         var completed = true

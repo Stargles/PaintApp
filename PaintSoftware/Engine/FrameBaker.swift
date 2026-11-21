@@ -472,6 +472,10 @@ final class FrameBaker {
         let frames = framesByDigest
 
         return { [weak self, store] in
+          // Step 2 runs as R3 (SCHEDULER.md): every canvas-sized allocation in it — the leaves'
+          // renders, the composite's pictures, the decode for the ring — asks the one budget in the
+          // `.later` lane, which evicts only what is kept in case and otherwise waits for room.
+          MemoryBudget.withLane(.later) { () -> (() -> Void) in
             // Step 2, off the main actor. Every value read here was frozen at mint time.
             let key = FrameBakeKey(recipe: recipe, renderResolution: resolution)
             let cached = wantsRing ? store.read(key) : nil
@@ -511,6 +515,7 @@ final class FrameBaker {
                     self.finish(frame: frame, key: key, outcome: outcome)
                 }
             }
+          }
         }
     }
 

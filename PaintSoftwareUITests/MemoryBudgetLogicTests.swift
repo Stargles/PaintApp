@@ -1195,10 +1195,10 @@ final class MemoryBudgetLogicTests: XCTestCase {
         let engine = try XCTUnwrap(MetalFillEngine.shared, "no Metal device")
         let side = 256, count = side * side
         let reference = [UInt8](repeating: 0, count: count * 4)
-        defer { CompositorBudget.availableMemoryOverrideBytes = nil }
+        defer { MemoryBudget.shared.availableOverrideBytes = nil }
 
         let needed = MetalFillSession.predictedBytes(width: side, height: side, isLasso: false)
-        CompositorBudget.availableMemoryOverrideBytes = needed * 2
+        MemoryBudget.shared.availableOverrideBytes = needed * 2
         let refused = engine.makeSession(referenceRGBA: reference, width: side, height: side)
         XCTAssertTrue(refused.isRefusal, "a session the valve declines must not be made")
         guard case .noHeadroom(let asked, let available) = refused else {
@@ -1209,7 +1209,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
 
         // The control, and it is the half that matters: one byte more of room and the same fill is
         // made. Without it this would pass against an engine that refused every fill.
-        CompositorBudget.availableMemoryOverrideBytes = needed * 2 + 1
+        MemoryBudget.shared.availableOverrideBytes = needed * 2 + 1
         XCTAssertNotNil(engine.makeSession(referenceRGBA: reference, width: side, height: side).session,
                         "a fill the process can afford must still be made")
     }
@@ -1343,13 +1343,13 @@ final class MemoryBudgetLogicTests: XCTestCase {
     @MainActor
     func testARefusedFillRaisesANoticeInsteadOfDoingNothing() throws {
         try XCTSkipIf(MetalFillEngine.shared == nil, "no Metal device")
-        defer { CompositorBudget.availableMemoryOverrideBytes = nil }
+        defer { MemoryBudget.shared.availableOverrideBytes = nil }
         let manager = CanvasFixture.manager(layerCount: 1)
         CanvasFixture.setBakedContent(manager, layerIndex: 0,
                                       CanvasFixture.solidImage(.white,
                                                                rect: CGRect(origin: .zero, size: CanvasFixture.canvasSize)))
         // A process with one byte to spare: the valve declines whatever the window is.
-        CompositorBudget.availableMemoryOverrideBytes = 1
+        MemoryBudget.shared.availableOverrideBytes = 1
 
         manager.notice = nil
         manager.beginInteractiveFill(at: CGPoint(x: 8, y: 8))
@@ -1376,10 +1376,10 @@ final class MemoryBudgetLogicTests: XCTestCase {
         // its doubling would still decline at exactly `needed` (the test would be blind to the
         // mutation, and was) and would wrongly allow at one and a half times it. The doubling is
         // there because the textures are not the whole cost of the operation they belong to.
-        XCTAssertFalse(CompositorBudget.hasHeadroom(for: needed, available: needed * 3 / 2),
+        XCTAssertFalse(MemoryBudget.valveAllows(needed, available: needed * 3 / 2),
                        "half again the bytes is not enough — the readback and the upload are paid on top")
-        XCTAssertTrue(CompositorBudget.hasHeadroom(for: needed, available: needed * 3))
-        XCTAssertTrue(CompositorBudget.hasHeadroom(for: needed, available: 0),
+        XCTAssertTrue(MemoryBudget.valveAllows(needed, available: needed * 3))
+        XCTAssertTrue(MemoryBudget.valveAllows(needed, available: 0),
                       "0 is no information, not no memory — this must stay inert on the simulator")
     }
 }
