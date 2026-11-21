@@ -861,13 +861,14 @@ if [[ $((EXP_EPOCH - $(date +%s))) -lt 3600 ]]; then
 fi
 xcrun devicectl device install app --device E3B83820-DF74-5042-B52B-0D5BA17E4877 <path>.app
 ```
-**Name the iPad and allow device registration when a profile has to be minted**: on 2026-10-08 the
-free team's portal refused with *"Your team has no devices from which to generate a provisioning
-profile"* until the build named the device and passed `-allowProvisioningDeviceRegistration`; a
-`generic/platform=iOS` destination registers nothing. `resign.sh` builds the same way since then.
+**A manual sign does not need the iPad**: once the iPad is registered with the team (it is), a
+`generic/platform=iOS -allowProvisioningUpdates` Release build mints the profile, and `install` works
+with the iPad locked. Naming the iPad as the destination makes Xcode wait for it to unlock. Only on
+*"Your team has no devices from which to generate a provisioning profile"* name it and pass
+`-allowProvisioningDeviceRegistration` (2026-10-08).
 Check the expiry before installing, not after: an expired profile is how "PaintApp is no longer
 available" recurred. **There is no minimum-life floor (owner, 2026-11-16)** — install any verified
-build whenever useful; a short-lived profile only means the hourly renewer re-signs sooner. The scheme's LaunchAction stays Debug (Xcode's Run button is for development); `-configuration
+build whenever useful; a short-lived profile only means the auto-resigner signs sooner. The scheme's LaunchAction stays Debug (Xcode's Run button is for development); `-configuration
 Release` above is what makes the shipped build the one that's actually optimised — Debug measured
 62x slower than Release on the alpha-mask render path. `~/PaintApp/deploy/deploy.sh` does this but
 **pulls `main` first**, so it never ships branch work — run the steps above from the worktree
@@ -882,32 +883,17 @@ identifier" — has two causes, and `devicectl list devices` tells them apart. A
   so rather than retrying; three attempts cost a minute and prove nothing. Never pass the device by
 name (`devicectl`'s columns shift on the space in "Kevin's iPad") — use the UUID above.
 
-**October22 renewal fix:** clean and build must share the exact same DerivedData/configuration
-arguments. Replacing an embedded profile without a new CodeSign task leaves an invalid resource
-seal even when Xcode reports BUILD SUCCEEDED. The local renewal script now refuses clean failures,
-verifies the full signature, and checks the profile is not expired (≥1 h left) immediately before install. Regression harness:
-`bash tools/test-resign-region.sh ~/PaintApp/deploy/resign.sh`; evidence and the local-script patch:
-[auto-resign-2026-10-22.md](docs/bug-evidence/auto-resign-2026-10-22.md).
-
-Auto-resign for the 7-day free-account cert: `/Library/LaunchDaemons/com.paintapp.resign.plist`
-(hourly, as root; due when the last-installed profile is expired or within 1h of expiring — not a
-fixed timer, since that let a profile die mid-interval on 2026-09-12. Verifies each build actually
-advanced the profile's expiry before installing. **The portal mints a new profile only once the old
-one has expired** (MEASURED 2026-09-23 and 09-30), so a same-profile answer while the profile is
-still valid is a quiet SKIP that wakes the Mac just after expiry; only a same-profile answer *after*
-expiry FAILs and notifies, because it means Xcode has no usable Apple ID session. There is no
-calendar ceiling: it fired inside a valid profile on 2026-10-07 and reported that as a missing
-session.) The script is `~/PaintApp/deploy/resign.sh`, outside git; `--dry-run` with
-`RESIGN_FAKE_NOW`, `RESIGN_STATE_FILE` and `RESIGN_FIXTURE_OLD_EXPIRATION`/`_NEW_EXPIRATION` proves
-the decision logic with no build. Log: `~/.config/paintapp/resign.log`.
-
-**October28 source protection:** renewal records the full installed source SHA beside the profile
-fields. It selects main only when main contains that source; while main is older it renews the exact
-installed commit. Missing/unrelated history refuses the build. After every successful manual install,
-atomically update `resign_state` with that verified source SHA, artifact path, profile expiry and
-creation; import private branch objects into the managed clone if needed. Never advance it before
-install succeeds. Source patch, activation and actual-boundary tests:
-[auto-resign-source-2026-10-28.md](docs/bug-evidence/auto-resign-source-2026-10-28.md).
+**Auto-resign** ([docs/RESIGN.md](docs/RESIGN.md), `tools/resign/`): signing and installing are
+separate stages over `~/.config/paintapp/resign_state`. *Sign* needs only the Mac — when the newest
+profile is expired or within 1 h, it builds Release for `generic/platform=iOS` (fetch best-effort, never
+downgrading the installed source), verifies, and stages the app in `~/PaintWork/device-*`. *Install*
+needs only the iPad — whenever it is listed available, the staged build goes on and is promoted to
+`LAST_*`. A user LaunchAgent ticks every 5 min; the root LaunchDaemon ticks hourly and arms `pmset`
+wakes around expiry. The owner is notified only when he must act, never for a locked iPad. After a
+**manual** install, update all four `LAST_*` fields atomically (import a branch commit into
+`~/PaintApp` first) and never before the install succeeds. Change the script in git, run
+`bash tools/resign/test-resign.sh`, then `tools/resign/install.sh` to pin it. Log:
+`~/.config/paintapp/resign.log`.
 
 Simulator testing runs locally too — the Tailscale/SSH `deploy/mac/*` scripts are for the Windows
 machine, not this Mac.

@@ -901,33 +901,6 @@ was already stalled — the same session's `backboardd` was at its jetsam limit 
 layout pass. Not reproduced; nothing to cap. Left open with the trace's shape here so a second
 report can be compared against it: if it fires in the same view again, that is the signal.
 
-## Xcode has no Apple ID signed in at all, so the CLI build fails even with a still-valid cached profile on disk (2026-09-13)
-
-`deploy/resign.sh` (outside this repo, at `~/PaintApp/deploy/resign.sh`) now tracks the installed
-profile's real expiry and refuses to reuse a stale one, but that only stops it from making things
-worse — it cannot make a fresh profile appear, and as of 2026-09-13 it cannot even reuse the one
-already on disk. MEASURED 2026-09-13, two separate ways:
-
-1. With every local `.mobileprovision` moved aside, `xcodebuild build -allowProvisioningUpdates` for
-   this scheme fails with `error: No Accounts: Add a new account in Accounts settings`, run as the
-   interactive `juliapark` shell (the same code path `resign.sh`'s `run_as_user` reduces to once
-   `launchctl asuser` has crossed into that session — not separately reproduced through an actual
-   root daemon invocation, since this pass had no `sudo`).
-2. With the still-valid cached profile back in place (`fda525e2-…`, expires 2026-09-14T21:09Z, last
-   refreshed by Xcode's GUI on 2026-09-07), a real end-to-end `resign.sh` run against production
-   failed with the *identical* error — `defaults read com.apple.dt.Xcode
-   DVTDeveloperAccountManagerAppleIDLists` shows `"IDE.Identifiers.Prod" = ()`, an empty list. Xcode's
-   account store isn't merely unreachable from the CLI; there is currently no Apple ID account in it
-   at all (`IDEProvisioningTeamByIdentifier` still remembers the team name from before, which is why
-   the brief that started this fix read the account as configured).
-
-So the fix in this pass cannot make the app self-healing by itself: until the owner opens Xcode →
-Settings → Accounts on this Mac and adds their Apple ID back, the currently-installed build will go
-stale again around 2026-09-14T21:09Z regardless of how often the daemon runs. The script now logs
-`VERDICT: FAIL — Xcode has no usable Apple ID session ("No Accounts")` and retries hourly so the very
-next successful sign-in is picked up within the hour, but hourly retries of a CLI-only path cannot
-fix a GUI-only dependency.
-
 ## Splitting a stepped pose channel changes the left half's last frames (2026-09-11)
 
 `TransformTrack.split(atCelLocalFrame:)` inserts a key at `cut - 1` holding `pose(atCelLocalFrame:
