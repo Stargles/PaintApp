@@ -7,3 +7,8 @@
   hasHeadroom retired -> MemoryBudget.shared.makeRoom / valveAllows / availableOverrideBytes.
   Vector-only flatten passes the canvas memo through (no copy). Bake step runs in .later lane.
 - Next: fix MemoryBudgetLogicTests, build, gate, fast tier.
+- g9 GREEN at 0.48 (peak 1139, budget peak 887) -> retuned to 0.45 (832 MiB). Running green1..3.
+- Fixed along the way: entry deinit deadlock (deinit inside budget lock) -> forget via forgetLock;
+  bake waits for room (3 frames) before starting, defers on refusal; ring .current only while playing;
+  decoded frames admitted for pixel lifetime; CPU compositor/strip/flat-stack/fill reference -> drawImage.
+- Left: fast tier Debug+Release, check scripts, drive draw/Move, TODO/PERFORMANCE/SCHEDULER docs.

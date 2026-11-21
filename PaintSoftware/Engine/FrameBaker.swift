@@ -480,7 +480,8 @@ final class FrameBaker {
           MemoryBudget.withLane(.later) { () -> (() -> Void) in
             // Step 2, off the main actor. Every value read here was frozen at mint time.
             let key = FrameBakeKey(recipe: recipe, renderResolution: resolution)
-            // The frame's picture plus one leaf, then the encode's two copies: the step's peak.
+            // Two frames is the step's peak: the picture and one leaf, then the picture and its BGRA
+            // copy, then that copy and LZ4's output — each pair let go before the next is made.
             let frameBytes = CompositorBudget.textureBytes(for: recipe.canvasSize)
             var refusedPartWay = false
             let cached = wantsRing ? store.read(key) : nil
@@ -490,18 +491,25 @@ final class FrameBaker {
                 // A hold reuses its content-addressed file. A decode already needed for the ring
                 // rejects an unreadable file before this decision; distant frames need only stat.
                 outcome = .alreadyOnDisk
-            } else if !MemoryBudget.shared.waitForRoom(3 * frameBytes) {
+            } else if !MemoryBudget.shared.waitForRoom(2 * frameBytes) {
                 // R3 waits before it starts, holding nothing; still no room is a retry, not a failure.
                 outcome = .deferred
-            } else if let image = PlaybackTrace.span(.bakeComposite, { () -> CGImage? in
+            } else if let converted = PlaybackTrace.span(.bakeComposite, {
+                () -> (pixels: (bytes: [UInt8], width: Int, height: Int), grant: MemoryBudget.Grant)? in
                 if delay > 0 { Thread.sleep(forTimeInterval: delay) }
                 let refusedBefore = MemoryBudget.shared.refusals
-                let image = recipe.composite(budgetBytes: budget)
-                refusedPartWay = image == nil && MemoryBudget.shared.refusals != refusedBefore
-                return image
+                // The composite is converted and let go here, before the encode allocates.
+                guard let image = recipe.composite(budgetBytes: budget),
+                      let grant = MemoryBudget.shared.admit(image.width * image.height * 4),
+                      let pixels = FrameBakeStore.bgraBytes(image) else {
+                    refusedPartWay = MemoryBudget.shared.refusals != refusedBefore
+                    return nil
+                }
+                return (pixels, grant)
             }) {
+                defer { converted.grant.release() }
                 switch PlaybackTrace.span(.bakeWrite, {
-                    store.store(image, for: key, playhead: playhead, frames: frames)
+                    store.store(pixels: converted.pixels, for: key, playhead: playhead, frames: frames)
                 }) {
                 case .success:
                     outcome = .baked

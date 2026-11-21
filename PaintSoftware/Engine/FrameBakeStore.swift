@@ -245,12 +245,25 @@ nonisolated final class FrameBakeStore {
                playhead: Int = 0,
                frames: [String: Set<Int>] = [:]) -> Result<Int, WriteFailure> {
         guard key.digest.count == 32 else { return .failure(.malformedKey) }
-        // The BGRA copy and LZ4's worst-case output, each the frame's size, admitted for the encode.
-        guard let encoding = MemoryBudget.shared.admit(image.width * image.height * 4 * 2) else {
+        // The BGRA copy, admitted by the one budget for as long as it is held.
+        guard let converting = MemoryBudget.shared.admit(image.width * image.height * 4) else {
             return .failure(.notAdmitted)
         }
-        defer { encoding.release() }
+        defer { converting.release() }
         guard let pixels = Self.bgraBytes(image) else { return .failure(.unreadableImage) }
+        return store(pixels: pixels, for: key, playhead: playhead, frames: frames)
+    }
+
+    /// `store(_:)` from pixels already converted — what the bake calls, having let the composite go
+    /// first, so its peak is two frames (the BGRA copy and LZ4's output) rather than three.
+    func store(pixels: (bytes: [UInt8], width: Int, height: Int),
+               for key: FrameBakeKey,
+               playhead: Int = 0,
+               frames: [String: Set<Int>] = [:]) -> Result<Int, WriteFailure> {
+        guard key.digest.count == 32 else { return .failure(.malformedKey) }
+        // LZ4's worst-case output is the frame's size, admitted for the encode.
+        guard let encoding = MemoryBudget.shared.admit(pixels.bytes.count) else { return .failure(.notAdmitted) }
+        defer { encoding.release() }
 
         let rawCount = pixels.bytes.count
         var flags: UInt16 = 0
