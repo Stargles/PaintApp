@@ -7,6 +7,20 @@ could not be verified as open or closed; verify against `main` and `git log`, th
 
 ## Current — iPad build `bd52b37f` installed 2026-11-19, owner re-test pending
 
+- [ ] **Owner's check of `2891caad` FAILED (Nov 20, ~22:45, Test1).** Installed build confirmed `2891caad`
+  (latest main: includes the window surfaces `d72eb69f` and the To Cross fix `bd52b37f`).
+  (a) **Play crashes the app** — still; the 370 MiB simulator gate passed, so the gate does not model
+  what kills it. **No crash or JetsamEvent log on the iPad for Nov 20** (the Nov 18 ones exist), so
+  this is not an OS memory kill — find out what it is before fixing anything.
+  (b) **A frame step takes ~400 ms** and (c) **the drawing layer and the rest of the sandwich arrive
+  staggered and look different** — contradicts the claim that steps are instant and unstaggered. Code
+  read: `frameStepSettleSeconds = 0.5`; while settling `FrameBaker.image(for:)` returns nil on a ring
+  miss (no decode while flipping), and after the settle every layer re-renders its own picture.
+  (d) **Orange bars (the bake) take a couple of seconds per frame.**
+  (e) **The gallery's version (1.0.43 (1)) never changes** — the owner cannot tell which build he has.
+  Show the commit and build date; every build stamps it.
+  Owner: *"Please fix everything and do it right. Don't screw up by poor planning and project
+  management."* Scheduler (docs/SCHEDULER.md) is not yet started — he asked whether it is.
 - [ ] **Owner's check of `e88cba87` FAILED (Nov 18 late).** Owner: *"I have no idea how this ever managed
   to pass through all your tests, and if I caught this, then who knows what I did not catch."*
   (a) **Play → heavy lag, then the iPad crashes** — the *third* time this regression has shipped;
