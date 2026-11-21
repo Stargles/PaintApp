@@ -1534,7 +1534,6 @@ extension CanvasManager {
             tileAllowance = min(tileAllowance, MetalFillEngine.fillBudgetBytes - fixed)
             guard tileAllowance > 0, MemoryBudget.shared.makeRoom(for: fixed) else { return nil }
         }
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: PixelOps.transparentFormat())
         var completed = true
         var walls: [VectorCanvas.Frozen] = []
         walls.reserveCapacity(snapshots.count)
@@ -1542,10 +1541,11 @@ extension CanvasManager {
             destination: CGRect(x: 0, y: 0, width: width, height: height),
             inverseTexelMap: Homography(window.transform.inverted())) : nil
         if window.scale < 1 && sampling == nil { return nil }
-        let composited = renderer.image { context in
+        // Into an admitted buffer (`PixelOps.drawImage`): the one budget sees it, and no renderer copy.
+        let composited = PixelOps.drawImage(size: CGSize(width: width, height: height)) { cg in
             let rect = window.canvasInWorking
             for source in snapshots {
-                guard isCurrent() else { completed = false; return }
+                guard isCurrent() else { completed = false; return false }
                 do throws(VectorMendSupport.Failure) {
                     if let baked = source.baked {
                         try prepareFillTransparency(baked, support: &support, isCurrent: isCurrent)
@@ -1554,7 +1554,7 @@ extension CanvasManager {
                         try prepareFillTransparency(raster, support: &support, isCurrent: isCurrent)
                     }
                 } catch { support = nil }
-                guard isCurrent() else { completed = false; return }
+                guard isCurrent() else { completed = false; return false }
                 do {
                     for value in [source.baked, source.raster] {
                         guard let raster = value, !raster.isCertainlyTransparent else { continue }
@@ -1565,19 +1565,19 @@ extension CanvasManager {
                                   image.size == window.canvasSize, let pixels = image.cgImage,
                                   pixels.width == Int(window.canvasSize.width),
                                   pixels.height == Int(window.canvasSize.height) else { return false }
-                            context.cgContext.saveGState(); context.cgContext.interpolationQuality = .none
+                            cg.saveGState(); cg.interpolationQuality = .none
                             let completed = ImageWarp.drawRaster(sourceSize: sampling.sourceSize,
                                 destination: sampling.destination, inverseTexelMap: sampling.inverseTexelMap,
                                 maximumWorkingBytes: tileAllowance, isCurrent: isCurrent,
                                 source: { pixels.cropping(to: $0) }, consume: { tile, rect in
                                     UIImage(cgImage: tile, scale: 1, orientation: .up).draw(in: rect)
                                 })
-                            context.cgContext.restoreGState()
+                            cg.restoreGState()
                             return completed
                         }
-                        guard drawn else { completed = false; return }
+                        guard drawn else { completed = false; return false }
                     }
-                } catch { completed = false; return }
+                } catch { completed = false; return false }
                 if source.baked.map({ !$0.isCertainlyTransparent }) == true
                     || source.raster.map({ !$0.isCertainlyTransparent }) == true {
                     // Monotonic across the actual frozen draw order: one nonempty/unproved
@@ -1590,20 +1590,24 @@ extension CanvasManager {
                 if let vector = source.vector {
                     let excluded = excludingElement.flatMap { $0.celID == source.celID ? $0.elementID : nil }
                     let drawn = autoreleasepool {
-                        vector.drawFillReference(into: context.cgContext, frameRect: rect,
+                        vector.drawFillReference(into: cg, frameRect: rect,
                             width: width, height: height, excludingElement: excluded, support: &support,
                             sampling: sampling, maximumWorkingBytes: tileAllowance, isCurrent: isCurrent)
                     }
                     guard let drawn else {
-                        completed = false; return
+                        completed = false; return false
                     }
                     if source.kind == .vector { walls.append(drawn) }
                 }
             }
+            return true
         }
-        guard completed, isCurrent(), composited.scale == 1, composited.imageOrientation == .up,
+        guard completed, isCurrent(), let composited, composited.scale == 1, composited.imageOrientation == .up,
               composited.size == CGSize(width: width, height: height), let cg = composited.cgImage,
               cg.width == width, cg.height == height else { return nil }
+        // The RGBA reference the fill reads, admitted while it is made from the picture above.
+        guard let referenceGrant = MemoryBudget.shared.admit(width * height * 4) else { return nil }
+        defer { referenceGrant.release() }
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
         let ok: Bool = bytes.withUnsafeMutableBytes { raw in
             guard let ctx = CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,

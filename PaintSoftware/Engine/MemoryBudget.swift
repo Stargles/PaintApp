@@ -108,11 +108,18 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
     private var pressureToken: MemoryPressure.Token?
     private static let log = Logger(subsystem: "Starg.PaintSoftware", category: "MemoryBudget")
 
-    /// `budget:<held>,<grants>,<shown>,<current>,<cache>,<refusals>` in MiB — the census line's field.
+    /// `budget:<held>,<grants>,<shown>,<current>,<cache>,<refusals>,<peak held>` in MiB — the census
+    /// line's field. The peak is what a footprint peak is read against: above it is memory the
+    /// budget is not asked about.
     var censusField: String {
         "budget:\(entryBytes >> 20),\(inFlightBytes >> 20),\(entryBytes(priority: .shown) >> 20),"
-            + "\(entryBytes(priority: .current) >> 20),\(entryBytes(priority: .cache) >> 20),\(refusals)"
+            + "\(entryBytes(priority: .current) >> 20),\(entryBytes(priority: .cache) >> 20),\(refusals),"
+            + "\(peakHeldBytes >> 20)"
     }
+
+    /// The most this budget has held at once since launch.
+    var peakHeldBytes: Int { lockState(); defer { condition.unlock() }; return peakHeld }
+    private var peakHeld = 0
 
     /// Evicts `.cache` entries, least recently used first, until at most `bytes` of them remain.
     func trimCaches(toBytes bytes: Int) {
@@ -339,7 +346,7 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
             let liveAvailable = available ?? Int(os_proc_available_memory())
             let free = total - residentBytes - grantedBytes
             if bytes <= free, Self.valveAllows(bytes, available: liveAvailable) {
-                if holding { grantedBytes += bytes }
+                if holding { grantedBytes += bytes; peakHeld = max(peakHeld, residentBytes + grantedBytes) }
                 condition.unlock()
                 return true
             }
