@@ -2309,6 +2309,38 @@ enum OwnersScene {
     static func row(layer: Int, frame: Int) -> Double { 0.2 + rowStep * Double(layer * frames + frame) }
 }
 
+/// **The real memory of the simulator's render server and of the app**, as `phys_footprint` — the
+/// number jetsam kills on — sampled once a second from the Mac by `tools/sim-footprint-sampler.sh`,
+/// which `tools/playcheck.sh` starts and points the test at (`TEST_RUNNER_PLAYCHECK_FOOTPRINT_CSV`). An
+/// XCUITest cannot read another process's memory, but it can read the file the Mac writes. The peaks
+/// are the kernel's own high-water marks, so a spike between two samples is still counted.
+struct SimFootprint {
+    let backboarddMiB: Double, backboarddPeakMiB: Double
+    let appMiB: Double, appPeakMiB: Double
+
+    static let environmentKey = "PLAYCHECK_FOOTPRINT_CSV"
+
+    /// The first sample taken after this call — so it covers everything before it — or nil when there
+    /// is no sampler or none arrives within `timeout`.
+    static func read(timeout: TimeInterval = 10) -> SimFootprint? {
+        guard let path = ProcessInfo.processInfo.environment[environmentKey] else { return nil }
+        let asked = Date().timeIntervalSince1970
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let text = try? String(contentsOfFile: path, encoding: .utf8),
+               let last = text.split(separator: "\n").last {
+                let fields = last.split(separator: ",", omittingEmptySubsequences: false).map { Double($0) }
+                if fields.count == 5, let epoch = fields[0], epoch > asked,
+                   let server = fields[1], let serverPeak = fields[2], let app = fields[3], let appPeak = fields[4] {
+                    return SimFootprint(backboarddMiB: server, backboarddPeakMiB: serverPeak, appMiB: app, appPeakMiB: appPeak)
+                }
+            }
+            Thread.sleep(forTimeInterval: 0.5)
+        } while Date() < deadline
+        return nil
+    }
+}
+
 extension PaintUITestCase {
 
     /// Launches into the owner's scene (`OwnersScene`), its onion skin as a new document has it.

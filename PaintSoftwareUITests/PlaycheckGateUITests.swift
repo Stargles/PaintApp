@@ -3,47 +3,56 @@ import XCTest
 /// **The owner's playcheck, run before every install without the iPad** (AGENTS.md, "The install gate
 /// runs without the iPad", 2026-11-18): his five-minute routine on Test1's shape — enter the scene,
 /// let it bake, play, step quickly and slowly, erase with To Cross, Cut and Normal, fill, undo, pan
-/// and zoom — on an iPad 9 simulator at his 1080×810 landscape window, counting every picture the
-/// app hands the render server over **the whole session** (`LayerContentsCensus`, `handedMiB:`).
+/// and zoom — on an iPad 9 simulator at his 1080×810 landscape window, **judged on the real memory of
+/// the two processes the iPad 9 kills**: the simulator's own `backboardd` and the app, as
+/// `phys_footprint` sampled from the Mac (`SimFootprint`). Run it through `tools/playcheck.sh`, which
+/// erases the device so the server's peak is this run's, and starts the sampler; run any other way it
+/// fails, because without the samples it would measure nothing.
 ///
-/// The crash shipped three times because each guard covered only the path its fix touched: playback
-/// was guarded, and on 2026-11-18 23:33 the iPad's `backboardd` was killed at its 1,850 MiB limit
-/// **entering** the scene, before Play was ever pressed. What killed it: every layer host showed its
-/// cel as a canvas-sized bitmap (95 MiB at 5000²), so entering five layers handed 476 MiB at once
-/// and the onion skin 47 more; every frame step that settled handed five more, every edit and undo
-/// another. MEASURED on this routine at `548f9eda`: 524 MiB on entering, **6,825 MiB** over the
-/// session, the simulator's own `backboardd` at 567–712 MiB. Since the hosts and the onion skin draw
-/// through window-sized surfaces (`CanvasPictureView`): 161 on entering, about 300 over the session,
-/// and that `backboardd` at 62.
+/// **Why not the census.** `LayerContentsCensus` counts the pictures the app knows it hands the render
+/// server — a proxy, and it was green while `2891caad` crashed the iPad on Play (2026-11-20): what the
+/// census cannot see is the app's own memory. MEASURED on this routine at `40c8c005`: the server never
+/// passed 202 MiB, and the app reached **2,071 MiB** — every layer's canvas-sized picture, the memos
+/// and the bake's flatten at once, over the iPad 9's 1,850 MiB limit for an app.
 ///
-/// **The budget, and why it is this number.** The iPad 9's `backboardd` is killed at 1,850 MiB. What
-/// it costs the server per MiB handed is the device's, not the simulator's: on 2026-11-18 at 23:33 a
-/// burst of about 524 MiB handed killed it, so with its own baseline the device spends at least 3.3
-/// MiB per MiB handed (1,850 / 524 ≈ 3.5, less the baseline). Half again for headroom: 1,850 / (3.3 ×
-/// 1.5) ≈ 374, so **the whole routine may hand 370 MiB** — less than entering the scene alone handed
-/// before, and a fixed amount however many steps, edits or plays the session holds, which is the
-/// property the iPad needs. The app must also stay in the foreground throughout.
+/// **The two budgets, and how they are derived.**
+/// - `backboardd`: the iPad 9 kills it at 1,850 MiB. At `a893eccb` — the code that killed it entering
+///   Test1 on 2026-11-18 23:33 — the simulator's `backboardd` peaked at 706 MiB entering this scene and
+///   951 over the routine, so the device spends at least 1,850 / 706 ≈ 2.6 times what the simulator
+///   shows. Half again for margin: 1,850 / (2.6 × 1.5) ≈ 474, so **450 MiB**.
+/// - the app: the iPad 9 kills it at 1,850 MiB too (PERFORMANCE.md §15.5, measured on the device). Its
+///   bitmaps and buffers are the same bytes on the simulator, so the ratio is taken as 1, and the
+///   allowance is the share of that limit the app already designs canvases against,
+///   `CanvasManager.gradedWorkingSetBudgetFraction` (0.63): **1,165 MiB**, the margin for a real scene
+///   heavier than this synthetic one (placed pictures, more frames).
 ///
-/// Takes about two and a half minutes, building aside.
+/// Both are the kernel's peaks since launch, asserted after every phase, so a red names the first phase
+/// that went over. Takes about four minutes, building aside.
 final class PlaycheckGateUITests: PaintUITestCase {
 
-    /// Every picture the whole routine may hand the render server — see the type's comment.
-    private let sessionHandedMiBBudget = 370
+    private let backboarddBudgetMiB = 450.0
+    private let appBudgetMiB = 1165.0
 
     private var phases: [String] = []
 
-    /// Records a phase's census and asserts the app is still up.
+    /// Records a phase's measured footprints and asserts the app is still up and both budgets hold.
     private func phase(_ app: XCUIApplication, _ name: String) {
-        let line = "\(name): handedMiB=\(readField(app, "handedMiB:")) holding=\(readField(app, "holding:")) "
-            + "census=\(readField(app, "census:")) by=\(readField(app, "handedBy:"))"
+        guard let sample = SimFootprint.read() else {
+            XCTFail("no footprint sample — run this gate through tools/playcheck.sh (\(SimFootprint.environmentKey))")
+            return
+        }
+        let line = String(format: "%@: backboardd=%.0f peak=%.0f app=%.0f peak=%.0f MiB", name,
+                          sample.backboarddMiB, sample.backboarddPeakMiB, sample.appMiB, sample.appPeakMiB)
+            + " census=\(readField(app, "census:")) by=\(readField(app, "handedBy:"))"
         phases.append(line)
         print("PLAYCHECK " + line)
         XCTAssertEqual(app.state, .runningForeground, "the app left the foreground during \(name)")
-        // After every phase, so a red names the first phase that went over the session's budget.
-        let handed = handedMiB(app)
-        XCTAssertLessThanOrEqual(handed, sessionHandedMiBBudget,
-                                 "by \(name) the routine had handed the render server \(handed) MiB — the iPad 9's "
-                                 + "backboardd dies at 1,850 MiB; by phase:\n" + phases.joined(separator: "\n"))
+        XCTAssertLessThanOrEqual(sample.backboarddPeakMiB, backboarddBudgetMiB,
+                                 "by \(name) the render server had reached \(Int(sample.backboarddPeakMiB)) MiB — "
+                                 + "the iPad 9's backboardd dies at 1,850; by phase:\n" + phases.joined(separator: "\n"))
+        XCTAssertLessThanOrEqual(sample.appPeakMiB, appBudgetMiB,
+                                 "by \(name) the app had reached \(Int(sample.appPeakMiB)) MiB — the iPad 9 kills it "
+                                 + "at 1,850; by phase:\n" + phases.joined(separator: "\n"))
     }
 
     /// Steps until the frame label reads `frame` (1-based).
@@ -55,7 +64,7 @@ final class PlaycheckGateUITests: PaintUITestCase {
         }
     }
 
-    func testTheOwnersPlaycheckHandsTheRenderServerAFixedBudget() throws {
+    func testTheOwnersPlaycheckStaysInsideTheiPad9sMemory() throws {
         let (app, canvas) = launchOwnersScene()
         phase(app, "enter the scene")
         waitForEveryFrameBaked(app)
@@ -135,7 +144,7 @@ final class PlaycheckGateUITests: PaintUITestCase {
         phase(app, "zoom in and out")
 
         let attachment = XCTAttachment(string: phases.joined(separator: "\n"))
-        attachment.name = "Render-server census by phase"
+        attachment.name = "Measured footprints by phase"
         attachment.lifetime = .keepAlways
         add(attachment)
     }
