@@ -153,6 +153,16 @@ could not be verified as open or closed; verify against `main` and `git log`, th
 
 ## Open reports and asks
 
+- [ ] **The auto-resigner broke again — "PaintApp is no longer available" (owner, Nov 20; ~10th time).**
+  Owner: *"Fix it well and fix it once. Remember the iPad might be locked, or the Mac might be off … When
+  the Mac is on and the iPad is unlocked it should automatically trigger so I don't have to tell you."*
+  Profile expired Nov 20 02:09; every hourly run failed — `git fetch` (10x in history), then `xcodebuild
+  clean` against the *named iPad* destination ("may need to be unlocked", 8x). History also: iPad
+  unreachable 16x, install failed 8x, same profile returned 7x. Root flaw: signing and installing are one
+  step that needs network + iPad + unlock at once. Manually re-signed (generic destination, installed
+  while the iPad was locked) Nov 20 22:31: `2891caad`, profile to Nov 28 03:31 UTC. Fix: sign without the
+  iPad (generic destination, fetch best-effort), stage the build, install whenever the iPad appears
+  (a frequent cheap trigger), wake the Mac at expiry; script tracked in git with a test harness.
 - [ ] **Catch iPad crashes without the owner (owner, Nov 19).** *"I shouldn't have been the one to catch
   that iPad crash."* The app cannot catch a backboardd Jetsam in-process, but: (1) on launch, detect that
   the last session ended uncleanly and save the flight recorder's last 90 s (persist it periodically so a
