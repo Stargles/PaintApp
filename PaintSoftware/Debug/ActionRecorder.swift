@@ -195,22 +195,22 @@ final class ActionRecorder: ObservableObject {
     static let ringPersistInterval: TimeInterval = 5
 
     /// **Keeps the last 90 s on disk so a kill cannot take them.** The main thread's whole share is one
-    /// snapshot of the ring (`elements(asOf:)` — the entries inside the window, a few hundred on an
-    /// ordinary minute) and the header; the lines, the string and the atomic write run on the watch's
-    /// serial utility queue. Skipped outright when nothing has been recorded since the last write.
+    /// copy of the ring struct (copy-on-write, so the first append after it
+    /// copies the storage) and the header; the window walk, the lines, the string and the atomic write run
+    /// on the watch's serial utility queue. Skipped outright when nothing has been recorded since the last write.
     /// `completion` is for tests, called on that queue after the file is in place.
     func persistRing(to url: URL = UncleanExitWatch.standard.ringURL, completion: (() -> Void)? = nil) {
         guard Self.isFlying, ringRevision != persistedRevision else { completion?(); return }
         persistedRevision = ringRevision
         let now = CACurrentMediaTime()
-        let entries = ring.elements(asOf: now)
-        let base = entries.first?.time ?? now
+        let snapshot = ring  // a copy-on-write reference: the walk below runs off main, on this frozen copy
         let header = Self.headerLine(canvasSize: flightContext.canvasSize, projectName: flightContext.projectName,
                                      tap: tapReport, url: url, freezesCaught: AppSettings.standard.canvasRepairCount,
-                                     flight: [("trigger", .str("crash-ring")), ("events", .int(entries.count)),
-                                              ("seconds", .num(now - base))])
+                                     flight: [("trigger", .str("crash-ring"))])
         let tool = toolSettingsProvider?() ?? []
         UncleanExitWatch.queue.async {
+            let entries = snapshot.elements(asOf: now)
+            let base = entries.first?.time ?? now
             try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? Data(Self.flightText(header: header, tool: tool, entries: entries, base: base).utf8)
                 .write(to: url, options: .atomic)

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CEE7E39B90FB91CAD3F59454 /* PaintSoftwareUITests/CrashCatcherUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07ED959E318A9FD088AD3AF6 /* PaintSoftwareUITests/CrashCatcherUITests.swift */; };
 		AE7D7593592302B368AC97E8 /* PaintSoftwareUITests/UncleanExitLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7D3D93619F2FEF97161CC2F /* PaintSoftwareUITests/UncleanExitLogicTests.swift */; };
 		62E3C86DA23E260164E3ADF5 /* PaintSoftware/Debug/DiagnosticPayloadSink.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCD8032FA736F4A401092170 /* PaintSoftware/Debug/DiagnosticPayloadSink.swift */; };
 		71C9AE8F790F8FFBD92C4FA5 /* PaintSoftware/Debug/UncleanExit.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAF02DD69718350FAC9BE8F7 /* PaintSoftware/Debug/UncleanExit.swift */; };
@@ -695,6 +696,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		07ED959E318A9FD088AD3AF6 /* PaintSoftwareUITests/CrashCatcherUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/CrashCatcherUITests.swift; sourceTree = "<group>"; };
 		E7D3D93619F2FEF97161CC2F /* PaintSoftwareUITests/UncleanExitLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/UncleanExitLogicTests.swift; sourceTree = "<group>"; };
 		CCD8032FA736F4A401092170 /* PaintSoftware/Debug/DiagnosticPayloadSink.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Debug/DiagnosticPayloadSink.swift; sourceTree = "<group>"; };
 		EAF02DD69718350FAC9BE8F7 /* PaintSoftware/Debug/UncleanExit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Debug/UncleanExit.swift; sourceTree = "<group>"; };
@@ -1919,6 +1921,7 @@
 				D8C19BFB7D1738C256175953 /* PaintSoftwareUITests/FlightRecorderUITests.swift */,
 				C545E79ABFBE13BE7006F17B /* PaintSoftwareUITests/FlightRecorderLogicTests.swift */,
 				2F320308DB08FAA6B869C70F /* PaintSoftware/Debug/FlightRecorder.swift */,
+				07ED959E318A9FD088AD3AF6 /* PaintSoftwareUITests/CrashCatcherUITests.swift */,
 				E7D3D93619F2FEF97161CC2F /* PaintSoftwareUITests/UncleanExitLogicTests.swift */,
 				CCD8032FA736F4A401092170 /* PaintSoftware/Debug/DiagnosticPayloadSink.swift */,
 				EAF02DD69718350FAC9BE8F7 /* PaintSoftware/Debug/UncleanExit.swift */,
@@ -2589,6 +2592,7 @@
 				9F3524FADD635E4C6590A1C3 /* PaintSoftwareUITests/FlightRecorderUITests.swift in Sources */,
 				11E1D249BCFC438A51CEAEC3 /* PaintSoftwareUITests/FlightRecorderLogicTests.swift in Sources */,
 				159091AE940B388FEAA2D077 /* PaintSoftware/Debug/FlightRecorder.swift in Sources */,
+				CEE7E39B90FB91CAD3F59454 /* PaintSoftwareUITests/CrashCatcherUITests.swift in Sources */,
 				71C9AE8F790F8FFBD92C4FA5 /* PaintSoftware/Debug/UncleanExit.swift in Sources */,
 				62E3C86DA23E260164E3ADF5 /* PaintSoftware/Debug/DiagnosticPayloadSink.swift in Sources */,
 				AE7D7593592302B368AC97E8 /* PaintSoftwareUITests/UncleanExitLogicTests.swift in Sources */,
