@@ -688,7 +688,6 @@ enum InterpolationEvaluator {
         let window = requested?.integral.intersection(bounds) ?? bounds
         let local = CGRect(origin: .zero, size: window.size)
         let format = PixelOps.transparentFormat(scale: resolution)
-        format.preferredRange = .standard
         func render(_ elements: [VectorElement]) -> UIImage? {
             let canvas = VectorCanvas(size: size, elements: elements)
             if requested == nil { return canvas.render(quality: quality, resolution: resolution) }

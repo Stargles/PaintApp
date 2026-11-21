@@ -6050,7 +6050,7 @@ final class VectorCanvas {
         }
 
         private func drawIsolatedFillWindow(_ window: CGRect, frameRect: CGRect) -> Bool {
-            let renderer = UIGraphicsImageRenderer(size: window.size, format: VectorCanvas.localContentFormat())
+            let renderer = UIGraphicsImageRenderer(size: window.size, format: PixelOps.transparentFormat())
             var drawn = false
             let image = renderer.image { context in
                 drawn = draw(into: context.cgContext, frameRect: frameRect, quality: .full) != nil
@@ -6991,7 +6991,7 @@ final class VectorCanvas {
         // Hoisted so the walk's findings can be read once the (synchronous) renderer closure below
         // has finished drawing — and nil afterwards exactly when it never ran.
         var walked: Walk?
-        let image = UIGraphicsImageRenderer(size: size, format: localContentFormat(resolution: resolution)).image { ctx in
+        let image = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat(scale: resolution)).image { ctx in
             let cg = ctx.cgContext
             // 1:1 into a context of the same size, format and scale, over transparent black — so
             // every destination pixel is `0`, source-over leaves the source exactly as it was, and
@@ -7018,14 +7018,6 @@ final class VectorCanvas {
         }
         return LocalContent(image: image, escaped: walked.escaped, measured: walked.measured,
                             dabCount: walked.dabCount)
-    }
-
-    private static func localContentFormat(resolution: CGFloat = 1) -> UIGraphicsImageRendererFormat {
-        // Keep native and clipped walks in the same 8-bit range. UIKit's automatic format can
-        // choose a 16-bit bitmap on wide-colour devices, making dab gradients much more expensive.
-        let format = PixelOps.transparentFormat(scale: resolution)
-        format.preferredRange = .standard
-        return format
     }
 
     /// What one walk learned — the footprints it measured, where it painted outside its clip

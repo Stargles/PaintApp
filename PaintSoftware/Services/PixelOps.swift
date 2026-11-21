@@ -4,10 +4,22 @@ import SwiftUI
 /// Shared pixel processing for raster edits, snapshots and mask-to-vector contours. Vector
 /// selections retain their editable elements; only operations that need pixels use these helpers.
 enum PixelOps {
+    /// **The one renderer format for the app's pictures: 8-bit premultiplied, transparent, drawn as
+    /// it is asked.** `preferredRange = .standard` is what makes it immediate, and that is a memory
+    /// decision before it is a colour one. Left at `.automatic`, UIKit backs the renderer with an
+    /// *auto context* that records the drawing as a display list so it can pick the bitmap's range at
+    /// the end: every image drawn in is retained by the list until the picture is made, and each is
+    /// then decoded again into a buffer of its own (`rip_auto_context` → `img_data_lock`). MEASURED on
+    /// the owner's playcheck, iPad 9 simulator, 5000² five layers (2026-11-21, `PlaycheckGateUITests`
+    /// through `tools/playcheck.sh`): a bake that draws its leaves into one frame three at a time and
+    /// lets each batch go held **every** leaf and a second copy of each at once, 763 MiB live at the
+    /// frame's end, and took the app past the iPad 9's 1,850 MiB limit. On a wide-colour device the
+    /// same `.automatic` also picks 16 bits per component, twice what every byte count here assumes.
     static func transparentFormat(scale: CGFloat = 1) -> UIGraphicsImageRendererFormat {
         let format = UIGraphicsImageRendererFormat()
         format.opaque = false
         format.scale = scale
+        format.preferredRange = .standard
         return format
     }
 
@@ -72,18 +84,12 @@ enum PixelOps {
     /// as the whole thing. This renders into a fresh buffer of exactly `rect.size`, which is the
     /// entire point when the caller is shrinking what an undo step holds on to.
     ///
-    /// `preferredRange = .standard` matters for the same reason: left at `.automatic`, a wide-colour
-    /// device backs the new buffer with 16 bits per component and the patch costs twice what the
-    /// caller's byte accounting says it does.
-    ///
     /// Returns nil for an empty or fully out-of-bounds rect.
     static func copiedSubimage(of image: UIImage, in rect: CGRect) -> UIImage? {
         let bounds = CGRect(origin: .zero, size: image.size)
         let clamped = rect.integral.intersection(bounds)
         guard !clamped.isNull, clamped.width >= 1, clamped.height >= 1 else { return nil }
-        let format = transparentFormat()
-        format.preferredRange = .standard
-        return UIGraphicsImageRenderer(size: clamped.size, format: format).image { _ in
+        return UIGraphicsImageRenderer(size: clamped.size, format: transparentFormat()).image { _ in
             image.draw(at: CGPoint(x: -clamped.origin.x, y: -clamped.origin.y))
         }
     }

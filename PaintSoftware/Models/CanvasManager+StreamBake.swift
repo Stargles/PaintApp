@@ -353,10 +353,7 @@ extension CanvasManager {
     /// reports. A copy costs the bake one frame-sized draw and the pool nothing.
     static func streamSnapshot(_ frame: UIImage, fitting naturalSize: CGSize) -> UIImage {
         let size = naturalSize.width > 0 && naturalSize.height > 0 ? naturalSize : frame.size
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = 1
-        format.opaque = false
-        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+        return UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { _ in
             frame.draw(in: CGRect(origin: .zero, size: size))
         }
     }
