@@ -13,8 +13,8 @@ Every status report to the owner lists this queue with each item's state, not on
 1. **Play crash** — in flight (`tmp/nov21-play`): measure the simulator's real backboardd on Test1.
 2. **Gallery shows the build** — in flight (`tmp/nov21-version`).
 3. **Crash catcher** — merged Nov 21; reaches the iPad with the next install (with (1)).
-4. **Open lasso acts as closed for every action** (Nov 17 ruling) — **never started**; queued behind
-   the crash work and not reported. Starts the moment (2) lands (independent code).
+4. **Open lasso acts as closed for every action** (Nov 17 ruling) — in flight (`tmp/nov21-lasso`)
+   since Nov 21; had sat unstarted and unreported for four days.
 5. **Frame steps instant and unstaggered + bake speed** — scheduler stage 2, after (1) merges.
    Folded in (owner, Nov 21): **zooming out after zooming in on a 5000² canvas, the edges appear a
    moment late** — caused by `d72eb69f`'s window-sized pictures (only the visible window is drawn, so
