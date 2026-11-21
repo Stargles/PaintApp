@@ -5,7 +5,24 @@ The owner's asks, live. Recorded when they arrive, deleted whole when done **and
 record of an outstanding task. Items marked "(status unclear — check)" were carried from older notes and
 could not be verified as open or closed; verify against `main` and `git log`, then delete or fix.
 
-## Current — iPad build `bd52b37f` installed 2026-11-19, owner re-test pending
+## Queue — the order work happens in (owner, Nov 21: *"communicate better … plan correctly"*)
+
+Every status report to the owner lists this queue with each item's state, not only what is in flight.
+"Installed" means the code on `main` — an ask below that is not marked shipped is **not** in it.
+
+1. **Play crash** — in flight (`tmp/nov21-play`): measure the simulator's real backboardd on Test1.
+2. **Gallery shows the build** — in flight (`tmp/nov21-version`).
+3. **Crash catcher** — in flight (`tmp/nov20-crash`).
+4. **Open lasso acts as closed for every action** (Nov 17 ruling) — **never started**; queued behind
+   the crash work and not reported. Starts the moment (2) lands (independent code).
+5. **Frame steps instant and unstaggered + bake speed** — scheduler stage 2, after (1) merges.
+6. **Undo latency / raster Undo budget** — scheduler stage 3 (one memory budget).
+7. **Re-check against `main`, then fix what remains:** stroke briefly disappears, stroke latency and
+   pan hitches, canvas freezes, rapid-edit whole-iPad failures, Liquify shown while held, Move-exit gap,
+   the red `SelectionEditUITests` swatch test.
+8. Audit follow-through, streaming on the real link, smaller asks below.
+
+## Current — iPad build `8545ac57` (= `2891caad` code) installed 2026-11-21, owner re-test pending
 
 - [ ] **Owner's check of `2891caad` FAILED (Nov 20, ~22:45, Test1).** Installed build confirmed `2891caad`
   (latest main: includes the window surfaces `d72eb69f` and the To Cross fix `bd52b37f`).
