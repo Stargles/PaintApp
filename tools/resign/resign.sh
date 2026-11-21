@@ -26,6 +26,7 @@ STAGE_ROOT=${RESIGN_STAGE_ROOT:-/Users/juliapark/PaintWork}
 RUN_USER=${RESIGN_RUN_USER:-juliapark}
 DEVICE_UUID=${RESIGN_DEVICE_UUID:-E3B83820-DF74-5042-B52B-0D5BA17E4877}
 BUNDLE_ID=Starg.PaintSoftware
+APP_EXECUTABLE=PaintSoftware
 WAKE_OWNER=com.paintapp.resign
 
 DUE_WINDOW=3600          # sign when the newest profile is expired or this close to it
@@ -372,6 +373,20 @@ install_staged() {
         return 0
     fi
     out=$(mktemp -t paintapp-install)
+    # An install terminates the running app and loses unsaved strokes. devicectl lists every live
+    # process, suspended (backgrounded) apps included, so a backgrounded app defers too; that ends
+    # when the owner closes the app or iOS evicts it. A failed or implausible query defers as well.
+    run_bounded 60 "$out" run_as_user xcrun devicectl device info processes --device "$DEVICE_UUID" || rc=$?
+    if (( rc != 0 )) || ! grep -q '/sbin/launchd' "$out"; then
+        rm -f "$out"
+        quiet "staged build waiting; could not list the iPad's running apps, so not installing"
+        return 0
+    fi
+    if grep -Eq "/${APP_EXECUTABLE}\.app/${APP_EXECUTABLE}[[:space:]]*\$" "$out"; then
+        rm -f "$out"
+        quiet "staged build waiting; PaintSoftware is running on the iPad and an install would close it — installs once it is closed"
+        return 0
+    fi
     log "Installing ${STAGED_SOURCE_SHA:0:8} (profile to $STAGED_PROFILE_EXPIRATION) on $DEVICE_UUID"
     run_bounded 600 "$out" run_as_user xcrun devicectl device install app --device "$DEVICE_UUID" "$STAGED_APP_PATH" || rc=$?
     if (( rc == 0 )); then

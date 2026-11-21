@@ -236,6 +236,8 @@ Every status report to the owner lists this queue with each item's state, not on
   **Defect (Nov 21): an install kills the app if it is running** — the rebuild's end-to-end test install
   at 22:49 very likely is the owner's Nov 20 "crash" (no crash log). The auto-installer must never install
   while PaintSoftware is running on the iPad (it would lose his unsaved strokes); defer until it is not.
+  **Fixed on `tmp/nov21-noinstall` (not merged, not re-pinned):** the install stage defers while the app is
+  running or the process query fails; harness case 3b. Orchestrator: merge, then `tools/resign/install.sh`.
 - [ ] **Catch iPad crashes without the owner (owner, Nov 19).** *"I shouldn't have been the one to catch
   that iPad crash."* The app cannot catch a backboardd Jetsam in-process, but: (1) on launch, detect that
   the last session ended uncleanly and save the flight recorder's last 90 s (persist it periodically so a

@@ -34,7 +34,15 @@ echo "xcrun $*" >> "$FAKE_DIR/calls"
 case "$2 $3" in
   "list devices") cat "$FAKE_DIR/devices" ;;
   "device install") exit "$(cat "$FAKE_DIR/install_rc" 2>/dev/null || echo 0)" ;;
-  "device info") echo "PaintSoftware   Starg.PaintSoftware   1.0" ;;
+  "device info")
+    if [[ "$4" == processes ]]; then
+      [[ -e "$FAKE_DIR/processes_fail" ]] && exit 1
+      printf '1  /sbin/launchd\n2239  /usr/libexec/logd\n'
+      [[ -e "$FAKE_DIR/app_running" ]] && echo "19502  /private/var/containers/Bundle/Application/B839087C/PaintSoftware.app/PaintSoftware      "
+      echo "19600  /private/var/containers/Bundle/Application/CCCC/PaintSoftwareUITests-Runner.app/PaintSoftwareUITests-Runner"
+      exit 0
+    fi
+    echo "PaintSoftware   Starg.PaintSoftware   1.0" ;;
 esac
 EOF
 cat > "$BIN/security" <<'EOF'
@@ -120,6 +128,20 @@ ok "unreachable iPad at sign time: signs generic, stages, no install, no notify"
 ! grep -q xcodebuild "$FAKE/calls" || die "rebuilt a staged build"
 [[ "$(grep -c 'list devices' "$FAKE/calls")" == 1 ]] || die "device query count"
 ok "pending install while away: no rebuild, only a device query"
+
+# 3b. iPad available but PaintSoftware is running (or the process query fails): nothing is installed,
+# the state is untouched, and it is quiet. Not running: installs as in case 4.
+printf 'X  x  %s  available (paired)  iPad\n' "$UUID" > "$FAKE/devices"
+touch "$FAKE/app_running"; : > "$FAKE/calls"; run
+! grep -q 'device install' "$FAKE/calls" || die "installed over a running app"
+[[ -n "$(get STAGED_APP_PATH)" && "$(get LAST_SOURCE_SHA)" == "$INSTALLED" && ! -e "$FAKE/notify" ]] || die "running-app state"
+grep -q 'PaintSoftware is running' "$CFG/resign.log" || die "no reason logged"
+! grep -q 'VERDICT: \(FAIL\|OK\)' <(tail -1 "$CFG/resign.log") || die "wrong verdict"
+rm -f "$FAKE/app_running"; touch "$FAKE/processes_fail"; : > "$FAKE/calls"; run
+! grep -q 'device install' "$FAKE/calls" || die "installed with an unreadable process list"
+[[ -n "$(get STAGED_APP_PATH)" && ! -e "$FAKE/notify" ]] || die "query-failure state"
+rm -f "$FAKE/processes_fail"
+ok "running app or failed process query: no install, state kept, quiet"
 
 # 4. iPad appears: installs the staged build, promotes it, deletes the superseded one.
 printf 'X  x  %s  available (paired)  iPad\n' "$UUID" > "$FAKE/devices"; : > "$FAKE/calls"; run
