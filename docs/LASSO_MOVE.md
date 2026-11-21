@@ -1813,6 +1813,22 @@ Six more came on **2026-10-12**, all about how the Select tool is *used* rather 
     a save, a layer change and the eyedropper (§5.33) do not. Freehand only — the rectangle, the wand
     and Tap are unchanged, and so is the fill tool's lasso, which still closes on lift.
 
+    **An open lasso acts as a closed one — for every consumer** (owner, 2026-11-17: *"even if the lasso is
+    open, it should still treat it as a closed one. The circle to close it is for if the user wants to
+    make a new selection."*). This **supersedes** the defaults above that an open lasso selects nothing
+    and that switching tool, panel or selection mode "puts it down". From its third point (and once a
+    point is off the node) the open lasso's polyline, closed by a straight edge from its open end back
+    to the node, is composed onto the selection that stood when it began — Add or Subtract — on every
+    stroke, corner and Undo (`CanvasManager.syncSelectionToOpenLasso`, the one place). So the whole
+    bottom bar — Copy, Duplicate, To New Layer, Fill, Edit, Clear — and Move read the one
+    `CanvasManager.selection` and none knows a lasso is open; Move's own close-the-draft special case
+    (`closeOpenLassoForMove`, `readLassoNodeReach`) is deleted. The node still closes it, and the next
+    loop is then a new one composed onto the selection. **Settling** (the node, a tool/panel/mode
+    switch, Edit Text or Edit Gradient, any edit that takes the canvas) keeps the selection and records
+    the one undo step a closed loop leaves; nothing is in the history while the lasso is open, and
+    Undo then retracts the last run and the region with it. **Deselect discards** the lasso and its
+    region rather than settling it first.
+
 30. **A drawn region follows the artist to another layer.** The owner: *"make the select stay when
     switching layers. Right now it disappears if you switch."* A loop, a rectangle and the wand's
     flood make a **region** (`Selection`), which carries no cel: Move, Recolour, Clear, the other

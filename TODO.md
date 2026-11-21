@@ -159,6 +159,10 @@ Every status report to the owner lists this queue with each item's state, not on
   one. The circle to close it is for if the user wants to make a new selection."* Close the loop
   implicitly (last point back to the start) for every consumer, and remove the Move-only special
   case for open selections, which this makes redundant. Amends docs/LASSO_MOVE.md §5.29 — update it.
+  **Status (Nov 21, branch `tmp/nov21-lasso`, not merged):** the open lasso now writes the selection
+  itself (`syncSelectionToOpenLasso`), so the bar and Move read one `selection`; Move's special case
+  deleted; §5.29 amended. Needs the owner's check on the iPad: draw an open C, tap Copy / To New Layer /
+  Clear.
 - [ ] **`SelectionEditUITests.testTheColourSwatchOpensThePickerOnTheLinesOwnColourAndTheLineFollowsItLive`
   red on an iPad 9 simulator (Nov 17):** `emptyToolbarPoint` finds no 44 pt gap in the portrait
   toolbar — the same stale premise fixed in `GraphEditorFingerUITests` by launching landscape.
