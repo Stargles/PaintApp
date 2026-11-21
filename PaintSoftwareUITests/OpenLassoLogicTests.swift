@@ -59,7 +59,7 @@ final class OpenLassoLogicTests: XCTestCase {
         let manager = CanvasFixture.manager()
         for corner in square { manager.tapLasso(at: corner, nodeReach: reach) }
         XCTAssertEqual(manager.openLasso?.points, square, "four corners, each joined to the last by a straight edge")
-        XCTAssertNil(manager.selection, "…and still open")
+        XCTAssertNotNil(manager.selection, "…and still open, though it already acts as the closed square (§5.29)")
 
         manager.tapLasso(at: CGPoint(x: 11, y: 12), nodeReach: reach)
 
@@ -110,7 +110,8 @@ final class OpenLassoLogicTests: XCTestCase {
         XCTAssertNotNil(manager.openLasso, "the pen lifted at the far corner of a C: still open")
         XCTAssertEqual(manager.openLasso?.start, square[0], "the node is where the stroke began")
         XCTAssertEqual(manager.openLasso?.end, square[2], "…and the open end where it lifted")
-        XCTAssertNil(manager.selection)
+        XCTAssertTrue(contains(manager, CGPoint(x: 28, y: 22)), "it acts as the triangle its straight edge back closes (§5.29)")
+        XCTAssertFalse(contains(manager, CGPoint(x: 15, y: 35)), "…and only that triangle")
     }
 
     /// **A new stroke joins from the open end with a straight edge to where the pen lands**, and
