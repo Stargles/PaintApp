@@ -54,6 +54,14 @@ struct ContentView: View {
                             onSaveAnyway: saveAnywayOverDamage,
                             onCancelDamagedSave: keepDamagedOriginal)
             }
+
+            // The reopen notice after an unclean end lands on the gallery, which has no badge of its own;
+            // the editor draws the same one itself (`DrawingView`).
+            if screen != .editor {
+                ActionRecorderIndicator()
+                    .padding(.top, 12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
         }
         // **Nothing in the app moves for the keyboard** — the owner, 2026-10-10: *"the keyboard comes up, and
         // for some reason the entire screen gets shifted up."* One declaration at the root of every screen
@@ -117,6 +125,11 @@ struct ContentView: View {
             } else {
                 autosave.stop()
             }
+        }
+        // `initial`: the launch itself is the first time the scene is active, and no change is delivered
+        // for it. See `UncleanExitWatch`.
+        .onChange(of: scenePhase, initial: true) { _, newPhase in
+            UncleanExitWatch.scenePhaseChanged(to: newPhase)
         }
         .onChange(of: scenePhase) { oldPhase, newPhase in
             // Playback ends when the app leaves the foreground, and this is not politeness — the

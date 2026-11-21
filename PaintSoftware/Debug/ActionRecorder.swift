@@ -120,6 +120,10 @@ final class ActionRecorder: ObservableObject {
     /// `requireFailure` answers), so in practice the window is the bound and the capacity only stops a
     /// burst from growing it.
     private var ring = FlightRing<(event: String, fields: [(String, JSONValue)])>(capacity: 5000, window: 90)
+    /// Bumped by every ring append; `persistRing` writes only when it has moved since the last write.
+    private var ringRevision = 0
+    private var persistedRevision = -1
+    private var ringPersistTimer: Timer?
     private var wedge = CanvasWedgeDetector()
     private var pendingNavigationFlight: DispatchWorkItem?
     /// The editor the flight ring is watching, for a dump's header. Updated on every `startFlight`,
@@ -181,6 +185,59 @@ final class ActionRecorder: ObservableObject {
         guard !Self.isFlying else { return }
         ensureTap()
         Self.isFlying = true
+        ringPersistTimer = Timer.scheduledTimer(withTimeInterval: Self.ringPersistInterval, repeats: true) { [weak self] _ in
+            self?.persistRing()
+        }
+    }
+
+    /// How often the ring is rewritten to `UncleanExitWatch.ringURL` while events keep arriving — the most
+    /// a crash can cost off the end of its dump.
+    static let ringPersistInterval: TimeInterval = 5
+
+    /// **Keeps the last 90 s on disk so a kill cannot take them.** The main thread's whole share is one
+    /// snapshot of the ring (`elements(asOf:)` — the entries inside the window, a few hundred on an
+    /// ordinary minute) and the header; the lines, the string and the atomic write run on the watch's
+    /// serial utility queue. Skipped outright when nothing has been recorded since the last write.
+    /// `completion` is for tests, called on that queue after the file is in place.
+    func persistRing(to url: URL = UncleanExitWatch.standard.ringURL, completion: (() -> Void)? = nil) {
+        guard Self.isFlying, ringRevision != persistedRevision else { completion?(); return }
+        persistedRevision = ringRevision
+        let now = CACurrentMediaTime()
+        let entries = ring.elements(asOf: now)
+        let base = entries.first?.time ?? now
+        let header = Self.headerLine(canvasSize: flightContext.canvasSize, projectName: flightContext.projectName,
+                                     tap: tapReport, url: url, freezesCaught: AppSettings.standard.canvasRepairCount,
+                                     flight: [("trigger", .str("crash-ring")), ("events", .int(entries.count)),
+                                              ("seconds", .num(now - base))])
+        let tool = toolSettingsProvider?() ?? []
+        UncleanExitWatch.queue.async {
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? Data(Self.flightText(header: header, tool: tool, entries: entries, base: base).utf8)
+                .write(to: url, options: .atomic)
+            completion?()
+        }
+    }
+
+    /// The reopen notice after an unclean end — the flight badge's own fading capsule, so the artist sees
+    /// it wherever the app opens.
+    func announceCrashReport() {
+        let notice = "The app didn't close cleanly last time — a crash report was saved"
+        refreshRecordings()
+        withAnimation { flightNotice = notice }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (UITestSeeds.noticeDurationOverride ?? 6)) { [weak self] in
+            guard self?.flightNotice == notice else { return }
+            withAnimation { self?.flightNotice = nil }
+        }
+    }
+
+    static func flightText(header: String, tool: ToolSettings, entries: [(time: Double, element: (event: String, fields: [(String, JSONValue)]))],
+                           base: Double) -> String {
+        var text = header + "\n"
+        if !tool.isEmpty { text += line("toolSettings", [("reason", .str("flight"))] + tool, at: 0) + "\n" }
+        for entry in entries {
+            text += line(entry.element.event, entry.element.fields, at: entry.time - base) + "\n"
+        }
+        return text
     }
 
     /// Puts the ring on disk as a recording of its own, `flight-<date>.jsonl`, beside the others in
@@ -220,11 +277,7 @@ final class ActionRecorder: ObservableObject {
         default: notice = "Saved the last 90 s"
         }
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            var text = header + "\n"
-            if !tool.isEmpty { text += Self.line("toolSettings", [("reason", .str("flight"))] + tool, at: 0) + "\n" }
-            for entry in entries {
-                text += Self.line(entry.element.event, entry.element.fields, at: entry.time - base) + "\n"
-            }
+            let text = Self.flightText(header: header, tool: tool, entries: entries, base: base)
             let written = FileManager.default.createFile(atPath: url.path, contents: Data(text.utf8))
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -676,6 +729,7 @@ final class ActionRecorder: ObservableObject {
         }
         if Self.isFlying, inRing {
             ring.append((event, fields), at: time)
+            ringRevision &+= 1
         }
     }
 

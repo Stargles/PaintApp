@@ -31,6 +31,10 @@ struct PaintApp: App {
         // container while the artist's real library sat untouched in Files.
         ProjectLocation.resolveOnLaunch()
         AppSettings.standard.forgetIfRequested()
+        // Did the last run die in the artist's hands? Off main; a yes saves the crash report and raises
+        // the fading notice. MetricKit's crash and hang diagnostics land in the same folder.
+        UncleanExitWatch.checkLaunch { _ in ActionRecorder.shared.announceCrashReport() }
+        DiagnosticPayloadSink.shared.start()
     }
 
     var body: some Scene {

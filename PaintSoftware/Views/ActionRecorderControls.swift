@@ -225,6 +225,7 @@ struct ActionRecorderIndicator: View {
                 .background(Color.black.opacity(0.65))
                 .clipShape(Capsule())
                 .allowsHitTesting(false)
+                .transition(.opacity)
                 .accessibilityIdentifier("recorder.flightNotice")
         } else if recorder.isRecording {
             HStack(spacing: 5) {
