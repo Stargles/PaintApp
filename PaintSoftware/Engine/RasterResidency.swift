@@ -6,11 +6,14 @@ import UIKit
 /// Derived composites keep their existing compositor/cache budgets.
 final class RasterResidency {
     // Includes both source buffers and the workspace needed to checkpoint dirty versions.
-    /// **Half the one budget is the share source pixels may hold** (SCHEDULER.md rule 5,
-    /// `MemoryBudget`), and what they hold is charged there as one `.shown` entry: this owner already
-    /// evicts its own candidates least recently used first within its share, and its checkpoint
-    /// bookkeeping is what makes an eviction safe, so the one budget counts it and leaves the choice here.
-    static let shared = RasterResidency(budgetBytes: MemoryBudget.shared.totalBytes / 2,
+    /// **Source pixels may hold up to the one budget** (SCHEDULER.md rule 5, `MemoryBudget`) — no
+    /// number of their own — and what they hold is charged there as one `.shown` entry, so every
+    /// other admission sees it: this owner already evicts its own candidates least recently used
+    /// first, and its checkpoint bookkeeping is what makes an eviction safe, so the one budget counts
+    /// it and leaves the choice here. (Its old figure, twice `CompositorBudget`'s, was a sixteenth of
+    /// the *Mac's* memory on the simulator — 1.5 GiB — which is the only reason three 5000² rasters
+    /// ever fitted in a test.)
+    static let shared = RasterResidency(budgetBytes: MemoryBudget.deviceTotalBytes,
                                         charge: MemoryBudget.shared.entry("RasterResidency", priority: .shown) {})
 
     enum Failure: Error, Equatable {

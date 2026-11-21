@@ -19,8 +19,8 @@ import UIKit
 /// build a fixture cel and read what it left resident.
 final class MemoryBudgetLogicTests: XCTestCase {
 
-    /// The one budget's total before a test narrowed it.
-    private static let originalTotal = MemoryBudget.shared.totalBytes
+    /// The one budget's total before a test narrowed it — the device's, which `shared` starts at.
+    private static let originalTotal = MemoryBudget.deviceTotalBytes
 
     /// Room in the one budget for exactly `bytes` beyond what is held now.
     private func allowOnly(_ bytes: Int) {
@@ -537,7 +537,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
             // Held so nothing is deallocated under the registry: a canvas that goes away is pruned,
             // and the test would then be measuring its own fixture's lifetime.
             let canvases = (0..<8).map { _ in ownersCanvasCel() }
-            for canvas in canvases { _ = canvas.render() }
+            for canvas in canvases { autoreleasepool { _ = canvas.render() } }
 
             XCTAssertEqual(VectorRenderCache.entryCount, allowed,
                            "a budget of \(allowed) entries' worth must hold \(allowed), whatever the count ceiling says")
@@ -563,12 +563,14 @@ final class MemoryBudgetLogicTests: XCTestCase {
         VectorRenderCache.removeAll(); PixelOps.clearRasterizeCache()
         defer { VectorRenderCache.removeAll(); restoreBudget() }
         let entryBytes = 2048 * 1024 * 4
-        allowOnly(entryBytes * 2)
+        let base = MemoryBudget.shared.heldBytes
+        // Room for the five on screen — what is shown is counted, it is memory — and two more.
+        allowOnly(entryBytes * (5 + 2))
 
         let shown = (0..<5).map { _ in ownersCanvasCel() }
         var pins = shown.map(VectorRenderCache.DisplayPin.init)
         let offScreen = (0..<3).map { _ in ownersCanvasCel() }
-        for canvas in shown + offScreen { _ = canvas.render() }
+        for canvas in shown + offScreen { autoreleasepool { _ = canvas.render() } }
         XCTAssertEqual(shown.filter(\.hasCachedImage).count, 5,
                        "every layer on screen keeps the picture its host is holding anyway")
         XCTAssertEqual(offScreen.filter(\.hasCachedImage).count, 2,
@@ -585,7 +587,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
                                    color: CodableColor(red: 0, green: 0, blue: 0, alpha: 1),
                                    size: 12, opacity: 1, samples: samples))
         _ = top.render()
-        for canvas in offScreen { _ = canvas.render() }
+        for canvas in offScreen { autoreleasepool { _ = canvas.render() } }
         let repairs = top.regionRepairs
         top.restoreElements(beforeStroke, changedInk: nil)
         _ = top.render()
@@ -602,7 +604,8 @@ final class MemoryBudgetLogicTests: XCTestCase {
         // never read, so Release may free them at their last use: hold them to here explicitly.
         withExtendedLifetime(pins) {}
         pins.removeAll()
-        _ = ownersCanvasCel().render()
+        MemoryBudget.shared.totalBytes = base + entryBytes * 2
+        autoreleasepool { _ = ownersCanvasCel().render() }
         XCTAssertLessThanOrEqual(VectorRenderCache.entryCount, 2,
                                  "a canvas no host shows is the cache's again, bounded like any other")
         XCTAssertLessThanOrEqual(VectorRenderCache.residentBytes, entryBytes * 2)
@@ -679,7 +682,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
                                               size: 8, opacity: 1, samples: samples))
                 return canvas
             }
-            for canvas in canvases { _ = canvas.render() }
+            for canvas in canvases { autoreleasepool { _ = canvas.render() } }
             let held = VectorRenderCache.entryCount
             withExtendedLifetime(canvases) {}
             return held
@@ -768,7 +771,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
                                        at: CGSize(width: 16, height: 16))
 
         let names = Set(MemoryPressure.registeredNames)
-        for expected in ["PixelOps.rasterizeCache", "MaskResolver.cache", "BrushPreviewCache", "VectorRenderCache",
+        for expected in ["MemoryBudget", "MaskResolver.cache", "BrushPreviewCache",
                          "OnionSkinRasterCache", "UndoHistory"] {
             XCTAssertTrue(names.contains(expected),
                           "\(expected) must answer MemoryPressure — \(names.sorted()) did")
@@ -796,7 +799,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
 
         VectorRenderCache.removeAll(); PixelOps.clearRasterizeCache()
         let canvases = (0..<8).map { _ in ownersCanvasCel() }
-        for canvas in canvases { _ = canvas.render() }
+        for canvas in canvases { autoreleasepool { _ = canvas.render() } }
         XCTAssertEqual(VectorRenderCache.entryCount, 8, "control: the cache must be full")
 
         MemoryPressure.signal(.warning)
@@ -1178,14 +1181,14 @@ final class MemoryBudgetLogicTests: XCTestCase {
             allowOnly(entryBytes * 3)
 
             let canvases = (0..<3).map { _ in ownersCanvasCel() }
-            for canvas in canvases { _ = canvas.render() }
+            for canvas in canvases { autoreleasepool { _ = canvas.render() } }
             XCTAssertEqual(VectorRenderCache.entryCount, 3, "control: the cache is exactly full")
 
             // Read the oldest one's memo. Nothing is rasterized either way — the second arm is a memo
             // *hit*, which is what makes it a use rather than a store.
             let rasterizationsBefore = canvases[0].rasterizations
             if readsThroughRender {
-                _ = canvases[0].render()
+                autoreleasepool { _ = canvases[0].render() }
             } else if case .ready = canvases[0].cachedRender() {} else {
                 XCTFail("control: the oldest entry must still be memoized before the read")
             }
@@ -1194,7 +1197,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
 
             // One more render, so exactly one entry has to go.
             let newcomer = ownersCanvasCel()
-            _ = newcomer.render()
+            autoreleasepool { _ = newcomer.render() }
 
             XCTAssertTrue(canvases[0].hasCachedImage,
                           "the cel that was read must survive — under insertion order it would be the victim (readsThroughRender: \(readsThroughRender))")
@@ -1239,7 +1242,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
         allowOnly(Int.max)
 
         let canvas = ownersCanvasCel()
-        _ = canvas.render()
+        autoreleasepool { _ = canvas.render() }
         XCTAssertGreaterThan(VectorRenderCache.residentBytes, 0, "control: the render is charged")
 
         // **`bumpVersion()` and not `elements = []`**, which was the first attempt and did not free
@@ -1264,7 +1267,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
         allowOnly(Int.max)
 
         let canvases = (0..<3).map { _ in ownersCanvasCel() }
-        for canvas in canvases { _ = canvas.render() }
+        for canvas in canvases { autoreleasepool { _ = canvas.render() } }
         let full = VectorRenderCache.residentBytes
         XCTAssertEqual(VectorRenderCache.entryCount, 3, "control: three entries")
 
@@ -1351,8 +1354,10 @@ final class MemoryBudgetLogicTests: XCTestCase {
         XCTAssertNil(budget.admit(50, lane: .answer), "60 + 50 is over 100 and nothing can be evicted")
         XCTAssertEqual(budget.refusals, 1)
         first?.release()
-        XCTAssertNotNil(budget.admit(50, lane: .answer), "the release made the room")
-        XCTAssertEqual(budget.heldBytes, 50, "a grant let go of is given back")
+        let second = budget.admit(50, lane: .answer)
+        XCTAssertNotNil(second, "the release made the room")
+        XCTAssertEqual(budget.heldBytes, 50, "a grant let go of is given back, one held is counted")
+        withExtendedLifetime(second) {}
     }
 
     /// Eviction order: what is kept in case goes first, least recently used first, then what is
@@ -1372,13 +1377,15 @@ final class MemoryBudgetLogicTests: XCTestCase {
         older.touch()   // read after `newer` was made: `newer` is now the least recently used
         XCTAssertEqual(budget.heldBytes, 90)
 
-        XCTAssertNotNil(budget.admit(20, lane: .answer))
+        let first = budget.admit(20, lane: .answer)
+        XCTAssertNotNil(first)
         XCTAssertEqual(evicted, ["newer"], "the least recently used cache entry, and only as much as needed")
-        XCTAssertNotNil(budget.admit(25, lane: .answer))
+        let second = budget.admit(25, lane: .answer)
+        XCTAssertNotNil(second)
         XCTAssertEqual(evicted, ["newer", "older", "current"], "the rest of the cache, then what is current")
-        XCTAssertNil(budget.admit(1, lane: .answer), "what is shown is never evicted")
+        XCTAssertNil(budget.admit(16, lane: .answer), "40 shown and 45 granted leave 15: what is shown is never evicted")
         XCTAssertEqual(shown.bytes, 40)
-        withExtendedLifetime((shown, current, older, newer)) {}
+        withExtendedLifetime((shown, current, older, newer, first, second)) {}
     }
 
     /// R2/R3 never take the frame about to be played, and main never waits.
@@ -1390,8 +1397,10 @@ final class MemoryBudgetLogicTests: XCTestCase {
         XCTAssertNil(budget.admit(30, lane: .later), "on main, R3 is refused rather than waiting")
         XCTAssertLessThan(Date().timeIntervalSince(started), 0.5, "and refused at once")
         XCTAssertEqual(current.bytes, 80, "R3 must not evict what is current")
-        XCTAssertNotNil(budget.admit(30, lane: .answer), "an R1 answer may")
+        let answer = budget.admit(30, lane: .answer)
+        XCTAssertNotNil(answer, "an R1 answer may")
         XCTAssertEqual(current.bytes, 0)
+        withExtendedLifetime(answer) {}
     }
 
     /// R2/R3 wait before they start, holding nothing, off main — for a release, or until cancelled.
@@ -1423,7 +1432,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
         let budget = MemoryBudget(totalBytes: 1000)
         budget.availableOverrideBytes = 150
         XCTAssertNil(budget.admit(100, lane: .answer), "150 left on the device is less than twice 100")
-        XCTAssertNotNil(budget.admit(70, lane: .answer))
+        XCTAssertNotNil(budget.admit(70, lane: .answer), "and more than twice 70")
         budget.availableOverrideBytes = 0
         XCTAssertTrue(budget.makeRoom(for: 900), "0 available is no information, not no memory")
     }
@@ -1432,20 +1441,22 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// evicting a memo while a job still draws from it frees nothing, and the budget must say so.
     func testADrawnPictureIsHeldUntilItsPixelsAreFreedWhereverItWent() {
         let before = MemoryBudget.shared.inFlightBytes
-        var picture: UIImage? = PixelOps.drawImage(size: CGSize(width: 100, height: 50)) { cg in
-            cg.setFillColor(UIColor.red.cgColor); cg.fill(CGRect(x: 0, y: 0, width: 10, height: 10)); return true
+        autoreleasepool {
+            let picture = PixelOps.drawImage(size: CGSize(width: 100, height: 50)) { cg in
+                cg.setFillColor(UIColor.red.cgColor); cg.fill(CGRect(x: 0, y: 0, width: 10, height: 10)); return true
+            }
+            XCTAssertEqual(MemoryBudget.shared.inFlightBytes - before, 100 * 50 * 4, "the pixels are charged")
+            XCTAssertEqual(picture?.cgImage?.width, 100)
         }
-        XCTAssertNotNil(picture)
-        XCTAssertEqual(MemoryBudget.shared.inFlightBytes - before, 100 * 50 * 4, "the pixels are charged")
-        XCTAssertEqual(picture?.cgImage?.width, 100)
-        autoreleasepool { picture = nil }
         XCTAssertEqual(MemoryBudget.shared.inFlightBytes, before, "and given back with them")
-        XCTAssertNil(PixelOps.drawImage(size: CGSize(width: 10, height: 10)) { _ in false }, "an abandoned draw is no picture")
+        autoreleasepool {
+            XCTAssertNil(PixelOps.drawImage(size: CGSize(width: 10, height: 10)) { _ in false }, "an abandoned draw is no picture")
+        }
         XCTAssertEqual(MemoryBudget.shared.inFlightBytes, before, "and charges nothing")
     }
 
     /// No cache above its share: the ring holds two frames only inside a quarter of the budget, and
-    /// source pixels are held to half of it.
+    /// source pixels are held to the budget itself.
     func testNoCacheIsSizedAboveItsShareOfTheOneBudget() {
         let budget = 888 * Self.mib
         let frame5000 = 5000 * 5000 * 4, frame6000 = 6000 * 6000 * 4
@@ -1457,7 +1468,8 @@ final class MemoryBudgetLogicTests: XCTestCase {
             XCTAssertLessThanOrEqual(CanvasManager.frameRingByteBudget(forFrameBytes: frameBytes, sharedBudgetBytes: budget),
                                      max(budget / CanvasManager.frameRingShareDivisor, CanvasManager.minimumFrameRingByteBudget))
         }
-        XCTAssertEqual(RasterResidency.shared.budgetBytes, MemoryBudget.shared.totalBytes / 2)
+        XCTAssertEqual(RasterResidency.shared.budgetBytes, MemoryBudget.deviceTotalBytes,
+                       "source pixels hold up to the one budget, never a number of their own")
     }
 
     /// **A vector-only cel's flatten is the canvas's own memo, not a second canvas-sized copy** — the

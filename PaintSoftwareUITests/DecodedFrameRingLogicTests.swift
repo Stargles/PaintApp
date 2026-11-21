@@ -404,13 +404,12 @@ final class DecodedFrameRingLogicTests: XCTestCase {
     /// the display thread per flip. With the budget below it is **24.0 fps with 155 hits and 0
     /// misses**. The rule is the fix; this is the rule.
     func testTheRingBudgetHoldsTwoFramesUntilTwoFramesStopFittingTheDevice() {
-        let iPad9 = 192_663_552            // `CompositorBudget.textureBudgetBytes` read off the device
-        CompositorBudget.budgetOverrideBytes = iPad9
-        defer { CompositorBudget.budgetOverrideBytes = nil }
+        let iPad9 = 192_663_552            // the ring's share of a one budget of four times this
+        let shared = iPad9 * CanvasManager.frameRingShareDivisor
 
         let minimum = CanvasManager.minimumFrameRingByteBudget
         func budget(_ edge: Int) -> Int {
-            CanvasManager.frameRingByteBudget(forFrameBytes: edge * edge * 4)
+            CanvasManager.frameRingByteBudget(forFrameBytes: edge * edge * 4, sharedBudgetBytes: shared)
         }
 
         // 2048²: two frames are 33.6 MB, far under the minimum, so the minimum stands and the ring
@@ -434,9 +433,9 @@ final class DecodedFrameRingLogicTests: XCTestCase {
 
         // The boundary is a property of the rule rather than of any canvas: exactly at the ceiling
         // the ring is on, one byte past it the ring is off.
-        XCTAssertEqual(CanvasManager.frameRingByteBudget(forFrameBytes: iPad9 / 2), iPad9 / 2 * 2,
+        XCTAssertEqual(CanvasManager.frameRingByteBudget(forFrameBytes: iPad9 / 2, sharedBudgetBytes: shared), iPad9 / 2 * 2,
                        "two frames that exactly fit are held")
-        XCTAssertEqual(CanvasManager.frameRingByteBudget(forFrameBytes: iPad9 / 2 + 1), 0,
+        XCTAssertEqual(CanvasManager.frameRingByteBudget(forFrameBytes: iPad9 / 2 + 1, sharedBudgetBytes: shared), 0,
                        "one byte more and there is no useful ring to have")
     }
 

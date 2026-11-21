@@ -485,24 +485,21 @@ final class InterpolationModelLogicTests: XCTestCase {
     /// so a timeline of blank cels would have nothing for eviction to evict and this would pass
     /// vacuously.
     func testAScrubDoesNotLeaveEveryCelItTouchedMemoized() throws {
-        let manager = CanvasFixture.manager(layerCount: 1)
-        manager.addVectorLayer()
-        let layerIndex = 1
-        // Assigned directly rather than built with `addCel`: the fixture's layers start with one cel
-        // spanning the whole scene, so every add would collide with it.
-        manager.layers[layerIndex].cels = (0..<6).map { frame in
+        // Six cels of one layer, held here rather than by a manager: a manager's own thumbnail
+        // renders would touch these memos from its queues while the scrub runs, and the order the
+        // budget evicts in is the thing under test.
+        let cels = (0..<6).map { frame in
             Cel(id: UUID(), startFrame: frame, frameCount: 1,
                 raster: .empty(size: CanvasFixture.canvasSize),
                 vector: VectorCanvas(size: CanvasFixture.canvasSize, strokes: [sampleStroke()]))
         }
-        let cels = manager.layers[layerIndex].cels
         // A budget of two entries' worth, so the scrub below has to evict. The fixture canvas is
         // 64x64, so a memo is 16 KiB and the entry ceiling of 12 would never bind on six cels.
         let entryBytes = 64 * 64 * 4
-        CompositorBudget.budgetOverrideBytes = entryBytes * 2
-        defer { CompositorBudget.budgetOverrideBytes = nil }
+        MemoryBudget.shared.totalBytes = MemoryBudget.shared.heldBytes + entryBytes * 2
+        defer { MemoryBudget.shared.totalBytes = MemoryBudget.deviceTotalBytes }
 
-        for cel in cels { _ = cel.vector?.render() }
+        for cel in cels { autoreleasepool { _ = cel.vector?.render() } }
 
         let kept = cels.filter { $0.vector?.hasCachedImage == true }
         XCTAssertEqual(kept.count, 2, "The byte budget bounds it, and it is bytes rather than a count of cels")

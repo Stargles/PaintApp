@@ -2678,13 +2678,14 @@ final class PerfBaselineTests: XCTestCase {
         let manager = perfManager()
         let cel = manager.layers[0].cels[0]
         let oneImage = CompositorBudget.textureBytes(for: Self.canvasSize)
-        defer { CompositorBudget.budgetOverrideBytes = nil }
-        // Room for two flattens and no more, so the third store has to evict.
-        CompositorBudget.budgetOverrideBytes = oneImage * 2
-
+        defer { MemoryBudget.shared.totalBytes = MemoryBudget.deviceTotalBytes }
         PixelOps.clearRasterizeCache()
         for _ in 0..<6 {
             autoreleasepool {
+                // Room in the one budget for two flattens beside everything else held, so a third
+                // store has to evict — re-taken each lap, because the stroke below grows the raster.
+                MemoryBudget.shared.totalBytes = MemoryBudget.shared.heldBytes + oneImage * 2
+                    - PixelOps.rasterizeCacheBytes
                 _ = PixelOps.rasterize(cel: cel, canvasSize: Self.canvasSize)
                 // A stroke is what moves `rasterVersion`, which is what makes a fresh key — the same
                 // thing the artist does that filled this cache in the first place.

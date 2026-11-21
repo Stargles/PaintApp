@@ -142,7 +142,11 @@ enum VectorRenderCache {
     /// Bytes of memoized vector render held beyond what layer hosts are showing — the part the
     /// budget may evict.
     static var residentBytes: Int {
-        MemoryBudget.shared.entryBytes(named: budgetName, priority: .cache)
+        lock.lock()
+        pruneLocked()
+        let live = records.values.map(\.entry)
+        lock.unlock()
+        return live.filter { $0.priority == .cache }.reduce(0) { $0 + $1.bytes }
     }
 
     /// How many live canvases are holding a memoized render, shown or not.
@@ -157,6 +161,7 @@ enum VectorRenderCache {
     /// Drops every memoized render this knows about. For tests.
     static func removeAll() {
         lock.lock()
+        pruneLocked()
         let all = records.values.compactMap(\.canvas)
         lock.unlock()
         for canvas in all { canvas.dropCachedImage() }

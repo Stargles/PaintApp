@@ -38,11 +38,8 @@ enum PixelOps {
         let width = Int((size.width * scale).rounded(.up)), height = Int((size.height * scale).rounded(.up))
         guard width > 0, height > 0 else { return nil }
         let bytesPerRow = width * 4, count = bytesPerRow * height
-        guard let grant = MemoryBudget.shared.admit(count) else {
-            MemoryPressure.signal(.allocationRefused)
-            return nil
-        }
-        guard let buffer = calloc(count, 1) else { return nil }
+        // A refusal is the caller's to name (`MemoryPressure.signal`): what was refused differs.
+        guard let grant = MemoryBudget.shared.admit(count), let buffer = calloc(count, 1) else { return nil }
         let info = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
         guard let cg = CGContext(data: buffer, width: width, height: height, bitsPerComponent: 8,
                                  bytesPerRow: bytesPerRow, space: sRGBColorSpace, bitmapInfo: info) else {
@@ -226,7 +223,7 @@ enum PixelOps {
                                                pose: pose, quality: quality),
                                      canvasSize: canvasSize, quality: quality, derivedResolution: derivedResolution)
         // A picture handed through is its owner's memo, not this one's.
-        if let made, made.copied { rasterizeCache.store(made.image, for: key) }
+        if let made, made.kept { rasterizeCache.store(made.image, for: key) }
         return made?.image
     }
 
@@ -248,7 +245,7 @@ enum PixelOps {
                                window: window)
         if let hit = rasterizeCache.value(for: key) { return hit }
         let made = rasterizeUncached(frozen, canvasSize: canvasSize, quality: quality, window: window)
-        if let made, made.copied { rasterizeCache.store(made.image, for: key) }
+        if let made, made.kept { rasterizeCache.store(made.image, for: key) }
         return made?.image
     }
 
@@ -579,7 +576,7 @@ enum PixelOps {
     private static func rasterizeUncached(_ cel: FrozenCel, canvasSize: CGSize,
                                           quality: RenderQuality, window: StripWindow? = nil,
                                           tier: CelTier = .combined,
-                                          derivedResolution: CGFloat = 1) -> (image: UIImage, copied: Bool)? {
+                                          derivedResolution: CGFloat = 1) -> (image: UIImage, kept: Bool)? {
         let bounds = CGRect(origin: .zero, size: canvasSize)
         let content = window.map {
             CGRect(origin: CGPoint(x: -$0.origin.x, y: -$0.origin.y), size: $0.frameSize)
@@ -610,11 +607,12 @@ enum PixelOps {
         // **A cel that is only its vector picture is that picture** — the canvas's own memo, already
         // charged to the one budget — so it is handed back rather than drawn into a second
         // canvas-sized copy (MEASURED: 95 MiB a layer at 5000², held twice by the memo next door).
+        // A derived picture (an in-between) is nobody's memo but this one's, so it is still kept.
         if tier != .backing, let vectorImage, replacingBase == nil, bakedImage == nil, strokesImage == nil,
            cel.display == nil, content == bounds, vectorImage.scale == 1,
            let picture = vectorImage.cgImage, picture.width == Int(bounds.width.rounded()),
            picture.height == Int(bounds.height.rounded()) {
-            return (vectorImage, copied: false)
+            return (vectorImage, kept: cel.derived != nil)
         }
         var completed = true
         let image = drawImage(size: bounds.size) { cg in
@@ -649,8 +647,13 @@ enum PixelOps {
             }
             return true
         }
-        guard completed, let image else { return nil }
-        return (image, copied: true)
+        guard completed else { return nil }
+        guard let image else {
+            // The one budget refused the picture: the work, not a draw, needed more memory.
+            MemoryPressure.signal(.workRefused)
+            return nil
+        }
+        return (image, kept: true)
     }
 
     // `compositeCanvas` lived here: a flat walk of `layers` that drew each visible layer's active cel

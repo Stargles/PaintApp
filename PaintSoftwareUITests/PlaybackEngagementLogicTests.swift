@@ -248,8 +248,9 @@ final class PlaybackEngagementLogicTests: XCTestCase {
         let perRender = CompositorBudget.textureBytes(for: canvas)      // 1 MiB
         let layers = 3, frames = 2, laps = 3
 
+        defer { MemoryBudget.shared.totalBytes = MemoryBudget.deviceTotalBytes }
         // Two entries against six, which is the owner's iPad 9 at 4096² to the entry.
-        CompositorBudget.budgetOverrideBytes = perRender * 2
+        MemoryBudget.shared.totalBytes = MemoryBudget.shared.heldBytes + perRender * 2
         let starved = plainDocument(layers: layers, frames: frames, canvas: canvas)
         VectorRenderCache.removeAll()
         var starvedPerLap: [Int] = []
@@ -263,7 +264,7 @@ final class PlaybackEngagementLogicTests: XCTestCase {
                        + "it is why it got worse rather than settling")
 
         // The same document, the same laps, with room for the whole loop.
-        CompositorBudget.budgetOverrideBytes = perRender * layers * frames * 2
+        MemoryBudget.shared.totalBytes = MemoryBudget.shared.heldBytes + perRender * layers * frames * 2
         let fed = plainDocument(layers: layers, frames: frames, canvas: canvas)
         VectorRenderCache.removeAll()
         var fedPerLap: [Int] = []

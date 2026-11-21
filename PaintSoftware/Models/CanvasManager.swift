@@ -3561,7 +3561,7 @@ final class CanvasManager: ObservableObject {
     /// thread. That is the one place RENDER.md §3.5's promise is still void, and PERFORMANCE.md §17
     /// carries the measurement of what it costs.
     static func frameRingByteBudget(forFrameBytes frameBytes: Int,
-                                    sharedBudgetBytes: Int = MemoryBudget.shared.totalBytes) -> Int {
+                                    sharedBudgetBytes: Int = MemoryBudget.deviceTotalBytes) -> Int {
         guard frameBytes > 0 else { return minimumFrameRingByteBudget }
         let twoFrames = 2 * frameBytes
         guard twoFrames <= sharedBudgetBytes / frameRingShareDivisor else { return 0 }

@@ -98,11 +98,16 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
         return result == KERN_SUCCESS ? Int(info.phys_footprint) : 0
     }
 
+    /// The budget this device runs under — what `shared` starts at, and what the shares of it
+    /// (`RasterResidency.shared`, the ring) are sized from, so a test narrowing `shared` cannot
+    /// resize them.
+    static let deviceTotalBytes = totalBytes(appLimitBytes: appLimitBytes)
+
     /// The one budget the app runs under. A memory warning trims what it keeps in case to half and
     /// leaving the foreground drops it all (`MemoryPressurePolicy`); a refused allocation trims like
     /// a warning. What is shown or current stays.
     static let shared: MemoryBudget = {
-        let budget = MemoryBudget(totalBytes: totalBytes(appLimitBytes: appLimitBytes))
+        let budget = MemoryBudget(totalBytes: deviceTotalBytes)
         MemoryPressure.startObservingSystemEvents()
         budget.pressureToken = MemoryPressure.register("MemoryBudget") { [weak budget] level in
             guard let budget else { return }
@@ -189,6 +194,11 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
         let free = total - residentBytes - grantedBytes
         let device = available ?? Int(os_proc_available_memory())
         return device > 0 ? min(free, device / 2) : free
+    }
+    /// What the device valve reads: the bytes left before jetsam, or 0 where that is not known.
+    var deviceAvailableBytes: Int {
+        lockState(); defer { condition.unlock() }
+        return available ?? Int(os_proc_available_memory())
     }
     /// Entries alone.
     var entryBytes: Int { lockState(); defer { condition.unlock() }; return residentBytes }
@@ -347,6 +357,10 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
         let evictable: Priority = lane == .answer ? .current : .cache
         let mayWait = waiting && !Thread.isMainThread
         let deadline = Date().addingTimeInterval(Self.longestWait)
+        // **Stops evicting once an eviction freed nothing.** A picture evicted from a cache while a
+        // job still draws from it stays counted (its pixels hold their grant), so evicting on would
+        // empty every cache for no byte; what is in use is waited for or refused instead.
+        var stalled = false
         lockState()
         while true {
             let liveAvailable = available ?? Int(os_proc_available_memory())
@@ -356,11 +370,12 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
                 condition.unlock()
                 return true
             }
-            let victims = victimsLocked(need: max(bytes - free, 1), upTo: evictable, keeping: nil)
+            let victims = stalled ? [] : victimsLocked(need: max(bytes - free, 1), upTo: evictable, keeping: nil)
             if !victims.isEmpty {
                 condition.unlock()
                 victims.forEach { $0.evict() }
                 lockState()
+                stalled = total - residentBytes - grantedBytes <= free
                 continue
             }
             if !mayWait || cancelled() || Date() >= deadline {
@@ -371,6 +386,7 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
                 return false
             }
             condition.wait(until: min(deadline, Date().addingTimeInterval(0.05)))
+            stalled = false
         }
     }
 

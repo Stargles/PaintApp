@@ -174,7 +174,7 @@ final class MetalFillEngine {
         // Admitted by the one budget (SCHEDULER.md rule 5) and held for the session's life — a fill is
         // an R1 answer, so a refusal is said at once, never waited out.
         guard let grant = MemoryBudget.shared.admit(needed, lane: .answer) else {
-            return .noHeadroom(needed: needed, available: MemoryBudget.shared.freeBytes)
+            return .noHeadroom(needed: needed, available: MemoryBudget.shared.deviceAvailableBytes)
         }
         guard width > 0, height > 0, width <= 16_383, height <= 16_383,
               referenceRGBA.count >= width * height * 4,
