@@ -3348,7 +3348,10 @@ final class CanvasManager: ObservableObject {
 
     /// Whether the animation is playing. Observable, so anything in the app can ask — which is the
     /// half of this that the view could not provide at all.
-    @Published private(set) var isPlaying: Bool = false
+    @Published private(set) var isPlaying: Bool = false {
+        // The decoded frames are the next ones on screen only while playing (`DecodedFrameRing.priority`).
+        didSet { if isPlaying != oldValue { frameBaker.ring.priority = isPlaying ? .current : .cache } }
+    }
 
     /// The wall clock playback derives its position from, injectable so a logic test can hand it
     /// numbers rather than sleeping through real frames.
@@ -3589,7 +3592,7 @@ final class CanvasManager: ObservableObject {
                    store: FrameBakeStore(root: FrameBakeStore.defaultRoot(projectID: projectID,
                                                                           renderResolution: renderResolution)),
                    ring: DecodedFrameRing(byteBudget: Self.frameRingByteBudget(
-                       forFrameBytes: decodedFrameBytes)))
+                       forFrameBytes: decodedFrameBytes), priority: .cache))
     }
 
     /// **`FrameBaker.close()`'s real caller.** `ContentView.returnToGallery` calls this on the way
@@ -3684,6 +3687,8 @@ final class CanvasManager: ObservableObject {
         // setter's lock and eviction sweep.
         let wantedRingBudget = Self.frameRingByteBudget(forFrameBytes: decodedFrameBytes)
         if baker.ring.byteBudget != wantedRingBudget { baker.ring.byteBudget = wantedRingBudget }
+        let ringPriority: MemoryBudget.Priority = isPlaying ? .current : .cache
+        if baker.ring.priority != ringPriority { baker.ring.priority = ringPriority }
 
         baker.isSuspended = suspended || liveTransformEdit != nil
         // `noteDocumentChanged` rather than `syncDirty()` + `kick()`: they are the same two lines,
