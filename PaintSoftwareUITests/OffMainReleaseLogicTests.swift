@@ -24,9 +24,10 @@ final class OffMainReleaseLogicTests: XCTestCase {
                                     _ make: @escaping @Sendable () -> AnyObject?) {
         let outcome: (found: Bool, freed: Bool) = DispatchQueue.global(qos: .userInitiated).sync {
             var owner = make()
-            guard let held = owner.flatMap({ Mirror(reflecting: $0).children.first { $0.label == label }?.value })
-                    .map({ $0 as AnyObject }) else { return (false, false) }
-            weak var stored = held
+            weak var stored: AnyObject?
+            // In a closure of its own, so no strong local outlives the read.
+            ({ stored = owner.flatMap { Mirror(reflecting: $0).children.first { $0.label == label }?.value as AnyObject? } })()
+            guard stored != nil else { return (false, false) }
             owner = nil
             return (true, stored == nil)
         }
