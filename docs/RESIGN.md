@@ -47,7 +47,8 @@ From the moment a profile expires until the Mac is on **and** the iPad is reacha
 open. If the Mac is awake (or wakes on the scheduled `pmset` event) a new profile is staged within
 minutes of expiry, and installed within five minutes of the iPad appearing. If the Mac is off at
 expiry nothing runs; at boot `RunAtLoad` signs at once. A Mac that is asleep with its lid closed on
-battery may ignore the wake.
+battery may ignore the wake. Both stages run in the owner's login session (keychain, Xcode's Apple ID),
+so after a reboot nothing signs until he logs in; a locked screen is fine.
 
 ## Operating it
 
