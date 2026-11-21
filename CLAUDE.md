@@ -844,6 +844,21 @@ end with `tools/stream/stream-client-check.py --host 100.104.85.111` and the iPa
 
 ## Deploy to iPad
 
+### The install gate — `tools/playcheck.sh <udid>`, green before every install
+
+On an iPad (9th generation) simulator of your own: it erases and boots the device, samples the
+simulator's own `backboardd` and the app once a second from the Mac (`tools/sim-footprint-sampler.sh`,
+`phys_footprint` and the kernel's peak), and runs `PlaycheckGateUITests` — the owner's routine on a
+5000² five-layer scene at his 1080×810 window — which asserts both peaks after every phase:
+`backboardd` ≤ 450 MiB and the app ≤ 1,165 MiB (the derivations are in the test's header). Exit 0 and
+`playcheck: GREEN` is the only pass; it also refuses a run whose xcresult does not hold exactly one
+passed test. Run through anything else the test fails, because without the sampler it measures
+nothing. **What it replaced, and why:** the gate asserted `LayerContentsCensus`, a count of the
+pictures the app *knows* it hands the render server. It stayed green while `2891caad` crashed the
+iPad on Play, because what grew was the app's own memory, which the census cannot see (2.07 GB on this
+routine, TODO.md). A proxy gate is not a gate; measure the processes the iPad kills.
+
+
 ```bash
 source ~/.config/paintapp/.env      # KEYCHAIN_PASSWORD, SIGNING_IDENTITY, PROJECT_DIR, PROJECT_FILE, SCHEME
 security unlock-keychain -p "$KEYCHAIN_PASSWORD" ~/Library/Keychains/login.keychain-db

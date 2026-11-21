@@ -61,8 +61,9 @@ own branch, so `main`'s HANDOFF.md can be behind.
   something only he can do is.
 - **The install gate runs without the iPad (owner, 2026-11-18).** The owner's 5-minute playcheck —
   play, step frames, erase in all three modes, undo, pan, fill on a 5000² five-layer scene — is a
-  simulator test that asserts the iPad's limits (render-server bytes under backboardd's 1,850 MiB, the
-  baked frame shown on a step); no install without it green. Unlocking the iPad can cost him a drive,
+  simulator test that asserts the iPad's limits on the **measured** memory of the simulator's
+  `backboardd` and of the app (`tools/playcheck.sh`, CLAUDE.md "The install gate"), and the baked frame
+  shown on a step; no install without it green. Unlocking the iPad can cost him a drive,
   so a device run happens only when it is already connected and unlocked — never wait or ask for it.
   Every fix gets a test on the path the artist uses, not only on the code it changed: the play crash
   shipped three times because each guard covered the edit path and nothing ever pressed Play.
