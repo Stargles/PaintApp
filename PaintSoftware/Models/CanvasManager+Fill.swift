@@ -86,7 +86,7 @@ extension CanvasManager {
     ///
     /// `bytes` is `window.workingWidth × window.workingHeight` premultiplied RGBA, covering
     /// `window.rect` of the canvas — TODO (86): a fill's pixels are the window's, never the canvas's.
-    final class FillRenderResult {
+    nonisolated final class FillRenderResult {
         let generation: UInt64
         /// The request's document time, including any parent above Repeat. A timeline scrub settles
         /// this result after currentFrame has changed, so the cel id cannot recover this context.

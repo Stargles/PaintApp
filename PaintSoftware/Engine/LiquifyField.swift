@@ -4,7 +4,7 @@ import UIKit
 /// The evaluated compact gesture field. Geometry is indexed in 64-point bins; displacement is
 /// evaluated only where ink or a destination pixel asks for it. Native tip masks are shared by
 /// reference, so a 4096² sweep has no 134 MB displacement grid and no per-dab bitmap allocation.
-final class LiquifyField {
+nonisolated final class LiquifyField {
     enum PreparedTip {
         case round(hardness: CGFloat)
         case image(mask: Int?, cosine: CGFloat, sine: CGFloat)

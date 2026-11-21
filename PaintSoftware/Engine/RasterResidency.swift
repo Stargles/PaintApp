@@ -229,7 +229,7 @@ protocol RasterResidencyCandidate: AnyObject {
 
 /// A native RGBA8 buffer whose charge lasts as long as any CGContext or CGImage can read its bytes.
 /// A provider reads this allocation directly; retained source images never use makeImage's hidden COW.
-final class RasterSurface {
+nonisolated final class RasterSurface {
     typealias ReadLease = RasterPixelBuffer.ReadLease
 
     let width: Int

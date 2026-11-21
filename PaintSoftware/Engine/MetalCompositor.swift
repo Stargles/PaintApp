@@ -142,7 +142,7 @@ extension BlendMode {
 /// so a regression that starts allocating per group is visible as a number rather than as a stall —
 /// and that number is now per *composite*, not lifetime, so a warm engine reporting 0 is the pool
 /// working rather than the metric breaking.
-private final class ScratchTexturePool {
+private nonisolated final class ScratchTexturePool {
 
     private let device: MTLDevice
     let width: Int
@@ -240,7 +240,7 @@ private final class ScratchTexturePool {
 ///
 /// Not thread-safe: `CompositorMetalEngine` holds one lock across the whole of `composite` and this
 /// is only ever touched from inside it.
-private final class UploadCache {
+private nonisolated final class UploadCache {
 
     struct Key: Hashable {
         let content: LayerContentVersion

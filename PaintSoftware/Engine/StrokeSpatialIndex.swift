@@ -23,7 +23,7 @@ import Foundation
 /// short-lived derived cache built and queried by whichever context is editing a cel, and adding a
 /// lock here would mean taking one per query on the touch path. Build one per user, or rebuild it
 /// behind `VectorCanvas`'s existing lock.
-final class StrokeSpatialIndex {
+nonisolated final class StrokeSpatialIndex {
 
     /// One segment of one element: the span from `sampleIndex` to `sampleIndex + 1` of the sample run
     /// at `elementIndex`.

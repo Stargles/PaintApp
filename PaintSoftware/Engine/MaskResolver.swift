@@ -23,7 +23,7 @@ import UIKit
 /// A reference type, and `Equatable` by identity rather than by content — a canvas-sized array
 /// compared on every SwiftUI pass would be its own performance bug, and identity is the right answer
 /// anyway because a resolution that comes back from the cache *is* the same mask.
-final class ResolvedMask {
+nonisolated final class ResolvedMask {
 
     let width: Int
     let height: Int
@@ -414,7 +414,7 @@ enum MaskResolver {
     /// Evicts in insertion order, as `PixelOps.rasterizeCache` does and for the same reason.
     private static let cache = MaskCache(limit: cacheEntryLimit)
 
-    private final class MaskCache {
+    private nonisolated final class MaskCache {
         private let limit: Int
         private var entries: [CacheKey: ResolvedMask] = [:]
         private var order: [CacheKey] = []

@@ -377,7 +377,7 @@ enum PixelOps {
     /// that the whole compositing subsystem is about one eighth of it.
     private static let rasterizeCache = RasterizeCache(limit: sharedRasterizeEntryLimit)
 
-    private final class RasterizeCache {
+    private nonisolated final class RasterizeCache {
         private let limit: Int
         private var entries: [RasterizeKey: (image: UIImage, bytes: Int)] = [:]
         private var order: [RasterizeKey] = []

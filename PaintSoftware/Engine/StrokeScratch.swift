@@ -46,7 +46,7 @@ import CoreGraphics
 /// `A = 1 - ∏(1 - aᵢ)` and one punch at the stroke's opacity `o` leaves `1 - o·A`. At `o == 1` those
 /// are the same number; below it, only the second obeys *"a 50% eraser removes exactly 50% wherever
 /// the stroke goes, however often it crosses back over itself"*.
-final class StrokeScratch: DabTarget {
+nonisolated final class StrokeScratch: DabTarget {
 
     /// What the window's pixels mean, and therefore how they are shown and how they commit.
     enum Role {

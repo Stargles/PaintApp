@@ -301,7 +301,7 @@ final class MetalFillEngine {
 /// Per-gesture GPU buffers + the composited reference. `fill(...)` runs the whole pipeline and returns
 /// the painted region as premultiplied RGBA bytes (transparent where unfilled), ready to composite
 /// onto the destination layer.
-final class MetalFillSession {
+nonisolated final class MetalFillSession {
     private let engine: MetalFillEngine
     let width: Int
     let height: Int

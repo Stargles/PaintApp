@@ -418,7 +418,7 @@ final class VideoFrameSource {
         var decodedFrame: DecodedFrame? { result.frame }
     }
 
-    fileprivate final class Residency {
+    fileprivate nonisolated final class Residency {
         let ring: DecodedFrameRing
         var readers: [String: VideoFrameReader] = [:]
         var recency: [String] = []

@@ -630,7 +630,7 @@ extension BrushStamper {
     /// `stampStroke` into one *is* the bake.
     ///
     /// It has state, so each bake owns one rather than sharing.
-    final class CollectingDabTarget: DabTarget {
+    nonisolated final class CollectingDabTarget: DabTarget {
         private(set) var dabs: [BakedDab] = []
         private(set) var travels: [CGPoint] = []
         private let tracksTravel: Bool
@@ -690,7 +690,7 @@ extension BrushStamper {
     ///
     /// `beginStroke`/`endStroke` forward, because the wrapped target may be a `RasterLayerTexture`
     /// keeping a stroke count.
-    final class PosedDabTarget: DabTarget {
+    nonisolated final class PosedDabTarget: DabTarget {
         private let inner: DabTarget
         private let pose: DabPose
 

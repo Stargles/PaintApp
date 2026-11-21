@@ -135,7 +135,7 @@ struct DecodedFrame {
 /// under one `NSLock` held for its whole body — the same bargain `CompositorMetalEngine` makes
 /// (RENDER §4). Nothing expensive happens inside it: `frame(for:)` returns a value type and
 /// `DecodedFrame.makeImage()` runs outside.
-final class DecodedFrameRing {
+nonisolated final class DecodedFrameRing {
 
     private let lock = NSLock()
 

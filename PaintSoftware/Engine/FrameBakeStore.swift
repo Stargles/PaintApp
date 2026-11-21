@@ -29,7 +29,7 @@ import Compression
 ///
 /// Same-root stores share one weakly held directory owner. File I/O and inventory updates serialize;
 /// metadata-only readiness uses its own short lock, independently of pixel reads and decompression.
-final class FrameBakeStore {
+nonisolated final class FrameBakeStore {
 
     // MARK: - Format
 
@@ -113,7 +113,7 @@ final class FrameBakeStore {
         case other(String)
     }
 
-    fileprivate final class Root {
+    fileprivate nonisolated final class Root {
         struct Entry { let size: Int; let revision: UInt64 }
         let url: URL
         let io = NSLock()
@@ -173,7 +173,7 @@ final class FrameBakeStore {
         }
     }
 
-    private final class WeakRoot {
+    private nonisolated final class WeakRoot {
         weak var value: Root?
         init(_ value: Root) { self.value = value }
     }

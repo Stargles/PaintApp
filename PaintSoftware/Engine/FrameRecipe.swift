@@ -267,7 +267,7 @@ struct SandwichRecipe {
         return (below, above)
     }
 
-    final class CelBand {
+    nonisolated final class CelBand {
         let backing: CGImage
         let ink: CGImage
         let opacity: CGFloat

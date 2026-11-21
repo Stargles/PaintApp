@@ -372,7 +372,7 @@ enum VectorMendSupport {
     /// The canonical renderer supplies actual resolved primitives after scatter/pose/dropout.
     /// Retain only their shared clip bounds and pending native parameter; no colors, tips or images
     /// are retained or redrawn. A pose which drops a primitive cannot shift the later metadata.
-    private final class Capture: DabTarget {
+    private nonisolated final class Capture: DabTarget {
         var dabs: [Dab] = []
         var blendMode: CGBlendMode = .normal
         private var parameter: CGFloat?

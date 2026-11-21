@@ -454,7 +454,7 @@ struct VectorStrokeRenderWalk {
 }
 
 /// Retains only one preceding support, never a whole walk or a global stroke hull.
-private final class BoundsDabTarget: DabTarget {
+private nonisolated final class BoundsDabTarget: DabTarget {
     private enum Support { case circle(CGPoint, CGFloat), image(Quad) }
     private let point: CGPoint?
     private let slop: CGFloat
@@ -1300,7 +1300,7 @@ struct VectorStreamElement: Identifiable, PlacedRectangle {
 /// — and is what `VectorCanvas.setStreamFrame` compares to tell a new frame from one it has already
 /// been told about. Locked, because the walk reads `frame` off the main thread while the tick
 /// writes it on the main actor.
-final class StreamPicture {
+nonisolated final class StreamPicture {
     private let lock = NSLock()
     private var _frame: UIImage?
     private var _index = 0
@@ -1734,7 +1734,7 @@ enum RenderQuality {
 /// drawing surface stamps into; renders on demand to a canvas-native `UIImage` displayed with
 /// nearest-neighbor magnification, so it stays pixelated when zoomed even though the source is
 /// resolution-independent.
-final class VectorCanvas {
+nonisolated final class VectorCanvas {
     /// Stable owner identity for cache keys after an ephemeral staged owner has been released.
     let residencyID = UUID()
     let size: CGSize

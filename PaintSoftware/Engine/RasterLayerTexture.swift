@@ -263,7 +263,7 @@ enum DabProbe {
 /// only touches its cache while holding its `NSLock`, and `CGContextDabTarget` is created and used
 /// inside a single render call. Adding a lock here would put one on the hottest path in the app for
 /// no benefit.
-final class DabGradientCache {
+nonisolated final class DabGradientCache {
     private var gradients: [Key: CGGradient] = [:]
     private(set) var hits = 0
     private(set) var misses = 0
@@ -550,7 +550,7 @@ final class DabGradientCache {
 /// would have produced. It holds under `.destinationOut` too, where only the source alpha is read.
 ///
 /// **Not thread-safe, by design** — the same contract `DabGradientCache` has, and the same owners.
-final class DabImageCache {
+nonisolated final class DabImageCache {
     private var tinted: [Key: CGImage] = [:]
     private(set) var hits = 0
     private(set) var misses = 0
@@ -660,7 +660,7 @@ final class DabImageCache {
 /// `beginStroke`/`endStroke` are no-ops. They exist on `RasterLayerTexture` to maintain
 /// `strokeCount`, which is display-only bookkeeping for a *persistent* texture; a render-local
 /// context has no such state and nothing reads a stroke count off it.
-final class CGContextDabTarget: DabTarget {
+nonisolated final class CGContextDabTarget: DabTarget {
     private let ctx: CGContext
     /// **Where this context's own `(0, 0)` sits in canvas points** — BRUSH.md §2.25's phase, and the
     /// whole of what "canvas-anchored" needs from a target.

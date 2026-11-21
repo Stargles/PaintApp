@@ -34,7 +34,7 @@ extension CanvasManager {
 /// One immutable resolved cel replacement. Pixel backing and editable ink share presentation and
 /// lifetime, while keeping their native posing rules: backing is sampled; ordinary ink is stamped
 /// through its geometry pose; evaluated linked ink intentionally declines the container pose.
-final class CelContentPicture {
+nonisolated final class CelContentPicture {
     enum Ink {
         case ordinary(source: VectorCanvas.Frozen, elements: [VectorElement], rewriting: Set<UUID>)
         case linked(InterpolationEvaluator.Evaluation)
