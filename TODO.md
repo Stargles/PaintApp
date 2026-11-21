@@ -158,7 +158,11 @@ could not be verified as open or closed; verify against `main` and `git log`, th
   the last session ended uncleanly and save the flight recorder's last 90 s (persist it periodically so a
   kill doesn't lose it) plus a "the iPad crashed last time" note; (2) MetricKit exit/crash diagnostics;
   (3) a Mac-side pull of new `JetsamEvent-*.ips` / app crash logs via `devicectl` whenever the iPad is
-  reachable (e.g. from the hourly resign daemon), flagged in the next session. Design with the owner first.
+  reachable, flagged in the next session.
+  **Owner rulings (Nov 20):** on reopen after a crash show a **small fading notice** ("The app didn't
+  close cleanly last time — a crash report was saved"), report listed under Recordings in Settings. The
+  Mac pulls the iPad's crash logs **only when the owner asks** — no change to the hourly resign job; a
+  `tools/` script makes the pull one command.
 - [ ] **Intermittent whole-iPad failures during rapid edits.** Owner: black screen and brief restart
   during draw → Undo → draw; also a crash after repeated Fill (Nov 11); Kevin confirms **rapid To Cross
   erasing on Test1 (4096²) triggers the failure**. Coincided with rapid activity and a running stream.
