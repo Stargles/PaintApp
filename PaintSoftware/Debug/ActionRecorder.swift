@@ -224,7 +224,7 @@ final class ActionRecorder: ObservableObject {
         let notice = "The app didn't close cleanly last time — a crash report was saved"
         refreshRecordings()
         withAnimation { flightNotice = notice }
-        DispatchQueue.main.asyncAfter(deadline: .now() + (UITestSeeds.noticeDurationOverride ?? 6)) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
             guard self?.flightNotice == notice else { return }
             withAnimation { self?.flightNotice = nil }
         }
