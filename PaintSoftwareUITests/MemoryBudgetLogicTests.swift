@@ -19,6 +19,18 @@ import UIKit
 /// build a fixture cel and read what it left resident.
 final class MemoryBudgetLogicTests: XCTestCase {
 
+    /// The one budget's total before a test narrowed it.
+    private static let originalTotal = MemoryBudget.shared.totalBytes
+
+    /// Room in the one budget for exactly `bytes` beyond what is held now.
+    private func allowOnly(_ bytes: Int) {
+        let held = MemoryBudget.shared.heldBytes
+        MemoryBudget.shared.totalBytes = bytes > Int.max / 2 ? Int.max / 2 : held + bytes
+    }
+
+    private func restoreBudget() { MemoryBudget.shared.totalBytes = Self.originalTotal }
+
+
     private static let mib = 1024 * 1024
 
     /// The devices worth naming. The iPad 9 is the one every measured figure in this project is
@@ -82,76 +94,6 @@ final class MemoryBudgetLogicTests: XCTestCase {
     }
 
     // MARK: - The reconciliation
-
-    /// **The budgets, at the owner's canvas on the owner's device, as one sum.**
-    ///
-    /// Item 13's ask was phrased as four budgets summing to "~700 MiB against the ~1.4 GB pre-jetsam
-    /// ceiling" (`Compositor.swift:102`); item 7 then found a fifth. RENDER.md §5 stage 7 adds the
-    /// **seventh**, and adding it is what the stage is for: `VectorRenderCache` and the fill session
-    /// were both holding real bytes with nothing declaring them, so the sum below rises not because
-    /// the app got hungrier but because two claims it was already making are now written down.
-    ///
-    /// **Every term here is a ceiling, not an observation**, which is why the assertion is an
-    /// inequality against the process limit and not a claim about what the app holds. Nothing has ever
-    /// measured them all full at once, and PERFORMANCE.md §6 still lists that as open.
-    func testTheSevenBudgetsSumToLessThanTheJetsamCeilingOnTheOwnersDevice() {
-        let iPad9: UInt64 = 3 << 30
-        let owners = CGSize(width: 2048, height: 1024)
-        let ownersCanvasBytes = Int(owners.width) * Int(owners.height) * 4
-
-        let metal = CompositorBudget.textureBudgetBytes(physicalMemory: iPad9)
-        let flatten = metal                                   // PixelOps.rasterizeCache reads the same number
-        let undo = UndoBudget.maxCostBytes(physicalMemory: iPad9)
-        // 1 byte of coverage per pixel, and the *smaller* of the entry ceiling and the byte budget —
-        // which at the owner's canvas is still the entry ceiling, so nothing about their documents
-        // moved. At 4096² the byte budget is what binds, which is the whole of the change.
-        let mask = min(MaskResolver.cacheEntryLimit * Int(owners.width) * Int(owners.height),
-                       metal / 8)
-        let onion = OnionSkinBudget.residentBudgetBytes
-        // Same shape: twelve entries at the owner's canvas is 96 MiB, inside a budget of 192, so the
-        // count binds here and the bytes bind at 4096².
-        let vectorRender = min(VectorRenderCache.entryLimit * ownersCanvasBytes, metal)
-        // One fill gesture, which is transient rather than held — but it is allocated *while* every
-        // cache above is full, so it belongs in the worst case.
-        let fill = min(MetalFillSession.predictedBytes(width: Int(owners.width), height: Int(owners.height),
-                                                       isLasso: true),
-                       metal)
-
-        let total = metal + flatten + undo + mask + onion + vectorRender + fill
-        let ceiling = 1400 * Self.mib
-
-        XCTAssertEqual(metal, 192 * Self.mib)
-        XCTAssertEqual(undo, 192 * Self.mib)
-        XCTAssertEqual(mask, 16 * Self.mib)
-        XCTAssertEqual(onion, 64 * Self.mib)
-        XCTAssertEqual(vectorRender, 96 * Self.mib, "twelve of the owner's canvases, inside the byte budget")
-        // 49 bytes a pixel — the lasso worst case, two reference colours, read off the buffer list
-        // `MetalFillSession.bytesPerPixel` sums, TODO (158)'s basin labels four bytes a pass of it. 43
-        // for a lasso over a uniform reference, which resolves to one colour and skips the second
-        // pass's buffers; the prediction the budget weighs is deliberately the upper one. A rate
-        // rather than a total, because the rate is the durable fact and the total follows from the
-        // canvas.
-        XCTAssertEqual(fill / (ownersCanvasBytes / 4), 49, "49 bytes a canvas pixel, worst case")
-        // The lasso's two `FillParams` and its filled-pixel counter are the only bytes here that do
-        // not scale.
-        let fillConstants = 2 * MemoryLayout<MetalFillEngine.FillParams>.stride + MemoryLayout<UInt32>.stride
-        XCTAssertEqual(fillConstants, 164, "a `FillParams` is 80 bytes — ten scalars and two float4s")
-        XCTAssertEqual(total, 850 * Self.mib + fillConstants, "the seven budgets at the owner's canvas")
-        XCTAssertLessThan(total, ceiling,
-                          "seven ceilings added together must still fit inside the process limit, or the arithmetic is asking for a jetsam")
-
-        // The direction, which is the part a future edit could quietly undo: before item 13 undo was
-        // a flat 300 MiB. A change that raises the total back past that is a change that needs an
-        // argument, and declaring two budgets that already existed undeclared is not one.
-        let before = metal + flatten + 300 * Self.mib + mask + onion + vectorRender + fill
-        XCTAssertLessThan(total, before,
-                          "putting undo on the shared rule must lower the worst case on the constrained device, not raise it")
-
-        // **Undo is no longer the largest single budget in the app**, which is the sentence the
-        // reconciliation is really about: it was 300 MiB against 192 apiece for two caches sized from
-        // a measured crash, with nothing to justify the difference.
-        XCTAssertEqual(undo, metal, "no budget should be bigger than the compositor's without a reason")
-    }
 
     /// The two small budgets are sized by something other than the device, and that is the deliberate
     /// half of "one story" — a mask cache is bounded by how many distinct masks one frame can carry
@@ -585,13 +527,13 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// against a cache that had gone back to counting.
     @MainActor
     func testTheVectorRenderMemoEvictsAtTheByteBoundRatherThanAtACount() {
-        VectorRenderCache.removeAll()
-        defer { VectorRenderCache.removeAll(); CompositorBudget.budgetOverrideBytes = nil }
+        VectorRenderCache.removeAll(); PixelOps.clearRasterizeCache()
+        defer { VectorRenderCache.removeAll(); restoreBudget() }
 
         let entryBytes = 2048 * 1024 * 4
         for allowed in [2, 5] {
             VectorRenderCache.removeAll()
-            CompositorBudget.budgetOverrideBytes = entryBytes * allowed
+            allowOnly(entryBytes * allowed)
             // Held so nothing is deallocated under the registry: a canvas that goes away is pruned,
             // and the test would then be measuring its own fixture's lifetime.
             let canvases = (0..<8).map { _ in ownersCanvasCel() }
@@ -618,10 +560,10 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// layers on screen, three cels off it.
     @MainActor
     func testACanvasOnScreenKeepsTheBaseItsNextUndoRepairs() {
-        VectorRenderCache.removeAll()
-        defer { VectorRenderCache.removeAll(); CompositorBudget.budgetOverrideBytes = nil }
+        VectorRenderCache.removeAll(); PixelOps.clearRasterizeCache()
+        defer { VectorRenderCache.removeAll(); restoreBudget() }
         let entryBytes = 2048 * 1024 * 4
-        CompositorBudget.budgetOverrideBytes = entryBytes * 2
+        allowOnly(entryBytes * 2)
 
         let shown = (0..<5).map { _ in ownersCanvasCel() }
         var pins = shown.map(VectorRenderCache.DisplayPin.init)
@@ -710,7 +652,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
 
         _ = successor.render()
         XCTAssertTrue(successor.hasCachedImage, "PREMISE: the successor holds a memoized render")
-        VectorRenderCache.trim(toBytes: 0)
+        MemoryBudget.shared.trimCaches(toBytes: 0)
         XCTAssertFalse(successor.hasCachedImage,
                        "a live canvas that registered under a dead canvas's key must still be a victim of the budget")
     }
@@ -722,11 +664,11 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// numbers so that changing the budget does not falsify it.
     @MainActor
     func testTheVectorRenderBoundHoldsMoreEntriesOnASmallerCanvas() {
-        defer { VectorRenderCache.removeAll(); CompositorBudget.budgetOverrideBytes = nil }
-        CompositorBudget.budgetOverrideBytes = 2048 * 1024 * 4 * 4    // four of the owner's canvases
+        defer { VectorRenderCache.removeAll(); restoreBudget() }
+        allowOnly(2048 * 1024 * 4 * 4)    // four of the owner's canvases
 
         func entriesHeld(width: Int, height: Int) -> Int {
-            VectorRenderCache.removeAll()
+            VectorRenderCache.removeAll(); PixelOps.clearRasterizeCache()
             let canvases = (0..<10).map { _ -> VectorCanvas in
                 let canvas = VectorCanvas.empty(size: CGSize(width: width, height: height))
                 var samples = StrokeSamples(channels: .pressureOnly)
@@ -848,11 +790,11 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// and one that halved it would look the same to a test that only checked "smaller than before".
     @MainActor
     func testAWarningHalvesTheVectorRenderMemoAndBackgroundingEmptiesIt() {
-        defer { VectorRenderCache.removeAll(); CompositorBudget.budgetOverrideBytes = nil }
+        defer { VectorRenderCache.removeAll(); restoreBudget() }
         let entryBytes = 2048 * 1024 * 4
-        CompositorBudget.budgetOverrideBytes = entryBytes * 8
+        allowOnly(entryBytes * 8)
 
-        VectorRenderCache.removeAll()
+        VectorRenderCache.removeAll(); PixelOps.clearRasterizeCache()
         let canvases = (0..<8).map { _ in ownersCanvasCel() }
         for canvas in canvases { _ = canvas.render() }
         XCTAssertEqual(VectorRenderCache.entryCount, 8, "control: the cache must be full")
@@ -1230,10 +1172,10 @@ final class MemoryBudgetLogicTests: XCTestCase {
     @MainActor
     func testAMemoReadKeepsACelAheadOfOneRenderedMoreRecently() {
         for readsThroughRender in [false, true] {
-            defer { VectorRenderCache.removeAll(); CompositorBudget.budgetOverrideBytes = nil }
+            defer { VectorRenderCache.removeAll(); restoreBudget() }
             let entryBytes = 2048 * 1024 * 4
-            VectorRenderCache.removeAll()
-            CompositorBudget.budgetOverrideBytes = entryBytes * 3
+            VectorRenderCache.removeAll(); PixelOps.clearRasterizeCache()
+            allowOnly(entryBytes * 3)
 
             let canvases = (0..<3).map { _ in ownersCanvasCel() }
             for canvas in canvases { _ = canvas.render() }
@@ -1268,9 +1210,9 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// images each" and that is the factor of two.
     @MainActor
     func testACanvasHoldingAFullAndAPreviewRenderIsChargedForBoth() {
-        defer { VectorRenderCache.removeAll(); CompositorBudget.budgetOverrideBytes = nil }
-        VectorRenderCache.removeAll()
-        CompositorBudget.budgetOverrideBytes = Int.max
+        defer { VectorRenderCache.removeAll(); restoreBudget() }
+        VectorRenderCache.removeAll(); PixelOps.clearRasterizeCache()
+        allowOnly(Int.max)
 
         let canvas = ownersCanvasCel()
         _ = canvas.render(quality: .full)
@@ -1292,9 +1234,9 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// already free. Found by mutation-testing `invalidateRenderOnly`'s hook, which nothing caught.
     @MainActor
     func testAnInvalidationThatFreesThePixelsFreesTheBudgetWithThem() {
-        defer { VectorRenderCache.removeAll(); CompositorBudget.budgetOverrideBytes = nil }
-        VectorRenderCache.removeAll()
-        CompositorBudget.budgetOverrideBytes = Int.max
+        defer { VectorRenderCache.removeAll(); restoreBudget() }
+        VectorRenderCache.removeAll(); PixelOps.clearRasterizeCache()
+        allowOnly(Int.max)
 
         let canvas = ownersCanvasCel()
         _ = canvas.render()
@@ -1317,9 +1259,9 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// well as to the allocator. The other half of the mutation that found the case above.
     @MainActor
     func testDroppingAMemoByHandGivesTheBytesBackToTheBudget() {
-        defer { VectorRenderCache.removeAll(); CompositorBudget.budgetOverrideBytes = nil }
-        VectorRenderCache.removeAll()
-        CompositorBudget.budgetOverrideBytes = Int.max
+        defer { VectorRenderCache.removeAll(); restoreBudget() }
+        VectorRenderCache.removeAll(); PixelOps.clearRasterizeCache()
+        allowOnly(Int.max)
 
         let canvases = (0..<3).map { _ in ownersCanvasCel() }
         for canvas in canvases { _ = canvas.render() }
@@ -1382,4 +1324,147 @@ final class MemoryBudgetLogicTests: XCTestCase {
         XCTAssertTrue(MemoryBudget.valveAllows(needed, available: 0),
                       "0 is no information, not no memory — this must stay inert on the simulator")
     }
+
+    // MARK: - SCHEDULER.md rule 5 — the one budget
+
+    /// The number, from the device's measured limit: 0.48 of the iPad 9's 1,850 MiB (the gate's
+    /// 0.63 less a 0.15 reserve for what is not canvas-sized), and the simulator runs on the reference.
+    func testTheOneBudgetIsTheCanvasShareOfTheDevicesMeasuredLimit() {
+        XCTAssertEqual(MemoryBudget.totalBytes(appLimitBytes: 1850 * Self.mib), 888 * Self.mib)
+        XCTAssertEqual(MemoryBudget.referenceAppLimitBytes, 1850 * Self.mib)
+        XCTAssertEqual(Self.originalTotal, 888 * Self.mib, "the simulator answers 0 available, so it runs on the reference iPad")
+        XCTAssertLessThan(MemoryBudget.canvasFraction, CanvasManager.gradedWorkingSetBudgetFraction,
+                          "canvas-sized memory must leave the rest of the app room inside what the gate allows it")
+    }
+
+    /// Admission: within the budget a grant, beyond it an R1 answer is refused at once, and a release
+    /// makes the room again.
+    func testAnAnswerIsGrantedWithinTheBudgetRefusedBeyondItAndAdmittedAfterARelease() {
+        let budget = MemoryBudget(totalBytes: 100)
+        let first = budget.admit(60, lane: .answer)
+        XCTAssertNotNil(first)
+        XCTAssertNil(budget.admit(50, lane: .answer), "60 + 50 is over 100 and nothing can be evicted")
+        XCTAssertEqual(budget.refusals, 1)
+        first?.release()
+        XCTAssertNotNil(budget.admit(50, lane: .answer), "the release made the room")
+        XCTAssertEqual(budget.heldBytes, 50, "a grant let go of is given back")
+    }
+
+    /// Eviction order: what is kept in case goes first, least recently used first, then what is
+    /// current; what is shown never.
+    func testAdmissionEvictsCacheBeforeCurrentLeastRecentlyUsedFirstAndNeverWhatIsShown() {
+        let budget = MemoryBudget(totalBytes: 100)
+        var evicted: [String] = []
+        func entry(_ name: String, _ priority: MemoryBudget.Priority, _ bytes: Int) -> MemoryBudget.Entry {
+            let made = budget.entry(name, priority: priority) { evicted.append(name) }
+            made.update(bytes: bytes)
+            return made
+        }
+        let shown = entry("shown", .shown, 40)
+        let current = entry("current", .current, 20)
+        let older = entry("older", .cache, 15)
+        let newer = entry("newer", .cache, 15)
+        older.touch()   // read after `newer` was made: `newer` is now the least recently used
+        XCTAssertEqual(budget.heldBytes, 90)
+
+        XCTAssertNotNil(budget.admit(20, lane: .answer))
+        XCTAssertEqual(evicted, ["newer"], "the least recently used cache entry, and only as much as needed")
+        XCTAssertNotNil(budget.admit(25, lane: .answer))
+        XCTAssertEqual(evicted, ["newer", "older", "current"], "the rest of the cache, then what is current")
+        XCTAssertNil(budget.admit(1, lane: .answer), "what is shown is never evicted")
+        XCTAssertEqual(shown.bytes, 40)
+        withExtendedLifetime((shown, current, older, newer)) {}
+    }
+
+    /// R2/R3 never take the frame about to be played, and main never waits.
+    func testBackgroundWorkEvictsOnlyTheCacheAndMainNeverWaits() {
+        let budget = MemoryBudget(totalBytes: 100)
+        let current = budget.entry("current", priority: .current) {}
+        current.update(bytes: 80)
+        let started = Date()
+        XCTAssertNil(budget.admit(30, lane: .later), "on main, R3 is refused rather than waiting")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 0.5, "and refused at once")
+        XCTAssertEqual(current.bytes, 80, "R3 must not evict what is current")
+        XCTAssertNotNil(budget.admit(30, lane: .answer), "an R1 answer may")
+        XCTAssertEqual(current.bytes, 0)
+    }
+
+    /// Off main, R3 waits for a release — and gives up when cancelled.
+    func testBackgroundWorkWaitsForAReleaseAndStopsWhenCancelled() {
+        let budget = MemoryBudget(totalBytes: 100)
+        let holder = budget.admit(90, lane: .answer)
+        let admitted = expectation(description: "R3 admitted after the release")
+        DispatchQueue.global().async {
+            if budget.admit(50, lane: .later) != nil { admitted.fulfill() }
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { holder?.release() }
+        wait(for: [admitted], timeout: 5)
+
+        let cancelledAnswer = expectation(description: "a cancelled wait answers nil")
+        let full = budget.admit(50, lane: .answer)
+        DispatchQueue.global().async {
+            let grant = budget.admit(80, lane: .later, cancelled: { true })
+            if grant == nil { cancelledAnswer.fulfill() }
+        }
+        wait(for: [cancelledAnswer], timeout: 2)
+        withExtendedLifetime(full) {}
+    }
+
+    /// The device's valve is inside the one budget: a nearly-full iPad refuses what the budget allows.
+    func testTheDeviceValveRefusesWhatTheBudgetWouldAllow() {
+        let budget = MemoryBudget(totalBytes: 1000)
+        budget.availableOverrideBytes = 150
+        XCTAssertNil(budget.admit(100, lane: .answer), "150 left on the device is less than twice 100")
+        XCTAssertNotNil(budget.admit(70, lane: .answer))
+        budget.availableOverrideBytes = 0
+        XCTAssertTrue(budget.makeRoom(for: 900), "0 available is no information, not no memory")
+    }
+
+    /// **A picture is counted for as long as its pixels live**, not for as long as a cache names it:
+    /// evicting a memo while a job still draws from it frees nothing, and the budget must say so.
+    func testADrawnPictureIsHeldUntilItsPixelsAreFreedWhereverItWent() {
+        let before = MemoryBudget.shared.inFlightBytes
+        var picture: UIImage? = PixelOps.drawImage(size: CGSize(width: 100, height: 50)) { cg in
+            cg.setFillColor(UIColor.red.cgColor); cg.fill(CGRect(x: 0, y: 0, width: 10, height: 10)); return true
+        }
+        XCTAssertNotNil(picture)
+        XCTAssertEqual(MemoryBudget.shared.inFlightBytes - before, 100 * 50 * 4, "the pixels are charged")
+        XCTAssertEqual(picture?.cgImage?.width, 100)
+        autoreleasepool { picture = nil }
+        XCTAssertEqual(MemoryBudget.shared.inFlightBytes, before, "and given back with them")
+        XCTAssertNil(PixelOps.drawImage(size: CGSize(width: 10, height: 10)) { _ in false }, "an abandoned draw is no picture")
+        XCTAssertEqual(MemoryBudget.shared.inFlightBytes, before, "and charges nothing")
+    }
+
+    /// No cache above its share: the ring holds two frames only inside a quarter of the budget, and
+    /// source pixels are held to half of it.
+    func testNoCacheIsSizedAboveItsShareOfTheOneBudget() {
+        let budget = 888 * Self.mib
+        let frame5000 = 5000 * 5000 * 4, frame6000 = 6000 * 6000 * 4
+        XCTAssertEqual(CanvasManager.frameRingByteBudget(forFrameBytes: frame5000, sharedBudgetBytes: budget), 2 * frame5000,
+                       "two of the owner's frames fit the ring's quarter")
+        XCTAssertEqual(CanvasManager.frameRingByteBudget(forFrameBytes: frame6000, sharedBudgetBytes: budget), 0,
+                       "two 6000² frames are over the ring's share, and one frame is no ring")
+        for frameBytes in [1 << 20, frame5000, frame6000] {
+            XCTAssertLessThanOrEqual(CanvasManager.frameRingByteBudget(forFrameBytes: frameBytes, sharedBudgetBytes: budget),
+                                     max(budget / CanvasManager.frameRingShareDivisor, CanvasManager.minimumFrameRingByteBudget))
+        }
+        XCTAssertEqual(RasterResidency.shared.budgetBytes, MemoryBudget.shared.totalBytes / 2)
+    }
+
+    /// **A vector-only cel's flatten is the canvas's own memo, not a second canvas-sized copy** — the
+    /// 95 MiB-a-layer double the playcheck's memgraphs found at 5000².
+    @MainActor
+    func testAVectorOnlyFlattenIsTheCanvasMemoAndIsNotMemoisedTwice() {
+        PixelOps.clearRasterizeCache()
+        defer { PixelOps.clearRasterizeCache(); VectorRenderCache.removeAll() }
+        let canvas = ownersCanvasCel()
+        var cel = Cel(id: UUID(), startFrame: 0, frameCount: 1, raster: .empty(size: CGSize(width: 2048, height: 1024)))
+        cel.vector = canvas
+        let flattened = PixelOps.rasterize(cel: cel, canvasSize: CGSize(width: 2048, height: 1024))
+        XCTAssertNotNil(flattened)
+        XCTAssertTrue(flattened === canvas.render(), "the flatten must hand the canvas's picture through")
+        XCTAssertEqual(PixelOps.rasterizeCacheBytes, 0, "and the flatten memo must not hold it a second time")
+    }
+
 }
