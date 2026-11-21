@@ -60,12 +60,14 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
     /// **The share of the app's limit that canvas-sized memory may hold, and how it is derived.**
     /// The install gate allows the whole app 0.63 of the limit (`CanvasManager
     /// .gradedWorkingSetBudgetFraction`, 1,165 MiB on the iPad 9 — the margin for a real scene
-    /// heavier than the gate's). What is *not* canvas-sized is the rest of the app: 64 MiB before a
-    /// scene opens and ~150–250 MiB with one open (UIKit, Metal, the window surfaces, the document's
-    /// model), MEASURED on the gate's routine as the footprint minus what this budget holds. A
-    /// reserve of 0.15 of the limit (277 MiB) covers that with room, so canvas-sized memory gets
-    /// **0.48 of the limit: 888 MiB on the iPad 9.**
-    static let canvasFraction = 0.48
+    /// heavier than the gate's). What this budget is not asked about is the rest of the app — UIKit,
+    /// Metal, the window surfaces, the document's model, a stroke's scratch — MEASURED on the gate's
+    /// routine (iPad 9 simulator, 2026-11-21) as the footprint peak less the budget's own peak:
+    /// **at most 252 MiB** (1,139 against 887), 64 MiB before a scene opens. A reserve of 0.18 of the
+    /// limit (333 MiB) covers that with 80 MiB to spare, so canvas-sized memory gets **0.45 of the
+    /// limit: 832 MiB on the iPad 9** — five shown 5000² layers (477) and a bake's peak (three
+    /// frames, 286) with room left.
+    static let canvasFraction = 0.45
 
     /// The budget for a process whose limit is `appLimitBytes`.
     static func totalBytes(appLimitBytes: Int) -> Int {

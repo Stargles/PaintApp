@@ -3570,8 +3570,8 @@ final class CanvasManager: ObservableObject {
 
     /// **The ring's share of the one budget** (`MemoryBudget`, SCHEDULER.md rule 5): a quarter. Its
     /// frames are charged there as `.current` like everything else; the share only decides whether
-    /// two frames — the least a flip can use — are worth holding at all. On the iPad 9's 888 MiB
-    /// budget that is 222 MiB, two frames up to ~5,270² (two 5000² frames are 191 MiB).
+    /// two frames — the least a flip can use — are worth holding at all. On the iPad 9's 832 MiB
+    /// budget that is 208 MiB, two frames up to ~5,100² (two 5000² frames are 191 MiB).
     static let frameRingShareDivisor = 4
 
     /// This document's decoded frame in bytes — BGRA at the size the knob actually renders, which is
