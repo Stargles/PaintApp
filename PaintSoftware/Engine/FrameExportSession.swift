@@ -587,6 +587,8 @@ final class FrameExportSession: ObservableObject {
                          + "Lower the Render Resolution and try again."
                 case .couldNotWrite:
                     return "Frame \(frame + 1) could not be saved — the device may be out of space."
+                case .notAdmitted:
+                    return "There is not enough memory to save frame \(frame + 1) right now. Try again."
                 case .unreadableImage, .malformedKey, .none:
                     return "Frame \(frame + 1) could not be rendered."
                 }

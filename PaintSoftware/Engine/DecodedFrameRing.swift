@@ -161,11 +161,17 @@ nonisolated final class DecodedFrameRing {
     /// - Parameter byteBudget: the ceiling. Clamped at zero; a zero budget is a legal, working
     ///   ring that holds nothing, which is what a device under memory pressure should be able to
     ///   ask for without the caller needing a second code path.
-    init(byteBudget: Int, budgetName: String = "DecodedFrameRing", priority: MemoryBudget.Priority = .current) {
+    /// `charged: false` when the frames' pixels hold their own grant (`FrameBakeStore`'s decoder
+    /// admits each one for its lifetime), so the ring's entries only name what an eviction frees.
+    init(byteBudget: Int, budgetName: String = "DecodedFrameRing", priority: MemoryBudget.Priority = .current,
+         charged: Bool = true) {
         budget = max(byteBudget, 0)
         self.budgetName = budgetName
         budgetPriority = priority
+        self.charged = charged
     }
+
+    private let charged: Bool
 
     /// The ceiling, in bytes. **Lowering it evicts immediately** rather than at the next insert:
     /// the reason to lower it is that the memory is needed now.
@@ -244,7 +250,7 @@ nonisolated final class DecodedFrameRing {
         recency.append(digest)
         residentBytes += frame.byteCount
         let owner = MemoryBudget.EntryRef()
-        let charge = MemoryBudget.shared.entry(budgetName, priority: budgetPriority) { [weak self] in
+        let charge = MemoryBudget.shared.entry(budgetName, priority: budgetPriority, charged: charged) { [weak self] in
             self?.evicted(digest, charge: owner.entry)
         }
         owner.entry = charge

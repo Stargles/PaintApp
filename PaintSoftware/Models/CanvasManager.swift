@@ -3589,7 +3589,7 @@ final class CanvasManager: ObservableObject {
                    store: FrameBakeStore(root: FrameBakeStore.defaultRoot(projectID: projectID,
                                                                           renderResolution: renderResolution)),
                    ring: DecodedFrameRing(byteBudget: Self.frameRingByteBudget(
-                       forFrameBytes: decodedFrameBytes), priority: .cache))
+                       forFrameBytes: decodedFrameBytes), priority: .cache, charged: false))
     }
 
     /// **`FrameBaker.close()`'s real caller.** `ContentView.returnToGallery` calls this on the way

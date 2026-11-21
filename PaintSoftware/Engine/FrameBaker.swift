@@ -480,7 +480,7 @@ final class FrameBaker {
           MemoryBudget.withLane(.later) { () -> (() -> Void) in
             // Step 2, off the main actor. Every value read here was frozen at mint time.
             let key = FrameBakeKey(recipe: recipe, renderResolution: resolution)
-            // The frame's picture and one leaf at a time: what the composite cannot start without.
+            // The frame's picture plus one leaf, then the encode's two copies: the step's peak.
             let frameBytes = CompositorBudget.textureBytes(for: recipe.canvasSize)
             var refusedPartWay = false
             let cached = wantsRing ? store.read(key) : nil
@@ -490,7 +490,7 @@ final class FrameBaker {
                 // A hold reuses its content-addressed file. A decode already needed for the ring
                 // rejects an unreadable file before this decision; distant frames need only stat.
                 outcome = .alreadyOnDisk
-            } else if !MemoryBudget.shared.waitForRoom(2 * frameBytes) {
+            } else if !MemoryBudget.shared.waitForRoom(3 * frameBytes) {
                 // R3 waits before it starts, holding nothing; still no room is a retry, not a failure.
                 outcome = .deferred
             } else if let image = PlaybackTrace.span(.bakeComposite, { () -> CGImage? in
@@ -505,6 +505,8 @@ final class FrameBaker {
                 }) {
                 case .success:
                     outcome = .baked
+                case .failure(.notAdmitted):
+                    outcome = .deferred
                 case .failure(let failure):
                     outcome = .writeFailed(failure)
                 }

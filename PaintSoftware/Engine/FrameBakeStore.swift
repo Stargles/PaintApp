@@ -198,6 +198,8 @@ nonisolated final class FrameBakeStore {
         case exceedsCeiling(needed: Int, ceiling: Int)
         /// The filesystem refused: full, read-only, or gone.
         case couldNotWrite
+        /// The one budget (`MemoryBudget`) had no room to encode it now — try again later.
+        case notAdmitted
         /// A key whose digest is not 32 bytes — the header has a fixed field for it, so there is
         /// nowhere to put a longer one and no way to compare a shorter one on the way back.
         case malformedKey
@@ -243,6 +245,11 @@ nonisolated final class FrameBakeStore {
                playhead: Int = 0,
                frames: [String: Set<Int>] = [:]) -> Result<Int, WriteFailure> {
         guard key.digest.count == 32 else { return .failure(.malformedKey) }
+        // The BGRA copy and LZ4's worst-case output, each the frame's size, admitted for the encode.
+        guard let encoding = MemoryBudget.shared.admit(image.width * image.height * 4 * 2) else {
+            return .failure(.notAdmitted)
+        }
+        defer { encoding.release() }
         guard let pixels = Self.bgraBytes(image) else { return .failure(.unreadableImage) }
 
         let rawCount = pixels.bytes.count
@@ -564,11 +571,16 @@ nonisolated final class FrameBakeStore {
 
     private static func decompressChecked(_ payload: Data, to expected: Int) throws -> Data {
         guard expected > 0, !payload.isEmpty else { throw ReadFailure.invalid }
-        guard let bytes = malloc(expected) else {
+        // Admitted by the one budget, and charged for as long as the pixels live — the ring, the
+        // screen or a playback tick may hold them after the ring lets go.
+        guard let grant = MemoryBudget.shared.admit(expected), let bytes = malloc(expected) else {
             MemoryPressure.signal(.allocationRefused)
             throw ReadFailure.allocationRefused
         }
-        var out = Data(bytesNoCopy: bytes, count: expected, deallocator: .free)
+        var out = Data(bytesNoCopy: bytes, count: expected, deallocator: .custom { pointer, _ in
+            free(pointer)
+            grant.release()
+        })
         let written = out.withUnsafeMutableBytes { dst -> Int in
             guard let destination = dst.bindMemory(to: UInt8.self).baseAddress else { return 0 }
             return payload.withUnsafeBytes { src -> Int in
