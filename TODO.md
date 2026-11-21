@@ -16,6 +16,10 @@ Every status report to the owner lists this queue with each item's state, not on
 4. **Open lasso acts as closed for every action** (Nov 17 ruling) — **never started**; queued behind
    the crash work and not reported. Starts the moment (2) lands (independent code).
 5. **Frame steps instant and unstaggered + bake speed** — scheduler stage 2, after (1) merges.
+   Folded in (owner, Nov 21): **zooming out after zooming in on a 5000² canvas, the edges appear a
+   moment late** — caused by `d72eb69f`'s window-sized pictures (only the visible window is drawn, so
+   newly revealed edges wait for a redraw). Owner: minor, fix along the way. Likely shape: keep a small
+   whole-canvas picture under the window so revealed edges show at once (soft) until the sharp redraw.
 6. **Undo latency / raster Undo budget** — scheduler stage 3 (one memory budget).
 7. **Re-check against `main`, then fix what remains:** stroke briefly disappears, stroke latency and
    pan hitches, canvas freezes, rapid-edit whole-iPad failures, Liquify shown while held, Move-exit gap,
