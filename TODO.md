@@ -170,11 +170,10 @@ could not be verified as open or closed; verify against `main` and `git log`, th
 - [ ] **The auto-resigner broke again — "PaintApp is no longer available" (owner, Nov 20; ~10th time).**
   Owner: *"Fix it well and fix it once. Remember the iPad might be locked, or the Mac might be off … When
   the Mac is on and the iPad is unlocked it should automatically trigger so I don't have to tell you."*
-  **Built on `tmp/nov20-resigner`, not merged** ([docs/RESIGN.md](docs/RESIGN.md)): sign (Mac only,
+  **Merged and live Nov 21** ([docs/RESIGN.md](docs/RESIGN.md)): sign (Mac only,
   generic destination, fetch best-effort) and install (iPad only) are separate stages over one state
   file; a 5-minute user LaunchAgent plus the hourly root daemon's wakes; script tracked in
-  `tools/resign/`, pinned by `install.sh`, 14-case harness. Open: merge, then re-run
-  `tools/resign/install.sh` from main; confirm the first real expiry (Nov 28 03:31 UTC) renews unattended.
+  `tools/resign/`, pinned by `install.sh`, 14-case harness. Open: confirm the first real expiry (Nov 28 03:31 UTC) renews unattended.
 - [ ] **Catch iPad crashes without the owner (owner, Nov 19).** *"I shouldn't have been the one to catch
   that iPad crash."* The app cannot catch a backboardd Jetsam in-process, but: (1) on launch, detect that
   the last session ended uncleanly and save the flight recorder's last 90 s (persist it periodically so a
