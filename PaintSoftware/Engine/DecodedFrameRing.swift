@@ -25,21 +25,6 @@ struct DecodedFrame {
     /// The pixels, `bytesPerRow * height` of them at minimum.
     let pixels: Data
 
-    /// **What the ring's frames are worth to the one budget.** While the animation plays they are
-    /// the next frames on screen (`.current`, which only an R1 answer may evict); stopped, they are
-    /// kept in case (`.cache`), so a bake of a frame nobody has seen yet can take their room — the
-    /// ring refills ahead of the playhead when play starts (`FrameBaker.fillRingAhead`).
-    var priority: MemoryBudget.Priority {
-        get { lock.lock(); defer { lock.unlock() }; return budgetPriority }
-        set {
-            lock.lock()
-            budgetPriority = newValue
-            let held = Array(charges.values)
-            lock.unlock()
-            held.forEach { $0.setPriority(newValue) }
-        }
-    }
-
     var byteCount: Int { pixels.count }
 
     init(width: Int, height: Int, bytesPerRow: Int, pixels: Data) {
@@ -200,6 +185,21 @@ nonisolated final class DecodedFrameRing {
     }
 
     /// How many bytes are resident.
+    /// **What the ring's frames are worth to the one budget.** While the animation plays they are
+    /// the next frames on screen (`.current`, which only an R1 answer may evict); stopped, they are
+    /// kept in case (`.cache`), so a bake of a frame nobody has seen yet can take their room — the
+    /// ring refills ahead of the playhead when play starts (`FrameBaker.fillRingAhead`).
+    var priority: MemoryBudget.Priority {
+        get { lock.lock(); defer { lock.unlock() }; return budgetPriority }
+        set {
+            lock.lock()
+            budgetPriority = newValue
+            let held = Array(charges.values)
+            lock.unlock()
+            held.forEach { $0.setPriority(newValue) }
+        }
+    }
+
     var byteCount: Int {
         lock.lock()
         defer { lock.unlock() }
