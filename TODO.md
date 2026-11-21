@@ -38,6 +38,29 @@ Every status report to the owner lists this queue with each item's state, not on
   read: `frameStepSettleSeconds = 0.5`; while settling `FrameBaker.image(for:)` returns nil on a ring
   miss (no decode while flipping), and after the settle every layer re-renders its own picture.
   (d) **Orange bars (the bake) take a couple of seconds per frame.**
+  **(a) measured on `tmp/nov21-play`, not merged, gate still RED.** What grows is the **app**, not
+  the render server. `tools/playcheck.sh` now samples the simulator's own `backboardd` and the app
+  (`phys_footprint` + the kernel's peak) through the routine; verified on `a893eccb` (the code that
+  killed the iPad's `backboardd` entering Test1): server 706 MiB entering, 951 over the routine. At
+  `40c8c005` the server never passed 206 MiB while the app peaked **1,916–2,524 MiB** (four runs) —
+  over the iPad 9's 1,850 MiB app limit (PERFORMANCE §15.5) on a 5×6 synthetic scene, so a heavier
+  Test1 pressing Play is the likely kill. Two producers fixed: (1) `PixelOps.transparentFormat` was
+  `.automatic` range, so every renderer recorded a display list that kept every image drawn into it
+  (the bake's three-at-a-time flatten held all five leaves plus re-decoded copies, 763 MiB live);
+  now `.standard`, immediate. (2) Default MainActor isolation gives every class without its own
+  `deinit` an isolated one: six `MetalFillSession`s (GPU buffers) let go on the fill queue waited for
+  a main thread busy with Undo — 2,292 MiB. 27 heavy holders are `nonisolated` now, guarded by
+  `tools/check-offmain-deinit.py` on the built app. With both: routine peak **1,740–1,804 MiB**, Undo no
+  longer spikes, steady 1,070–1,250. **Still over the gate's 1,165 MiB budget**: the steady state is
+  five canvas-sized host pictures (95 MiB each at 5000²) plus memos that each own 192 MiB
+  (`VectorRenderCache`, `PixelOps` flatten memo, the ring) — SCHEDULER.md stage 3's one budget — and
+  the entering/bake spike adds every vector render's second copy (`UIGraphicsImageRenderer` copies
+  its bitmap at `image{}`) on top. **Test1 itself could not be copied**: it lives in On My iPad/PaintApp
+  (File Provider storage), which `devicectl` cannot read; its bake files (Library/Caches, read-only)
+  show 5000² frames with large placed screen captures, ~25 MB compressed each, ≥20 frames.
+  No crash log for Nov 20 stays unexplained; the device's last launch signature is the 22:49 re-sign.
+  (b)/(d) seen in the same runs: the bake's display-list replay re-decoded every leaf per frame;
+  measure bake time per frame again after this branch before chasing it elsewhere.
   (e) **The gallery's version (1.0.43 (1)) never changes** — the owner cannot tell which build he has.
   Show the commit and build date; every build stamps it.
   **(e) DONE on `tmp/nov21-version`, not merged**: `tools/stamp-build.sh` (build phase) stamps the built Info.plist
