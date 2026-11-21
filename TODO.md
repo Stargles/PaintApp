@@ -210,8 +210,8 @@ Every status report to the owner lists this queue with each item's state, not on
   the last run died in the foreground; a backgrounded end reports nothing), MetricKit diagnostics written as
   `metrickit-*.jsonl`, the fading reopen notice (the flight badge's capsule, also drawn on the gallery), and
   `tools/pull-ipad-crashes.sh`. Armed on the simulator only by `-uiTestCrashWatch`. Owner to confirm on the
-  iPad after the next install; the owner's kill-while-drawing check is a force-quit from the app switcher
-  *while the app is frontmost is impossible*, so a real test is a backboardd Jetsam or Xcode's Stop.
+  iPad after the next install (a force-quit from the switcher is a background end and rightly reports
+  nothing; a real backboardd Jetsam or Xcode's Stop while drawing is what raises it).
 - [ ] **Intermittent whole-iPad failures during rapid edits.** Owner: black screen and brief restart
   during draw → Undo → draw; also a crash after repeated Fill (Nov 11); Kevin confirms **rapid To Cross
   erasing on Test1 (4096²) triggers the failure**. Coincided with rapid activity and a running stream.
