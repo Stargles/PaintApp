@@ -13,8 +13,8 @@ Every status report to the owner lists this queue with each item's state, not on
 1. **Play crash** — in flight (`tmp/nov21-play`): measure the simulator's real backboardd on Test1.
 2. **Gallery shows the build** — merged Nov 21 ("Build <commit> · <date>"); reaches the iPad with (1).
 3. **Crash catcher** — merged Nov 21; reaches the iPad with the next install (with (1)).
-4. **Open lasso acts as closed for every action** (Nov 17 ruling) — in flight (`tmp/nov21-lasso`)
-   since Nov 21; had sat unstarted and unreported for four days.
+4. **Open lasso acts as closed for every action** (Nov 17 ruling) — merged Nov 21; reaches the iPad
+   with (1). Owner to check: draw an open C, then Copy, To New Layer, Clear.
 5. **Frame steps instant and unstaggered + bake speed** — scheduler stage 2, after (1) merges.
    Folded in (owner, Nov 21): **zooming out after zooming in on a 5000² canvas, the edges appear a
    moment late** — caused by `d72eb69f`'s window-sized pictures (only the visible window is drawn, so
@@ -166,6 +166,8 @@ Every status report to the owner lists this queue with each item's state, not on
 - [ ] **`SelectionEditUITests.testTheColourSwatchOpensThePickerOnTheLinesOwnColourAndTheLineFollowsItLive`
   red on an iPad 9 simulator (Nov 17):** `emptyToolbarPoint` finds no 44 pt gap in the portrait
   toolbar — the same stale premise fixed in `GraphEditorFingerUITests` by launching landscape.
+  Same failure in `SelectionEditLiveUITests`' two picker tests (Nov 21). Also red on `main` (Nov 21):
+  `SelectionAndMoveUITests.testDenyOutsideSelectionClipsStrokeUntilToggledOn` (Rectangle mode).
 - [ ] **Build the real-time scheduler — [docs/SCHEDULER.md](docs/SCHEDULER.md) (rules ruled Nov 17;
   owner delegated them).** "Real time" in the owner's first prompt meant this; it was never built.
   Five stages, each shipped and checked on the iPad. Owner may wait for a larger usage plan before the
