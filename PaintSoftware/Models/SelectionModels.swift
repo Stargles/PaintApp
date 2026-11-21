@@ -1024,21 +1024,41 @@ extension CanvasManager {
         // still hanging over the cel has to be part of its content by now rather than arriving on
         // top of the selection afterwards.
         guard beginCanvasEdit() else { return }
-        guard let canvasSize else { return }
+        let before = selection
+        switch selectionAfterLoop(path, onto: before) {
+        case .ignored: return
+        case .refusedSubtract: raise(.nothingToSubtractFrom)
+        case .selection(let after):
+            replaceSelection(with: after, label: loopHistoryLabel(onto: before))
+        }
+    }
+
+    /// What a loop does to a selection — the one rule, asked by a closed loop (`finishSelection`) and by
+    /// an open lasso on every change it makes (`syncSelectionToOpenLasso`, LASSO_MOVE.md §5.29).
+    enum LoopOutcome {
+        case selection(Selection?)
+        /// A subtract drawn with no region to take from.
+        case refusedSubtract
+        /// A loop too small to enclose anything: the selection stays as it is.
+        case ignored
+    }
+
+    func selectionAfterLoop(_ path: CGPath, onto existing: Selection?) -> LoopOutcome {
+        guard let canvasSize else { return .ignored }
         let canvasRect = CGRect(origin: .zero, size: canvasSize)
-        if let existing = selection, existing.isRegion {
-            let composition = selectionComposition
-            replaceSelection(with: existing.composed(with: path, by: composition, within: canvasRect),
-                             label: composition.historyLabel)
-            return
+        if let existing, existing.isRegion {
+            return .selection(existing.composed(with: path, by: selectionComposition, within: canvasRect))
         }
-        if subtractsSelection {
-            raise(.nothingToSubtractFrom)
-            return
-        }
+        if subtractsSelection { return .refusedSubtract }
         let bounds = path.boundingBoxOfPath.intersection(canvasRect)
-        guard bounds.width > 1, bounds.height > 1 else { return }
-        replaceSelection(with: Selection(path: path, bounds: bounds), label: .makeSelection)
+        guard bounds.width > 1, bounds.height > 1 else { return .ignored }
+        return .selection(Selection(path: path, bounds: bounds))
+    }
+
+    /// What the step a loop leaves on the undo stack is called.
+    func loopHistoryLabel(onto existing: Selection?) -> HistoryActionLabel {
+        if let existing, existing.isRegion { return selectionComposition.historyLabel }
+        return .makeSelection
     }
 
     /// **The one door the artist changes the selection through** — a loop, a tap in Tap and Deselect:
@@ -1049,6 +1069,12 @@ extension CanvasManager {
         let before = selection
         guard before != nil || replacement != nil else { return }
         selection = replacement
+        recordSelectionStep(from: before, to: replacement, label: label)
+    }
+
+    /// The undo step for a selection that has already been written.
+    func recordSelectionStep(from before: Selection?, to replacement: Selection?, label: HistoryActionLabel) {
+        guard before != nil || replacement != nil else { return }
         recordUndo(label: label,
                    undo: { [weak self] in guard let self else { return }; selection = selectionStillActing(before) },
                    redo: { [weak self] in guard let self else { return }; selection = selectionStillActing(replacement) })
@@ -1103,7 +1129,7 @@ extension CanvasManager {
     /// selection back, and redo puts it down again. Nothing selected is nothing to record: the open
     /// lasso, if there is one, is put down all the same.
     func deselect() {
-        abandonOpenLasso()
+        discardOpenLasso()
         replaceSelection(with: nil, label: .deselect)
     }
 
@@ -1140,12 +1166,12 @@ extension CanvasManager {
             return
         }
 
-        // Settle adjustable content before Move reads it, keeping the draft available to close.
         guard commitEditsInFlight() else { return }
         if openLasso != nil {
-            // A draft expresses a region. An incomplete loop or a subtract that empties the selection
-            // must not turn into a whole-cel Move.
-            guard closeOpenLassoForMove(), selection != nil else { return }
+            // An open lasso acts as the closed loop it is (§5.29). One that selects nothing — a lone
+            // node, or a subtract that emptied the selection — must not turn into a whole-cel Move.
+            settleOpenLasso()
+            guard selection != nil else { return }
         }
 
         if activeLayerIsVector {

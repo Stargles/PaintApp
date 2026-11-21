@@ -212,7 +212,6 @@ final class OpenLassoLogicTests: XCTestCase {
     func testMoveClosesAnOpenStrokeLikeTheStartNodeAndLiftsOnlyItsInk() throws {
         let manager = CanvasFixture.manager()
         let ids = try vectorInkForMove(manager)
-        manager.readLassoNodeReach = { self.reach }
         let baseline = manager.history.undoStack.count
         manager.liftLassoStroke(stroke(through: square), nodeReach: reach)
 
@@ -230,28 +229,26 @@ final class OpenLassoLogicTests: XCTestCase {
     }
 
     @MainActor
-    func testMoveLeavesAnIncompleteDraftOpenAndKeepsTheWholeCelPathWithoutADraft() throws {
+    func testMoveOfALassoThatEnclosesNothingPutsItDownAndDoesNotLiftTheWholeCel() throws {
         let manager = CanvasFixture.manager()
         let ids = try vectorInkForMove(manager)
-        manager.readLassoNodeReach = { self.reach }
         manager.tapLasso(at: square[0], nodeReach: reach)
         manager.tapLasso(at: square[1], nodeReach: reach)
 
         manager.toggleMove()
 
-        XCTAssertEqual(manager.openLasso?.points, Array(square.prefix(2)))
-        XCTAssertNil(manager.vectorFloat)
+        XCTAssertNil(manager.openLasso, "the lasso is settled, not left behind")
+        XCTAssertNil(manager.selection, "two points enclose nothing")
+        XCTAssertNil(manager.vectorFloat, "…and that must not become a whole-cel Move")
 
-        manager.deselect()
         manager.toggleMove()
-        XCTAssertEqual(manager.vectorFloat?.parts.first?.insideIDs, Set(ids))
+        XCTAssertEqual(manager.vectorFloat?.parts.first?.insideIDs, Set(ids), "Move with no lasso is the whole cel")
     }
 
     @MainActor
     func testMoveClosesAnEmptyLoopWithoutLiftingTheWholeCel() throws {
         let manager = CanvasFixture.manager()
         _ = try vectorInkForMove(manager)
-        manager.readLassoNodeReach = { self.reach }
         let blank = square.map { CGPoint(x: $0.x - 7, y: 0.5 * $0.y) }
         manager.liftLassoStroke(stroke(through: blank), nodeReach: reach)
 
@@ -260,6 +257,133 @@ final class OpenLassoLogicTests: XCTestCase {
         XCTAssertNil(manager.openLasso)
         XCTAssertTrue(contains(manager, CGPoint(x: 15, y: 13)), "the closed loop stays on the blank paper")
         XCTAssertNil(manager.vectorFloat, "the ink outside the loop stays where it is")
+    }
+
+    // MARK: - An open lasso acts as closed (LASSO_MOVE.md §5.29)
+
+    /// A U: the polyline of three corners, open on the fourth side.
+    private var openU: [CGPoint] { [square[0], square[1], square[2], square[3]] }
+
+    private func sameRegion(_ a: CanvasManager, _ b: CanvasManager, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertNotNil(a.selection, "the open lasso selected something", file: file, line: line)
+        XCTAssertNotNil(b.selection, file: file, line: line)
+        for point in [inside, outside, CGPoint(x: 12, y: 38), CGPoint(x: 38, y: 12), CGPoint(x: 5, y: 25)] {
+            XCTAssertEqual(contains(a, point), contains(b, point), "\(point)", file: file, line: line)
+        }
+        XCTAssertEqual(a.selection?.bounds, b.selection?.bounds, file: file, line: line)
+    }
+
+    /// **An open loop's region is the implicitly closed loop's** — the last point joined back to the
+    /// first — however the lasso was made, and the selection is up before anything closes it.
+    func testAnOpenLoopSelectsTheRegionTheClosedLoopDoes() {
+        let open = CanvasFixture.manager()
+        for corner in openU { open.tapLasso(at: corner, nodeReach: reach) }
+        XCTAssertNotNil(open.openLasso, "PREMISE: nothing closed it")
+        let closed = CanvasFixture.manager()
+        for corner in openU { closed.tapLasso(at: corner, nodeReach: reach) }
+        closed.tapLasso(at: square[0], nodeReach: reach)
+        XCTAssertNil(closed.openLasso, "PREMISE: this one was closed on the node")
+        sameRegion(open, closed)
+        XCTAssertTrue(contains(open, inside))
+        XCTAssertFalse(contains(open, outside))
+
+        let drawn = CanvasFixture.manager()
+        drawn.liftLassoStroke(stroke(through: openU), nodeReach: reach)
+        XCTAssertNotNil(drawn.openLasso)
+        let drawnClosed = CanvasFixture.manager()
+        drawnClosed.liftLassoStroke(stroke(through: openU), nodeReach: reach)
+        drawnClosed.tapLasso(at: square[0], nodeReach: reach)
+        sameRegion(drawn, drawnClosed)
+    }
+
+    /// The same on a vector layer: the region is a place on the paper, whatever kind of layer is active,
+    /// and the layer's own consumers read it through the one `selection`.
+    @MainActor
+    func testAnOpenLoopSelectsTheSameRegionOnAVectorLayer() throws {
+        let open = CanvasFixture.manager()
+        _ = try vectorInkForMove(open)
+        for corner in openU { open.tapLasso(at: corner, nodeReach: reach) }
+        let closed = CanvasFixture.manager()
+        _ = try vectorInkForMove(closed)
+        for corner in openU { closed.tapLasso(at: corner, nodeReach: reach) }
+        closed.tapLasso(at: square[0], nodeReach: reach)
+        sameRegion(open, closed)
+    }
+
+    /// Fewer than three points enclose nothing: no selection yet, and a selection already up is untouched.
+    func testTwoPointsSelectNothingAndLeaveTheSelectionAlone() {
+        let manager = CanvasFixture.manager()
+        manager.tapLasso(at: square[0], nodeReach: reach)
+        manager.tapLasso(at: square[1], nodeReach: reach)
+        XCTAssertNil(manager.selection)
+
+        let held = CanvasFixture.manager()
+        held.finishSelection(path: CGPath(rect: CGRect(x: 0, y: 0, width: 8, height: 8), transform: nil))
+        held.tapLasso(at: square[0], nodeReach: reach)
+        held.tapLasso(at: square[1], nodeReach: reach)
+        XCTAssertTrue(contains(held, CGPoint(x: 4, y: 4)))
+        XCTAssertFalse(contains(held, inside))
+    }
+
+    /// **The open lasso composes onto the selection that stood under it, live, and the step lands once
+    /// when it ends** — not one per corner. Undo while it is open takes the last corner and the region
+    /// follows; when the lasso is gone the earlier selection stands exactly as before.
+    func testAnOpenLassoComposesLiveAndLandsOneUndoStepWhenItEnds() {
+        let manager = CanvasFixture.manager()
+        manager.finishSelection(path: CGPath(rect: CGRect(x: 0, y: 0, width: 8, height: 8), transform: nil))
+        let baseline = manager.history.undoStack.count
+        let held = manager.selection?.path
+
+        for corner in openU { manager.tapLasso(at: corner, nodeReach: reach) }
+        XCTAssertTrue(contains(manager, CGPoint(x: 4, y: 4)), "the earlier selection is still held")
+        XCTAssertTrue(contains(manager, inside), "…and the open lasso is added to it")
+        XCTAssertEqual(manager.history.undoStack.count, baseline, "nothing is in the history while it is open")
+
+        manager.undo()
+        XCTAssertEqual(manager.openLasso?.points.count, 3)
+        XCTAssertTrue(contains(manager, CGPoint(x: 4, y: 4)))
+        XCTAssertFalse(contains(manager, CGPoint(x: 12, y: 38)), "the retracted corner's region is gone")
+
+        manager.tapLasso(at: square[3], nodeReach: reach)
+        manager.settleOpenLasso()
+        XCTAssertNil(manager.openLasso)
+        XCTAssertTrue(contains(manager, inside), "settling keeps the selection")
+        XCTAssertEqual(manager.history.undoStack.count, baseline + 1, "one step for the whole lasso")
+        manager.undo()
+        XCTAssertEqual(manager.selection?.path, held, "undo gives back the selection that stood under it")
+    }
+
+    /// Undoing the lasso's last run takes its region with it.
+    func testUndoOfTheOnlyRunTakesTheRegionWithIt() {
+        let manager = CanvasFixture.manager()
+        manager.liftLassoStroke(stroke(through: openU), nodeReach: reach)
+        XCTAssertNotNil(manager.selection)
+        manager.undo()
+        XCTAssertNil(manager.openLasso)
+        XCTAssertNil(manager.selection)
+    }
+
+    /// An open lasso that takes a region the artist has up, under Subtract.
+    func testAnOpenLassoSubtractsUnderSubtract() {
+        let manager = CanvasFixture.manager()
+        manager.finishSelection(path: CGPath(rect: CGRect(x: 0, y: 0, width: 50, height: 50), transform: nil))
+        manager.subtractsSelection = true
+        for corner in openU { manager.tapLasso(at: corner, nodeReach: reach) }
+        XCTAssertFalse(contains(manager, inside), "the open lasso's region is taken out")
+        XCTAssertTrue(contains(manager, CGPoint(x: 3, y: 3)), "…and only its region")
+    }
+
+    /// **Deselect discards the open lasso and its region** — one step back to nothing, not a lasso
+    /// settled and then deselected.
+    func testDeselectDiscardsAnOpenLassoAndItsRegion() {
+        let manager = CanvasFixture.manager()
+        for corner in openU { manager.tapLasso(at: corner, nodeReach: reach) }
+        XCTAssertNotNil(manager.selection)
+        let baseline = manager.history.undoStack.count
+        manager.deselect()
+        XCTAssertNil(manager.openLasso)
+        XCTAssertNil(manager.selection)
+        XCTAssertEqual(manager.history.undoStack.count, baseline, "nothing was selected before the lasso: no step")
     }
 
     // MARK: - Undo
@@ -343,6 +467,11 @@ final class OpenLassoLogicTests: XCTestCase {
         manager.commitAllInteractiveState()
         XCTAssertNil(manager.openLasso, "a tool or panel switch settles everything in flight, the lasso too")
         XCTAssertNil(manager.selection, "…and none of it selected anything")
+
+        for corner in openU { manager.tapLasso(at: corner, nodeReach: reach) }
+        manager.commitAllInteractiveState()
+        XCTAssertNil(manager.openLasso)
+        XCTAssertTrue(contains(manager, inside), "a lasso with a shape lands as the closed loop it acted as")
     }
 
     /// **The eyedropper keeps an open lasso** — TODO (187), the owner, 2026-10-12: picking a colour in

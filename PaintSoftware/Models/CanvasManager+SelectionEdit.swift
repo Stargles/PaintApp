@@ -669,7 +669,7 @@ extension CanvasManager {
         case .gradient:
             opened = beginGradientEdit(elementID: id)
         }
-        if opened { abandonOpenLasso() }
+        if opened { settleOpenLasso() }
         return opened
     }
 }

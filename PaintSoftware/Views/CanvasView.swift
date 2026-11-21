@@ -422,9 +422,6 @@ struct CanvasView: UIViewRepresentable {
         // Freehand selection (TODO (184)): the model decides whether a stroke or tap closes the lasso
         // or leaves it open, and the overlay is told the answer in the same turn of the run loop, so
         // the preview never shows a lifted stroke between the lift and the pass that follows it.
-        canvasManager.readLassoNodeReach = { [weak selectionOverlay] in
-            selectionOverlay?.nodeReach
-        }
         selectionOverlay.onLassoStroke = { [weak coordinator = context.coordinator] run, reach in
             coordinator?.canvasManager.liftLassoStroke(run, nodeReach: reach)
             coordinator?.updateSelectionOverlay()

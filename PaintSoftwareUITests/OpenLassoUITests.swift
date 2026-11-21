@@ -85,7 +85,8 @@ final class OpenLassoUITests: PaintUITestCase {
             canvas.coordinate(withNormalizedOffset: corner).tap()
             XCTAssertTrue(settledField(app, "lasso:", equals: "\(index + 1)"),
                           "corner \(index + 1) joined the open lasso (it holds \(readField(app, "lasso:")))")
-            XCTAssertFalse(deselect.isEnabled, "an open lasso selects nothing yet")
+            XCTAssertEqual(deselect.isEnabled, index >= 2,
+                           "two corners enclose nothing; from the third the open lasso acts as the closed one (§5.29)")
         }
         XCTAssertTrue(try nodeIsDrawn(canvas, at: node), "the start node is drawn where the first tap landed")
         attachScreenshot(app, "open-lasso-four-corners")
@@ -154,7 +155,7 @@ final class OpenLassoUITests: PaintUITestCase {
         }
         try fingerStroke(through: points + [corners[3]])
         XCTAssertTrue(try nodeIsDrawn(canvas, at: corners[0]), "the lifted U still has its open start node")
-        XCTAssertFalse(app.buttons["selectPanel.deselectButton"].isEnabled, "the U has not closed yet")
+        XCTAssertTrue(app.buttons["selectPanel.deselectButton"].isEnabled, "the open U already acts as a closed loop")
         attachScreenshot(XCUIScreen.main, "open-u-before-move")
 
         app.buttons["toolbar.moveButton"].tap()
@@ -208,7 +209,7 @@ final class OpenLassoUITests: PaintUITestCase {
         dragOnCanvas(app, from: at(0.15, 0.12), to: at(0.55, 0.30))
         let held = readField(app, "lasso:")
         XCTAssertNotEqual(held, "none", "the stroke lifted away from where it landed leaves the lasso open")
-        XCTAssertFalse(deselect.isEnabled, "…and selects nothing")
+        XCTAssertTrue(deselect.isEnabled, "…and acts as the closed loop its straight edge back to the node makes")
         XCTAssertTrue(try nodeIsDrawn(canvas, at: hostPoint(canvas, at(0.15, 0.12))),
                       "…with its node where the pen landed")
         attachScreenshot(app, "open-lasso-after-a-stroke")
@@ -223,6 +224,7 @@ final class OpenLassoUITests: PaintUITestCase {
         XCTAssertTrue(settledField(app, "lasso:", equals: held), "undo took the corner back")
         undo.tap()
         XCTAssertTrue(settledField(app, "lasso:", equals: "none"), "…and the next press the stroke, which was the lasso")
+        XCTAssertFalse(deselect.isEnabled, "…and the selection it made goes with it")
 
         // A mode switch puts an open lasso down.
         canvas.coordinate(withNormalizedOffset: at(0.20, 0.15)).tap()
@@ -319,6 +321,89 @@ final class OpenLassoUITests: PaintUITestCase {
         XCTAssertTrue(waitUntil(canvas, bottomLeft, isWhitish),
                       "…and the one in its fourth corner: the corners placed before and after the pick made one shape")
         XCTAssertTrue(waitUntil(canvas, outside, isRed), "…and left the mark outside it")
+    }
+
+    // MARK: - An open lasso acts as closed for every action (§5.29)
+
+    /// Two red marks on a fresh landscape document, an OPEN freehand U drawn round the left one and
+    /// lifted away from where it began. Returns the canvas, both marks, and the U's start node.
+    private func openUAroundTheLeftMark(_ app: XCUIApplication) throws
+        -> (canvas: XCUIElement, inside: CGVector, outside: CGVector, node: CGPoint) {
+        XCTAssertTrue(launchIntoEditor(app, orientationBeforeCreatingCanvas: .landscapeLeft))
+        let canvas = app.otherElements["canvas.host"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 5))
+        let paper = paperRect(in: canvas)
+        let exposed = visiblePaperRect(app, in: canvas)
+        let top = exposed.minY + exposed.height * 0.12
+        let row = exposed.minY + exposed.height * 0.26
+        let bottom = exposed.minY + exposed.height * 0.39
+        func at(_ x: Double, _ y: Double) -> CGVector { CGVector(dx: paper.minX + paper.width * x, dy: y) }
+
+        setBrushColor(app, hex: "FF0000")
+        setBrushSize(app, normalized: 0.12)
+        let inside = at(0.36, row), outside = at(0.73, row)
+        drawLine(on: canvas, from: at(0.30, row), to: at(0.42, row))
+        drawLine(on: canvas, from: at(0.67, row), to: at(0.79, row))
+        XCTAssertTrue(waitUntil(canvas, inside, isRed), "PREMISE: the mark inside the U is drawn")
+        XCTAssertTrue(waitUntil(canvas, outside, isRed), "PREMISE: the mark outside it is drawn")
+
+        app.buttons["toolbar.selectButton"].tap()
+        let freehand = app.buttons["selectPanel.mode.lasso"]
+        XCTAssertTrue(freehand.waitForExistence(timeout: 5))
+        freehand.tap()
+        assertBelowTheToolbar(app, canvas, dy: top, "The open end of the U")
+        assertAboveTheDock(app, canvas, dy: bottom, "The bottom of the U")
+        XCTAssertFalse(app.buttons["selectPanel.clearButton"].isEnabled, "PREMISE: nothing is selected")
+        let corners = [at(0.23, top), at(0.23, bottom), at(0.50, bottom), at(0.50, top)]
+            .map { hostPoint(canvas, $0) }
+        let points = zip(corners, corners.dropFirst()).flatMap { a, b in
+            (0..<10).map { step in
+                let t = Double(step) / 10
+                return CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t)
+            }
+        }
+        try fingerStroke(through: points + [corners[3]])
+        XCTAssertNotEqual(readField(app, "lasso:"), "none", "PREMISE: the U is still open")
+        XCTAssertTrue(try nodeIsDrawn(canvas, at: corners[0]), "PREMISE: its start node is drawn")
+        return (canvas, inside, outside, corners[0])
+    }
+
+    /// **The whole bottom bar works on a lasso nobody closed** — the owner, 2026-11-17: *"even if the
+    /// lasso is open, it should still treat it as a closed one."* Copy, To New Layer (the ink is on a
+    /// new layer) and Clear (the area is empty) each act on the U's closed shape, and Move too.
+    func testAnOpenLassoIsTheClosedOneForCopyToNewLayerAndClear() throws {
+        let app = XCUIApplication()
+        let (canvas, inside, outside, node) = try openUAroundTheLeftMark(app)
+        for id in ["copyButton", "duplicateButton", "moveToNewLayerButton", "fillButton", "clearButton", "deselectButton"] {
+            XCTAssertTrue(app.buttons["selectPanel.\(id)"].isEnabled, "\(id) is live with the lasso still open")
+        }
+        attachScreenshot(XCUIScreen.main, "open-u-bar-live")
+
+        app.buttons["selectPanel.copyButton"].tap()
+        XCTAssertTrue(settledField(app, "lasso:", equals: "none"), "Copy took the open lasso as the loop it acts as")
+        XCTAssertTrue(app.buttons["selectPanel.clearButton"].isEnabled, "…and the selection stands")
+
+        app.buttons["selectPanel.moveToNewLayerButton"].tap()
+        let done = app.buttons["moveBar.doneButton"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5), "the enclosed ink comes up in the Move box on its new layer")
+        done.tap()
+        XCTAssertTrue(done.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(waitUntil(canvas, inside, isRed), "the ink is still on the canvas")
+        openLayerPanel(app)
+        let moved = try XCTUnwrap(readVectorMarker(app, layerIndex: 1), "To New Layer made a second layer")
+        XCTAssertEqual(moved.strokes, 1, "…holding the stroke inside the U and not the one outside")
+        XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1, "the original kept the outside stroke")
+        XCTAssertTrue(waitUntil(canvas, outside, isRed))
+        XCTAssertFalse(try nodeIsDrawn(canvas, at: node), "the node went with the open lasso")
+    }
+
+    func testAnOpenLassoIsTheClosedOneForClear() throws {
+        let app = XCUIApplication()
+        let (canvas, inside, outside, _) = try openUAroundTheLeftMark(app)
+        app.buttons["selectPanel.clearButton"].tap()
+        XCTAssertTrue(waitUntil(canvas, inside, isWhitish), "Clear emptied the area the open U encloses")
+        XCTAssertTrue(waitUntil(canvas, outside, isRed), "…and left the ink outside it")
+        attachScreenshot(XCUIScreen.main, "open-u-cleared")
     }
 
     // MARK: - Opening an editor puts an open lasso down (TODO (188))

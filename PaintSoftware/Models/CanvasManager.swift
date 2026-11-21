@@ -927,7 +927,7 @@ final class CanvasManager: ObservableObject {
     // MARK: - Select & Move tool state (see SelectionModels.swift for the operations)
     @Published var selectionMode: SelectionMode = .lasso {
         // An open lasso is Freehand's own state: another mode has nothing to close it with.
-        didSet { if oldValue != selectionMode { abandonOpenLasso() } }
+        didSet { if oldValue != selectionMode { settleOpenLasso() } }
     }
     /// **The Freehand lasso the artist has begun and not closed** — TODO (184). Nil when none is
     /// open, which is every moment but the stretch between a stroke or tap that left it open and the
@@ -939,8 +939,10 @@ final class CanvasManager: ObservableObject {
             if (oldValue == nil) != (openLasso == nil) { refreshUndoRedoState() }
         }
     }
-    /// Reads the current Freehand node reach in canvas points from the live selection overlay.
-    var readLassoNodeReach: (() -> CGFloat?)?
+    /// **The selection as it stood when the open lasso began** — the region the lasso's implicitly closed
+    /// loop is added to or taken from, every time the lasso changes. Nil exactly when no lasso is open;
+    /// the wrapper is what tells "no lasso" from "a lasso begun over no selection". See `OpenLassoBase`.
+    var openLassoBase: OpenLassoBase?
     @Published var transformMode: TransformMode = .uniform
     /// **TODO (135) — which cels a folder's Move carries**, the picker on the Move bar while a folder's
     /// box is up. `.thisCel` is the shipped behaviour and the default.
@@ -2097,7 +2099,8 @@ final class CanvasManager: ObservableObject {
         guard commitEditsInFlight() else { return false }
         // The tool is being replaced, and an open lasso is the Select tool's own unfinished work —
         // unlike a save (`settleInteractiveState`), which must not take it from under the artist's pen.
-        abandonOpenLasso()
+        // It lands as the closed loop it already acts as (LASSO_MOVE.md §5.29).
+        settleOpenLasso()
         return true
     }
 
