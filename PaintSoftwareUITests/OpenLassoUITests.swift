@@ -389,12 +389,12 @@ final class OpenLassoUITests: PaintUITestCase {
         done.tap()
         XCTAssertTrue(done.waitForNonExistence(timeout: 5))
         XCTAssertTrue(waitUntil(canvas, inside, isRed), "the ink is still on the canvas")
+        XCTAssertTrue(waitUntil(canvas, outside, isRed), "…and so is the ink outside the U")
+        XCTAssertFalse(try nodeIsDrawn(canvas, at: node), "the node went with the open lasso")
         openLayerPanel(app)
         let moved = try XCTUnwrap(readVectorMarker(app, layerIndex: 1), "To New Layer made a second layer")
         XCTAssertEqual(moved.strokes, 1, "…holding the stroke inside the U and not the one outside")
         XCTAssertEqual(readVectorMarker(app, layerIndex: 0)?.strokes, 1, "the original kept the outside stroke")
-        XCTAssertTrue(waitUntil(canvas, outside, isRed))
-        XCTAssertFalse(try nodeIsDrawn(canvas, at: node), "the node went with the open lasso")
     }
 
     func testAnOpenLassoIsTheClosedOneForClear() throws {
