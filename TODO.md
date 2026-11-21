@@ -11,7 +11,7 @@ Every status report to the owner lists this queue with each item's state, not on
 "Installed" means the code on `main` — an ask below that is not marked shipped is **not** in it.
 
 1. **Play crash** — in flight (`tmp/nov21-play`): measure the simulator's real backboardd on Test1.
-2. **Gallery shows the build** — in flight (`tmp/nov21-version`).
+2. **Gallery shows the build** — merged Nov 21 ("Build <commit> · <date>"); reaches the iPad with (1).
 3. **Crash catcher** — merged Nov 21; reaches the iPad with the next install (with (1)).
 4. **Open lasso acts as closed for every action** (Nov 17 ruling) — in flight (`tmp/nov21-lasso`)
    since Nov 21; had sat unstarted and unreported for four days.
