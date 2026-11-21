@@ -233,6 +233,9 @@ Every status report to the owner lists this queue with each item's state, not on
   generic destination, fetch best-effort) and install (iPad only) are separate stages over one state
   file; a 5-minute user LaunchAgent plus the hourly root daemon's wakes; script tracked in
   `tools/resign/`, pinned by `install.sh`, 14-case harness. Open: confirm the first real expiry (Nov 28 03:31 UTC) renews unattended.
+  **Defect (Nov 21): an install kills the app if it is running** — the rebuild's end-to-end test install
+  at 22:49 very likely is the owner's Nov 20 "crash" (no crash log). The auto-installer must never install
+  while PaintSoftware is running on the iPad (it would lose his unsaved strokes); defer until it is not.
 - [ ] **Catch iPad crashes without the owner (owner, Nov 19).** *"I shouldn't have been the one to catch
   that iPad crash."* The app cannot catch a backboardd Jetsam in-process, but: (1) on launch, detect that
   the last session ended uncleanly and save the flight recorder's last 90 s (persist it periodically so a
