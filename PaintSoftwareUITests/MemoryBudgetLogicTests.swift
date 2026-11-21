@@ -1327,15 +1327,17 @@ final class MemoryBudgetLogicTests: XCTestCase {
 
     // MARK: - SCHEDULER.md rule 5 — the one budget
 
-    /// The number, from the device's measured limit: 0.45 of the iPad 9's 1,850 MiB (the gate's
-    /// 0.63 less a 0.18 reserve for what is not canvas-sized), and the simulator runs on the reference.
+    /// The number, from the device's measured limit: 0.48 of the iPad 9's 1,850 MiB — inside the two
+    /// measured bounds `MemoryBudget.canvasFraction` derives — and the simulator runs on the reference.
     func testTheOneBudgetIsTheCanvasShareOfTheDevicesMeasuredLimit() {
-        XCTAssertEqual(MemoryBudget.totalBytes(appLimitBytes: 1850 * Self.mib) / Self.mib, 832)
+        XCTAssertEqual(MemoryBudget.totalBytes(appLimitBytes: 1850 * Self.mib) / Self.mib, 888)
         XCTAssertEqual(MemoryBudget.referenceAppLimitBytes, 1850 * Self.mib)
         XCTAssertEqual(Self.originalTotal, MemoryBudget.totalBytes(appLimitBytes: 1850 * Self.mib),
                        "the simulator answers 0 available, so it runs on the reference iPad")
-        XCTAssertGreaterThanOrEqual(Self.originalTotal, 5 * 5000 * 5000 * 4 + 3 * 5000 * 5000 * 4,
-                                    "five shown 5000² layers and a bake's three-frame peak must fit")
+        XCTAssertGreaterThanOrEqual(Self.originalTotal / Self.mib, 667 + 191,
+                                    "the owner's scene on screen and a bake's two-frame peak must fit")
+        XCTAssertLessThanOrEqual(Self.originalTotal / Self.mib + 252, 1165,
+                                 "and the rest of the app, measured, must still fit the gate's allowance")
         XCTAssertLessThan(MemoryBudget.canvasFraction, CanvasManager.gradedWorkingSetBudgetFraction,
                           "canvas-sized memory must leave the rest of the app room inside what the gate allows it")
     }
@@ -1445,7 +1447,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
     /// No cache above its share: the ring holds two frames only inside a quarter of the budget, and
     /// source pixels are held to half of it.
     func testNoCacheIsSizedAboveItsShareOfTheOneBudget() {
-        let budget = 832 * Self.mib
+        let budget = 888 * Self.mib
         let frame5000 = 5000 * 5000 * 4, frame6000 = 6000 * 6000 * 4
         XCTAssertEqual(CanvasManager.frameRingByteBudget(forFrameBytes: frame5000, sharedBudgetBytes: budget), 2 * frame5000,
                        "two of the owner's frames fit the ring's quarter")

@@ -57,17 +57,21 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
     /// MEASURED on the device (PERFORMANCE.md §15.5).
     static let referenceAppLimitBytes = 1850 * 1024 * 1024
 
-    /// **The share of the app's limit that canvas-sized memory may hold, and how it is derived.**
-    /// The install gate allows the whole app 0.63 of the limit (`CanvasManager
-    /// .gradedWorkingSetBudgetFraction`, 1,165 MiB on the iPad 9 — the margin for a real scene
-    /// heavier than the gate's). What this budget is not asked about is the rest of the app — UIKit,
-    /// Metal, the window surfaces, the document's model, a stroke's scratch — MEASURED on the gate's
-    /// routine (iPad 9 simulator, 2026-11-21) as the footprint peak less the budget's own peak:
-    /// **at most 252 MiB** (1,139 against 887), 64 MiB before a scene opens. A reserve of 0.18 of the
-    /// limit (333 MiB) covers that with 80 MiB to spare, so canvas-sized memory gets **0.45 of the
-    /// limit: 832 MiB on the iPad 9** — five shown 5000² layers (477) and a bake's peak (three
-    /// frames, 286) with room left.
-    static let canvasFraction = 0.45
+    /// **The share of the app's limit that canvas-sized memory may hold, and how it is derived** —
+    /// two MEASURED bounds from the install gate's routine (iPad 9 simulator, 5000² × five vector
+    /// layers, 2026-11-21), on the reference iPad's 1,850 MiB:
+    /// - **from below**: what the scene holds on screen with the bake idle — five layer pictures and
+    ///   the frame's other pictures, 667 MiB — plus a bake's peak of two frames (191 MiB). Below
+    ///   **858 MiB** the bake can never start and the scene never bakes.
+    /// - **from above**: the gate allows the whole app 0.63 of the limit (`CanvasManager
+    ///   .gradedWorkingSetBudgetFraction`, 1,165 MiB), and what this budget is not asked about —
+    ///   UIKit, Metal, the window surfaces, the model, a stroke's scratch — measured at most 252 MiB
+    ///   above the budget's own peak (footprint peak 1,139 against 887). Above **913 MiB** the gate
+    ///   has no margin.
+    /// 0.48 of the limit is **888 MiB**, inside both. A heavier scene moves the first bound, not the
+    /// number: more or larger layers than fit refuse their pictures through the notices, and the
+    /// bake waits — which is the budget doing its job rather than the app being killed.
+    static let canvasFraction = 0.48
 
     /// The budget for a process whose limit is `appLimitBytes`.
     static func totalBytes(appLimitBytes: Int) -> Int {
