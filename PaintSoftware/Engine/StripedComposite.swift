@@ -340,8 +340,7 @@ enum StripedCompositor {
         // partial image is discarded.
         var declined = false
 
-        let image = UIGraphicsImageRenderer(bounds: frame, format: PixelOps.transparentFormat())
-            .image { _ in
+        let image = PixelOps.drawImage(size: frame.size) { _ in
                 for strip in strips where !declined {
                     // SCHEDULER.md rule 3: a touch outranks the frame — wait here, between strips.
                     InteractionGate.shared.checkpoint()
@@ -364,8 +363,9 @@ enum StripedCompositor {
                             .draw(in: strip.core, blendMode: .copy, alpha: 1)
                     }
                 }
+                return !declined
             }
-        return declined ? nil : image.cgImage
+        return declined ? nil : image?.cgImage
     }
 
     /// `CGImage.cropping(to:)` with the rounding stated rather than inherited.

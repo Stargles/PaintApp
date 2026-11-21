@@ -723,8 +723,9 @@ enum CoreGraphicsCompositor {
         guard size.width > 0, size.height > 0 else { return nil }
         let bounds = CGRect(origin: .zero, size: size)
 
-        let image = UIGraphicsImageRenderer(bounds: bounds, format: PixelOps.transparentFormat())
-            .image { context in
+        // Into an admitted buffer the picture wraps (`PixelOps.drawImage`): no second copy, and the
+        // one budget counts it for as long as it lives.
+        let image = PixelOps.drawImage(size: bounds.size) { context in
                 // **Skipped for a chunk continuation, and `background` is still the paper**
                 // (RENDER.md §3.4). The accumulator leaf this walk is about to draw already holds
                 // the paper; filling it again would lay a translucent one down twice. Everything
@@ -752,8 +753,9 @@ enum CoreGraphicsCompositor {
                 // frame, which is a cost this branch did not measure.
                 draw(request.tree, of: request, in: bounds, context: context,
                      paperInBackdrop: request.background != nil)
+                return true
             }
-        return image.cgImage
+        return image?.cgImage
     }
 
     /// **The canvas paper, into whatever context the caller has made current** — nothing at all when
@@ -792,7 +794,7 @@ enum CoreGraphicsCompositor {
     /// provably composites to what the deleted flat walk composited. §5.3's "never allocate one per
     /// layer" wants exactly this, and `PerfBaselineTests` measures it.
     private static func draw(_ nodes: [RenderNode], of request: RenderRequest, in bounds: CGRect,
-                             context: UIGraphicsImageRendererContext, paperInBackdrop: Bool) {
+                             context: CGContext, paperInBackdrop: Bool) {
         for node in nodes {
             switch node.content {
             case .leaf(let layerIndex):
@@ -889,8 +891,7 @@ enum CoreGraphicsCompositor {
                 // the graded result back into `inner`, exactly mirroring how the leaf case above
                 // grades `context.currentImage` in place. That makes `assembled` the *graded*
                 // composite by the time this closure returns.
-                let assembled = UIGraphicsImageRenderer(bounds: bounds, format: PixelOps.transparentFormat())
-                    .image { inner in
+                guard let assembled = PixelOps.drawImage(size: bounds.size, { inner in
                         fold(op, inputs, of: request, in: bounds, context: inner)
                         if let effect = node.effect {
                             // No `inkBelow`: a node with a grade always buffers
@@ -899,7 +900,8 @@ enum CoreGraphicsCompositor {
                             // image here, which is why §4's table never has to ask about a node.
                             grade(effect, by: node, of: request, in: bounds, context: inner, inkBelow: nil)
                         }
-                    }
+                        return true
+                    }) else { continue }
                 // The node's mask clips the node, so it lands on the assembled composite — which is
                 // the same rule its opacity and its blend mode follow, and the reason
                 // `needsOwnBuffer` counts a mask as a reason to allocate. It clips the *result* of
@@ -942,7 +944,7 @@ enum CoreGraphicsCompositor {
     /// `.stack` never takes the isolating branch, so it still runs the single-shared-accumulator loop
     /// it always did, byte for byte — the common case does not start paying a buffer per child.
     private static func fold(_ op: CompositorOp, _ inputs: [[RenderNode]], of request: RenderRequest,
-                             in bounds: CGRect, context: UIGraphicsImageRendererContext) {
+                             in bounds: CGRect, context: CGContext) {
         for (slot, input) in inputs.enumerated() {
             guard case .mix(let mode) = op, slot > 0 else {
                 // `paperInBackdrop: false` throughout `fold`, and it is not a choice: `fold` is
@@ -951,8 +953,10 @@ enum CoreGraphicsCompositor {
                 draw(input, of: request, in: bounds, context: context, paperInBackdrop: false)
                 continue
             }
-            let isolated = UIGraphicsImageRenderer(bounds: bounds, format: PixelOps.transparentFormat())
-                .image { inner in draw(input, of: request, in: bounds, context: inner, paperInBackdrop: false) }
+            guard let isolated = PixelOps.drawImage(size: bounds.size, { inner in
+                draw(input, of: request, in: bounds, context: inner, paperInBackdrop: false)
+                return true
+            }) else { continue }
             // Opacity 1: the node's own fade applies once to the finished fold, up in `draw`. Fading
             // a slot on its way into the fold would be the per-child mistake group opacity already
             // refuses to make.
@@ -977,13 +981,13 @@ enum CoreGraphicsCompositor {
     /// oracle the shader is measured against and the fallback on a device with no Metal, so it may be
     /// slow and may not be approximate. §5.1 is the argument for where this runs at interactive rates.
     private static func grade(_ effect: Effect, by node: RenderNode, of request: RenderRequest,
-                              in bounds: CGRect, context: UIGraphicsImageRendererContext,
+                              in bounds: CGRect, context: CGContext,
                               inkBelow: [RenderNode]?) {
         let width = Int(bounds.width.rounded()), height = Int(bounds.height.rounded())
         guard width > 0, height > 0 else { return }
         // Read before either arm writes anything: both crossfade their result back over this exact
         // image, and the ink arm runs a whole sub-composite of its own before it needs it.
-        guard let backdropImage = context.currentImage.cgImage,
+        guard let backdropImage = context.makeImage(),
               let backdrop = premultipliedBytes(backdropImage, width: width, height: height)
         else { return }
 
@@ -1020,7 +1024,7 @@ enum CoreGraphicsCompositor {
     /// result over the accumulator, and why it needs no clipped copy of the graded image.
     private static func mixBack(_ graded: [UInt8], over backdrop: [UInt8], by node: RenderNode,
                                 of request: RenderRequest, in bounds: CGRect,
-                                context: UIGraphicsImageRendererContext, width: Int, height: Int) {
+                                context: CGContext, width: Int, height: Int) {
         // Same resolution the GPU path uploads, for `MaskResolver`'s reason — the threshold is a step
         // function and the two backends cannot be allowed to land on opposite sides of it.
         mixBack(graded, over: backdrop,
@@ -1035,7 +1039,7 @@ enum CoreGraphicsCompositor {
     /// so it passes nil coverage and the layer's own opacity.
     static func mixBack(_ graded: [UInt8], over backdrop: [UInt8], opacity opacityValue: Double,
                         coverage: ResolvedMask?, in bounds: CGRect,
-                        context: UIGraphicsImageRendererContext, width: Int, height: Int) {
+                        context: CGContext, width: Int, height: Int) {
         let opacity = Float(opacityValue)
 
         var result = backdrop
@@ -1130,13 +1134,12 @@ enum CoreGraphicsCompositor {
         // `fillBackground` rather than a second spelling of the fill, and the renderer starts
         // transparent, so a padded canvas's margin is left transparent here exactly as it is at the
         // top of the walk — which is what keeps the margin out of the crossfade.
-        let replaced = UIGraphicsImageRenderer(bounds: bounds, format: PixelOps.transparentFormat())
-            .image { _ in
+        guard let replaced = PixelOps.drawImage(size: bounds.size, { _ in
                 fillBackground(request.background)
                 UIImage(cgImage: gradedInkImage, scale: 1, orientation: .up)
                     .draw(in: bounds, blendMode: .normal, alpha: 1)
-            }
-        guard let replacedImage = replaced.cgImage else { return nil }
+                return true
+            }), let replacedImage = replaced.cgImage else { return nil }
         return premultipliedBytes(replacedImage, width: width, height: height)
     }
 
@@ -1161,7 +1164,7 @@ enum CoreGraphicsCompositor {
     /// composite in `PixelOps` with `.normal` hard-coded, which is 25 modes' worth of arithmetic
     /// this backend already owns and a second implementation this file's header rejects on sight.
     static func draw(_ image: UIImage, mode: BlendMode, opacity: Double,
-                     in bounds: CGRect, context: UIGraphicsImageRendererContext) {
+                     in bounds: CGRect, context: CGContext) {
         if let cgMode = mode.coreGraphicsBlendMode {
             // Via `UIImage` rather than `CGContext.draw` so the top-left origin and the alpha
             // application are literally the same call the deleted flat walk made. A byte-identical
@@ -1197,11 +1200,11 @@ enum CoreGraphicsCompositor {
     /// answer for all three channels at once. `Composite.metal` never had this problem — its
     /// `blendChannels` already takes a `float3` — which is exactly why the trap is CPU-only.
     private static func drawHandRolled(_ image: UIImage, mode: BlendMode, opacity: Double,
-                                       in bounds: CGRect, context: UIGraphicsImageRendererContext) {
+                                       in bounds: CGRect, context: CGContext) {
         let width = Int(bounds.width.rounded()), height = Int(bounds.height.rounded())
         guard width > 0, height > 0,
               let sourceImage = image.cgImage,
-              let backdropImage = context.currentImage.cgImage,
+              let backdropImage = context.makeImage(),
               let source = premultipliedBytes(sourceImage, width: width, height: height),
               let backdrop = premultipliedBytes(backdropImage, width: width, height: height)
         else { return }
@@ -1365,9 +1368,9 @@ extension CoreGraphicsCompositor {
                 }
                 switch top {
                 case .pixels(let image, let mode, let opacity):
-                    draw(image, mode: mode, opacity: opacity, in: bounds, context: context)
+                    draw(image, mode: mode, opacity: opacity, in: bounds, context: context.cgContext)
                 case .grade(let effect, let opacity, let coverage):
-                    grade(effect, opacity: opacity, coverage: coverage, in: bounds, context: context)
+                    grade(effect, opacity: opacity, coverage: coverage, in: bounds, context: context.cgContext)
                 case .nothing:
                     break
                 }
@@ -1384,10 +1387,10 @@ extension CoreGraphicsCompositor {
     /// to escape. `coverage` is the one mask a merge *does* have: a vector layer's own ink (TODO (92)),
     /// handed in already resolved since it needs no document to read.
     private static func grade(_ effect: Effect, opacity: Double, coverage: ResolvedMask?, in bounds: CGRect,
-                              context: UIGraphicsImageRendererContext) {
+                              context: CGContext) {
         let width = Int(bounds.width.rounded()), height = Int(bounds.height.rounded())
         guard width > 0, height > 0,
-              let backdropImage = context.currentImage.cgImage,
+              let backdropImage = context.makeImage(),
               let backdrop = premultipliedBytes(backdropImage, width: width, height: height)
         else { return }
         let graded = EffectReference.apply(effect, to: backdrop, width: width, height: height)
