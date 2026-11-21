@@ -116,7 +116,7 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
 
     /// Evicts `.cache` entries, least recently used first, until at most `bytes` of them remain.
     func trimCaches(toBytes bytes: Int) {
-        condition.lock()
+        lockState()
         let cached = entries.values.compactMap(\.entry).filter { $0.storedPriority == .cache }
             .reduce(0) { $0 + $1.storedBytes }
         let victims = victimsLocked(need: cached - bytes, upTo: .cache, keeping: nil)
@@ -126,7 +126,7 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
 
     /// Bytes held by entries of `priority`.
     func entryBytes(priority: Priority) -> Int {
-        condition.lock(); defer { condition.unlock() }
+        lockState(); defer { condition.unlock() }
         return entries.values.compactMap(\.entry).filter { $0.storedPriority == priority }.reduce(0) { $0 + $1.storedBytes }
     }
 
@@ -157,38 +157,38 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
 
     /// The budget, in bytes. Settable for a test, or for the gate's simulated device.
     var totalBytes: Int {
-        get { condition.lock(); defer { condition.unlock() }; return total }
-        set { condition.lock(); total = max(0, newValue); condition.broadcast(); condition.unlock() }
+        get { lockState(); defer { condition.unlock() }; return total }
+        set { lockState(); total = max(0, newValue); condition.broadcast(); condition.unlock() }
     }
 
     /// Bytes the device valve reads as available, imposed by a test, or nil for the process's own
     /// `os_proc_available_memory()` — the seam that lets a test drive a nearly-full iPad's refusal.
     var availableOverrideBytes: Int? {
-        get { condition.lock(); defer { condition.unlock() }; return available }
-        set { condition.lock(); available = newValue; condition.broadcast(); condition.unlock() }
+        get { lockState(); defer { condition.unlock() }; return available }
+        set { lockState(); available = newValue; condition.broadcast(); condition.unlock() }
     }
 
     /// Everything charged: entries plus grants in flight.
-    var heldBytes: Int { condition.lock(); defer { condition.unlock() }; return residentBytes + grantedBytes }
+    var heldBytes: Int { lockState(); defer { condition.unlock() }; return residentBytes + grantedBytes }
     /// What is left before the budget is full, or before the device valve closes if that is sooner.
     var freeBytes: Int {
-        condition.lock(); defer { condition.unlock() }
+        lockState(); defer { condition.unlock() }
         let free = total - residentBytes - grantedBytes
         let device = available ?? Int(os_proc_available_memory())
         return device > 0 ? min(free, device / 2) : free
     }
     /// Entries alone.
-    var entryBytes: Int { condition.lock(); defer { condition.unlock() }; return residentBytes }
+    var entryBytes: Int { lockState(); defer { condition.unlock() }; return residentBytes }
     /// Grants in flight.
-    var inFlightBytes: Int { condition.lock(); defer { condition.unlock() }; return grantedBytes }
+    var inFlightBytes: Int { lockState(); defer { condition.unlock() }; return grantedBytes }
     /// What admissions this budget has refused since launch.
-    var refusals: Int { condition.lock(); defer { condition.unlock() }; return refusalCount }
+    var refusals: Int { lockState(); defer { condition.unlock() }; return refusalCount }
     /// Entries evicted to make room since launch.
-    var evictions: Int { condition.lock(); defer { condition.unlock() }; return evictionCount }
+    var evictions: Int { lockState(); defer { condition.unlock() }; return evictionCount }
 
     /// Bytes held by entries named `name`, and of `priority` if given — for tests and the census.
     func entryBytes(named name: String, priority: Priority? = nil) -> Int {
-        condition.lock(); defer { condition.unlock() }
+        lockState(); defer { condition.unlock() }
         return entries.values.compactMap(\.entry)
             .filter { $0.name == name && (priority == nil || $0.storedPriority == priority) }
             .reduce(0) { $0 + $1.storedBytes }
@@ -253,7 +253,7 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
     /// after charging an entry it could not ask for in advance (the picture was made by someone else).
     /// Must be called with no lock held that an eviction could take.
     func settle(keeping kept: Entry? = nil) {
-        condition.lock()
+        lockState()
         let victims = victimsLocked(need: residentBytes + grantedBytes - total, upTo: .current, keeping: kept)
         condition.unlock()
         victims.forEach { $0.evict() }
@@ -334,7 +334,7 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
         let evictable: Priority = lane == .answer ? .current : .cache
         let mayWait = waiting && !Thread.isMainThread
         let deadline = Date().addingTimeInterval(Self.longestWait)
-        condition.lock()
+        lockState()
         while true {
             let liveAvailable = available ?? Int(os_proc_available_memory())
             let free = total - residentBytes - grantedBytes
@@ -347,7 +347,7 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
             if !victims.isEmpty {
                 condition.unlock()
                 victims.forEach { $0.evict() }
-                condition.lock()
+                lockState()
                 continue
             }
             if !mayWait || cancelled() || Date() >= deadline {
@@ -364,19 +364,19 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
     // MARK: - Internals
 
     private func read<T>(_ body: () -> T) -> T {
-        condition.lock(); defer { condition.unlock() }
+        lockState(); defer { condition.unlock() }
         return body()
     }
 
     private func returnGrant(_ bytes: Int) {
-        condition.lock()
+        lockState()
         grantedBytes -= bytes
         condition.broadcast()
         condition.unlock()
     }
 
     private func set(_ entry: Entry, bytes: Int?, priority: Priority?, touching: Bool) {
-        condition.lock()
+        lockState()
         defer { condition.unlock() }
         let key = ObjectIdentifier(entry)
         let tracked = entries[key]?.entry === entry
@@ -391,16 +391,30 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
         if newBytes < oldBytes { condition.broadcast() }
     }
 
+    /// **An entry has died.** Called from its `deinit`, which can run anywhere — including inside
+    /// this budget's own lock, when a snapshot taken under it held the last reference — so it takes
+    /// only `forgetLock` and leaves the charge to be dropped by the next locked operation (`locked`).
     private func forget(_ entry: Entry) {
+        forgetLock.lock()
+        forgotten.append((ObjectIdentifier(entry), entry.charged ? entry.storedBytes : 0))
+        forgetLock.unlock()
+    }
+
+    private let forgetLock = NSLock()
+    private var forgotten: [(key: ObjectIdentifier, bytes: Int)] = []
+
+    /// Takes the lock and settles the charges of entries that died since. Every locked path starts here.
+    private func lockState() {
         condition.lock()
-        let key = ObjectIdentifier(entry)
-        if entries[key] != nil, entries[key]?.entry == nil || entries[key]?.entry === entry {
+        forgetLock.lock()
+        let dead = forgotten
+        forgotten.removeAll()
+        forgetLock.unlock()
+        for (key, bytes) in dead where entries[key] != nil && entries[key]?.entry == nil {
             entries.removeValue(forKey: key)
-            if entry.charged { residentBytes -= entry.storedBytes }
-            entry.storedBytes = 0
-            condition.broadcast()
+            residentBytes -= bytes
         }
-        condition.unlock()
+        if !dead.isEmpty { condition.broadcast() }
     }
 
     /// Takes entries out of the charge, lowest priority and least recently used first, until `need`
