@@ -205,6 +205,13 @@ Every status report to the owner lists this queue with each item's state, not on
   close cleanly last time — a crash report was saved"), report listed under Recordings in Settings. The
   Mac pulls the iPad's crash logs **only when the owner asks** — no change to the hourly resign job; a
   `tools/` script makes the pull one command.
+  **Status (Nov 20, branch `tmp/nov20-crash`, not merged or installed):** built — `UncleanExitWatch`
+  (foreground marker + persisted flight ring, promoted to `Recordings/crash-*.jsonl` on a launch that finds
+  the last run died in the foreground; a backgrounded end reports nothing), MetricKit diagnostics written as
+  `metrickit-*.jsonl`, the fading reopen notice (the flight badge's capsule, also drawn on the gallery), and
+  `tools/pull-ipad-crashes.sh`. Armed on the simulator only by `-uiTestCrashWatch`. Owner to confirm on the
+  iPad after the next install; the owner's kill-while-drawing check is a force-quit from the app switcher
+  *while the app is frontmost is impossible*, so a real test is a backboardd Jetsam or Xcode's Stop.
 - [ ] **Intermittent whole-iPad failures during rapid edits.** Owner: black screen and brief restart
   during draw → Undo → draw; also a crash after repeated Fill (Nov 11); Kevin confirms **rapid To Cross
   erasing on Test1 (4096²) triggers the failure**. Coincided with rapid activity and a running stream.
