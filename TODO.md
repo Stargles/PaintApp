@@ -12,7 +12,7 @@ Every status report to the owner lists this queue with each item's state, not on
 
 1. **Play crash** — in flight (`tmp/nov21-play`): measure the simulator's real backboardd on Test1.
 2. **Gallery shows the build** — in flight (`tmp/nov21-version`).
-3. **Crash catcher** — in flight (`tmp/nov20-crash`).
+3. **Crash catcher** — merged Nov 21; reaches the iPad with the next install (with (1)).
 4. **Open lasso acts as closed for every action** (Nov 17 ruling) — **never started**; queued behind
    the crash work and not reported. Starts the moment (2) lands (independent code).
 5. **Frame steps instant and unstaggered + bake speed** — scheduler stage 2, after (1) merges.
@@ -205,7 +205,7 @@ Every status report to the owner lists this queue with each item's state, not on
   close cleanly last time — a crash report was saved"), report listed under Recordings in Settings. The
   Mac pulls the iPad's crash logs **only when the owner asks** — no change to the hourly resign job; a
   `tools/` script makes the pull one command.
-  **Status (Nov 20, branch `tmp/nov20-crash`, not merged or installed):** built — `UncleanExitWatch`
+  **Status (merged Nov 21, not yet installed):** built — `UncleanExitWatch`
   (foreground marker + persisted flight ring, promoted to `Recordings/crash-*.jsonl` on a launch that finds
   the last run died in the foreground; a backgrounded end reports nothing), MetricKit diagnostics written as
   `metrickit-*.jsonl`, the fading reopen notice (the flight badge's capsule, also drawn on the gallery), and
