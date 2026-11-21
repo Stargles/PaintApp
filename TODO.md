@@ -10,17 +10,24 @@ could not be verified as open or closed; verify against `main` and `git log`, th
 Every status report to the owner lists this queue with each item's state, not only what is in flight.
 "Installed" means the code on `main` — an ask below that is not marked shipped is **not** in it.
 
-1. **Play crash** — in flight (`tmp/nov21-play`): measure the simulator's real backboardd on Test1.
+1. **Play crash** — measured: it is the **app's own memory** (1.9–2.5 GB on the simulator against the
+   iPad 9's 1,850 MiB app limit), not the render server (≤ 206 MiB now). Two producers fixed and merged
+   Nov 21 (renderers recording display lists; heavy objects freed only on main). The gate is now
+   `tools/playcheck.sh` on measured footprints and is **still red** (app 1.73–1.76 GB vs 1,165 budget):
+   steady state ~1.1–1.25 GB is five canvas-sized layer pictures plus caches of 192 MiB each — that is
+   SCHEDULER.md stage 3 (one budget), in flight next. **No install until it is green.**
+   Likely: the Nov 20 22:4x "crash" with no crash log was the resigner's test install (binary re-signed on
+   the iPad 22:49:34) killing the running app — see the resigner item.
 2. **Gallery shows the build** — merged Nov 21 ("Build <commit> · <date>"); reaches the iPad with (1).
 3. **Crash catcher** — merged Nov 21; reaches the iPad with the next install (with (1)).
 4. **Open lasso acts as closed for every action** (Nov 17 ruling) — merged Nov 21; reaches the iPad
    with (1). Owner to check: draw an open C, then Copy, To New Layer, Clear.
-5. **Frame steps instant and unstaggered + bake speed** — scheduler stage 2, after (1) merges.
+5. **Frame steps instant and unstaggered + bake speed** — scheduler stage 2, after (1). Re-measure bake time first: (1) removed a full decode of every layer per bake.
    Folded in (owner, Nov 21): **zooming out after zooming in on a 5000² canvas, the edges appear a
    moment late** — caused by `d72eb69f`'s window-sized pictures (only the visible window is drawn, so
    newly revealed edges wait for a redraw). Owner: minor, fix along the way. Likely shape: keep a small
    whole-canvas picture under the window so revealed edges show at once (soft) until the sharp redraw.
-6. **Undo latency / raster Undo budget** — scheduler stage 3 (one memory budget).
+6. **Undo latency / raster Undo budget** — rides on stage 3's one budget (in flight under (1)).
 7. **Re-check against `main`, then fix what remains:** stroke briefly disappears, stroke latency and
    pan hitches, canvas freezes, rapid-edit whole-iPad failures, Liquify shown while held, Move-exit gap,
    the red `SelectionEditUITests` swatch test.

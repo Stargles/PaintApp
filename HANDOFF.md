@@ -15,7 +15,7 @@ From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
    the iPad down, steps ~400 ms and staggered, bake bars slow, version label never changes. **No device
    runs for crashes, ever** (owner). In flight: (A) `tmp/nov21-play` — measure the *simulator's real
    backboardd footprint* on the owner's real Test1 (copied read-only off the iPad), fix the producer,
-   make the gate assert that instead of the `LayerContentsCensus` proxy; (B) `tmp/nov21-version` — the
+   make the gate assert that instead of the `LayerContentsCensus` proxy — **done Nov 21: it is the app's memory; gate is `tools/playcheck.sh`, still red; stage 3 next (TODO queue (1))**; (B) `tmp/nov21-version` — the
    gallery shows commit + build date; (C) `tmp/nov20-crash` — crash catcher (fading notice; Mac pulls
    iPad logs only when asked). Then: (D) frame steps instant and unstaggered + bake speed, built as
    docs/SCHEDULER.md stage 2 on (A)'s harness — one fresh worker after (A) merges. The auto-resigner
