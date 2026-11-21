@@ -137,6 +137,7 @@ struct GalleryView: View {
                         Text(AppVersion.versionString)
                             .font(.caption)
                             .foregroundColor(.gray.opacity(0.6))
+                            .accessibilityIdentifier("galleryBuildLabel")
                         Spacer()
                     }
                     .padding(.horizontal, 16)

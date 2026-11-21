@@ -40,6 +40,8 @@ Every status report to the owner lists this queue with each item's state, not on
   (d) **Orange bars (the bake) take a couple of seconds per frame.**
   (e) **The gallery's version (1.0.43 (1)) never changes** — the owner cannot tell which build he has.
   Show the commit and build date; every build stamps it.
+  **(e) DONE on `tmp/nov21-version`, not merged**: `tools/stamp-build.sh` (build phase) stamps the built Info.plist
+  ("Build <sha8>[+] · Nov 20 22:31"; CFBundleVersion = commit count); `BuildLabelUITests` checks it.
   Owner: *"Please fix everything and do it right. Don't screw up by poor planning and project
   management."* Scheduler (docs/SCHEDULER.md) is not yet started — he asked whether it is.
 - [ ] **Owner's check of `e88cba87` FAILED (Nov 18 late).** Owner: *"I have no idea how this ever managed

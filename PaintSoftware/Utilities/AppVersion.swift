@@ -1,13 +1,15 @@
 import Foundation
 
-/// Tracks the current app version for debugging purposes. Reads the bundle's own version info
-/// (Xcode's MARKETING_VERSION/CURRENT_PROJECT_VERSION build settings) rather than a hardcoded git
-/// hash — a manually-updated constant would immediately drift out of sync with HEAD.
+/// Names the build. `tools/stamp-build.sh` (a build phase) writes the commit, a "+" if the tree was
+/// dirty, and the build time into the built Info.plist, so every build says what it is.
 struct AppVersion {
-    /// A human-readable version string, e.g. "v1.0 (1)".
+    /// e.g. "Build 2891caad · Nov 20 22:31".
     static var versionString: String {
-        let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
-        return "v\(shortVersion) (\(build))"
+        Bundle.main.object(forInfoDictionaryKey: "PaintBuildLabel") as? String ?? "Build unknown"
+    }
+
+    /// e.g. "2891caad" or "2891caad+".
+    static var commit: String {
+        Bundle.main.object(forInfoDictionaryKey: "PaintBuildCommit") as? String ?? "unknown"
     }
 }
