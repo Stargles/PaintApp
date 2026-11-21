@@ -6633,3 +6633,43 @@ failures later corrected by cf selected11; the benchmark itself passed in that b
 passed before and after13 actual behavioral fault controls. Paired Release cost and device/system
 memory checks remain; Mode3 uses its existing async full-canvas path and gets no inferred crash fix.
 Evidence: `~/PaintWork/s55-recorded-regressions/eraser-native-preview-normal291-d034036f/`.
+
+## 37. One memory budget — SCHEDULER.md stage 3 (2026-11-21)
+
+**What changed.** `Engine/MemoryBudget.swift` is the one admission point (SCHEDULER rule 5). The
+layer memos (`VectorRenderCache`), the flatten memo, the decoded-frame ring and source pixels
+(`RasterResidency`) are entries in it; renders, composites, the bake's encode and decode and fill
+sessions ask it before allocating. `CompositorBudget.hasHeadroom`/`availableMemoryOverrideBytes`,
+`VectorRenderCache.budgetBytes`/`entryLimit`/`trim`, the flatten memo's byte cap and per-cache
+pressure responders are gone. `PixelOps.drawImage` draws into the buffer the picture wraps (no
+`UIGraphicsImageRenderer` copy at the end) and the buffer carries its grant until it is freed, so a
+picture is counted for exactly as long as it lives. A vector-only cel's flatten is its canvas memo,
+handed through rather than copied.
+
+**The number (MEASURED, iPad 9 simulator, `tools/playcheck.sh`, 5000² × five vector layers).** 0.48 of
+the app's limit, 888 MiB on the iPad 9, between two measured bounds: the scene on screen with the bake
+idle holds 667 MiB and a bake's peak is two frames (191), so below 858 the scene never bakes; the app
+outside the budget peaked 252 MiB above the budget's own peak, so above 913 the gate (1,165) has no
+margin. At 0.45 (832 MiB) the bake waited forever — measured, three runs.
+
+| phase | `ee0e672d` app peak | `tmp/nov21-budget` app peak (three runs) |
+|---|---|---|
+| enter the scene | **1,725** (steady 1,248) | 966–980 (steady 862–934) |
+| bake | red before it | 966–980 |
+| play 12 s | — | 987–1,011 |
+| 12 quick steps | — | 1,010–1,073 |
+| 4 slow steps | — | 1,048–1,073 |
+| erase ×3 | — | 1,048–1,073 |
+| fill | — | 1,048–1,073 |
+| **4 undos** | — | **1,138–1,142** |
+| pan, zoom | — | 1,138–1,142 |
+
+`backboardd` peak 101–201 MiB throughout. **The thin spot is Undo**: about 90 MiB above every other
+phase, 23–27 MiB under the gate, while the budget itself held ≤ 887 — so ~250 MiB of that transient
+is memory the budget is not asked about. Not yet attributed (the vector walk's transparency layers
+are ruled out: only non-normal brushes isolate). Next lead for TODO (6).
+
+**Frame step and bake (MEASURED, same runs, end to end through the gate's pixel probe, which polls
+the screen and reads to ~0.3 s).** One step back to a whole, settled frame: **2.23–2.38 s**. The six
+frames bake in 1.1–9.1 s (0.19–1.52 s a frame) — first frames are the ones on screen, whose leaves are
+the shown memos and cost no walk; the spread is the bake waiting for room behind the entering renders.

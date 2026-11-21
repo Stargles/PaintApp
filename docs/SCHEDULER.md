@@ -1,6 +1,6 @@
 # SCHEDULER — real-time rules for every piece of work in PaintApp
 
-Status: **rules ruled, build not started** (2026-11-17). The owner delegated the rules: *"I'll let you pick
+Status: **rules ruled; stage 3 (one budget) built on `tmp/nov21-budget`, 2026-11-21** (`Engine/MemoryBudget.swift`). The owner delegated the rules: *"I'll let you pick
 out the rules for this because if I explicitly define it I might miss something critical. Basically, all
 the UX stuff the user interacts with should be hard or firm real time like moving the canvas, canvas
 updating, drawing strokes, erasing, etc. To make this so, everything that can run on a background thread
