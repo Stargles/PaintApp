@@ -43,7 +43,7 @@ final class PlaycheckGateUITests: PaintUITestCase {
         }
         let line = String(format: "%@: backboardd=%.0f peak=%.0f app=%.0f peak=%.0f MiB", name,
                           sample.backboarddMiB, sample.backboarddPeakMiB, sample.appMiB, sample.appPeakMiB)
-            + " census=\(readField(app, "census:")) by=\(readField(app, "handedBy:"))"
+            + " census=\(readField(app, "census:")) by=\(readField(app, "handedBy:")) budget=\(readField(app, "budget:"))"
         phases.append(line)
         print("PLAYCHECK " + line)
         XCTAssertEqual(app.state, .runningForeground, "the app left the foreground during \(name)")
@@ -67,7 +67,12 @@ final class PlaycheckGateUITests: PaintUITestCase {
     func testTheOwnersPlaycheckStaysInsideTheiPad9sMemory() throws {
         let (app, canvas) = launchOwnersScene()
         phase(app, "enter the scene")
+        let bakeStarted = Date()
         waitForEveryFrameBaked(app)
+        // TODO.md queue (5) reads these: whole-scene bake time and one settled step, end to end as the
+        // artist sees them (a pixel probe polls the screen, so a step reads to ~0.3 s).
+        print(String(format: "PLAYCHECK timing: %d frames baked in %.1f s (%.2f s a frame)", OwnersScene.frames,
+                     Date().timeIntervalSince(bakeStarted), Date().timeIntervalSince(bakeStarted) / Double(OwnersScene.frames)))
         let paper = paperRect(in: canvas, canvasSize: OwnersScene.canvasSize)
         func at(_ x: Double, layer: Int, frame: Int) -> CGVector { onHost(paper, x, OwnersScene.row(layer: layer, frame: frame)) }
         let settled = { (frame: Int) -> Bool in
@@ -96,6 +101,11 @@ final class PlaycheckGateUITests: PaintUITestCase {
         }
         XCTAssertEqual(readFrameLabel(app)?.current, 5, "PREMISE: four slow steps from frame 1")
         XCTAssertTrue(settled(4), "a settled step shows frame 5 whole: \(framesShown(app, canvas, x: 0.8))")
+        let stepStarted = Date()
+        back.tap()
+        XCTAssertTrue(settled(3), "a step back shows frame 4 whole: \(framesShown(app, canvas, x: 0.8))")
+        print(String(format: "PLAYCHECK timing: one step to a whole frame in %.2f s", Date().timeIntervalSince(stepStarted)))
+        forward.tap()
         phase(app, "4 slow steps")
 
         // Each eraser on its own frame's stroke of the active layer (layer 1, the lowest rows).

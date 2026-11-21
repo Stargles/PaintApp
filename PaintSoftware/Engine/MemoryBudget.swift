@@ -22,12 +22,14 @@ import os
 ///   bitmap, a bake's composite, a fill's buffers. A grant is held until the job releases it, so two
 ///   jobs in flight cannot both be admitted into the same free bytes.
 ///
-/// **What a refusal means depends on the lane**, which is SCHEDULER.md's class of the asking job:
-/// an R1 answer (`.answer`) is told no at once and says so through the notices that exist; R2 and R3
-/// (`.soon`, `.later`) wait on their own thread until something is released, or give up when
-/// cancelled — and never on main, which does not wait (rule 1). R1 may evict `.current` entries;
-/// R2 and R3 evict only `.cache` ones, so a background bake cannot throw away the frame about to be
-/// played to make room for one nobody is looking at.
+/// **What a refusal means depends on the lane**, which is SCHEDULER.md's class of the asking job.
+/// An allocation is never waited on — a job holding half its working set while it waits for the
+/// other half waits on itself — so `admit` answers at once in every lane. R1 (`.answer`) may evict
+/// `.current` entries and a refusal is said through the notices that exist; R2 and R3 (`.soon`,
+/// `.later`) evict only `.cache`, so a background bake cannot throw away the frame about to be played.
+/// **R2 and R3 wait before they start instead** (`waitForRoom`): on their own thread, holding
+/// nothing, until their working set fits or they are cancelled — never on main (rule 1) — and a job
+/// refused part-way gives its work back to be retried rather than finishing on borrowed memory.
 ///
 /// **The device's own valve is inside this, not beside it.** On a device `os_proc_available_memory()`
 /// is the bytes left before jetsam, and it moves for reasons the app does not control (another app in
@@ -104,6 +106,13 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
     }()
 
     private var pressureToken: MemoryPressure.Token?
+    private static let log = Logger(subsystem: "Starg.PaintSoftware", category: "MemoryBudget")
+
+    /// `budget:<held>,<grants>,<shown>,<current>,<cache>,<refusals>` in MiB — the census line's field.
+    var censusField: String {
+        "budget:\(entryBytes >> 20),\(inFlightBytes >> 20),\(entryBytes(priority: .shown) >> 20),"
+            + "\(entryBytes(priority: .current) >> 20),\(entryBytes(priority: .cache) >> 20),\(refusals)"
+    }
 
     /// Evicts `.cache` entries, least recently used first, until at most `bytes` of them remain.
     func trimCaches(toBytes bytes: Int) {
@@ -296,12 +305,21 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
     /// How long an R2/R3 job waits for room before giving up and retrying later.
     static let longestWait: TimeInterval = 10
 
-    /// Asks for `bytes`: evicts what the lane may evict, then grants, refuses (`.answer`, main, or
-    /// `cancelled`), or waits for a release. Nil is a refusal; the caller keeps what it had.
-    func admit(_ bytes: Int, lane: Lane = MemoryBudget.currentLane,
-               cancelled: () -> Bool = { false }) -> Grant? {
+    /// Asks for `bytes`: evicts what the lane may evict, then grants or refuses — at once. Nil is a
+    /// refusal; the caller keeps what it had.
+    func admit(_ bytes: Int, lane: Lane = MemoryBudget.currentLane) -> Grant? {
         guard bytes > 0 else { return Grant(bytes: 0, budget: nil) }
-        return reserve(bytes, lane: lane, holding: true, cancelled: cancelled) ? Grant(bytes: bytes, budget: self) : nil
+        return reserve(bytes, lane: lane, holding: true, waiting: false, cancelled: { false })
+            ? Grant(bytes: bytes, budget: self) : nil
+    }
+
+    /// **An R2/R3 job's wait before it starts**: blocks this (background) thread, holding nothing,
+    /// until `bytes` fit — evicting only what is kept in case — or `cancelled`, or `longestWait`
+    /// passes. False on main at once (rule 1). Holds nothing afterwards either: the job's own
+    /// allocations are admitted as they happen.
+    func waitForRoom(_ bytes: Int, cancelled: () -> Bool = { false }) -> Bool {
+        guard bytes > 0 else { return true }
+        return reserve(bytes, lane: .later, holding: false, waiting: true, cancelled: cancelled)
     }
 
     /// Whether `bytes` can be allocated now — evicting what an R1 answer may to make the room — without
@@ -309,12 +327,12 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
     /// list); a job that knows its size up front holds a `Grant` instead.
     func makeRoom(for bytes: Int) -> Bool {
         guard bytes > 0 else { return true }
-        return reserve(bytes, lane: .answer, holding: false, cancelled: { false })
+        return reserve(bytes, lane: .answer, holding: false, waiting: false, cancelled: { false })
     }
 
-    private func reserve(_ bytes: Int, lane: Lane, holding: Bool, cancelled: () -> Bool) -> Bool {
+    private func reserve(_ bytes: Int, lane: Lane, holding: Bool, waiting: Bool, cancelled: () -> Bool) -> Bool {
         let evictable: Priority = lane == .answer ? .current : .cache
-        let mayWait = lane != .answer && !Thread.isMainThread
+        let mayWait = waiting && !Thread.isMainThread
         let deadline = Date().addingTimeInterval(Self.longestWait)
         condition.lock()
         while true {
@@ -334,7 +352,9 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
             }
             if !mayWait || cancelled() || Date() >= deadline {
                 refusalCount += 1
+                let state = "held \(residentBytes >> 20)+\(grantedBytes >> 20) of \(total >> 20) MiB"
                 condition.unlock()
+                Self.log.notice("refused \(bytes >> 20, privacy: .public) MiB in lane \(lane.rawValue, privacy: .public): \(state, privacy: .public)")
                 return false
             }
             condition.wait(until: min(deadline, Date().addingTimeInterval(0.05)))

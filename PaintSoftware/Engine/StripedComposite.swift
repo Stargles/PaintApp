@@ -149,11 +149,10 @@ enum StripedCompositor {
                   node.blendMode == .normal else { return nil }
         }
         let frame = CGRect(origin: .zero, size: recipe.canvasSize)
-        guard MemoryBudget.shared.makeRoom(for: CompositorBudget.textureBytes(for: recipe.canvasSize) * 4)
-        else { return nil }
+        // The frame's own picture is admitted by `drawImage` (the caller's lane — a bake's is R3);
+        // the leaves resolved three at a time are admitted by their own renders.
         var declined = false
-        let image = UIGraphicsImageRenderer(bounds: frame, format: PixelOps.transparentFormat())
-            .image { context in
+        let image = PixelOps.drawImage(size: frame.size) { _ in
                 if let paper = recipe.background {
                     paper.color.setFill()
                     UIRectFill(paper.rect)
@@ -165,11 +164,13 @@ enum StripedCompositor {
                     guard node.isVisible, case .leaf(let index) = node.content else { return nil }
                     return (index, node.opacity)
                 }
-                let batchSize = 3
+                // Up to three at a time, as many as the one budget has room for now — at least one.
+                let leafBytes = max(1, CompositorBudget.textureBytes(for: recipe.canvasSize))
                 var start = 0
                 while start < visible.count, !declined {
                     // SCHEDULER.md rule 3: a touch outranks the frame — wait here, between leaves.
                     InteractionGate.shared.checkpoint()
+                    let batchSize = min(3, max(1, MemoryBudget.shared.freeBytes / leafBytes))
                     let batch = Array(visible[start..<min(start + batchSize, visible.count)])
                     start += batchSize
                     autoreleasepool {
@@ -179,14 +180,15 @@ enum StripedCompositor {
                         if resolved.failed { declined = true; return }
                         for (index, opacity) in batch {
                             guard let source = resolved.sources[index] else { continue }
-                            CoreGraphicsCompositor.draw(UIImage(cgImage: source.image, scale: 1, orientation: .up),
-                                                        mode: .normal, opacity: opacity,
-                                                        in: frame, context: context)
+                            // `.normal` is a CoreGraphics mode: `CoreGraphicsCompositor.draw`'s own call.
+                            UIImage(cgImage: source.image, scale: 1, orientation: .up)
+                                .draw(in: frame, blendMode: .normal, alpha: CGFloat(opacity))
                         }
                     }
                 }
+                return !declined
             }
-        return declined ? nil : image.cgImage
+        return declined ? nil : image?.cgImage
     }
 
     // MARK: - The apron

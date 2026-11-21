@@ -116,8 +116,10 @@ enum PixelOps {
         // of these produces a canvas-sized `UIImage` (8 MiB at 2048×1024), and without a pool per
         // worker thread they accumulate until the enclosing pool drains — which for a 32-cel document
         // is a quarter of a gigabyte of temporaries that the serial version never held at once.
+        // The caller's memory lane goes with the work to every thread (`MemoryBudget.currentLane`).
+        let lane = MemoryBudget.currentLane
         DispatchQueue.concurrentPerform(iterations: count) { index in
-            autoreleasepool { (buffer + index).initialize(to: transform(index)) }
+            autoreleasepool { MemoryBudget.withLane(lane) { (buffer + index).initialize(to: transform(index)) } }
         }
         let results = Array(UnsafeBufferPointer(start: buffer, count: count))
         buffer.deinitialize(count: count)

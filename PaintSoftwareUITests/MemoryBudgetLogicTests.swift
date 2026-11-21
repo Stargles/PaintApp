@@ -1389,22 +1389,25 @@ final class MemoryBudgetLogicTests: XCTestCase {
         XCTAssertEqual(current.bytes, 0)
     }
 
-    /// Off main, R3 waits for a release — and gives up when cancelled.
-    func testBackgroundWorkWaitsForAReleaseAndStopsWhenCancelled() {
+    /// R2/R3 wait before they start, holding nothing, off main — for a release, or until cancelled.
+    /// An allocation itself is never waited on, so a job cannot wait on memory it holds itself.
+    func testBackgroundWorkWaitsForRoomBeforeItStartsAndStopsWhenCancelled() {
         let budget = MemoryBudget(totalBytes: 100)
         let holder = budget.admit(90, lane: .answer)
-        let admitted = expectation(description: "R3 admitted after the release")
+        XCTAssertFalse(budget.waitForRoom(50), "main never waits")
+        XCTAssertNil(budget.admit(50, lane: .later), "and an allocation is answered at once")
+        let roomed = expectation(description: "R3 finds room after the release")
         DispatchQueue.global().async {
-            if budget.admit(50, lane: .later) != nil { admitted.fulfill() }
+            if budget.waitForRoom(50), budget.heldBytes == 0 { roomed.fulfill() }
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { holder?.release() }
-        wait(for: [admitted], timeout: 5)
+        wait(for: [roomed], timeout: 5)
+        XCTAssertEqual(budget.heldBytes, 0, "waiting for room holds none of it")
 
-        let cancelledAnswer = expectation(description: "a cancelled wait answers nil")
-        let full = budget.admit(50, lane: .answer)
+        let full = budget.admit(90, lane: .answer)
+        let cancelledAnswer = expectation(description: "a cancelled wait answers false")
         DispatchQueue.global().async {
-            let grant = budget.admit(80, lane: .later, cancelled: { true })
-            if grant == nil { cancelledAnswer.fulfill() }
+            if !budget.waitForRoom(50, cancelled: { true }) { cancelledAnswer.fulfill() }
         }
         wait(for: [cancelledAnswer], timeout: 2)
         withExtendedLifetime(full) {}

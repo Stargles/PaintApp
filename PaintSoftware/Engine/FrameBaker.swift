@@ -234,6 +234,8 @@ final class FrameBaker {
     /// Frames the store refused (§3.5's disk-full) or the compositor could not produce. Neither is a
     /// document failure; see `finish`.
     private(set) var failedCount = 0
+    /// Bakes the one budget turned back to be tried again (`Outcome.deferred`).
+    private(set) var deferredCount = 0
 
     /// The last thing the store refused, for a diagnostic. Cleared by `reset()`.
     private(set) var lastWriteFailure: FrameBakeStore.WriteFailure?
@@ -478,6 +480,9 @@ final class FrameBaker {
           MemoryBudget.withLane(.later) { () -> (() -> Void) in
             // Step 2, off the main actor. Every value read here was frozen at mint time.
             let key = FrameBakeKey(recipe: recipe, renderResolution: resolution)
+            // The frame's picture and one leaf at a time: what the composite cannot start without.
+            let frameBytes = CompositorBudget.textureBytes(for: recipe.canvasSize)
+            var refusedPartWay = false
             let cached = wantsRing ? store.read(key) : nil
             var decoded = cached?.frame
             let outcome: Outcome
@@ -485,9 +490,15 @@ final class FrameBaker {
                 // A hold reuses its content-addressed file. A decode already needed for the ring
                 // rejects an unreadable file before this decision; distant frames need only stat.
                 outcome = .alreadyOnDisk
-            } else if let image = PlaybackTrace.span(.bakeComposite, {
+            } else if !MemoryBudget.shared.waitForRoom(2 * frameBytes) {
+                // R3 waits before it starts, holding nothing; still no room is a retry, not a failure.
+                outcome = .deferred
+            } else if let image = PlaybackTrace.span(.bakeComposite, { () -> CGImage? in
                 if delay > 0 { Thread.sleep(forTimeInterval: delay) }
-                return recipe.composite(budgetBytes: budget)
+                let refusedBefore = MemoryBudget.shared.refusals
+                let image = recipe.composite(budgetBytes: budget)
+                refusedPartWay = image == nil && MemoryBudget.shared.refusals != refusedBefore
+                return image
             }) {
                 switch PlaybackTrace.span(.bakeWrite, {
                     store.store(image, for: key, playhead: playhead, frames: frames)
@@ -498,7 +509,8 @@ final class FrameBaker {
                     outcome = .writeFailed(failure)
                 }
             } else {
-                outcome = .compositeFailed
+                // Refused part-way by the one budget: the frame goes back to be baked when there is room.
+                outcome = refusedPartWay ? .deferred : .compositeFailed
             }
 
             // The ring is filled from the store rather than from the `CGImage` just composited, and
@@ -660,11 +672,13 @@ final class FrameBaker {
         case alreadyOnDisk
         case writeFailed(FrameBakeStore.WriteFailure)
         case compositeFailed
+        /// The one budget had no room for it (SCHEDULER.md rule 5): still dirty, tried again shortly.
+        case deferred
 
         var isOnDisk: Bool {
             switch self {
             case .baked, .alreadyOnDisk: return true
-            case .writeFailed, .compositeFailed: return false
+            case .writeFailed, .compositeFailed, .deferred: return false
             }
         }
     }
@@ -691,6 +705,12 @@ final class FrameBaker {
         // **Only when something reached disk**, and only on a key that mints. A frame whose write or
         // composite failed is marked clean as it always was: re-dirtying a frame that cannot be baked
         // is a spin, and the failure is already counted and reported.
+        if case .deferred = outcome {
+            deferredCount += 1
+            ringWalk = nil
+            lookAgainWhenTheGateSettles()
+            return
+        }
         let current = currentKey(atFrame: frame)
         if outcome.isOnDisk, let current, current != key {
             bakeQueue.markDirty(frame..<(frame + 1))
@@ -712,6 +732,8 @@ final class FrameBaker {
         case .compositeFailed:
             failedCount += 1
             forget(frame: frame)
+        case .deferred:
+            break
         }
 
         // A bake that reached the ring inserted around nothing in particular; the walk re-settles.

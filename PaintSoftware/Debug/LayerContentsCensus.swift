@@ -92,7 +92,7 @@ final class LayerContentsCensus {
     /// `census:<peak MiB>,<peak large>,<handed>,<busiest second>` for `canvas.host`'s label.
     var field: String {
         "census:\(peakBytes >> 20),\(peakLarge),\(handed),\(busiest) handedMiB:\(handedBytes >> 20)"
-            + " holding:\(heldBytes >> 20) handedBy:\(producers)"
+            + " holding:\(heldBytes >> 20) handedBy:\(producers) " + MemoryBudget.shared.censusField
     }
 
     /// `handedByOwner`'s three largest, `View=MiB` joined by `;` — one space-free field.
