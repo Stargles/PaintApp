@@ -30,7 +30,13 @@ Every status report to the owner lists this queue with each item's state, not on
 3. **Crash catcher** — merged Nov 21; reaches the iPad with the next install (with (1)).
 4. **Open lasso acts as closed for every action** (Nov 17 ruling) — merged Nov 21; reaches the iPad
    with (1). Owner to check: draw an open C, then Copy, To New Layer, Clear.
-5. **Frame steps instant and unstaggered + bake speed** — scheduler stage 2, after (1). MEASURED with
+5. **Scheduler build, S1–S9 (docs/SCHEDULER_DESIGN.md, merged Nov 25; owner rulings §7 pending).**
+   **S1 in flight** (`tmp/nov25-s1`): scheduler core, frame reads not held by the touch, one presenter that
+   swaps whole pictures — the frame-step fix. Cause found: the tap that steps holds back the decode
+   (`InteractionGate`), the decode waits for no dirty frame, then `image(for:)` decodes on main.
+   Then S2 bake format + zoom-out edges, S3a/b R1 onto the scheduler + Undo, S4 memory manager (= (9)),
+   S5 three layer pictures, S6 bake throughput, S7 rest, S8 stream, S9 device gate.
+   Earlier text of this item, kept for its measurements: **Frame steps instant and unstaggered + bake speed** — scheduler stage 2, after (1). MEASURED with
    stage 3 (iPad 9 simulator, playcheck, end to end through a screen probe that reads to
    ~0.3 s): **one step to a whole settled frame 2.23–2.38 s**; **bake 0.19–1.52 s a frame** (six frames
    in 1.1–9.1 s — the frame on screen costs no walk; the spread is the bake waiting for memory behind
