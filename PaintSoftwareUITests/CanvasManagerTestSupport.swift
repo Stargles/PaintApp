@@ -2,6 +2,15 @@ import AVFoundation
 import XCTest
 import UIKit
 
+extension MemoryBudget {
+    /// Narrows this budget to `bytes` beyond what cannot be evicted, emptying its caches first: room
+    /// measured over another suite's leftover pictures grows by theirs the moment they are evicted.
+    func leaveRoom(for bytes: Int) {
+        trimCaches(toBytes: 0)
+        totalBytes = heldBytes + bytes
+    }
+}
+
 /// Shared fixtures for the pure-logic `CanvasManager` characterization tests.
 ///
 /// These are **characterization** tests, not specification tests: they pin down what

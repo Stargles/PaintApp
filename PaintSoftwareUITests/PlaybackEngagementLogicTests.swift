@@ -249,15 +249,8 @@ final class PlaybackEngagementLogicTests: XCTestCase {
         let layers = 3, frames = 2, laps = 3
 
         defer { MemoryBudget.shared.totalBytes = MemoryBudget.deviceTotalBytes }
-        // Other suites' background work (bakes, thumbnails) holds and gives back grants in this one
-        // budget; narrowing it against a moving figure would test their timing, not this rule.
-        for _ in 0..<30 {
-            let before = MemoryBudget.shared.inFlightBytes
-            Thread.sleep(forTimeInterval: 0.1)
-            if MemoryBudget.shared.inFlightBytes == before { break }
-        }
         // Two entries against six, which is the owner's iPad 9 at 4096² to the entry.
-        MemoryBudget.shared.totalBytes = MemoryBudget.shared.heldBytes + perRender * 2
+        MemoryBudget.shared.leaveRoom(for: perRender * 2)
         let starved = plainDocument(layers: layers, frames: frames, canvas: canvas)
         VectorRenderCache.removeAll()
         var starvedPerLap: [Int] = []
@@ -271,7 +264,7 @@ final class PlaybackEngagementLogicTests: XCTestCase {
                        + "it is why it got worse rather than settling")
 
         // The same document, the same laps, with room for the whole loop.
-        MemoryBudget.shared.totalBytes = MemoryBudget.shared.heldBytes + perRender * layers * frames * 2
+        MemoryBudget.shared.leaveRoom(for: perRender * layers * frames * 2)
         let fed = plainDocument(layers: layers, frames: frames, canvas: canvas)
         VectorRenderCache.removeAll()
         var fedPerLap: [Int] = []
