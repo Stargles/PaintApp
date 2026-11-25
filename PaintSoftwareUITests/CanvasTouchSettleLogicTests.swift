@@ -15,49 +15,6 @@ import Combine
 /// points are `CanvasTransformLeavesStandingUITests`' to drive, with a staggered two-finger drag.
 final class CanvasTouchSettleLogicTests: XCTestCase {
 
-    // MARK: - The recognizer repair's deadline
-
-    func testRepairUsesTheLatestLiftEvenIfTheNextGestureHasAlreadyEnded() throws {
-        var deadline = CanvasRepairDeadline()
-        let counter = NSObject()
-
-        _ = deadline.touchCountChanged(to: 2, counter: counter)
-        let first = try XCTUnwrap(deadline.touchCountChanged(to: 0, counter: counter))
-        _ = deadline.touchCountChanged(to: 1, counter: counter)
-        let second = try XCTUnwrap(deadline.touchCountChanged(to: 0, counter: counter))
-
-        XCTAssertFalse(deadline.isCurrent(first, counter: counter, activeCount: 0),
-                       "The first deadline cannot inspect the next gesture during its settlement window")
-        XCTAssertTrue(deadline.isCurrent(second, counter: counter, activeCount: 0),
-                      "The second lift gets its own deadline to check for stranded recognizers")
-    }
-
-    func testRepairRequiresTheOwningCounterAndNoTouchesDown() throws {
-        var deadline = CanvasRepairDeadline()
-        let counter = NSObject()
-        let replacement = NSObject()
-        _ = deadline.touchCountChanged(to: 1, counter: counter)
-        let check = try XCTUnwrap(deadline.touchCountChanged(to: 0, counter: counter))
-
-        XCTAssertFalse(deadline.isCurrent(check, counter: counter, activeCount: 1),
-                       "A contact down at the deadline makes repair ineligible")
-        XCTAssertFalse(deadline.isCurrent(check, counter: replacement, activeCount: 0),
-                       "A deadline from the removed counter cannot repair the new recognizers")
-    }
-
-    func testRepairIsScheduledOnlyWhenTheLastTouchLifts() throws {
-        var deadline = CanvasRepairDeadline()
-        let counter = NSObject()
-        XCTAssertNil(deadline.touchCountChanged(to: 0, counter: counter))
-        XCTAssertNil(deadline.touchCountChanged(to: 2, counter: counter))
-        XCTAssertNil(deadline.touchCountChanged(to: 1, counter: counter))
-        let check = try XCTUnwrap(deadline.touchCountChanged(to: 0, counter: counter))
-
-        XCTAssertNil(deadline.touchCountChanged(to: 0, counter: counter),
-                     "Repeated zero reports do not restart the settlement window")
-        XCTAssertTrue(deadline.isCurrent(check, counter: counter, activeCount: 0))
-    }
-
     // MARK: - The state machine
 
     /// A lone finger is watched, then believed when the window runs out.

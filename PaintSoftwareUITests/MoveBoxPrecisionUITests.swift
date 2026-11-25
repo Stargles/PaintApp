@@ -10,7 +10,7 @@ import XCTest
 /// raster Move box**, whose pans are a different mechanism from the vector box's raw touches.
 ///
 /// **What this cannot drive, and says so:** the pen. Whether a real Pencil's `UITouch` reaches the
-/// host's `TouchCountRecognizer` while it rests on the overlay is the one link left unproven by a
+/// window's `TouchCountRecognizer` while it rests on the overlay is the one link left unproven by a
 /// finger — the shape snap's own capture says it does (`counter:1/0`), and nothing here contradicts
 /// it. A device check is a pen on a box and a finger beside it.
 final class MoveBoxPrecisionUITests: PaintUITestCase {

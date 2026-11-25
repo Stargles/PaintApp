@@ -30,7 +30,6 @@ final class AppSettingsLogicTests: XCTestCase {
         XCTAssertNil(settings.projectsFolderName)
         XCTAssertFalse(settings.storageInvitationDismissed)
         XCTAssertEqual(settings.galleryFolder, [], "The gallery opens at the top of the tree")
-        XCTAssertEqual(settings.canvasRepairCount, 0)
         XCTAssertNil(settings.lastAppSignature)
     }
 
@@ -70,7 +69,6 @@ final class AppSettingsLogicTests: XCTestCase {
         defaults.set(Data([9]), forKey: "PaintApp.projectLocation.bookmark")
         defaults.set("Files", forKey: "PaintApp.projectLocation.displayName")
         defaults.set(true, forKey: "PaintApp.gallery.storageInvitationDismissed")
-        defaults.set(4, forKey: "paintapp.canvasFreezesCaught")
         defaults.set("sig", forKey: "PaintApp.projectBackup.lastAppSignature")
 
         XCTAssertTrue(settings.pencilOnlyDrawing)
@@ -79,7 +77,6 @@ final class AppSettingsLogicTests: XCTestCase {
         XCTAssertEqual(settings.projectsFolderBookmark, Data([9]))
         XCTAssertEqual(settings.projectsFolderName, "Files")
         XCTAssertTrue(settings.storageInvitationDismissed)
-        XCTAssertEqual(settings.canvasRepairCount, 4)
         XCTAssertEqual(settings.lastAppSignature, "sig")
     }
 
@@ -102,35 +99,6 @@ final class AppSettingsLogicTests: XCTestCase {
         XCTAssertNil(settings.defaults.object(forKey: AppSettings.Key.lastStreamPort), "No port is left without its host")
     }
 
-    // MARK: - The canvas repair count
-
-    /// Each repair is one, the new total is what `recordCanvasRepair` answers, and the count reads it
-    /// back — after a launch too, so a build's repair rate can be read off the iPad.
-    func testEveryCanvasRepairIsCountedOnceAndOutlivesALaunch() throws {
-        let (settings, suite) = try isolatedSettings()
-        XCTAssertEqual(settings.recordCanvasRepair(), 1)
-        XCTAssertEqual(settings.recordCanvasRepair(), 2)
-        XCTAssertEqual(settings.recordCanvasRepair(), 3)
-        XCTAssertEqual(settings.canvasRepairCount, 3)
-        let next = try relaunched(suite)
-        XCTAssertEqual(next.canvasRepairCount, 3)
-        XCTAssertEqual(next.recordCanvasRepair(), 4, "and the next repair carries on from it")
-    }
-
-    /// The Settings row reads the count with `@AppStorage(AppSettings.Key.canvasRepairCount)`, so the
-    /// key is what ties the number on screen to the number counted.
-    func testTheRepairCountLivesUnderTheKeyTheMenuRowReads() throws {
-        let settings = try isolatedSettings().settings
-        settings.recordCanvasRepair()
-        settings.recordCanvasRepair()
-        XCTAssertEqual(settings.defaults.integer(forKey: AppSettings.Key.canvasRepairCount), 2)
-    }
-
-    func testTheRepairRowSaysWhatItCounts() {
-        XCTAssertEqual(CanvasRepairCount.title(0), "Canvas freezes caught: 0")
-        XCTAssertEqual(CanvasRepairCount.title(12), "Canvas freezes caught: 12")
-    }
-
     // MARK: - Launch-argument hooks
 
     private func seeded() throws -> AppSettings {
@@ -139,7 +107,6 @@ final class AppSettingsLogicTests: XCTestCase {
         settings.renderResolution = .half
         settings.lastStreamEndpoint = StreamEndpoint(host: "laptop", port: 47301)
         settings.galleryFolder = ["Scene 3"]
-        settings.recordCanvasRepair()
         settings.projectsFolderBookmark = Data([1])
         settings.projectsFolderName = "Files"
         settings.storageInvitationDismissed = true
@@ -159,7 +126,6 @@ final class AppSettingsLogicTests: XCTestCase {
             XCTAssertEqual(settings.renderResolution, .full, argument)
             XCTAssertNil(settings.lastStreamEndpoint, argument)
             XCTAssertEqual(settings.galleryFolder, [], argument)
-            XCTAssertEqual(settings.canvasRepairCount, 0, argument)
             XCTAssertEqual(settings.projectsFolderBookmark, Data([1]), "\(argument) leaves the library where it is")
             XCTAssertEqual(settings.projectsFolderName, "Files", argument)
             XCTAssertTrue(settings.storageInvitationDismissed, argument)
@@ -173,7 +139,6 @@ final class AppSettingsLogicTests: XCTestCase {
         XCTAssertTrue(settings.pencilOnlyDrawing)
         XCTAssertEqual(settings.renderResolution, .half)
         XCTAssertEqual(settings.galleryFolder, ["Scene 3"])
-        XCTAssertEqual(settings.canvasRepairCount, 1)
     }
 
     /// `-resetGallery`'s own half, which `ProjectBackupManager` runs beside the wipe of the library.

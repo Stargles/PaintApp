@@ -213,10 +213,6 @@ def emit_state_comments(events, lo: float, hi: float, out: list[str], indent: st
                 f'{indent}// [{t:7.3f}] recognizer {event["name"]}: '
                 f'{event["from"]} -> {event["to"]} ({event.get("src", "?")})'
             )
-        elif kind == "requireFailure" and event.get("answer"):
-            out.append(
-                f'{indent}// [{t:7.3f}] {event["asker"]} is waiting on {event["other"]} to fail'
-            )
 
 
 def emit_gesture(gesture: Gesture, out: list[str], indent: str, warnings: list[str]):

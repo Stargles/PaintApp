@@ -5635,13 +5635,10 @@ final class PerfBaselineTests: XCTestCase {
     /// **What the always-on flight recorder costs a stroke** — its per-event cost, and a whole
     /// 500-sample stroke with and without it.
     ///
-    /// The flight recorder adds four things to the drawing path, and this times the real code for
-    /// each but the last: every event the ring keeps is an `emit` (here `model`, a two-field event, and
-    /// `recognizer`, a six-field one); every stroke sample delivers the tap one `.changed` action
-    /// message, which finds the recognizer in the registry and writes nothing because the state did
-    /// not change (`noteTransition`); the touch-began and -ended events each end in one
-    /// `sweepRecognizerStates` over the registry, which reads `numberOfTouches` of the four
-    /// recognizers the file follows (`followsTouchCount`); and every move is counted against its
+    /// The flight recorder adds three things to the drawing path, and this times the real code for each
+    /// but the last: every event the ring keeps is an `emit` (here `model`, a two-field event, and
+    /// `recognizer`, a five-field one); the touch-began and -ended events each end in one
+    /// `sweepRecognizerStates` over the registry; and every move is counted against its
     /// touch (`WindowEventTap.willSend`). The registry is populated the way the app's is, from a view
     /// carrying the canvas's own named recognizers, on the test process's real window with the real
     /// tap installed.
@@ -5666,12 +5663,10 @@ final class PerfBaselineTests: XCTestCase {
             ActionRecorder.isFlying = wasFlying
         }
 
-        // The canvas's named recognizer set, as `setUpGestures` and a layer host install it. The
-        // stroke recognizer stands in as a plain one: `noteTransition` asks nothing of its class.
+        // The canvas's named recognizer set, as `setUpGestures` and a layer host install it.
         let stroke = UIGestureRecognizer(target: nil, action: nil)
         stroke.name = "stroke.perf"
-        let names = ["canvas.pan", "canvas.pinch", "canvas.rotation", "canvas.twoFingerTap",
-                     "canvas.touchCounter", "canvas.threeFingerTap", "canvas.fillPress", "canvas.catchAll",
+        let names = ["canvas.touches", "canvas.fillPress", "canvas.catchAll",
                      "canvas.eyedropperPress", "canvas.textPress", "canvas.moveBoxCommit"]
         for name in names {
             let recognizer = UIGestureRecognizer(target: nil, action: nil)
@@ -5693,11 +5688,10 @@ final class PerfBaselineTests: XCTestCase {
         let emitModel = perCall(iterations) { ActionRecorder.ifRecording { $0.model("selectedTool", "brush") } }
         let emitRecognizer = perCall(iterations) {
             ActionRecorder.ifRecording {
-                $0.recognizer("canvas.pan", object: ObjectIdentifier(stroke), from: .possible, to: .began,
-                              source: "sweep:b", touches: 2)
+                $0.recognizer("canvas.fillPress", object: ObjectIdentifier(stroke), from: .possible, to: .began,
+                              source: "sweep:b")
             }
         }
-        let sampleHook = perCall(iterations) { tap.noteTransition(stroke, to: .changed, source: "action") }
         let sweep = perCall(iterations) { tap.sweepRecognizerStates(after: .ended) }
         struct CountedTouch { var skipped = 0; var moves = 0; var target = "canvas.host"; var hitClass = "StrokeCanvasView" }
         var counted = [ObjectIdentifier(stroke): CountedTouch()]
@@ -5706,7 +5700,7 @@ final class PerfBaselineTests: XCTestCase {
         let gateOff = perCall(iterations) { ActionRecorder.ifRecording { $0.model("selectedTool", "brush") } }
 
         // The whole stroke: the pipeline `testSyntheticStrokeBaseline` times, with the flight
-        // recorder's work for it — an action message per sample and a sweep at each end — beside it
+        // recorder's work for it — a count per sample and a sweep at each end — beside it
         // or not. Alternated, five of each, and the medians compared, so a slow first stroke or a
         // noisy second cannot land on one side.
         let manager = perfManager()
@@ -5719,7 +5713,6 @@ final class PerfBaselineTests: XCTestCase {
                 stamp(samples, into: manager)
                 tap.sweepRecognizerStates(after: .began)
                 for _ in 0..<Self.sampleCount {
-                    tap.noteTransition(stroke, to: .changed, source: "action")
                     counted[ObjectIdentifier(stroke)]?.moves += 1
                 }
                 tap.sweepRecognizerStates(after: .ended)
@@ -5730,7 +5723,6 @@ final class PerfBaselineTests: XCTestCase {
         report("flight recorder", [
             ("emitModel", nanoseconds(emitModel)),
             ("emitRecognizer", nanoseconds(emitRecognizer)),
-            ("strokeSampleHook", nanoseconds(sampleHook)),
             ("moveCountStandIn", nanoseconds(moveCount)),
             ("sweep\(names.count + 1)", nanoseconds(sweep)),
             ("gateOff", nanoseconds(gateOff)),
@@ -5741,7 +5733,7 @@ final class PerfBaselineTests: XCTestCase {
         ])
 
         XCTAssertLessThan(emitRecognizer, 50e-6, "an event into the ring costing 50 µs would be a regression, not noise")
-        XCTAssertLessThan(sampleHook, 50e-6, "a stroke sample's flight work costing 50 µs would be a regression, not noise")
+        XCTAssertLessThan(sweep, 50e-6, "a sweep costing 50 µs would be a regression, not noise")
     }
 
     /// PNG's Up (`back == bytesPerRow`) and Sub (`back == 4`) filters, over the same code. The first

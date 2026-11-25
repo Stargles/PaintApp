@@ -1,21 +1,7 @@
 import XCTest
 
-/// The flight recorder's two pure halves: `CanvasWedgeDetector`, replayed against real recordings of
-/// the canvas freeze and of a healthy canvas, and `FlightRing`'s two bounds.
-///
-/// **The detector is tested against the evidence it was written from**, read off the repo's own
-/// `docs/bug-evidence/` through `#filePath` — the same route `CanvasPresentationLogicTests` takes to
-/// the app's source:
-///
-/// - `canvas-freeze-2026-09-23.jsonl` — the owner's recording of the frozen canvas, TODO (110),
-///   verbatim. It starts after the wedge: every touch binds `canvas.touchCounter` and none of pan,
-///   pinch or rotation.
-/// - `canvas-freeze-sim-popover-wedge.jsonl` — the freeze reproduced on the simulator (a value layer,
-///   a `.popover` up, a two-finger drag), touch lines only. It starts healthy, so it holds the
-///   transition as well as the wedge.
-/// - `canvas-freeze-sim-healthy.jsonl` — a healthy canvas that contains the one shape a naive rule
-///   would fire on: a finger stroke, then a second finger landing on it, which binds none of the
-///   three because the stroke's `.began` already failed them.
+/// The flight recorder's two pure halves — `CanvasTouchAudit`, which says the canvas stopped answering a
+/// hand, and `FlightRing`'s two bounds — and what its files carry.
 final class FlightRecorderLogicTests: XCTestCase {
 
     func testSharedRecordingFilenameIsUniqueAtOneWallClockInstantForBothPrefixes() {
@@ -232,64 +218,71 @@ final class FlightRecorderLogicTests: XCTestCase {
         XCTAssertEqual(trace.report().undoPictures.first?.source, .empty)
     }
 
-    // MARK: - The detector, against the recordings
+    // MARK: - The canvas audit
 
-    func testTheDetectorTripsOnTheOwnersRecordingOfTheFrozenCanvas() throws {
-        let trips = try replay("canvas-freeze-2026-09-23.jsonl")
-        XCTAssertEqual(trips.count, 1, "the owner's frozen canvas must be detected, and exactly once")
-        XCTAssertEqual(trips.first?.touch, 3, """
-            The second touch sequence of the owner's recording is the proof — the first stranded \
-            sequence alone is one observation — so the detector trips on touch 3, 0.96 s in.
-            """)
+    private let canvas = NSObject()
+
+    private func reading(count: Int = 2, fingers: Int = 2, isAtRest: Bool = false, writes: Int = 10,
+                         refusals: Int = 3) -> CanvasTouchAudit.Reading {
+        .init(source: ObjectIdentifier(canvas), count: count, fingers: fingers, isAtRest: isAtRest, writes: writes, refusals: refusals)
     }
 
-    func testTheDetectorTripsOnTheSimulatorWedgeAndNotBeforeIt() throws {
-        let trips = try replay("canvas-freeze-sim-popover-wedge.jsonl")
-        XCTAssertEqual(trips.count, 1, "the reproduced wedge must be detected, and exactly once")
-        let transition = try XCTUnwrap(try lastSequenceStartBindingPan("canvas-freeze-sim-popover-wedge.jsonl"),
-                                       "PREMISE: the fixture starts healthy — it holds the transition")
-        XCTAssertGreaterThan(trips[0].time, transition, "it trips after the last healthy sequence, not during the healthy part")
+    private func contact(_ id: Int, _ x: CGFloat, _ y: CGFloat = 0, heard: Bool = true) -> CanvasTouchAudit.Contact {
+        .init(id: id, point: CGPoint(x: x, y: y), isHeard: heard)
     }
 
-    func testTheDetectorStaysQuietOnAHealthyCanvasWhereASecondFingerJoinsAStroke() throws {
-        let lines = try touchLines("canvas-freeze-sim-healthy.jsonl")
-        XCTAssertTrue(lines.contains { $0.phase == "began" && !$0.startsSequence
-                                        && $0.bound.contains(CanvasWedgeDetector.canvasMarker)
-                                        && CanvasWedgeDetector.transformRecognizers.isDisjoint(with: $0.bound) },
-                      "PREMISE: the fixture holds a joining finger bound to none of pan/pinch/rotation")
-        XCTAssertEqual(try replay("canvas-freeze-sim-healthy.jsonl").count, 0,
-                       "a healthy canvas must never be reported as wedged")
+    /// A pair that moves `deltas` along and lifts; what the audit says of it, all told.
+    private func runPair(deltas: [(CGFloat, CGFloat)] = [(28, 28), (45, 45)], fingers: Int = 2, writes: Int = 10,
+                         refusals: Int = 3, third: Bool = false) -> [CanvasTouchAudit.Finding] {
+        var audit = CanvasTouchAudit()
+        var findings: [CanvasTouchAudit.Finding?] = []
+        findings.append(audit.observe([contact(1, 0)], landed: [1], windowIsClear: false, reading(count: 1, fingers: 1)))
+        findings.append(audit.observe([contact(1, 0), contact(2, 100)], landed: [2], windowIsClear: false, reading(fingers: fingers)))
+        for (a, b) in deltas {
+            findings.append(audit.observe([contact(1, a), contact(2, 100 + b)], landed: [], windowIsClear: false,
+                                          reading(fingers: fingers)))
+        }
+        if third {
+            findings.append(audit.observe([contact(1, 90), contact(2, 190), contact(3, 300)], landed: [3], windowIsClear: false,
+                                          reading(count: 3, fingers: 3, writes: writes, refusals: refusals)))
+        }
+        findings.append(audit.observe([], landed: [], windowIsClear: true,
+                                      reading(count: 0, fingers: 0, isAtRest: true, writes: writes, refusals: refusals)))
+        return findings.compactMap { $0 }
     }
 
-    // MARK: - The detector's rule, stated
-
-    /// Once per wedge, and a healthy sequence re-arms it: the owner may keep trying to pan for a
-    /// minute, and that is one freeze and one file, not thirty.
-    func testTheDetectorFiresOncePerWedgeAndRearmsOnAHealthySequence() {
-        var detector = CanvasWedgeDetector()
-        let stranded = ["canvas.touchCounter", "_UISystemGestureGateGestureRecognizer"]
-        let healthy = stranded + ["canvas.pan", "canvas.pinch", "canvas.rotation"]
-
-        XCTAssertFalse(detector.touchBegan(startsSequence: true, boundRecognizers: stranded), "one stranded sequence is one observation")
-        XCTAssertTrue(detector.touchBegan(startsSequence: true, boundRecognizers: stranded), "the second trips it")
-        XCTAssertFalse(detector.touchBegan(startsSequence: true, boundRecognizers: stranded), "…once")
-        XCTAssertFalse(detector.touchBegan(startsSequence: true, boundRecognizers: healthy), "a healthy sequence re-arms it")
-        XCTAssertFalse(detector.touchBegan(startsSequence: true, boundRecognizers: stranded))
-        XCTAssertTrue(detector.touchBegan(startsSequence: true, boundRecognizers: stranded), "and the next wedge is a new one")
+    func testAPairThatMovedAndAViewThatDidNotIsAFinding() {
+        XCTAssertEqual(runPair(), [.unmoved(first: 1, second: 2, travel: 45, samples: 2)])
+        XCTAssertEqual(runPair(deltas: [(-15, 15), (-24, 24)]), [.unmoved(first: 1, second: 2, travel: 48, samples: 2)],
+                       "spreading counts as much as travelling")
+        XCTAssertEqual(runPair(third: true), [.unmoved(first: 1, second: 2, travel: 45, samples: 2)],
+                       "a third finger ends the watch on the pair, and it is still the finding it was")
+        XCTAssertEqual(runPair(deltas: [(1, 1), (2, 2)]), [], "an ordinary tap")
+        XCTAssertEqual(runPair(deltas: [(28, 28), (28, 28)]), [], "one movement and then a rest")
+        XCTAssertEqual(runPair(writes: 11), [], "the view moved")
+        XCTAssertEqual(runPair(refusals: 4), [], "a drag turned it down")
+        XCTAssertEqual(runPair(fingers: 0), [], "two palms move nothing")
     }
 
-    /// A touch off the canvas host, or one that joins a sequence already running, is no evidence
-    /// either way — neither counts, neither re-arms.
-    func testTouchesThatDoNotStartACanvasSequenceAreIgnored() {
-        var detector = CanvasWedgeDetector()
-        let stranded = ["canvas.touchCounter"]
-        XCTAssertFalse(detector.touchBegan(startsSequence: true, boundRecognizers: stranded))
-        XCTAssertFalse(detector.touchBegan(startsSequence: false, boundRecognizers: stranded), "a joining finger does not count")
-        XCTAssertFalse(detector.touchBegan(startsSequence: true, boundRecognizers: ["UIScrollViewPanGestureRecognizer"]),
-                       "a touch on the timeline does not count")
-        XCTAssertEqual(detector.strandedSequences, 1, "…and neither re-armed it")
-        XCTAssertTrue(detector.touchBegan(startsSequence: true, boundRecognizers: stranded))
+    func testALandingTheCanvasNeverHeardIsAFindingOnce() {
+        var audit = CanvasTouchAudit()
+        XCTAssertEqual(audit.observe([contact(7, 0, heard: false)], landed: [7], windowIsClear: false, reading(count: 0, fingers: 0)),
+                       .unheard(touch: 7))
+        XCTAssertNil(audit.observe([contact(7, 0, heard: false), contact(8, 50, heard: false)], landed: [8], windowIsClear: false,
+                                   reading(count: 0, fingers: 0)), "one finding a sequence")
+        XCTAssertNil(audit.observe([], landed: [], windowIsClear: true, reading(count: 0, fingers: 0, isAtRest: true)))
+        XCTAssertEqual(audit.observe([contact(9, 0, heard: false)], landed: [9], windowIsClear: false, reading(count: 0, fingers: 0)),
+                       .unheard(touch: 9), "and the next sequence is its own")
     }
+
+    func testACanvasStillHoldingATouchWhenEveryTouchIsGoneIsAFinding() {
+        var audit = CanvasTouchAudit()
+        XCTAssertNil(audit.observe([contact(1, 0)], landed: [1], windowIsClear: false, reading(count: 1, fingers: 1)))
+        XCTAssertEqual(audit.observe([], landed: [], windowIsClear: true, reading(count: 1, fingers: 1)), .held(count: 1))
+        XCTAssertNil(audit.observe([], landed: [], windowIsClear: true, reading(count: 0, fingers: 0, isAtRest: true)))
+    }
+
+    // MARK: - What a finding says was not at rest
 
     // MARK: - What the repair finds not at rest
 
@@ -302,9 +295,8 @@ final class FlightRecorderLogicTests: XCTestCase {
         func settle(in state: UIGestureRecognizer.State) { self.state = state }
     }
 
-    /// The stranded canvas's flight file names what was replaced; this is what it adds — every
-    /// recognizer under the window out of `.possible` or still holding a touch, wherever in the tree
-    /// it hangs, named by what the file already calls it.
+    /// Every recognizer under the window out of `.possible` or still holding a touch, wherever in the
+    /// tree it hangs, named by what the file already calls it.
     func testTheCensusListsEveryRecognizerNotAtRestAndNoneAtRest() {
         let window = UIView()
         let canvas = UIView()
@@ -340,7 +332,7 @@ final class FlightRecorderLogicTests: XCTestCase {
         XCTAssertEqual(WindowEventTap.unquietRecognizers(under: view), ["canvas.pinch possible touches:2 on UIView"])
     }
 
-    // MARK: - What a stranded canvas's flight carries (BUGS.md, "The canvas's recognizers strand…")
+    // MARK: - What a flight's lines carry
 
     private func touchSample(phase: String, touchID: Int, object: AnyObject, moves: Int? = nil,
                              time: Double = 1, point: CGPoint = .zero, down: Int = 1, bound: [String]? = nil,
@@ -390,42 +382,11 @@ final class FlightRecorderLogicTests: XCTestCase {
         XCTAssertNotEqual(first["uid"] as? String, other["uid"] as? String, "another object is another uid")
     }
 
-    /// The count is on the line only for a recognizer the file follows the touches of; the line of a
-    /// touch count moving on its own is the same state on both sides.
-    func testARecognizerLineCarriesTheTouchesItWasAskedFor() throws {
-        let recognizer = NSObject()
-        let counted = try parsed("recognizer", ActionRecorder.recognizerFields(
-            name: "canvas.pan", object: ObjectIdentifier(recognizer), from: .failed, to: .failed, source: "sweep:e", touches: 0))
-        XCTAssertEqual(counted["touches"] as? Int, 0, "0 is the finding that matters: failed, and nothing left to wait for")
-        XCTAssertEqual(counted["from"] as? String, "failed")
-        XCTAssertEqual(counted["to"] as? String, "failed")
-        XCTAssertEqual(counted["src"] as? String, "sweep:e")
-
-        let uncounted = try parsed("recognizer", ActionRecorder.recognizerFields(
-            name: "canvas.twoFingerTap", object: ObjectIdentifier(recognizer), from: .possible, to: .failed, source: "sweep:b", touches: nil))
-        XCTAssertNil(uncounted["touches"], "a recognizer the file does not follow has no count on its line")
-    }
-
-    /// **Every flight header names the repair count**, so two flights from two builds set side by side
-    /// say how often each build had caught a freeze by then — and a recording's header too, since the
-    /// count is a fact about the build and not about the trigger.
-    func testEveryHeaderCarriesTheRepairCount() throws {
-        let url = URL(fileURLWithPath: "/tmp/flight-test.jsonl")
-        let flight = try headerFields(
-            ActionRecorder.headerLine(canvasSize: nil, projectName: "T", tap: nil, url: url, freezesCaught: 12,
-                                      flight: [("trigger", .str("stranded"))]))
-        XCTAssertEqual(flight["canvasFreezesCaught"] as? Int, 12)
-        XCTAssertEqual(flight["mode"] as? String, "flight")
-
-        let recording = try headerFields(ActionRecorder.headerLine(canvasSize: nil, projectName: "T", tap: nil, url: url, freezesCaught: 0))
-        XCTAssertEqual(recording["canvasFreezesCaught"] as? Int, 0, "a build that has caught none says 0, not nothing")
-    }
-
     private func headerFields(_ line: String) throws -> [String: Any] {
         try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any], line)
     }
 
-    // MARK: - The sweep says which event it followed, and follows touches
+    // MARK: - The sweep says which event it followed
 
     func testASweepIsTaggedWithTheLettersOfTheTouchPhasesTheEventCarried() {
         typealias Phases = WindowEventTap.EventPhases
@@ -437,36 +398,17 @@ final class FlightRecorderLogicTests: XCTestCase {
         XCTAssertEqual(Phases(UITouch.Phase.moved), .moved)
     }
 
-    func testTheFileFollowsTheTouchesOfTheTransformRecognizersAndTheStrokeRecognizersOnly() {
-        for name in ["canvas.pan", "canvas.pinch", "canvas.rotation", "stroke.66A8F2C1"] {
-            XCTAssertTrue(WindowEventTap.followsTouchCount(named: name), name)
-        }
-        for name in ["canvas.twoFingerTap", "canvas.threeFingerTap", "canvas.touchCounter", "canvas.fillPress", "timeline.rulerScrub"] {
-            XCTAssertFalse(WindowEventTap.followsTouchCount(named: name), name)
-        }
-    }
-
-    /// **What a sweep writes about a followed recognizer, through the real tap, the ring and a saved
-    /// file**: its state change with the touches UIKit says it holds, and — the finding a stranded
-    /// pan's flight needs, *failed holding two touches* against *ended holding none* — the count moving
-    /// on its own, in the sweep of the event it dropped in. A recognizer the file does not follow gets
-    /// its state change without a count, and nothing for its touches. A sweep that finds nothing new
-    /// writes nothing.
-    ///
-    /// The two are named for this test rather than `canvas.pan` and `canvas.twoFingerTap`: the ring is
-    /// the recorder's own and holds whatever an earlier test left in it, so a line is this test's by
-    /// its name. `followsTouchCount`'s table is the test above. (`Driven` is settled in `.began` and
-    /// `.ended`: UIKit puts a recognizer set to `.failed` with no real touch behind it straight back
-    /// to `.possible`.)
-    func testASweepWritesAFollowedRecognizersStateWithItsTouchesAndTheCountMovingOnItsOwn() throws {
+    /// **What a sweep writes, through the real tap, the ring and a saved file**: a recognizer's state when
+    /// it changed, tagged with the event it changed in, and nothing when nothing did. The recognizer is
+    /// named for this test: the ring is the recorder's own and holds whatever an earlier test left in it.
+    /// (`Driven` is settled in `.began` and `.ended`: UIKit puts a recognizer set to `.failed` with no
+    /// real touch behind it straight back to `.possible`.)
+    func testASweepWritesAStateThatChangedAndTheEventItChangedIn() throws {
         guard let window = WindowEventTap.activeWindow() else { throw XCTSkip("no window in the test process to install the tap on") }
         let canvas = UIView(frame: window.bounds)
-        let followed = Driven(target: nil, action: nil)
-        followed.name = "stroke.sweeptest"
-        let unfollowed = Driven(target: nil, action: nil)
-        unfollowed.name = "canvas.sweeptest.tap"
-        canvas.addGestureRecognizer(followed)
-        canvas.addGestureRecognizer(unfollowed)
+        let driven = Driven(target: nil, action: nil)
+        driven.name = "canvas.sweeptest"
+        canvas.addGestureRecognizer(driven)
         window.addSubview(canvas)
 
         let tap = WindowEventTap()
@@ -479,37 +421,18 @@ final class FlightRecorderLogicTests: XCTestCase {
         guard tap.install().interceptedClass != nil else { throw XCTSkip("the tap could not intercept this window") }
         ActionRecorder.isFlying = true
 
-        followed.held = 2
-        followed.settle(in: .began)
-        unfollowed.settle(in: .began)
-        tap.sweepRecognizerStates(after: .began)      // both begin; the followed one holds two touches
-        followed.held = 1
-        tap.sweepRecognizerStates(after: .ended)      // one finger lifts: the count moves, the state does not
-        followed.held = 0
-        followed.settle(in: .ended)
-        unfollowed.held = 3
-        tap.sweepRecognizerStates(after: [.ended, .cancelled])   // the last lift: the state moves with the count
+        driven.settle(in: .began)
+        tap.sweepRecognizerStates(after: .began)
         tap.sweepRecognizerStates(after: .ended)      // nothing changed: nothing written
+        driven.settle(in: .ended)
+        tap.sweepRecognizerStates(after: [.ended, .cancelled])
 
-        let lines = try savedFlightLines().filter { $0["event"] as? String == "recognizer" }
-        let followedLines = lines.filter { $0["name"] as? String == "stroke.sweeptest" }
-        let unfollowedLines = lines.filter { $0["name"] as? String == "canvas.sweeptest.tap" }
-
-        func summary(_ line: [String: Any]) -> String {
-            "\(line["from"] ?? "?")>\(line["to"] ?? "?") \(line["src"] ?? "?") touches:\(line["touches"] ?? "-")"
-        }
-        XCTAssertEqual(followedLines.map(summary), [
-            "possible>began sweep:b touches:2",
-            "began>began sweep:e touches:1",
-            "began>ended sweep:ec touches:0",
-        ], "state and touches while the state moves, the touches alone when only they move, and no fourth line for the quiet sweep")
-
-        XCTAssertEqual(unfollowedLines.map(summary), ["possible>began sweep:b touches:-"],
-                       "a recognizer the file does not follow: its state change, no count, and nothing when only its touches moved")
+        let lines = try savedFlightLines().filter { $0["name"] as? String == "canvas.sweeptest" }
+        XCTAssertEqual(lines.map { "\($0["from"] ?? "?")>\($0["to"] ?? "?") \($0["src"] ?? "?")" },
+                       ["possible>began sweep:b", "began>ended sweep:ec"])
     }
 
-    /// Saves the flight ring the way the Settings row does and reads the file back — its header is
-    /// checked on the way, because the header is the other half of what a stranded flight carries.
+    /// Saves the flight ring the way the Settings row does and reads the file back.
     private func savedFlightLines() throws -> [[String: Any]] {
         let saved = try XCTUnwrap(ActionRecorder.shared.saveFlight(trigger: "test"))
         addTeardownBlock { try? FileManager.default.removeItem(at: saved) }
@@ -520,182 +443,20 @@ final class FlightRecorderLogicTests: XCTestCase {
         let lines = try text.split(separator: "\n").map {
             try XCTUnwrap(try JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any], String($0))
         }
-        XCTAssertEqual(lines.first?["canvasFreezesCaught"] as? Int, AppSettings.standard.canvasRepairCount,
-                       "the saved flight's header names the repair count of the moment")
         XCTAssertEqual(lines.first?["trigger"] as? String, "test")
         return lines
     }
 
-    // MARK: - Automatic navigation evidence
+    // MARK: - A finding saves its own flight
 
     @MainActor
-    func testNavigationSnapshotReadsCurrentTransformAndRecognizerAttachment() throws {
-        let recorder = ActionRecorder.shared
-        let wasFlying = ActionRecorder.isFlying
-        defer { ActionRecorder.isFlying = wasFlying }
-        ActionRecorder.isFlying = true
-        let plane = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
-        let pinch = Driven()
-        plane.addGestureRecognizer(pinch)
-        let marker = "test-fresh-pose-" + UUID().uuidString
-        var delivery = Array(repeating: CanvasNavigationGesture.Delivery(), count: CanvasNavigationGesture.allCases.count)
-        recorder.canvasNavigationSnapshot(edge: marker + ":start", touch: 10, container: plane, writes: 0,
-                                          pan: nil, pinch: pinch, rotation: nil, delivery: delivery)
-        plane.transform = CGAffineTransform(rotationAngle: 0.5).scaledBy(x: 1.75, y: 1.75)
-        plane.center = CGPoint(x: 234, y: 187)
-        pinch.settle(in: .began)
-        pinch.held = 2
-        delivery[CanvasNavigationGesture.pinch.rawValue].changed = 1
-        delivery[CanvasNavigationGesture.pinch.rawValue].writes = 1
-        recorder.canvasNavigationSnapshot(edge: marker + ":moving", touch: 10, container: plane, writes: 1,
-                                          pan: nil, pinch: pinch, rotation: nil, delivery: delivery)
-        let lines = try savedFlightLines().filter { ($0["edge"] as? String)?.hasPrefix(marker) == true }
-        XCTAssertEqual(lines.count, 2)
-        let start = try XCTUnwrap(lines.first)
-        let moving = try XCTUnwrap(lines.last)
-        XCTAssertEqual(start["scale"] as? Double, 1)
-        XCTAssertEqual(start["cx"] as? Double, 200)
-        XCTAssertEqual(moving["scale"] as? Double, 1.75)
-        XCTAssertEqual(moving["rot"] as? Double, 0.5)
-        XCTAssertEqual(moving["cx"] as? Double, 234)
-        XCTAssertEqual(moving["cy"] as? Double, 187)
-        XCTAssertEqual(moving["canvas.pinch.state"] as? String, "began")
-        XCTAssertEqual(moving["canvas.pinch.touches"] as? Int, 2)
-        XCTAssertEqual(moving["canvas.pinch.view"] as? String, moving["canvas"] as? String)
-        XCTAssertEqual(moving["canvas.pinch.changed"] as? Int, 1)
-        XCTAssertEqual(moving["canvas.pinch.writes"] as? Int, 1)
-        XCTAssertTrue(moving["canvas.rotation.obj"] is NSNull)
-    }
-
-    func testNavigationMissDistinguishesCancelReissueFromComparableLiftAndHealthyReissue() throws {
-        XCTAssertNil(runReissue(interruption: "ended", lostNavigation: true, end: CGPoint(x: 851, y: 220.5)))
-        XCTAssertNil(runReissue(interruption: "cancelled", lostNavigation: false, end: CGPoint(x: 851, y: 220.5)))
-        XCTAssertNil(runReissue(interruption: "cancelled", lostNavigation: true, end: CGPoint(x: 708, y: 369)))
-        let miss = try XCTUnwrap(runReissue(interruption: "cancelled", lostNavigation: true, end: CGPoint(x: 851, y: 220.5)))
-        XCTAssertEqual(miss.kind, "cancelReissue")
-        XCTAssertEqual(miss.touch, 3694)
-        XCTAssertEqual(miss.cancelledTouch, 3693)
-        XCTAssertEqual(miss.survivor, 3692)
-        XCTAssertEqual(miss.lost, ["canvas.pinch", "canvas.rotation"])
-        XCTAssertEqual(miss.travel, hypot(149, 148.5), accuracy: 0.001)
-        XCTAssertEqual(miss.moves, 17)
-    }
-
-    func testFreshMissingContactThatGetsAHealthyPartnerDoesNotSave() {
-        let object = NSObject(), other = NSObject()
-        let counter = CanvasWedgeDetector.canvasMarker
-        var miss = CanvasNavigationMiss()
-        let first = touchSample(phase: "began", touchID: 1, object: object, bound: [counter])
-        let second = touchSample(phase: "began", touchID: 2, object: other, down: 2, bound: [counter, "canvas.pan"])
-        XCTAssertNil(miss.observe([first], startsSequence: true))
-        XCTAssertNil(miss.observe([second], startsSequence: false))
-        XCTAssertNil(miss.observe([touchSample(phase: "ended", touchID: 1, object: object, moves: 8)], startsSequence: false))
-    }
-
-    private func runReissue(interruption: String, lostNavigation: Bool, end: CGPoint) -> CanvasNavigationMiss.Finding? {
-        let survivor = NSObject(), cancelled = NSObject(), reissued = NSObject()
-        let counter = CanvasWedgeDetector.canvasMarker
-        let all = [counter, "canvas.pan", "canvas.pinch", "canvas.rotation", "stroke.test"]
-        let new = lostNavigation ? [counter, "canvas.pan"] : Array(all.dropLast())
-        var miss = CanvasNavigationMiss()
-        XCTAssertNil(miss.observe([
-            touchSample(phase: "began", touchID: 3692, object: survivor, time: 85.88, point: CGPoint(x: 701, y: 457), down: 2, bound: all),
-            touchSample(phase: "began", touchID: 3693, object: cancelled, time: 85.88, point: CGPoint(x: 702, y: 369), down: 2, bound: all)
-        ], startsSequence: true))
-        XCTAssertNil(miss.observe([
-            touchSample(phase: interruption, touchID: 3693, object: cancelled, moves: 0, time: 85.93, point: CGPoint(x: 702, y: 369))
-        ], startsSequence: false))
-        XCTAssertNil(miss.observe([
-            touchSample(phase: "began", touchID: 3694, object: reissued, time: 85.94, point: CGPoint(x: 702, y: 369), down: 2, bound: new)
-        ], startsSequence: false))
-        let finding = miss.observe([
-            touchSample(phase: "ended", touchID: 3694, object: reissued, moves: 17, time: 86.27, point: end)
-        ], startsSequence: false)
-        XCTAssertNil(miss.observe([
-            touchSample(phase: "ended", touchID: 3692, object: survivor, moves: 21, time: 86.27, point: CGPoint(x: 813, y: 574.5), down: 0)
-        ], startsSequence: false), "one episode contributes one finding")
-        return finding
-    }
-
-    func testBoundPairNeedsRepeatedIntentionalMotionWithoutNavigationWritesOrPolicyRefusals() throws {
-        let pan = try XCTUnwrap(runBoundPair())
-        XCTAssertEqual(pan.kind, "boundWithoutApplication")
-        XCTAssertEqual(pan.touch, 11)
-        XCTAssertEqual(pan.lost, [])
-        XCTAssertEqual(pan.motion?.partner, 12)
-        XCTAssertEqual(pan.motion?.centroidTravel, 45)
-        XCTAssertEqual(pan.motion?.relativeTravel, 0)
-        XCTAssertEqual(pan.motion?.samples, 2)
-        XCTAssertEqual(pan.moves, 13)
-        let pinch = try XCTUnwrap(runBoundPair(deltas: [(0, 0), (-15, 15), (-24, 24)]))
-        XCTAssertEqual(pinch.motion?.centroidTravel, 0)
-        XCTAssertEqual(pinch.motion?.relativeTravel, 48)
-
-        XCTAssertNil(runBoundPair(deltas: [(0, 0), (1, 1), (2, 2)]), "ordinary taps stay quiet")
-        XCTAssertNil(runBoundPair(deltas: [(0, 0), (28, 28), (28, 28)]), "a held position is only one motion sample")
-        XCTAssertNil(runBoundPair(writes: 1), "a real navigation write before lift is sufficient")
-        XCTAssertNil(runBoundPair(refusals: 1), "an intentional policy refusal is sufficient")
-        XCTAssertNil(runBoundPair(plainLandings: [12]), "an overlay or menu at either landing precludes diagnosis")
-        XCTAssertNil(runBoundPair(secondType: "pencil"), "a Pencil is not the second finger")
-        XCTAssertNil(runBoundPair(secondDelay: 0.12), "a late arrival is not a fresh pair")
-        XCTAssertNil(runBoundPair(interveningPhase: "began"), "a third contact on or off the canvas invalidates the pair")
-        XCTAssertNil(runBoundPair(interveningPhase: "cancelled"), "a cancelled and reissued contact takes the other path")
-    }
-
-    private func runBoundPair(deltas: [(Double, Double)] = [(0, 0), (28, 28), (45, 45)],
-                              writes: Int = 0, refusals: Int = 0, plainLandings: Set<Int> = [11, 12],
-                              secondType: String = "direct", secondDelay: Double = 0.02,
-                              interveningPhase: String? = nil) -> CanvasNavigationMiss.Finding? {
-        let host = NSObject(), first = NSObject(), second = NSObject(), other = NSObject()
-        let source = ObjectIdentifier(host)
-        let bound = [CanvasWedgeDetector.canvasMarker] + CanvasNavigationGesture.allCases.map(\.name)
-        let before = CanvasNavigationMiss.Activity(source: source, writes: 10, refusals: 3)
-        var detector = CanvasNavigationMiss()
-        XCTAssertNil(detector.observe([
-            touchSample(phase: "began", touchID: 11, object: first, time: 1, bound: bound)
-        ], startsSequence: true, plainLandings: plainLandings.intersection([11])))
-        XCTAssertNil(detector.observe([
-            touchSample(phase: "began", touchID: 12, object: second, time: 1 + secondDelay, down: 2, bound: bound, type: secondType)
-        ], startsSequence: false, plainLandings: plainLandings.intersection([12])))
-        func positions(_ a: Double, _ b: Double) -> (CanvasNavigationMiss.Position, CanvasNavigationMiss.Position) {
-            (.init(id: 11, point: CGPoint(x: 70 + a, y: 100)), .init(id: 12, point: CGPoint(x: 160 + b, y: 100)))
-        }
-        let initial = positions(0, 0)
-        detector.startBoundPair(initial.0, initial.1, at: 1.03, activity: before)
-        for (index, delta) in deltas.enumerated() {
-            let points = positions(delta.0, delta.1)
-            let time = 1.1 + Double(index) * 0.06
-            if detector.shouldSampleBoundPair(at: time, interval: 0.05) {
-                detector.sampleBoundPair(points.1, points.0, at: time, activity: before)
-            }
-        }
-        if let interveningPhase {
-            let id = interveningPhase == "cancelled" ? 12 : 13
-            XCTAssertNil(detector.observe([
-                touchSample(phase: interveningPhase, touchID: id, object: other, time: 1.31)
-            ], startsSequence: false, activity: before))
-            if interveningPhase == "cancelled" {
-                XCTAssertNil(detector.observe([
-                    touchSample(phase: "began", touchID: 13, object: other, time: 1.32, down: 2, bound: bound)
-                ], startsSequence: false, plainLandings: [13]))
-                detector.startBoundPair(initial.0, .init(id: 13, point: initial.1.point), at: 1.32, activity: before)
-                XCTAssertFalse(detector.isWatchingBoundPair, "even a fully bound replacement cannot rearm this detector")
-            }
-        }
-        let after = CanvasNavigationMiss.Activity(source: source, writes: 10 + writes, refusals: 3 + refusals)
-        return detector.observe([
-            touchSample(phase: "ended", touchID: 11, object: first, moves: 13, time: 1.45)
-        ], startsSequence: false, activity: after)
-    }
-
-    @MainActor
-    func testNavigationMissesAutomaticallySaveWithoutManualRecording() throws {
+    func testAFindingSavesItsFlightByItselfAndSaysNothingOnScreen() throws {
         let recorder = ActionRecorder.shared
         let wasFlying = ActionRecorder.isFlying
         let wasCapturing = ActionRecorder.isCapturing
         ActionRecorder.isFlying = true
         ActionRecorder.isCapturing = false
-        recorder.startFlight(canvasSize: CGSize(width: 300, height: 300), projectName: "navigation-test-source")
+        recorder.startFlight(canvasSize: CGSize(width: 300, height: 300), projectName: "audit-test-source")
         recorder.refreshRecordings()
         let known = Set(recorder.recordings.map(\.url))
         var created: [URL] = []
@@ -705,7 +466,6 @@ final class FlightRecorderLogicTests: XCTestCase {
             ActionRecorder.isFlying = wasFlying
             ActionRecorder.isCapturing = wasCapturing
         }
-        let marker = "test-no-motion-" + UUID().uuidString
         func newFlights() -> Set<URL> { Set(recorder.recordings.map(\.url)).subtracting(known) }
         func waitForFlight(count: Int, excluding: Set<URL> = []) throws -> URL {
             let saved = expectation(for: NSPredicate { _, _ in newFlights().count == count }, evaluatedWith: recorder)
@@ -718,73 +478,30 @@ final class FlightRecorderLogicTests: XCTestCase {
             let data = try recordingBytes(at: url, containing: marker)
             return try String(decoding: data, as: UTF8.self).split(separator: "\n").map { try headerFields(String($0)) }
         }
-        let object = NSObject()
-        var miss = CanvasNavigationMiss()
-        let bound = [CanvasWedgeDetector.canvasMarker]
-        let plane = UIView(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
-        let delivery = Array(repeating: CanvasNavigationGesture.Delivery(), count: CanvasNavigationGesture.allCases.count)
-        var now = CACurrentMediaTime()
-
-        let began = touchSample(phase: "began", touchID: 1567, object: object, time: now, bound: bound)
-        recorder.touch(began)
-        XCTAssertNil(miss.observe([began], startsSequence: true))
-        recorder.canvasNavigationSnapshot(edge: marker + ":begin", touch: 1567, container: plane, writes: 0,
-                                          pan: nil, pinch: nil, rotation: nil, delivery: delivery)
-        now += 0.01
-        let ended = touchSample(phase: "ended", touchID: 1567, object: object, moves: 19, time: now,
-                                point: CGPoint(x: 120, y: 0), down: 0)
-        recorder.touch(ended)
-        let finding = try XCTUnwrap(miss.observe([ended], startsSequence: false))
-        recorder.canvasNavigationSnapshot(edge: marker + ":lift", touch: 1567, container: plane, writes: 0,
-                                          pan: nil, pinch: nil, rotation: nil, delivery: delivery)
-        recorder.canvasNavigationMissed(finding)
-        let second = touchSample(phase: "began", touchID: 1568, object: object, bound: bound)
-        XCTAssertNil(miss.observe([second], startsSequence: true))
-        XCTAssertNil(miss.observe([touchSample(phase: "ended", touchID: 1568, object: object, moves: 0)],
-                                 startsSequence: false), "consecutive fresh misses are one diagnostic episode")
-
-        let partial = try XCTUnwrap(runReissue(interruption: "cancelled", lostNavigation: true, end: CGPoint(x: 851, y: 220.5)))
-        recorder.canvasNavigationMissed(partial)
-        recorder.canvasNavigationMissed(try XCTUnwrap(runBoundPair()))
-        // The pending item itself writes the first flight. There is no project switch, manual
-        // Save Last 90 Seconds, or repair callback to land it for the recorder.
+        let marker = "audit-" + UUID().uuidString
+        recorder.canvasMissed(.unmoved(first: 11, second: 12, travel: 45, samples: 2), notAtRest: [marker])
+        recorder.canvasMissed(.unheard(touch: 1567), notAtRest: [marker])
+        recorder.canvasMissed(.held(count: 1), notAtRest: [marker])
+        // The pending item itself writes the flight: no project switch and no Save Last 90 Seconds.
         let first = try waitForFlight(count: 1)
         let lines = try readLines(in: first, containing: marker)
-        let missedLine = lines.first { $0["event"] as? String == "canvasNavigationMiss" && $0["touch"] as? Int == 1567 }
-        XCTAssertEqual(lines.first?["trigger"] as? String, "navigation")
-        XCTAssertEqual(lines.first?["project"] as? String, "navigation-test-source")
-        let snapshots = lines.filter { ($0["edge"] as? String)?.hasPrefix(marker) == true }
-        XCTAssertEqual(snapshots.count, 2)
-        for key in ["scale", "cx", "cy", "rot", "writes", "canvas.pan.changed", "canvas.pinch.changed", "canvas.rotation.changed"] {
-            let begin = try XCTUnwrap(snapshots.first?[key] as? Double, key)
-            XCTAssertEqual(snapshots.last?[key] as? Double, begin, key)
-        }
-        XCTAssertEqual(snapshots.last?["writes"] as? Int, 0)
-        XCTAssertEqual(missedLine?["event"] as? String, "canvasNavigationMiss")
-        XCTAssertEqual(missedLine?["kind"] as? String, "freshMissing")
-        XCTAssertEqual(missedLine?["touch"] as? Int, 1567)
-        XCTAssertEqual(missedLine?["travel"] as? Double, 120)
-        XCTAssertEqual(missedLine?["moves"] as? Int, 19)
+        XCTAssertEqual(lines.first?["trigger"] as? String, "canvas")
+        XCTAssertEqual(lines.first?["project"] as? String, "audit-test-source")
+        XCTAssertNil(recorder.flightNotice, "a diagnosis is nothing the artist can act on")
+        let misses = lines.filter { $0["event"] as? String == "canvasMiss" && $0["notAtRest"] as? String == marker }
+        XCTAssertEqual(misses.compactMap { $0["kind"] as? String }, ["unmoved", "unheard", "held"], "three findings, one file")
+        XCTAssertEqual(misses.first?["touch"] as? Int, 11)
+        XCTAssertEqual(misses.first?["partner"] as? Int, 12)
+        XCTAssertEqual(misses.first?["travel"] as? Double, 45)
+        XCTAssertEqual(misses.first?["samples"] as? Int, 2)
 
-        let reissue = lines.first { $0["event"] as? String == "canvasNavigationMiss" && $0["touch"] as? Int == 3694 }
-        XCTAssertEqual(reissue?["kind"] as? String, "cancelReissue")
-        XCTAssertEqual(reissue?["lost"] as? String, "canvas.pinch,canvas.rotation")
-        XCTAssertEqual(reissue?["survivor"] as? Int, 3692)
-        XCTAssertEqual(reissue?["moves"] as? Int, 17)
-        let boundMiss = try XCTUnwrap(lines.first { $0["kind"] as? String == "boundWithoutApplication" })
-        XCTAssertEqual(boundMiss["partner"] as? Int, 12)
-        XCTAssertEqual(boundMiss["centroidTravel"] as? Double, 45)
-        XCTAssertEqual(boundMiss["relativeTravel"] as? Double, 0)
-        XCTAssertEqual(boundMiss["motionSamples"] as? Int, 2)
-
-        recorder.canvasNavigationMissed(partial)
-        // Switching before the diagnostic delay preserves the outgoing project context.
-        recorder.startFlight(canvasSize: CGSize(width: 200, height: 200), projectName: "navigation-test-next")
+        recorder.canvasMissed(.held(count: 2), notAtRest: [marker + "-next"])
+        // Switching before the delay keeps the outgoing project's context.
+        recorder.startFlight(canvasSize: CGSize(width: 200, height: 200), projectName: "audit-test-next")
         let afterSwitch = try waitForFlight(count: 2, excluding: [first])
-        let switchedLines = try readLines(in: afterSwitch, containing: "cancelReissue")
-        XCTAssertEqual(switchedLines.first?["project"] as? String, "navigation-test-source")
+        XCTAssertEqual(try readLines(in: afterSwitch, containing: marker + "-next").first?["project"] as? String, "audit-test-source")
 
-        // The canceled pending timer must leave the two files alone after its deadline.
+        // The cancelled pending timer must leave the two files alone after its deadline.
         let duplicate = expectation(for: NSPredicate { _, _ in newFlights().count > 2 }, evaluatedWith: recorder)
         duplicate.isInverted = true
         wait(for: [duplicate], timeout: 0.35)
@@ -806,59 +523,5 @@ final class FlightRecorderLogicTests: XCTestCase {
 
     func testAnEmptyRingReadsEmpty() {
         XCTAssertTrue(FlightRing<Int>(capacity: 8, window: 90).elements(asOf: 0).isEmpty)
-    }
-
-    // MARK: - Replaying a recording
-
-    private struct TouchLine {
-        let time: Double
-        let touch: Int
-        let phase: String
-        let startsSequence: Bool
-        let bound: Set<String>
-    }
-
-    /// The detector's trips over a recording, as (touch id, time).
-    private func replay(_ fixture: String) throws -> [(touch: Int, time: Double)] {
-        var detector = CanvasWedgeDetector()
-        return try touchLines(fixture).compactMap { line in
-            guard line.phase == "began",
-                  detector.touchBegan(startsSequence: line.startsSequence, boundRecognizers: Array(line.bound)) else { return nil }
-            return (line.touch, line.time)
-        }
-    }
-
-    private func lastSequenceStartBindingPan(_ fixture: String) throws -> Double? {
-        try touchLines(fixture).last { $0.phase == "began" && $0.startsSequence && $0.bound.contains("canvas.pan") }?.time
-    }
-
-    /// Every touch line, with whether a `began` started a sequence reconstructed the way the live
-    /// tap decides it: nothing else was down when it landed.
-    private func touchLines(_ fixture: String) throws -> [TouchLine] {
-        let url = try evidence(fixture)
-        var down: Set<Int> = []
-        var lines: [TouchLine] = []
-        for raw in try String(contentsOf: url, encoding: .utf8).split(separator: "\n") {
-            let object = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
-            guard let object, object["event"] as? String == "touch",
-                  let phase = object["phase"] as? String, let touch = object["touch"] as? Int,
-                  let time = object["t"] as? Double else { continue }
-            let bound = Set((object["grNames"] as? String)?.split(separator: ",").map(String.init) ?? [])
-            let starts = phase == "began" && down.isEmpty
-            if phase == "began" { down.insert(touch) } else if phase == "ended" || phase == "cancelled" { down.remove(touch) }
-            lines.append(TouchLine(time: time, touch: touch, phase: phase, startsSequence: starts, bound: bound))
-        }
-        XCTAssertFalse(lines.isEmpty, "\(fixture) has no touch lines — the replay would pass for reading nothing")
-        return lines
-    }
-
-    private func evidence(_ fixture: String) throws -> URL {
-        let url = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("docs/bug-evidence/\(fixture)")
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            throw XCTSkip("\(url.path) is not readable from here — expected only on a physical device")
-        }
-        return url
     }
 }

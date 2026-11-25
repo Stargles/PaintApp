@@ -165,10 +165,8 @@ final class ToolLogicTests: XCTestCase {
 
     /// **The `.text` case, driven through a real manager, because the stake is a *pair* of values
     /// rather than one.** What made the omission dangerous was not the tool changing; it was the tool
-    /// changing while `textGestureActive` stayed true. That pair is
-    /// `CanvasTouchInputs.transformDependencyIsUnresolvable` — the text overlay goes on claiming
-    /// touches in its `hitTest` while `activeHostIsInteractive` flips true underneath it, so
-    /// pan/pinch/rotate start waiting on a stroke recognizer that is never handed a touch.
+    /// changing while `textGestureActive` stayed true: the text overlay goes on claiming touches in its
+    /// `hitTest` while `activeHostIsInteractive` flips true underneath it.
     ///
     /// **This is not a reported defect being repaired.** No UI route reaches `selectBrush` with
     /// `.text` active: `BrushSettingsPanel` is the only caller, it needs `activePanel == .brush`, and
@@ -189,9 +187,7 @@ final class ToolLogicTests: XCTestCase {
         XCTAssertEqual(manager.selectedTool, .text, """
             Picking a brush preset took the tool off `.text` without committing the text session. \
             `selectBrush` bakes nothing, so the session stays live and `TextOverlayView` stays on \
-            screen claiming touches while the layer host goes interactive underneath it — \
-            `CanvasTouchInputs.transformDependencyIsUnresolvable`, which is a canvas that will not \
-            pan, pinch or rotate.
+            screen claiming touches while the layer host goes interactive underneath it.
             """)
         XCTAssertTrue(manager.textGestureActive,
                       "…and the session is still the artist's to finish, which is the point of not switching")

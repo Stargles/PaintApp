@@ -134,16 +134,6 @@ final class TextSessionUITests: PaintUITestCase {
         XCTAssertTrue(launchIntoEditor(app), "setup: a brand-new document")
         XCTAssertGreaterThan(app.windows.firstMatch.frame.width, app.windows.firstMatch.frame.height,
                              "PREMISE: the owner colour workflow is actually landscape")
-        func currentRepairCount() throws -> Int {
-            app.buttons["toolbar.settingsButton"].tap()
-            let caught = app.staticTexts["recorder.freezesCaught"]
-            XCTAssertTrue(caught.waitForExistence(timeout: 5), "PREMISE: Settings exposes the durable repair count")
-            let number = caught.label.components(separatedBy: ": ").last ?? ""
-            let count = try XCTUnwrap(Int(number), "PREMISE: the durable repair count is numeric (\(caught.label))")
-            app.buttons["toolbar.settingsButton"].tap()
-            return count
-        }
-        let repairsBefore = try currentRepairCount()
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         let host = canvas.frame
@@ -298,8 +288,6 @@ final class TextSessionUITests: PaintUITestCase {
         XCTAssertGreaterThan(red, 40, "the whole selected text window shows the picked colour (red pixels \(red))")
         XCTAssertLessThan(try count(isBlackInk), black / 5, "…and no selected words remain black")
         attachScreenshot(XCUIScreen.main, "text-drawn-in-the-picked-colour")
-        XCTAssertEqual(try currentRepairCount(), repairsBefore,
-                       "the durable canvas repair count did not change during text selection and recolouring")
     }
 
     /// A public selection survives a live colour change: the next key replaces the word, rather

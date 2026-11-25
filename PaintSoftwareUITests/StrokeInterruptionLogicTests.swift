@@ -1,7 +1,8 @@
 import XCTest
 
-/// `StrokeGiveUp` and `StrokeInterruption.giveUpReason` — the two halves of "this stroke is not
-/// going to reach its lift", and the one question the artist actually feels: **does the ink stay?**
+/// `StrokeGiveUp` — what happens to a stroke that is not going to reach its lift, and the one question
+/// the artist actually feels: **does the ink stay?** Which of the two reasons it is, is
+/// `CanvasTouchCore`'s to say (`CanvasTouchCoreLogicTests`).
 ///
 /// **This file is written to fail on omission**, the way `ToolLogicTests` is, and for the same
 /// reason. The defect it guards is not a wrong branch; it is a *third* abandonment reason added
@@ -10,14 +11,6 @@ import XCTest
 /// compile without stating an answer — and `testEveryGiveUpReasonStatesWhetherTheInkSurvives` walks
 /// `allCases` against a table written here by hand, so a new case cannot be *added* without somebody
 /// stating the answer twice, in two files, on purpose.
-///
-/// **Why this is a logic test and not a UI test, measured rather than assumed.** The path into
-/// `giveUpReason` is `StrokeGestureRecognizer.touchesBegan` finding a touch already tracked. XCUITest
-/// cannot produce it: every two-finger gesture the harness synthesises arrives as a *single*
-/// `touchesBegan` carrying two touches, which the recognizer's earlier `touches.count == 1` guard
-/// catches, so the tracked-touch branch is never entered at all. A UI test here is not slow, it is
-/// incapable — which is exactly why the decision was lifted out of the recognizer into free
-/// functions over `Bool`s.
 final class StrokeInterruptionLogicTests: XCTestCase {
 
     // MARK: - The ink rule
@@ -85,101 +78,5 @@ final class StrokeInterruptionLogicTests: XCTestCase {
     func testRawValuesAreStableBecauseRecordingsCarryThem() {
         XCTAssertEqual(StrokeGiveUp.handedOver.rawValue, "handedOver")
         XCTAssertEqual(StrokeGiveUp.interrupted.rawValue, "interrupted")
-    }
-
-    // MARK: - Reading the three signals
-
-    /// All eight combinations of the three readings, with the reason each one is what it is.
-    ///
-    /// The shape to notice is that **seven of the eight are `.interrupted`**: any one of the three
-    /// signals saying "orphan" is enough, because none of them is reliable alone. `allTouches` is
-    /// documented as the *event's* touches rather than the window's; a `UITouch` object recycled by
-    /// UIKit reads as `.began`; and a phase read on a recycled object describes the new touch, not
-    /// the old one. Requiring agreement would mean answering "hand-off" whenever one signal happened
-    /// to be unavailable — which is today's behaviour and today's bug.
-    private let combinations: [(amongArrivals: Bool, stillInEvent: Bool, hasFinished: Bool,
-                                expected: StrokeGiveUp, why: String)] = [
-        (false, true, false, .handedOver,
-         "The only hand-off: the tracked touch is not among the arrivals, is still in the event, and "
-         + "has not finished — i.e. a finger genuinely still on the glass while a second one lands."),
-        (false, true, true, .interrupted,
-         "Still in the event but its own phase says ended/cancelled: direct evidence of a corpse."),
-        (false, false, false, .interrupted,
-         "Gone from the event entirely. A touch still on the glass is in `event.allTouches`; one "
-         + "whose sequence ended without this recognizer hearing about it is not."),
-        (false, false, true, .interrupted, "Two signals agree it is over."),
-        (true, true, false, .interrupted,
-         "The tracked object is itself among the arrivals — UIKit recycled it, so the previous "
-         + "sequence is long over. Its phase reading `.began` describes the *new* touch."),
-        (true, true, true, .interrupted, "Recycled, and the phase agrees."),
-        (true, false, false, .interrupted, "Recycled and absent from the event."),
-        (true, false, true, .interrupted, "All three signals say orphan."),
-    ]
-
-    func testEveryCombinationOfTheThreeReadings() {
-        XCTAssertEqual(combinations.count, 8, "Three Bools have eight combinations; state all of them")
-        var seen = Set<String>()
-        for combination in combinations {
-            let key = "\(combination.amongArrivals)\(combination.stillInEvent)\(combination.hasFinished)"
-            XCTAssertTrue(seen.insert(key).inserted, "Combination \(key) is listed twice")
-
-            let actual = StrokeInterruption.giveUpReason(
-                trackedTouchIsAmongArrivals: combination.amongArrivals,
-                trackedTouchIsStillInTheEvent: combination.stillInEvent,
-                trackedTouchHasFinished: combination.hasFinished)
-            XCTAssertEqual(actual, combination.expected, """
-                giveUpReason(amongArrivals: \(combination.amongArrivals), \
-                stillInEvent: \(combination.stillInEvent), \
-                hasFinished: \(combination.hasFinished)) should be \(combination.expected). \
-                \(combination.why)
-                """)
-        }
-    }
-
-    /// The rule in one line, asserted separately from the table so that rewriting the table cannot
-    /// take it with it: **any one signal is enough.**
-    func testAnySingleSignalIsEnoughToCallItInterrupted() {
-        XCTAssertEqual(StrokeInterruption.giveUpReason(trackedTouchIsAmongArrivals: true,
-                                                       trackedTouchIsStillInTheEvent: true,
-                                                       trackedTouchHasFinished: false), .interrupted)
-        XCTAssertEqual(StrokeInterruption.giveUpReason(trackedTouchIsAmongArrivals: false,
-                                                       trackedTouchIsStillInTheEvent: true,
-                                                       trackedTouchHasFinished: true), .interrupted)
-        XCTAssertEqual(StrokeInterruption.giveUpReason(trackedTouchIsAmongArrivals: false,
-                                                       trackedTouchIsStillInTheEvent: false,
-                                                       trackedTouchHasFinished: false), .interrupted)
-    }
-
-    /// The two-finger pan the class was written around still has to work, and this is the assertion
-    /// that stops the fix being "return `.interrupted`". A recognizer that answered `.interrupted`
-    /// for a live second finger would commit an undo step for every pan-dab and, worse, take the
-    /// terminal-state path on a sequence that is still going.
-    func testALiveSecondFingerIsStillAHandOff() {
-        XCTAssertEqual(StrokeInterruption.giveUpReason(trackedTouchIsAmongArrivals: false,
-                                                       trackedTouchIsStillInTheEvent: true,
-                                                       trackedTouchHasFinished: false), .handedOver)
-    }
-
-    /// **The known cost, recorded so it stays known.** The touch that *discovers* the corpse spends
-    /// itself doing so: `touchesBegan` gives the previous stroke up and returns, leaving the
-    /// recognizer in a terminal state that receives nothing further until UIKit resets it. So an
-    /// interrupted stroke costs the artist one swallowed touch — the *third* attempt is the first
-    /// that draws, not the second.
-    ///
-    /// What is assertable headlessly is the half that decides it: the discovery reads `.interrupted`,
-    /// which is the branch that returns. Binding the new touch instead would mean driving `state`
-    /// from `.changed`/`.ended` back to `.began`, which is not a documented transition and whose
-    /// failure mode is "drawing stops working" rather than "drawing is delayed by one touch".
-    ///
-    /// If this ever stops being true — if a later change makes the discovering touch draw — this test
-    /// is where to come and say so, rather than discovering it as a surprise.
-    func testTheTouchThatDiscoversACorpseIsSpentDiscoveringIt() {
-        // The everyday shape of the discovery: UIKit handed the tracked touch's object back out for
-        // the new touch, so it arrives among `touches`.
-        XCTAssertEqual(StrokeInterruption.giveUpReason(trackedTouchIsAmongArrivals: true,
-                                                       trackedTouchIsStillInTheEvent: true,
-                                                       trackedTouchHasFinished: false),
-                       .interrupted,
-                       "This is the branch that commits the old stroke and returns without starting a new one")
     }
 }

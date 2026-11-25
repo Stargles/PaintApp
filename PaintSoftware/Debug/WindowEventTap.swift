@@ -445,7 +445,7 @@ protocol CanvasTouchAuditSource: UIView {
     /// asked at `.began`: the binding is made during hit-testing and does not change, and asking on
     /// every `.moved` would put a list on ~120 lines a second.
     private func boundRecognizerNames(for touch: UITouch) -> [String] {
-        (touch.gestureRecognizers ?? []).map { displayName(for: $0) }
+        (touch.gestureRecognizers ?? []).map { Self.name(of: $0) }
     }
 
     private func makeSample(_ touch: UITouch, track: Track, phase: String, point: CGPoint,
@@ -809,7 +809,7 @@ protocol CanvasTouchAuditSource: UIView {
     /// sweep would not see until the next touch, if ever.
     @objc private func recognizerFired(_ recognizer: UIGestureRecognizer) {
         guard ActionRecorder.isCapturing || ActionRecorder.isFlying else { return }
-        note(recognizer, source: "action")
+        noteTransition(recognizer, to: recognizer.state, source: "action")
     }
 
     /// Reads every watched recognizer's state after the event has been dispatched and writes whatever
@@ -843,7 +843,7 @@ protocol CanvasTouchAuditSource: UIView {
 
     /// Records a transition a recognizer's action announced, keeping the registry's `lastState` in step
     /// so the sweep doesn't write it a second time.
-    func noteTransition(_ recognizer: UIGestureRecognizer, to newState: UIGestureRecognizer.State, source: String) {
+    private func noteTransition(_ recognizer: UIGestureRecognizer, to newState: UIGestureRecognizer.State, source: String) {
         guard let entry = registryByID[ObjectIdentifier(recognizer)] else {
             // Not discovered yet (created since the last rescan). Still worth writing — a nameless
             // line is better than a missing transition — and the name falls back to the class.
@@ -856,10 +856,6 @@ protocol CanvasTouchAuditSource: UIView {
         ActionRecorder.shared.recognizer(entry.name, object: entry.objectID, from: entry.lastState, to: newState,
                                          source: source)
         entry.lastState = newState
-    }
-
-    private func note(_ recognizer: UIGestureRecognizer, source: String) {
-        noteTransition(recognizer, to: recognizer.state, source: source)
     }
 
     /// The name a recognizer is known by in the file.

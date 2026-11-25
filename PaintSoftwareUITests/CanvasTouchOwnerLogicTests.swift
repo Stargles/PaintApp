@@ -763,56 +763,6 @@ final class CanvasTouchOwnerLogicTests: XCTestCase {
         }
     }
 
-    // MARK: - The fifteenth question
-
-    /// **Where two-finger navigation is staked on something that cannot resolve.**
-    ///
-    /// `shouldRequireFailure` makes pan / pinch / rotate wait for the active layer's stroke
-    /// recognizer whenever `shouldInteract` is true. That asks "is the host accepting touches?",
-    /// but the question that decides whether the recognizer will ever reach a terminal state is
-    /// "did *this* touch reach the host?", and two things answer no:
-    ///
-    ///  * **the active layer is hidden.** `shouldInteract` never consults visibility — visibility is
-    ///    applied one line above it as `host.isHidden`, a different mechanism — so the host is
-    ///    `isUserInteractionEnabled` *and* invisible, and UIKit delivers nothing to a hidden view.
-    ///    Hide the layer you are on (or the group holding it), keep a brush selected, and the canvas
-    ///    will not pan, pinch or rotate.
-    ///  * **an overlay above the hosts claimed the touch** — a shape outline, a text box or grip, a
-    ///    guide grip. Two fingers landing there produce the same stall.
-    ///
-    /// **This does not explain BUGS.md's "two-finger pan is dead while Fill is selected".** With
-    /// Fill selected `Tool.paintsOnCanvas` is false, so `shouldInteract` is false, so no dependency
-    /// is stated at all — no tool with its own recognizer appears below. Whatever kills that gesture
-    /// on the owner's iPad is not in the arbitration layer.
-    func testTheTransformDependencyIsUnresolvableOnlyInTheDeclaredCases() {
-        var found = Set<String>()
-        forEachReachableInput { inputs in
-            guard inputs.transformDependencyIsUnresolvable else { return }
-            found.insert("hiddenHost=\(!inputs.activeLayerIsOnScreen) chrome=\(inputs.chrome.rawValue) tool=\(inputs.tool)")
-        }
-
-        var expected = Set<String>()
-        for tool in Tool.allCases where tool.paintsOnCanvas {
-            expected.insert("hiddenHost=true chrome=none tool=\(tool)")
-            for chrome in [CanvasTouchChrome.guideGrip, .shapeHandleOrOutline, .textBoxOrBand, .textHandle] {
-                expected.insert("hiddenHost=false chrome=\(chrome.rawValue) tool=\(tool)")
-                expected.insert("hiddenHost=true chrome=\(chrome.rawValue) tool=\(tool)")
-            }
-        }
-
-        XCTAssertEqual(found, expected,
-                       "new: \(found.subtracting(expected).sorted())\ngone: \(expected.subtracting(found).sorted())")
-    }
-
-    /// No tool with a recognizer of its own can stall the transform, because none of them makes the
-    /// host interactive. States the Fill half of BUGS.md's open report as an assertion.
-    func testNoToolWithItsOwnRecognizerEverStakesTheTransformOnAStroke() {
-        forEachReachableInput { inputs in
-            guard inputs.tool.canvasRecognizerOwner(fillMode: inputs.fillMode) != nil else { return }
-            XCTAssertFalse(inputs.transformWaitsOnActiveStroke, "at \(self.signature(inputs))")
-        }
-    }
-
     // MARK: - Properties of the gates themselves
 
     /// Every one of the fourteen gates spells `activePanel == .select` or `!= .select` and ignores
