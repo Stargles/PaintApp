@@ -163,6 +163,8 @@ Every status report to the owner lists this queue with each item's state, not on
   live ink go before the paced base picture lands (`UnlandedInk` exists for exactly this handoff).
   Recording `recording-20261117-225331` (`~/PaintWork/nov17-lag-evidence/`) shows the strokes and
   rasterizes but the recorder does not log the live-ink → base-picture handoff — make it.
+  **Owner, Nov 25:** still recalls *"brief flickering when i lay down multiple brushstrokes"* (build
+  `8545ac57`). His call: nothing now — check whether it still happens on the next build first.
   **Same family, erase (owner, Nov 17 late):** erasing a lot at once, the erased strokes briefly
   reappear and then vanish — the old base picture shown again before the erased one lands. Recording
   on the iPad (newest after 22:53). One fix: the live picture stays until the base that matches it is

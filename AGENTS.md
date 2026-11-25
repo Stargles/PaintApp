@@ -38,6 +38,13 @@ own branch, so `main`'s HANDOFF.md can be behind.
   TODO.md *before* work starts. Fold updates into the existing task where appropriate. HANDOFF.md
   points to TODO.md when the next step changes; it must never be the sole record of a task. Re-check
   both after every merge. A session can end at any moment; conversation-only tasks are lost.
+- **The root agent is an orchestrator (owner, restated 2026-11-25).** It stays high level: it plans, writes
+  short briefs, judges reports, decides merges and installs, and reports the queue. It does **not** read
+  large source files, analyse recordings, debug test failures or write fixes itself — those go to a worker,
+  even when the piece looks small, because they fill the root's context. Its own shell use is limited to
+  git, reading a result line, and running a finished script. Unless he sets another cap: at most one Opus
+  worker *or* two Sonnet workers at once, Opus only for heavy work. Be smart with tokens; give a status
+  report of the queue now and then; do not stop until everything is done or his input is genuinely needed.
 - **His usage budget is set per session** (how many agents, which models). Ask if it was not stated;
   put cheap models on mechanical work.
   Set model and effort explicitly for routine delegation. Use a low-cost model at low
