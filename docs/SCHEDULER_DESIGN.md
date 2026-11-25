@@ -328,22 +328,12 @@ tests of the old path, doc text.
 
 S1 ships the owner's most visible fix on its own; S2 makes the step cheap at any zoom. S3b waits for M2; S5 waits for S4.
 
-## 7. Questions for the owner (plain language)
+## 7. Owner rulings (Nov 25)
 
-**Q1 — stepping onto a frame that was never drawn before.** After an edit that reaches many frames, or on
-opening a scene, a frame may not be ready yet; on Test1 it takes about a second on your iPad to make. While it is
-made, should the canvas: **(a)** keep showing the frame you came from (the number changes at once, a small
-"drawing…" mark shows) and switch to the whole new frame when ready — *our default*; or **(b)** show a soft, lower-detail
-version of the new frame in about a fifth of a second, then sharpen it? (b) needs A/B pictures before you choose (M5).
-
-**Q2 — keep the finished frames between launches?** Today every launch throws away the baked frames (your earlier
-ruling, RENDER.md §2.11), so a 300–1000-drawing scene is re-drawn in the background every time you open it —
-minutes of orange bars. Options: **(a)** keep them for the scenes you open, inside one storage limit (about 3 MB a
-frame at screen detail; the limit is 4 GB or 10% of free space, oldest scenes dropped first); **(b)** keep only the
-scene you last had open; **(c)** keep throwing them away. (a)/(b) cost one check of each drawing when a scene opens
-(M8 measures it).
-
-Everything else on this page is decided.
+- **Q1 — a never-drawn frame:** keep showing the previous frame until the new one is whole. No soft-first.
+- **Q2 — bakes between launches:** a Settings option to keep them, **default off**. When on, they are stored
+  in the scene's own folder (they travel with the canvas), inside the disk limit; when off, emptied at launch
+  as today. S2 builds it.
 
 ## 8. Changes to SCHEDULER.md (same branch)
 
