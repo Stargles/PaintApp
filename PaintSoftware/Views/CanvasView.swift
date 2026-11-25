@@ -5053,9 +5053,8 @@ struct CanvasView: UIViewRepresentable {
         /// not express that — it was satisfied by the two fingers of an ordinary canvas pan, which is
         /// why the owner saw the snap only *after* lifting the pen and pinching.
         ///
-        /// Restricted to `isShapeFollowingFinger` (pen still down), the companion change to removing the
-        /// bake from the transform path: without it a two-finger pan over a pending shape would snap
-        /// it.
+        /// Restricted to `isShapeFollowingFinger` (pen still down): without it a two-finger pan over a
+        /// pending shape would snap it.
         private func refreshShapeConstraint() {
             let hold = canvasManager.modifierHold
             let fingers = currentAccompanyingFingers()
@@ -5434,7 +5433,7 @@ struct CanvasView: UIViewRepresentable {
 ///
 /// **`UIGestureRecognizerDelegate.gestureRecognizer(_:shouldReceive:)` was the alternative**, and it
 /// does receive the `UITouch`. It was rejected because the `Coordinator` is the shared delegate of
-/// pan, pinch, rotation, the touch counter and both presses, so the stash would be written by every
+/// every press and tap on the container, so the stash would be written by every
 /// recognizer's touches and read by two — the readers would have to filter by identity, and would
 /// still be leaning on an ordering between a delegate callback and an action dispatch that UIKit
 /// does not document. A subclass owns its own field and cannot be written by anything else, and the

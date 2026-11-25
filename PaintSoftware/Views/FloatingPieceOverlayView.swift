@@ -45,8 +45,8 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
     /// Whether one of the box's pans owns a touch — **from touch-down, not from the pan's `.began`**,
     /// which is a slop's travel later. While it does, the box owns every other touch: a second finger
     /// on another grip starts no second drag, a finger away from the box commits nothing when it
-    /// lifts, and the canvas's own pan, pinch and rotate stand down
-    /// (`CanvasView.Coordinator.gestureRecognizerShouldBegin`). Touch-down matters because the finger
+    /// lifts, and the canvas's own navigation stands down
+    /// (`CanvasView.Coordinator.mayNavigate`). Touch-down matters because the finger
     /// that makes a drag precise is often already there when the pen starts to move, and the canvas's
     /// two-finger pan would otherwise begin in the same breath as the pan that is meant to win.
     var isDragging: Bool { drag != nil }

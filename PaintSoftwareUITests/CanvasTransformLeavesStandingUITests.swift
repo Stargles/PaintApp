@@ -31,12 +31,7 @@ final class CanvasTransformLeavesStandingUITests: PaintUITestCase {
     /// That is "Fingers Can Paint" off — passed as a launch argument, which overrides the persisted
     /// preference for this launch only and leaves the simulator's own untouched.
     ///
-    /// It is what lets a *staggered* pan reach the transform recognizers on a layer that can be drawn
-    /// on at all. With fingers painting, the first finger of a pan begins a stroke (`.began`), and a
-    /// recognizer waiting on the stroke to fail is failed for good when the stroke is *recognised* —
-    /// MEASURED: on a fresh document, a drag whose fingers land 20 ms apart does not pan the canvas
-    /// and the same drag landing together does. A value layer has no stroke recognizer to wait on,
-    /// which is why the effect layer's test runs in either mode.
+    /// A staggered pan with fingers painting is `CanvasTouchUITests`'.
     private let pencilOnly = ["-paintapp.pencilOnlyDrawing", "YES"]
 
     // MARK: - The bottom dock's menus

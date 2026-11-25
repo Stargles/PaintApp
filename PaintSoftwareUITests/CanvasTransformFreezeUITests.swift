@@ -27,13 +27,9 @@ import XCTest
 /// canvas's effective scale/rotation/offset on `canvas.host`'s label — the trick
 /// `SandwichPresentation` already documents there, and it shares the label with it.
 ///
-/// **Why a pinch and not a pan.** XCUITest has no two-finger drag primitive; `pinch` and `rotate`
-/// are the only real multi-touch gestures it synthesises. Pinch is enough: all three transform
-/// recognizers carry the identical failure dependency from
-/// `Coordinator.gestureRecognizer(_:shouldRequireFailureOf:)`, so a pinch that cannot start is a
-/// pan that cannot start. (Measured: `pinch` delivers both touches in a *single* `touchesBegan` with
-/// `touches.count == 2`, so it takes `StrokeGestureRecognizer`'s legal `.possible → .failed` guard
-/// and never reaches `failTrackedStroke`. No test here reaches that function — see its doc comment.)
+/// **Why a pinch and not a pan.** XCUITest has no public two-finger drag; `pinch` and `rotate` are the only
+/// multi-touch gestures it makes, and either reaches the one thing that moves the canvas
+/// (`CanvasTouchCore`). `CanvasTouchUITests` drives the rest with fingers of their own.
 ///
 /// Its own class because xcodebuild distributes parallel work per test *class* (see CLAUDE.md).
 final class CanvasTransformFreezeUITests: PaintUITestCase {
@@ -99,8 +95,7 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
     }
 
     /// The second instance the owner reported, reached with no popover and no timeline at all: with
-    /// the Fill tool selected, `reconcileLayers` disables the active layer's host (`shouldInteract`)
-    /// while `shouldRequireFailureOf` goes on naming that host's stroke recognizer.
+    /// the Fill tool selected, `reconcileLayers` disables the active layer's host (`shouldInteract`).
     func testCanvasStillTransformsWithTheFillToolSelected() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -287,12 +282,9 @@ final class CanvasTransformFreezeUITests: PaintUITestCase {
     /// *"in the edit text keyboard menu, then select pencil brush"*.
     ///
     /// **Text is the `.fill` case's twin, and that is why these two tests exist.**
-    /// `Tool.paintsOnCanvas` is false for exactly `.fill`, `.eyedropper` and `.text`, and it is what
-    /// `shouldRequireFailure` reads (through `activeHostIsInteractive`) before it stakes pan / pinch
-    /// / rotate on the active layer's stroke recognizer. So `.text` sits in the same state
-    /// `testCanvasStillTransformsWithTheFillToolSelected` covers, and BUGS.md's still-open
-    /// *"two-finger pan/pinch/rotate is dead while the Fill tool is selected, on device"* is the
-    /// other member of that pair. These are the `.text` half of that net.
+    /// `Tool.paintsOnCanvas` is false for exactly `.fill`, `.eyedropper` and `.text`, which is what turns
+    /// the active layer's host off (`activeHostIsInteractive`). So `.text` sits in the same state
+    /// `testCanvasStillTransformsWithTheFillToolSelected` covers. These are the `.text` half of that net.
     ///
     /// This one is text mode with a box actually on screen — the state the owner describes being in
     /// when it locks. `TextOverlayView` is above every layer host and claims the box and its move

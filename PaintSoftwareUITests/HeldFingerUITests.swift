@@ -12,9 +12,7 @@ final class HeldFingerUITests: PaintUITestCase {
     /// **Two fingers landing 20 ms apart, as a hand lands them, still pan the canvas** — the first
     /// reaches the canvas alone, as it would if it were the start of a hold; with nothing dragging it
     /// is not one. Cold start, a fresh document with one stroke lifted into the Move box — the surface
-    /// where a drag arms the rule — and no drag under way. (With a stroke host listening and no box up,
-    /// the same synthetic pan leaves the offset at zero on the build before this item too, so it is
-    /// not a pan this suite can ask of an empty editor.)
+    /// where a drag arms the rule — and no drag under way.
     func testATwoFingerPanWithNothingDraggingStillPansTheCanvas() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))

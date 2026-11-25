@@ -1904,7 +1904,7 @@ final class CanvasManager: ObservableObject {
         apply(touchSettle.fingerLanded(mayContinueTake: mayContinueTake))
     }
 
-    /// The host's `TouchCountRecognizer` reports how many touches are on the canvas, which is what
+    /// `CanvasTouchCore` says how many touches are on the canvas, which is what
     /// tells a watched finger it is no longer alone (`CanvasTouchSettle.touchCountChanged`).
     func canvasTouchCountChanged(_ total: Int) {
         apply(touchSettle.touchCountChanged(to: total))
