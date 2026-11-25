@@ -3102,10 +3102,15 @@ final class CanvasManager: ObservableObject {
     /// show the baked frame at once"*. Without it every step handed each layer host a new cel to
     /// rasterize — at the owner's 5000² a second a layer on the iPad 9, and one 95 MiB picture each
     /// for the render server — and the canvas waited for all of them.
+    ///
+    /// **150 ms, since S1 (SCHEDULER_DESIGN.md §4: "steps stopped 150 ms")** — it was half a second while
+    /// the layers' pictures could reach the screen one at a time, and the bake had to stay up long
+    /// enough to hide that. The hosts now take over from the bake as one set (`CanvasPresenter`), so
+    /// the quiet only keeps a burst of steps from starting renders nobody will see.
     @Published private(set) var frameStepIsSettling = false
     private var frameStepSettle: DispatchWorkItem?
     /// How long after the last step the layers are asked for their own pictures again.
-    static let frameStepSettleSeconds: TimeInterval = 0.5
+    static let frameStepSettleSeconds: TimeInterval = 0.15
 
     /// **Whether the frames are flipping**: playing, or a step that has not settled.
     var framesAreFlipping: Bool { isPlaying || frameStepIsSettling }

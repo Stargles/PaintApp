@@ -1119,9 +1119,9 @@ extension CanvasManager {
     /// owner's Test1 at 5000² made the same arithmetic visible without playback: each step handed
     /// five hosts a cel to rasterize, a second each on the iPad 9, and the canvas waited for them. A
     /// step now shows the bake, and the hosts render again only once the playhead has been still for
-    /// `CanvasManager.frameStepSettleSeconds`, under the bake until they land
-    /// (`CanvasView.Coordinator.bakedFrameCoveringTheHosts`). A frame with no bake yet is §2.10's
-    /// miss: the picture before it stays up.
+    /// `CanvasManager.frameStepSettleSeconds`, and take over from the bake as one set
+    /// (`CanvasPresenter`, SCHEDULER.md rule 10). A frame with no bake yet is §2.10's miss: the
+    /// picture before it stays up until the new one is whole (owner Q1, 2026-11-25).
     @MainActor
     func sandwichEngagesOnCanvas(tree: [RenderNode]) -> Bool {
         guard tree.needsCompositorOnCanvas || hasContainerPoseInForce || framesAreFlipping

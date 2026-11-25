@@ -28,6 +28,14 @@ final class CanvasPictureView: UIView {
     private(set) var clip: CGImage?
     /// True once `image` is the picture on screen — false while its first draw is in flight.
     private(set) var isShowingImage = true
+    /// **The presenter a layer's pictures go up through** (`WindowSurfaceView.presenter`): while it
+    /// holds, this view's new picture waits, drawn, for the rest of its set.
+    var presenter: CanvasPresenter? {
+        get { surface.presenter }
+        set { surface.presenter = newValue }
+    }
+    /// Whether the picture asked for last is on screen, or drawn and waiting for its set.
+    var hasPictureReady: Bool { isShowingImage || (presenter?.hasCurrentPicture(surface) ?? false) }
     /// The onion skin's ghost is magnified bilinear; a layer's ink stays crisp (`LayerHostView.init`).
     var smoothWhenMagnified = false
 

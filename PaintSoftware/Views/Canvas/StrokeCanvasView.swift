@@ -424,12 +424,19 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// `pacedRender` is armed, the newest one it will start when the interval is up.
     private var pendingVectorRender: DeferredVectorRender.Revision?
 
-    /// **This view has been handed a different canvas and has nothing of it on screen yet** — its
-    /// render is off main and the base slot still holds the *previous* canvas's picture (the previous
-    /// frame's cel after a frame step). Not "a stroke's re-render is pending": that one has shown this
-    /// canvas before, so `displayedVectorVersion` is not `nothingDisplayed`.
-    var isAwaitingFirstPicture: Bool {
-        (pendingVectorRender != nil && displayedVectorVersion == Self.nothingDisplayed) || !imageView.isShowingImage
+    /// **Whether this layer's picture of what it now holds is ready for the canvas's next set** — on
+    /// screen, or drawn and parked with the presenter (SCHEDULER.md rule 10). Not while a different
+    /// canvas has been handed over and its render is still off main (the base slot holds the
+    /// *previous* frame's cel after a step); a stroke's re-render of a canvas already shown does not
+    /// count, since the picture up is of this canvas.
+    var hasItsPictureReady: Bool {
+        !(pendingVectorRender != nil && displayedVectorVersion == Self.nothingDisplayed) && imageView.hasPictureReady
+    }
+
+    /// The presenter this layer's pictures go up through.
+    var presenter: CanvasPresenter? {
+        get { imageView.presenter }
+        set { imageView.presenter = newValue }
     }
 
     /// A pan, zoom or turn of the canvas: the base draws what the window now shows of it.

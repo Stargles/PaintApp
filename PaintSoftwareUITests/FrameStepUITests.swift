@@ -27,9 +27,9 @@ final class FrameStepUITests: PaintUITestCase {
         }
     }
 
-    private func probe(_ app: XCUIApplication, _ canvas: XCUIElement) -> Probe {
-        let paper = paperRect(in: canvas, canvasSize: OwnersScene.canvasSize)
-        let visible = visiblePaperRect(app, in: canvas, canvasSize: OwnersScene.canvasSize)
+    private func probe(_ app: XCUIApplication, _ canvas: XCUIElement, size: CGSize) -> Probe {
+        let paper = paperRect(in: canvas, canvasSize: size)
+        let visible = visiblePaperRect(app, in: canvas, canvasSize: size)
         let host = canvas.frame
         let rows = (0..<OwnersScene.layers).compactMap { layer -> [CGPoint]? in
             let points = (0..<OwnersScene.frames).map { onHost(paper, 0.8, OwnersScene.row(layer: layer, frame: $0)) }
@@ -68,10 +68,29 @@ final class FrameStepUITests: PaintUITestCase {
         return (samples, Date().timeIntervalSince(since))
     }
 
+    /// The owner's Test1 shape at 5000²: a baked step is whole on screen within S1's 0.3 s.
     func testAStepShowsTheWholeNewFrameAtOnceAndNeverAMix() throws {
-        let (app, canvas) = launchOwnersScene()
+        let shown = try stepThroughABakedScene(size: OwnersScene.canvasSize)
+        XCTAssertLessThanOrEqual(shown.max() ?? .max, 300, "S1's target: a baked step is whole on screen within 0.3 s")
+    }
+
+    /// **The owner's report of 2026-11-25, on his iPad at c15ad799**: a small fully baked scene
+    /// (2048×1024), stepping frames — *"a slight delay for the new frame to swap; it should be instant
+    /// because the frame is already baked"*. His recording read 0 ring hits in 110 flips: every baked
+    /// frame was on disk and its read waited for the touch to lift. Here a step's frame is in memory
+    /// (the ring holds the frames either side of a stopped playhead), so it is up within the first
+    /// display frames: the off-main draw of one window and the swap.
+    func testOnASmallBakedSceneAStepIsWholeOnTheNextDisplayFrames() throws {
+        let shown = try stepThroughABakedScene(size: CGSize(width: 2048, height: 1024))
+        XCTAssertLessThanOrEqual(shown.max() ?? .max, 50, "a baked, resident frame is up within three display frames")
+    }
+
+    /// Opens the scene cold, bakes it, steps it slowly and in a burst, and answers each slow step's
+    /// milliseconds from the tap to the whole frame on screen (the app's clock).
+    private func stepThroughABakedScene(size: CGSize) throws -> [Int] {
+        let (app, canvas) = launchOwnersScene(size: size)
         waitForEveryFrameBaked(app)
-        let probe = probe(app, canvas)
+        let probe = probe(app, canvas, size: size)
         watch(probe, for: 30, allowed: ["0"], "the baked first frame", until: { $0.allSatisfy { $0 == "0" } })
         mixes = []
         attachScreenshot(XCUIScreen.main, "frame-step-baked")
@@ -91,9 +110,9 @@ final class FrameStepUITests: PaintUITestCase {
             watch(probe, for: 1.5, allowed: [String(next)], "slow step \(index + 1) settling on \(next)")
             let census = stepCensus(app)
             shown.append(census.frame == next ? census.shownMs ?? -1 : -1)
-            print("FRAMESTEP slow step \(index + 1) to \(next): decode \(census.decodeMs.map(String.init) ?? "-") ms, "
-                  + "whole frame \(census.shownMs.map(String.init) ?? "-") ms (app); screen probe whole by "
-                  + String(format: "%.2f s over %d samples", arrived.seconds, arrived.samples.count))
+            print("FRAMESTEP \(Int(size.width))x\(Int(size.height)) slow step \(index + 1) to \(next): decode "
+                  + "\(census.decodeMs.map(String.init) ?? "-") ms, whole frame \(census.shownMs.map(String.init) ?? "-") ms "
+                  + "(app); screen probe whole by " + String(format: "%.2f s over %d samples", arrived.seconds, arrived.samples.count))
             current = next
         }
         attachScreenshot(XCUIScreen.main, "frame-step-slow")
@@ -108,12 +127,51 @@ final class FrameStepUITests: PaintUITestCase {
         XCTAssertEqual(readFrameLabel(app)?.current, landed + 1, "the label agrees with the picture")
 
         let census = stepCensus(app)
-        let sorted = shown.sorted()
-        print("FRAMESTEP whole frame after a slow step (app, ms): \(shown); main-thread decodes "
-              + "\(census.mainDecodes.map(String.init) ?? "?"); mixed or blank samples: \(mixes.count)")
+        print("FRAMESTEP \(Int(size.width))x\(Int(size.height)) whole frame after a slow step (app, ms): \(shown); "
+              + "main-thread decodes \(census.mainDecodes.map(String.init) ?? "?"); mixed or blank samples: \(mixes.count); "
+              + "sets presented \(readField(app, "presented:")); late answers \(readField(app, "r1late:"))")
         XCTAssertEqual(mixes, [], "the screen showed one frame on every layer, never a mix or a blank")
         XCTAssertFalse(shown.contains(-1), "every slow step recorded its whole frame on screen: \(shown)")
         XCTAssertEqual(census.mainDecodes, 0, "SCHEDULER.md rule 2: no baked frame is ever decoded on the main thread")
-        XCTAssertLessThanOrEqual(sorted.last ?? .max, 300, "S1's target: a baked step is whole on screen within 0.3 s")
+        return shown
+    }
+
+    /// **The old things still work after stepping** (AGENTS.md, the bar for done): play, a stroke,
+    /// Undo, a pan, and a Move box raised and put down — on the small baked scene.
+    func testAfterStepsTheCanvasStillPlaysDrawsUndoesPansAndMoves() throws {
+        let size = CGSize(width: 2048, height: 1024)
+        let (app, canvas) = launchOwnersScene(size: size)
+        waitForEveryFrameBaked(app)
+        let forward = app.buttons["timeline.stepForwardButton"]
+        XCTAssertTrue(forward.waitForExistence(timeout: 5))
+        for _ in 0..<3 { forward.tap() }
+
+        let play = app.buttons["timeline.playButton"]
+        play.tap()
+        let before = readFrameLabel(app)?.current
+        Thread.sleep(forTimeInterval: 2)
+        let during = readFrameLabel(app)?.current
+        play.tap()
+        XCTAssertNotEqual(before, during, "playback moves the playhead")
+
+        let paper = paperRect(in: canvas, canvasSize: size)
+        let blank = onHost(paper, 0.5, 0.1)
+        XCTAssertFalse(isInk(ScreenshotPixels(canvas.screenshot().image)?.pixel(normalizedX: blank.dx, normalizedY: blank.dy)),
+                       "PREMISE: no ink where the stroke goes")
+        drawLine(on: canvas, from: onHost(paper, 0.3, 0.1), to: onHost(paper, 0.7, 0.1))
+        XCTAssertTrue(waitUntil(canvas, blank, isInk, timeout: 10), "a stroke drawn after stepping shows")
+        app.buttons["sideToolbar.undoButton"].tap()
+        XCTAssertTrue(waitUntil(canvas, blank, { !self.isInk($0) }, timeout: 10), "Undo takes it off")
+
+        let transform = readField(app, "xform:")
+        try panAboveTheDock(app, canvas, stagger: 0)
+        XCTAssertNotEqual(readField(app, "xform:"), transform, "a two-finger pan moves the canvas")
+
+        app.buttons["toolbar.moveButton"].tap()
+        let done = app.buttons["moveBar.doneButton"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5), "Move raises its box")
+        done.tap()
+        wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: done)], timeout: 5)
+        attachScreenshot(XCUIScreen.main, "frame-step-old-things")
     }
 }

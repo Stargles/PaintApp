@@ -122,6 +122,20 @@ final class WindowSurfaceView: UIView {
         residentTotal += delta
     }
 
+    /// **The presenter this surface's pictures go up through** (SCHEDULER.md rule 10): while it holds, a
+    /// finished draw is parked with it rather than swapped, and goes up with the rest of its set. Nil
+    /// for a surface that is a set of its own — the baked frame, a stream window.
+    weak var presenter: CanvasPresenter?
+    /// A finished draw is parked with the presenter: no new draw starts into the back surface it holds.
+    var hasParkedPicture: Bool { parked != nil }
+    /// Which park is outstanding, so an older park's drop cannot clear a newer one.
+    private var parked: Int?
+    private var parks = 0
+    /// Moved by `takeDown` and `freezePresented`, so a parked swap from before either never shows.
+    private var parkGeneration = 0
+    /// The newest frame asked for while a picture was parked, drawn once it goes up or is dropped.
+    private var askedWhileParked: (() -> Frame?)?
+
     /// How many frames have been presented — for tests, which spin the run loop until it moves.
     private(set) var presentedCount = 0
     /// The window the surfaces are sized to, in canvas points; `.null` before the first present.
@@ -155,6 +169,7 @@ final class WindowSurfaceView: UIView {
     /// An in-flight draw owns only the other surface and may finish safely in the background.
     func freezePresented() -> FrozenWindow? {
         draws.cancel()
+        dropParked()
         let frozen = presented
         presented = nil
         layer.contents = nil
@@ -184,6 +199,7 @@ final class WindowSurfaceView: UIView {
     /// again hands it nothing new (`CanvasPictureView`).
     func takeDown() {
         draws.cancel()
+        dropParked()
         presented = nil
         layer.contents = nil
         isHidden = true
@@ -204,7 +220,12 @@ final class WindowSurfaceView: UIView {
     /// replaced before it was minted is never drawn, and its `finished` never runs.
     func present(_ mint: @escaping () -> Frame?) {
         draws.request { [weak self] in
-            guard let self, let frame = mint() else { return nil }
+            guard let self else { return nil }
+            guard !self.hasParkedPicture else {
+                self.askedWhileParked = mint
+                return nil
+            }
+            guard let frame = mint() else { return nil }
             guard let work = self.drawing(frame) else {
                 frame.finished?(false)
                 return nil
@@ -258,20 +279,59 @@ final class WindowSurfaceView: UIView {
             _ = target.surface.unlock(options: [], seed: nil)
             return { [weak self] in
                 guard let self else { return }
-                guard drawn == window, self.surfaces.count == 2, self.surfaceWindow == window,
-                      canPresent?() != false else {
-                    finished?(false)
-                    return
+                let generation = self.parkGeneration
+                let isCurrent = { [weak self] () -> Bool in
+                    guard let self else { return false }
+                    return generation == self.parkGeneration && drawn == window && self.surfaces.count == 2
+                        && self.surfaceWindow == window && canPresent?() != false
                 }
-                self.layer.contents = target.surface
-                self.presented = FrozenWindow(storage: target, window: window, placement: placement)
-                Self.placeLayer(self.layer, in: window, by: placement)
-                self.isHidden = false
-                self.back = 1 - self.back
-                self.presentedCount += 1
-                finished?(true)
+                let swap = { [weak self] in
+                    guard let self else { return }
+                    guard isCurrent() else {
+                        finished?(false)
+                        return
+                    }
+                    self.layer.contents = target.surface
+                    self.presented = FrozenWindow(storage: target, window: window, placement: placement)
+                    Self.placeLayer(self.layer, in: window, by: placement)
+                    self.isHidden = false
+                    self.back = 1 - self.back
+                    self.presentedCount += 1
+                    finished?(true)
+                }
+                guard let presenter = self.presenter, presenter.isHolding, isCurrent() else { return swap() }
+                // Drawn, and waiting for its set: the back surface holds it until the set goes up.
+                self.parks += 1
+                let token = self.parks
+                self.parked = token
+                let settle = { [weak self] in
+                    guard let self, self.parked == token else { return }
+                    self.parked = nil
+                    self.drawAskedWhileParked()
+                }
+                presenter.park(self, isCurrent: isCurrent, swap: {
+                    swap()
+                    settle()
+                }, drop: {
+                    finished?(false)
+                    settle()
+                })
             }
         }
+    }
+
+    /// A parked picture will never go up — the view was taken down or frozen. The presenter's entry
+    /// for it fails `isCurrent` from now on.
+    private func dropParked() {
+        parkGeneration += 1
+        parked = nil
+        askedWhileParked = nil
+    }
+
+    private func drawAskedWhileParked() {
+        guard let mint = askedWhileParked else { return }
+        askedWhileParked = nil
+        present(mint)
     }
 
     /// `present(_:)` for a frame whose description is already in hand — a stream element's newest

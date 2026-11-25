@@ -959,7 +959,8 @@ struct CanvasView: UIViewRepresentable {
                         self.handleStrokeMoved(sample, penTime: penTime, host: host)
                     }
                 }
-                host.strokeView.onRenderSettled = { [weak self] in self?.coverTheHostsWithTheBakeWhileTheyRender() }
+                host.strokeView.presenter = presenter
+                host.strokeView.onRenderSettled = { [weak self] in self?.settlePresentation() }
                 host.strokeView.onBaseHoleChanged = { [weak host] hole in
                     host?.setBackingReplacementHole(hole)
                 }
@@ -1416,6 +1417,10 @@ struct CanvasView: UIViewRepresentable {
                 + " readout:\(handleAssist.readout?.text ?? "none")"
                 + " readoutbox:\(rotationReadoutBox())"
                 + " step:\(FrameStepCensus.field)"
+                // **How many whole sets the presenter has put up** (SCHEDULER.md rule 10), and the
+                // scheduler's late answers (rule 8) — both monotonic.
+                + " presented:\(presenter.setsPresented)"
+                + " r1late:\(Scheduler.shared.stats.lateAnswers)"
                 // **The open lasso's size** (TODO (184)): how many points the Freehand lasso holds, or
                 // `none` — the host hides the overlay's layers from XCUITest like every descendant.
                 + " lasso:\(canvasManager.openLasso.map { String($0.points.count) } ?? "none")"
@@ -1635,6 +1640,17 @@ struct CanvasView: UIViewRepresentable {
         /// The frame `sandwichFull` depicts — the M1 probe's (`FrameStepCensus`).
         private var sandwichFullFrame: Int?
 
+        /// **The one owner of when the canvas's pictures change** (SCHEDULER.md rule 10): every layer
+        /// host's picture goes up through it, so a frame step, or the hosts taking over from the baked
+        /// frame, swaps every layer at once or not at all — `settlePresentation`.
+        private lazy var presenter: CanvasPresenter = {
+            let presenter = CanvasPresenter()
+            presenter.onPark = { [weak self] in self?.settlePresentation() }
+            return presenter
+        }()
+        /// The frame the baked-frame surface has on screen, nil while it is down or has drawn nothing yet.
+        private var wholeShowsFrame: Int?
+
         /// The rebuilds of the live picture, one in flight at a time — see `requestSandwichRebuild`.
         private let sandwichRebuilds = LatestWins(queue: Coordinator.sandwichQueue)
 
@@ -1846,7 +1862,14 @@ struct CanvasView: UIViewRepresentable {
         /// `isHidden`/`alpha`/interaction settled — and again from the far end of each rebuild.
         private func updateSandwich(tree: [RenderNode], engaged: Bool) {
             defer { reconcileStreamDisplay() }
+            defer { settlePresentation() }
             defer { frameOfTheLastPass = canvasManager.currentFrame }
+            // **A step holds every layer's new picture for the set** (rule 10): the hosts were just
+            // handed the new frame's cels, and what each draws waits — the frame left stays whole on
+            // screen (owner Q1) — until the whole new frame is up, from the bake or from all of them.
+            if let left = frameOfTheLastPass, left != canvasManager.currentFrame, !isSandwichStrokeLive {
+                presenter.hold()
+            }
             guard let belowView = sandwichBelowView, let aboveView = sandwichAboveView else { return }
 
             /// Every exit from this function agrees with the view stack about who is painting the
@@ -1858,9 +1881,10 @@ struct CanvasView: UIViewRepresentable {
             }
 
             guard engaged else {
-                // Last, after the hosts have been handed this pass's cels and un-blanked: whatever
-                // they still have to render is what the bake covers.
-                defer { coverTheHostsWithTheBakeWhileTheyRender() }
+                // **The hosts take over from the baked frame as one set**: while the bake is up, what
+                // they draw of the cels they were just handed waits beneath it, and the bake comes
+                // down in the turn the last of them is ready (`settlePresentation`).
+                if bakedFrameView != nil { presenter.hold() }
                 let hasComposite = sandwichPresentation != .disengaged || livePicture != nil || sandwichFull != nil
                 if hasComposite {
                     switch prepareHostPictures(Set(layerHosts.keys)) {
@@ -2054,9 +2078,12 @@ struct CanvasView: UIViewRepresentable {
             // grade — until its bake lands: the owner's ruling for the fast picture (TODO (125),
             // `SandwichPresentation.live`).
             let mask = presentation == .midStroke ? liveMaskImage : nil
+            // At rest the bake draws the whole frame, but only once its surface has a picture up: until
+            // then the hosts keep theirs (held by the presenter), or the step would show the paper.
+            let wholeIsUp = wholeShowsFrame != nil || !(presentation == .rest || presentation == .disengaged)
             for (id, host) in layerHosts {
                 let drawsItself = live && (id == activeID || drawnByHosts.contains(id))
-                host.setBlanked(!drawsItself)
+                host.setBlanked(!drawsItself && wholeIsUp)
                 // §6.4 rides on exactly the same predicate as blanking, which is the point: a host
                 // drawing its own pixels is the one place a mask can be applied, and every other
                 // host's pixels are inside a composite that has already been clipped. Tying
@@ -2841,8 +2868,6 @@ struct CanvasView: UIViewRepresentable {
         private var bakedFrameWindow: BakedFrameWindow?
         /// The playhead's frame at the end of the last `updateSandwich` — the frame a step is leaving.
         private var frameOfTheLastPass: Int?
-        /// The bake file the cover's picture came from, so a pass with the same frame keeps it.
-        private var bakedFrameCoverName: String?
         /// The baked frame's own lane: a draw is a window-sized resample, and must never queue behind
         /// a canvas-sized composite on `sandwichQueue`.
         private static let bakedFrameQueue = DispatchQueue(label: "com.paintapp.CanvasView.bakedFrame",
@@ -2853,7 +2878,7 @@ struct CanvasView: UIViewRepresentable {
             guard let picture, let container = containerView else {
                 bakedFramePicture = nil
                 bakedFrameWindow = nil
-                bakedFrameCoverName = nil
+                wholeShowsFrame = nil
                 guard let view = bakedFrameView else { return }
                 view.removeFromSuperview()
                 bakedFrameView = nil
@@ -2883,15 +2908,10 @@ struct CanvasView: UIViewRepresentable {
             bakedFramePicture = picture
             bakedFrameWindow = window
             guard let view = bakedFrameView else { return }
-            // **The first picture is drawn in this turn** (`presentFirst`): the pass that puts the
-            // bake up is the one that blanks the hosts or empties `belowView`, so a first draw off the
-            // main thread would show the paper for its length. One window-sized resample, once; every
-            // later picture is drawn off main while the one before it stays up.
-            if view.layer.contents == nil, let frame = mintBakedFrame() {
-                view.presentFirst(frame)
-            } else {
-                view.present { [weak self] in self?.mintBakedFrame() }
-            }
+            // **Drawn off the main thread, always** (rule 2). The hosts stay unblanked under a surface
+            // that has nothing up yet (`wholeIsUp` in `updateSandwich`), so its first draw shows the
+            // frame left rather than the paper, and its landing blanks them.
+            view.present { [weak self] in self?.mintBakedFrame() }
         }
 
         /// The host's pixels in canvas points, now.
@@ -2920,9 +2940,14 @@ struct CanvasView: UIViewRepresentable {
                 }
                 return geometry.window
             }, canPresent: { [weak self] in self?.bakedFramePicture === picture }, finished: { [weak self] shown in
-                guard shown else { return }
-                if let frame = self?.bakedFramePictureFrame { FrameStepCensus.shown(frame: frame) }
-                self?.publishCanvasState()
+                guard shown, let self else { return }
+                let first = self.wholeShowsFrame == nil
+                self.wholeShowsFrame = self.bakedFramePictureFrame
+                if let frame = self.bakedFramePictureFrame { FrameStepCensus.shown(frame: frame) }
+                // Its first picture is up: the hosts under it may blank now.
+                if first { self.applySandwichPresentationNow() }
+                self.settlePresentation()
+                self.publishCanvasState()
             })
         }
 
@@ -2935,29 +2960,41 @@ struct CanvasView: UIViewRepresentable {
             showBakedFrame(picture)
         }
 
-        /// **The bake stays over the hosts until they have the frame's pictures** — on the disengaged
-        /// canvas, after a step settles or playback stops, the hosts render the cels they were just
-        /// handed, off the main thread, a second a layer at the owner's 5000² on the iPad 9; the frame
-        /// they will draw is already baked, so that is what the artist sees meanwhile, and never a mix
-        /// of two frames. A frame with no bake keeps the picture already up (§2.10). Not while a
-        /// stroke is live: the stroke is drawn by its host.
-        private func coverTheHostsWithTheBakeWhileTheyRender() {
-            guard sandwichPresentation == .disengaged else { return }
-            showBakedFrame(bakedFrameCoveringTheHosts())
+        /// **SCHEDULER.md rule 10's one decision: whether the set the presenter holds goes up now.**
+        ///
+        /// - A stroke or edit under the pencil: at once — ink is never held for a set.
+        /// - The bake drawing the canvas: once its surface shows this frame. It covers every host, so
+        ///   what they parked goes up beneath it; until then the last whole picture stays (owner Q1).
+        /// - The hosts drawing the canvas: once every visible host's picture of what it now holds is
+        ///   drawn — then they go up together, and the bake, if it was over them, comes down in the
+        ///   same transaction. Never one layer ahead of the rest.
+        /// - The live pair or bands: the hosts that draw themselves are the edit's, and show at once.
+        ///
+        /// Asked after every pass, every host render and every park.
+        private func settlePresentation() {
+            guard presenter.isHolding else { return }
+            if isSandwichStrokeLive || canvasManager.strokeIsLive { return presentSet(takingDownTheWhole: false) }
+            switch sandwichPresentation {
+            case .rest:
+                if wholeShowsFrame == canvasManager.currentFrame { presentSet(takingDownTheWhole: false) }
+            case .disengaged:
+                let hosts = layerHosts.values.filter { !$0.isBlanked && !$0.isHidden }
+                guard presenter.isComplete(hosts, showing: { $0.strokeView.hasItsPictureReady }) else { return }
+                presentSet(takingDownTheWhole: bakedFrameView != nil)
+            case .live, .midStroke, .moving:
+                presentSet(takingDownTheWhole: false)
+            }
         }
 
-        private func bakedFrameCoveringTheHosts() -> UIImage? {
-            guard !isSandwichStrokeLive, !canvasManager.strokeIsLive,
-                  layerHosts.values.contains(where: { $0.strokeView.isAwaitingFirstPicture }) else { return nil }
-            let frame = canvasManager.currentFrame
-            let baker = canvasManager.frameBaker
-            guard baker.isBaked(atFrame: frame), let key = baker.currentKey(atFrame: frame) else {
-                return bakedFramePicture
-            }
-            if key.fileName == bakedFrameCoverName, let shown = bakedFramePicture { return shown }
-            guard let image = baker.image(for: key, atFrame: frame) else { return bakedFramePicture }
-            bakedFrameCoverName = key.fileName
-            return UIImage(cgImage: image, scale: 1, orientation: .up)
+        /// The held set goes up in one Core Animation transaction.
+        private func presentSet(takingDownTheWhole: Bool) {
+            let wholeWasUp = wholeShowsFrame != nil
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            presenter.present(alongside: { if takingDownTheWhole { showBakedFrame(nil) } })
+            CATransaction.commit()
+            if !wholeWasUp || takingDownTheWhole { FrameStepCensus.shown(frame: canvasManager.currentFrame) }
+            publishCanvasState()
         }
 
         /// The baker's *"this frame is ready"*, wired to the canvas that is showing the previous one.

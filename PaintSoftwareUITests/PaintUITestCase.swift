@@ -2371,14 +2371,14 @@ extension PaintUITestCase {
     /// Launches into the owner's scene (`OwnersScene`), its onion skin as a new document has it.
     /// Returns once the editor is up — not once it is baked (`waitForEveryFrameBaked`), so a caller
     /// can count what entering the document hands the render server.
-    func launchOwnersScene(_ extra: [String] = []) -> (XCUIApplication, XCUIElement) {
+    func launchOwnersScene(_ extra: [String] = [], size: CGSize = OwnersScene.canvasSize) -> (XCUIApplication, XCUIElement) {
         let app = XCUIApplication()
         app.launchArguments += ["-resetGallery", "-uiTestSeedPlainAnimation",
                                 "-uiTestSeedAnimationShape", "\(OwnersScene.layers)x\(OwnersScene.frames)",
                                 "-uiTestTextureBudgetBytes", String(OwnersScene.iPad9BudgetBytes),
                                 "-uiTestContentsCensus"] + extra
-        XCTAssertTrue(launchIntoEditor(app, size: OwnersScene.canvasSize, orientationBeforeCreatingCanvas: .landscapeLeft),
-                      "setup: a 5000² document in landscape")
+        XCTAssertTrue(launchIntoEditor(app, size: size, orientationBeforeCreatingCanvas: .landscapeLeft),
+                      "setup: a \(Int(size.width))×\(Int(size.height)) document in landscape")
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 10), "setup: the canvas")
         XCTAssertEqual(readFrameLabel(app)?.total, OwnersScene.frames,
