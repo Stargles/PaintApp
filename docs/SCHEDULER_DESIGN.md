@@ -305,3 +305,62 @@ Expected, Test1 shape, minimum machine (ESTIMATE): frame with no new cel ≈ 0.1
 ≈ 0.8–1.3 s (walk-bound: 1.75–3.2 core-seconds over ~3 effective cores); simulator counts are the gate.
 **The floor is the vector walk.** If M4 shows placed images dominate it, cache their window-scaled decode; if dabs do,
 GPU stamping is a separate future project, not promised here.
+
+## 6. Migration — small merges, each shippable and gated
+
+Every merge: the fast tier Debug + Release, its own cold-start XCUITest on the artist's path, `tools/playcheck.sh`
+GREEN (app ≤ 1,165 MiB, `backboardd` ≤ 450 MiB) and the counts below printed by the gate's trace. Simulator times
+are compared **before vs after on the same simulator**, never against device figures. "Delete" is whole: code,
+tests of the old path, doc text.
+
+| # | Merge | Touches | Deletes | Proof (artist's path) | Gate numbers | Size, model, risk |
+|---|---|---|---|---|---|---|
+| **S1** | **Frame steps: core + R1 frame reads + presenter** | new `Engine/Scheduling/*`, `Platform/Apple*`; `FrameBaker` (read path), `DecodedFrameRing`, `CanvasView` baked-frame + sandwich presentation, `CanvasPictureView`, `ModifierHoldHost`, `CanvasManager` step | `InteractionGate` (becomes the scheduler's touch flag), `frameStepSettleSeconds` + `frameStepIsSettling` (→ "steps stopped 150 ms"), the main-thread decode in `image(for:)`, `fillRingAhead`'s place behind the bake, `coverTheHostsWithTheBakeWhileTheyRender`, `bakedFrameCoveringTheHosts`, `isAwaitingFirstPicture`, held-frame surface, `presentFirst`'s main draw | `FrameStepUITests` from a new document: two layers × three frames drawn, baked; step ±1 ×12 quickly then slowly; screen probe each step | `storeDecode` on main **0**; step reads held by touch **0**; presented sets per settled step **≤ 2** (whole, cut); frames with mixed rows **0**; gate "one step to a whole frame" from 2.23–2.38 s to **≤ 0.3 s** (probe moves to the app's `presented:` census field, ms) | ~1,300 lines; **Opus**; medium: presentation ordering vs live-ink retirement |
+| **S2** | Bake file v2 (tiles + levels), window reads, picture under the window, disk limit | `FrameBakeStore`, `DecodedFrameRing`, `BakedFrameWindow`, `FrameExportSession` reads full level, `AppleMachine` disk | v1 format (bump `formatVersion`, Caches only — no repair needed), `frameRingByteBudget`'s ~4900² cliff, `frameRingShareDivisor`, `defaultByteCeiling` | `ZoomEdgesUITests`: zoom in, pinch out, probe the revealed edge in the first frame; export round trip | revealed-edge blank frames **0**; ring frames held at 5000² **≥ 6** (was 2); decoded bytes per step at fit **≤ 25 MiB** (was 95) | ~800; **Sonnet** with this page; low |
+| **S3a** | R1 queues onto the scheduler | `DeferredVectorRender`, `StrokeScratch`, `prepareCanvasUpdate`, Liquify, fill (`fillQueue`, its `.sync`), text/shape previews | 6 `DispatchQueue`s, `fillQueue.sync {}`, `Pacing` (its reason — a server copy per landing — ended with `d72eb69f`; re-measure the undo storm's window draws first) | existing stroke/fill/Liquify UI tests + an Undo storm | R1 `late` **0** on the gate; main spans unchanged or lower | ~700; **Sonnet**; low |
+| **S3b** | In-place repair, kept undo pixels, cancellable walks, no lock across a walk | `VectorCanvas` render/walk, `StrokeCanvasView` landing, `UndoHistory`, raster undo | `rasterizeLock`; the copy per landed edit and per Undo; `renderIsolated` on main (Move lift) | `UndoLatencyUITests`: cold start, five strokes, Undo ×5 fast then Redo ×5, probe each | Undo phase peak **≤ the other phases' + 20 MiB** (was +90); per-Undo picture copies **0**; walks per Undo **0** while kept pixels hold; R1 waits behind R3 **0** | ~1,200; **Opus**; high — needs **M2** first |
+| **S4** | Memory manager (stage 3b) | `MemoryBudget` → facts, policies, reservation, arbitration, `PictureStore` spill on S2's codec, predictions; features: layer memos, flatten memo, ring, `RasterResidency`, undo | `Priority`, `waitForRoom`, `currentLane`/`withLane`, `UndoBudget` cap, per-cache shares | `LayerSwitchUITests`: 5 layers, switch far and near, draw at once; logic storms on `VirtualExecutor` | `r1DiskWaits` **0**; spill/load spans on main **0**; thrash events **0** on the playcheck; hit rates printed per feature | ~1,400; **Opus**; medium |
+| **S5** | Two merged pictures, always | `CanvasView` presentation, `RenderRequest.sandwichEngagesOnCanvas`, layer hosts | the flat row (each layer drawing itself at rest), `.shown` per-host pins, `liveHostsBesidesTheActive` special cases that the cut covers | 8-layer fixture: enter, draw on layer 2 then 7, Undo, Move | idle layer pictures **≤ 3** at any layer count; app idle peak with **8** layers ≤ the 5-layer peak + 10 MiB | ~1,000; **Opus**; high (every live path) |
+| **S6** | Bake throughput | `FrameBaker`, `StripedComposite`, `BakeQueue` (order within bands), `PixelOps.parallelMap` → `tiles` | `waitForRoom` in the bake, `Outcome.deferred`'s discard, `min(3, …)` batch | playcheck's bake phase | walks **=** distinct cel revisions; bake deferrals **0**; scene bake ≥ **2×** faster than S5 on the same simulator | ~800; **Opus** for bands, **Sonnet** for reuse; medium |
+| **S7** | R2/R3 guests | thumbnails, onion, sandwich, value fill, eyedropper, export, save, load, recorder, crash ring | their queues; `serializingPackageMutation`'s `.sync` from main; seam lint allowlist → **empty** | existing UI tests of each + a save during a stroke | seam lint **0 exceptions**; unattributed main time **0** | 3 × ~500; **Sonnet**; low |
+| **S8** | Stream as a guest | after **M7** | its 3 queues | `StreamLive*` suites, stream on vs off | stroke spans with stream on within 5% of off | ~400; **Sonnet**; low |
+| **S9** | Rule 9 on the device | `DeviceStressUITests` burst + trace assertions | — | device burst when the iPad is already unlocked | max main pass, R1 p95 ≤ 100 ms, the counts above | ~300; **Sonnet** |
+
+S1 ships the owner's most visible fix on its own; S2 makes the step cheap at any zoom. S3b waits for M2; S5 waits for S4.
+
+## 7. Questions for the owner (plain language)
+
+**Q1 — stepping onto a frame that was never drawn before.** After an edit that reaches many frames, or on
+opening a scene, a frame may not be ready yet; on Test1 it takes about a second on your iPad to make. While it is
+made, should the canvas: **(a)** keep showing the frame you came from (the number changes at once, a small
+"drawing…" mark shows) and switch to the whole new frame when ready — *our default*; or **(b)** show a soft, lower-detail
+version of the new frame in about a fifth of a second, then sharpen it? (b) needs A/B pictures before you choose (M5).
+
+**Q2 — keep the finished frames between launches?** Today every launch throws away the baked frames (your earlier
+ruling, RENDER.md §2.11), so a 300–1000-drawing scene is re-drawn in the background every time you open it —
+minutes of orange bars. Options: **(a)** keep them for the scenes you open, inside one storage limit (about 3 MB a
+frame at screen detail; the limit is 4 GB or 10% of free space, oldest scenes dropped first); **(b)** keep only the
+scene you last had open; **(c)** keep throwing them away. (a)/(b) cost one check of each drawing when a scene opens
+(M8 measures it).
+
+Everything else on this page is decided.
+
+## 8. Changes to SCHEDULER.md (same branch)
+
+Status updated; R1 names the frame a step asks for; rule 3 says reads of the shown frame are R1 and never held by
+the touch flag; rule 5 becomes "one memory manager" (ask once at the peak, reservations, tiers); rule 6 is rewritten
+for item 9 (f) — the old "one R1 and one R2/R3 at a time" would leave four of the minimum machine's six cores idle;
+new rule 10, presentation; §5's build order is replaced by §6's merges (stages 1 and 3 done; stage 3b = S4).
+
+## 9. Measurements that decide, not guesses
+
+| # | Measure | How | Decides |
+|---|---|---|---|
+| M1 | tap → decode start → swap, per step | `PlaybackTrace` spans on the playcheck, today's code | confirms §0's cause; the before figure for S1 |
+| M2 | the ~250 MiB at Undo | playcheck to the Undo phase with `MallocStackLogging=lite`, `leaks --outputGraph` when the sampler passes 1,100 MiB; `vmmap --summary` by region | where S3b's budget entry goes (render copies → in-place repair; IOSurface → presenter; Metal → `gpu` job) |
+| M3 | whole vs cut at one window | logic test: same frame drawn both ways at fit and 2× zoom, per-pixel max and count over 2/255 | whether the cut also draws from half levels |
+| M4 | what a walk costs at 5000² | device bench (already-unlocked rule): one Test1-like cel, split into dabs / placed-image draws / setup, whole vs 5 bands | band baking (S6) if bands ≤ 1.3× whole, else whole leaves + spill; image-decode cache if images dominate |
+| M5 | half-level decode + window draw; quarter-detail walk | device bench, same fixtures as PERFORMANCE §10.2 | the §4 budget lines; Q1's A/B pictures |
+| M6 | charged vs resident bytes of a sparse picture | `mincore` over a picture after a render, three Test1-like layers | charge touched pages if the gap ≥ 25% |
+| M7 | the stream's cost while drawing | stream on/off pair on the gate (CPU, main spans, memory) | S8's scope |
+| M8 | hashing every cel once on open | 300-cel synthetic scene, simulator relative | whether Q2's (a)/(b) costs an acceptable open |
