@@ -45,8 +45,11 @@ Every status report to the owner lists this queue with each item's state, not on
 7. **Re-check against `main`, then fix what remains:** stroke briefly disappears, stroke latency and
    pan hitches, rapid-edit whole-iPad failures, Liquify shown while held, Move-exit gap,
    the red `SelectionEditUITests` swatch test.
-8. **Canvas freezes** (owner, Nov 24: *"iPad has new canvas freeze reports because I was drawing"*) —
-   built; needs an install and the owner's confirmation ("Canvas freezes" below).
+8. **Canvas freezes** — merged Nov 25 (`71f4fd6e`): one touch recognizer of our own replaces UIKit's pan /
+   pinch / rotation / tap web and the repair; all 43 flights replay clean. Goes to the iPad with the next
+   install; owner to confirm with fast three-finger redos and palm-down pans. Seven UI tests red on old
+   main too, to triage under (7): Distort corner, two `FillLiveAdjust`, `GuideUITests` grid, wide-picture
+   Move box, `MenuInterruption` toolbar gap, `testDenyOutsideSelection…`.
 9. **One memory manager, not one per feature (owner, Nov 25: *"you decide … different features may have
    different specific memory management behaviors that they want programmed in … with some things needing
    to be strictly real time"*).** Decided: **go, designed together with stage 2 as one page** (time and memory
