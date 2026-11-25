@@ -2810,7 +2810,7 @@ struct CanvasView: UIViewRepresentable {
                 // frame the canvas is leaving is the last complete picture; it is held, unclaimed by
                 // `sandwichFullKey`, until this frame's bake lands.
                 if sandwichFull == nil, let left = frameOfTheLastPass, left != canvasManager.currentFrame,
-                   let previous = baker.image(atFrame: left) {
+                   let previous = baker.residentImage(atFrame: left) {
                     sandwichFull = UIImage(cgImage: previous, scale: 1, orientation: .up)
                     sandwichFullFrame = left
                 }
@@ -2955,7 +2955,7 @@ struct CanvasView: UIViewRepresentable {
                 return bakedFramePicture
             }
             if key.fileName == bakedFrameCoverName, let shown = bakedFramePicture { return shown }
-            guard let image = baker.image(for: key) else { return bakedFramePicture }
+            guard let image = baker.image(for: key, atFrame: frame) else { return bakedFramePicture }
             bakedFrameCoverName = key.fileName
             return UIImage(cgImage: image, scale: 1, orientation: .up)
         }

@@ -79,6 +79,23 @@ final class FrameBakerLogicTests: XCTestCase {
         return order
     }
 
+    /// **What the canvas gets for `frame`**: a hit at once, or the answer read (R1, off the main thread)
+    /// it asks for, waited for through the frame-finished observers the canvas itself listens on. Nil
+    /// when nothing lands within `timeout`. A read never decodes on the main thread, so a test that
+    /// wants the picture waits for it the way the canvas does.
+    private func awaitImage(_ baker: FrameBaker, atFrame frame: Int, timeout: TimeInterval = 10) -> CGImage? {
+        if let hit = baker.image(atFrame: frame) { return hit }
+        let listener = NSObject()
+        let landed = expectation(description: "frame \(frame) is read")
+        landed.assertForOverFulfill = false
+        baker.observeFrameFinished(listener) { finished, readiness in
+            if finished == frame, readiness == .resident { landed.fulfill() }
+        }
+        defer { baker.stopObservingFrameFinished(listener) }
+        guard XCTWaiter.wait(for: [landed], timeout: timeout) == .completed else { return nil }
+        return baker.image(atFrame: frame)
+    }
+
     /// A document whose every frame is a **different picture**, so every frame is its own bake key.
     ///
     /// One one-frame cel per frame on layer 0, each carrying its own content. That matters more than
@@ -156,7 +173,7 @@ final class FrameBakerLogicTests: XCTestCase {
     /// Pin the actual painted picture, rather than accepting a clean bit as proof of recovery.
     private func drawnBytes(_ baker: FrameBaker, frame: Int = 0,
                             file: StaticString = #filePath, line: UInt = #line) throws -> [UInt8] {
-        let image = try XCTUnwrap(baker.image(atFrame: frame), file: file, line: line)
+        let image = try XCTUnwrap(awaitImage(baker, atFrame: frame), file: file, line: line)
         let pixels = try XCTUnwrap(FrameBakeStore.bgraBytes(image), file: file, line: line)
         let offset = (5 * pixels.width + 5) * 4
         XCTAssertEqual(Array(pixels.bytes[offset..<(offset + 4)]), [0, 0, 255, 255],
@@ -300,31 +317,28 @@ final class FrameBakerLogicTests: XCTestCase {
         XCTAssertEqual(baker.bakedCount, 0)
         XCTAssertEqual(notifications, 0, "Closed UI consumers must receive no late bake/idle callbacks.")
         XCTAssertNil(baker.exportFocus)
-        XCTAssertNil(baker.image(for: key))
+        XCTAssertNil(baker.image(for: key, atFrame: 0))
         let completed = try XCTUnwrap(baker.store.loadDecoded(key))
         let offset = (5 * completed.width + 5) * 4
         XCTAssertEqual(Array(completed.pixels[offset..<(offset + 4)]), [0, 0, 255, 255],
                        "The frozen worker actually completed; only its canceled landing was discarded.")
     }
 
-    func testResetCancelsAQueuedRingFillAndAllowsTheExistingOwnerToResume() throws {
+    func testResetCancelsAnInFlightReadAndAllowsTheExistingOwnerToResume() throws {
         let manager = recoveryDocument()
-        let queue = DispatchQueue(label: "FrameBakerLogicTests.reset-ring")
         let baker = FrameBaker(manager: manager, store: FrameBakeStore(root: root),
-                               ring: DecodedFrameRing(byteBudget: 1024 * 1024), workQueue: queue)
+                               ring: DecodedFrameRing(byteBudget: 1024 * 1024))
         baker.noteDocumentChanged()
         drain(baker)
         let expected = try drawnBytes(baker)
         baker.ring.removeAll()
-        let gate = DispatchSemaphore(value: 0)
-        queue.async { gate.wait() }
         manager.playbackNow = { 0 }
         manager.play()
         defer { manager.stopPlayback() }
-        XCTAssertNil(baker.image(atFrame: 0))
-        XCTAssertTrue(baker.isBaking, "Premise: a ring-fill read is queued before reset.")
+        XCTAssertNil(baker.image(atFrame: 0), "Premise: a miss, so the frame's answer read is in flight.")
         baker.reset()
-        waitForWorker(queue, releasing: gate)
+        // Whatever the read did off the main thread, its landing was cancelled with it.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
         XCTAssertEqual(baker.ring.count, 0)
         XCTAssertTrue(baker.keyByFrame.isEmpty)
         XCTAssertEqual(baker.bakeQueue.pendingCount, 0)
@@ -1125,7 +1139,7 @@ final class FrameBakerLogicTests: XCTestCase {
 
         for frame in 0..<4 {
             XCTAssertTrue(baker.isBaked(atFrame: frame))
-            guard let image = baker.image(atFrame: frame) else {
+            guard let image = awaitImage(baker, atFrame: frame) else {
                 return XCTFail("Frame \(frame) is on disk and must come back.")
             }
             // **The live canvas's size, not the canvas's** — stage 4d mints the bake at
@@ -1164,10 +1178,12 @@ final class FrameBakerLogicTests: XCTestCase {
                        "The baker's own record is what is stale, which is why nothing reads it for a picture.")
     }
 
-    /// **The ring is filled ahead of the playhead, and only ahead of it** (§3.5).
+    /// **The ring is filled ahead of the playhead** (§3.5), and stopped one frame behind it as well
+    /// (`testStoppedTheRingAlsoHoldsTheFrameBehindThePlayhead`).
     ///
-    /// Lookahead 3 with the playhead on 0 admits frames 0, 1, 2 and 3 and nothing else — play never
-    /// decodes on the display thread, and the frames behind are not what play is about to want.
+    /// Lookahead 3 with the playhead on 0 of a looping scene admits frames 0, 1, 2 and 3, and 9 behind
+    /// it across the loop, and nothing else — the frames further out are not what a step or play is
+    /// about to want.
     func testTheRingIsFilledAheadOfThePlayhead() {
         let manager = perFrameDocument(frames: 10)
         manager.currentFrame = 0
@@ -1177,16 +1193,30 @@ final class FrameBakerLogicTests: XCTestCase {
         baker.noteDocumentChanged()
         drain(baker)
 
-        XCTAssertEqual(baker.ring.count, 4, "The playhead's frame and the three ahead of it.")
-        for frame in 0...3 {
+        XCTAssertEqual(baker.ring.count, 5, "The playhead's frame, the three ahead of it and — stopped, on a loop — the one behind.")
+        for frame in [0, 1, 2, 3, 9] {
             guard let key = baker.keyByFrame[frame] else { return XCTFail("Frame \(frame) must be baked.") }
             XCTAssertTrue(baker.ring.contains(key.fileName), "Frame \(frame) is inside the lookahead.")
         }
-        for frame in 4..<10 {
+        for frame in 4..<9 {
             guard let key = baker.keyByFrame[frame] else { return XCTFail("Frame \(frame) must be baked.") }
             XCTAssertFalse(baker.ring.contains(key.fileName),
                            "Frame \(frame) is past the lookahead and belongs on disk only.")
         }
+    }
+
+    /// **Stopped, the frame behind the playhead is held too** — a step goes either way, and the frame
+    /// it lands on must already be in memory for the whole frame to be up on the next display frame
+    /// (the owner, 2026-11-25: stepping a baked scene showed "a slight delay"). Playing, only ahead.
+    func testStoppedTheRingAlsoHoldsTheFrameBehindThePlayhead() {
+        let manager = perFrameDocument(frames: 10)
+        manager.currentFrame = 5
+        let baker = makeBaker(manager)
+        baker.ringLookahead = 2
+        baker.noteDocumentChanged()
+        drain(baker)
+        let held = (0..<10).filter { baker.keyByFrame[$0].map { baker.ring.contains($0.fileName) } ?? false }
+        XCTAssertEqual(held, [4, 5, 6, 7], "the playhead, two ahead, and one behind")
     }
 
     /// A hold is one entry in the ring as well as one file — the ring is keyed by digest for the same
@@ -1241,7 +1271,7 @@ final class FrameBakerLogicTests: XCTestCase {
                 XCTAssertTrue(baker.ring.contains(key.fileName),
                               "Flip \(flips) to frame \(playhead) missed the ring — play would decode on the display thread.")
             }
-            XCTAssertNotNil(baker.image(atFrame: playhead))
+            XCTAssertNotNil(flips == 0 ? awaitImage(baker, atFrame: playhead) : baker.image(atFrame: playhead))
             drain(baker)
             flips += 1
         }
@@ -1250,8 +1280,8 @@ final class FrameBakerLogicTests: XCTestCase {
     /// **Play never decodes on the display thread** (§3.5), taken literally: while the animation
     /// plays, a frame the ring does not hold is a miss — §2.10's previous picture — and the top-up
     /// that lands it announces it through the frame-finished observers, the way a baked frame is
-    /// announced. At rest the same read decodes synchronously, because a scrub that lands on a frame
-    /// wants that frame and not the one before it.
+    /// announced. At rest it is the same: a miss asks for the frame as an answer (R1) and the canvas
+    /// is told when it lands — never a decode on the main thread (SCHEDULER_DESIGN.md S1).
     func testPlayNeverDecodesOnTheDisplayThreadAndTheTopUpAnnouncesTheFrame() {
         let manager = perFrameDocument(frames: 3)
         let baker = makeBaker(manager)
@@ -1283,8 +1313,11 @@ final class FrameBakerLogicTests: XCTestCase {
 
         manager.stopPlayback()
         baker.ring.removeAll()
-        XCTAssertNotNil(baker.image(atFrame: 1), "At rest a scrub decodes the frame it landed on.")
-        XCTAssertTrue(baker.ring.contains(key.fileName), "And rings it on the way past.")
+        guard let stepped = baker.keyByFrame[2] else { return XCTFail("Frame 2 must be baked.") }
+        manager.currentFrame = 2
+        XCTAssertNil(baker.image(atFrame: 2), "At rest a miss is a miss too: the display thread decodes nothing.")
+        XCTAssertNotNil(awaitImage(baker, atFrame: 2), "The answer read lands the frame the step landed on.")
+        XCTAssertTrue(baker.ring.contains(stepped.fileName), "And rings it on the way past.")
     }
 
     // MARK: - Bookkeeping
@@ -1382,7 +1415,7 @@ final class FrameBakerLogicTests: XCTestCase {
         XCTAssertEqual(baker.bakeQueue.frameCount, 4)
         XCTAssertEqual(pending(baker, manager), Array(0..<4),
                        "The scene length is in the structural stamp, so the shorter scene is a re-bake…")
-        for frame in 4..<10 {
+        for frame in 4..<9 {
             XCTAssertFalse(baker.bakeQueue.isPending(frame), "…and frame \(frame) is not in it.")
         }
     }

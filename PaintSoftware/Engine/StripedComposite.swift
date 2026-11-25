@@ -168,8 +168,9 @@ enum StripedCompositor {
                 let leafBytes = max(1, CompositorBudget.textureBytes(for: recipe.canvasSize))
                 var start = 0
                 while start < visible.count, !declined {
-                    // SCHEDULER.md rule 3: a touch outranks the frame — wait here, between leaves.
-                    InteractionGate.shared.checkpoint()
+                    // SCHEDULER.md rule 3: a touch outranks later work — a bake waits here, between
+                    // leaves. An answer composited through this path is never held.
+                    if MemoryBudget.currentLane == .later { Scheduler.shared.parkWhileTouchHeld() }
                     let batchSize = min(3, max(1, MemoryBudget.shared.freeBytes / leafBytes))
                     let batch = Array(visible[start..<min(start + batchSize, visible.count)])
                     start += batchSize
@@ -342,8 +343,9 @@ enum StripedCompositor {
 
         let image = PixelOps.drawImage(size: frame.size) { _ in
                 for strip in strips where !declined {
-                    // SCHEDULER.md rule 3: a touch outranks the frame — wait here, between strips.
-                    InteractionGate.shared.checkpoint()
+                    // SCHEDULER.md rule 3: a touch outranks later work — a bake waits here, between
+                    // strips. An answer composited through this path is never held.
+                    if MemoryBudget.currentLane == .later { Scheduler.shared.parkWhileTouchHeld() }
                     autoreleasepool {
                         guard let composited = ChunkedCompositor.composite(recipe.windowed(to: strip.buffer),
                                                                            budgetBytes: budgetBytes) else {

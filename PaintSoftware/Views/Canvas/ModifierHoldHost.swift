@@ -78,7 +78,7 @@ struct ModifierHoldHost: UIViewRepresentable {
             counter.name = "window.touchCounter"
             counter.onTouchesChanged = { [weak hold] total in
                 // SCHEDULER.md rule 3: the window's one touch count is what later work yields to.
-                InteractionGate.shared.touchesChanged(to: total)
+                Scheduler.shared.touches(total)
                 hold?.onTouchesChanged?()
             }
         }

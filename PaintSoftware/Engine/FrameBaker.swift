@@ -104,7 +104,7 @@ final class FrameBaker {
     ///  - The same local `playhead` is what `kick` hands to `FrameBakeStore.store(…, playhead:)`,
     ///    whose eviction policy is *"the files farthest from the playhead go first"* — so a long
     ///    export drops what it has already written rather than what it is about to read.
-    ///  - `fillRingAhead` warms the decoded ring ahead of the cursor, not ahead of the artist.
+    ///  - `topUpRing` warms the decoded ring around the cursor, not around the artist.
     ///
     /// **Nothing about the interactive path changes**: this is nil unless an export is live, and it
     /// is `endExport`'s job to make sure that stays true even when one fails. The `range` also
@@ -298,57 +298,92 @@ final class FrameBaker {
         manager.makeFrameRecipe(atFrame: frame, includeBackground: true, sizing: .liveComposite)
     }
 
-    /// The finished picture for `key`: the ring first, then — at rest — the store, decoding into the
-    /// ring on the way past. Nil is a miss and not an error — §2.10 keeps the previous picture up.
+    /// The finished picture for `key` if it is in memory — the ring, or the answer to the last read —
+    /// and nil otherwise. **Never decodes** (SCHEDULER.md rule 2): a miss asks for the frame as an
+    /// answer (R1, `requestRead`) and the canvas keeps the picture it has until `notifyFrameFinished`
+    /// says this one is resident.
     ///
-    /// **Ring → store → `makeImage()` is the whole chain**, and every step of it is zero-copy over
-    /// one `Data`: `loadDecoded` hands back the decompressor's own buffer, the ring retains it, and
-    /// `makeImage()` wraps it in a `CGDataProvider`.
+    /// **Ring → `makeImage()` is the whole chain** and zero-copy over one `Data`: `loadDecoded` hands
+    /// back the decompressor's own buffer, the ring retains it, and `makeImage()` wraps it.
     ///
-    /// **While the animation plays, a miss is a miss and nothing is decoded here** — §3.5's *"play
-    /// never decodes on the display thread"*, taken literally. The store read is an LZ4 decode of a
-    /// whole frame, MEASURED at 21 ms a frame on the simulator and 39–70 ms on the owner's iPad 9 at
-    /// 4096², which is more than a 24 fps interval; paying it on the main thread does not make the
-    /// frame land on time, it makes every frame after it late as well. The walk `kick` starts on
-    /// the same pass decodes the frame off the main thread, and `finishRingFill` announces it
-    /// through `notifyFrameFinished`, so the canvas showing the previous picture is told the moment
-    /// this one is resident. **A frame step is a flip too until it settles**
-    /// (`CanvasManager.framesAreFlipping`): stepping through a 5000² scene decoded a 95 MiB frame on
-    /// the main thread per step, which SCHEDULER.md rule 2 forbids. Once the playhead has settled a
-    /// read decodes synchronously again: the artist has landed on a frame and wants that frame.
-    func image(for key: FrameBakeKey) -> CGImage? {
+    /// The read is an answer, not later work, and that is S1 of SCHEDULER_DESIGN.md: it used to
+    /// decode on the main thread at rest and, while the frames flipped, to wait behind the bake and
+    /// behind the touch flag — the tap that stepped held its own frame back 250–500 ms (M1: the
+    /// decode began 267 ms after every slow step on the iPad 9 simulator; the owner's scrub on a
+    /// baked 2048×1024 scene read 0 hits in 110 flips).
+    func image(for key: FrameBakeKey, atFrame frame: Int) -> CGImage? {
         guard !isClosed else { return nil }
         // `value` is the ring's answer — 1 resident, 0 a miss — so a `PlaybackTrace` report carries
-        // the hit rate without a second counter, and `storeDecode`'s `onMain` count is what a
-        // device run holds §3.5 against.
-        if let resident = ring.frame(for: key.fileName) {
+        // the hit rate without a second counter.
+        if let resident = ring.frame(for: key.fileName) ?? answered.flatMap({ $0.name == key.fileName ? $0.frame : nil }) {
             return PlaybackTrace.span(.bakeRead, value: 1) { resident.makeImage() }
         }
-        guard manager?.framesAreFlipping != true else {
-            PlaybackTrace.mark(.bakeRead, value: 0)
-            ringWalk = nil
-            kick()
-            return nil
-        }
-        return PlaybackTrace.span(.bakeRead, value: 0) {
-            let result = store.read(key)
-            guard let decoded = result.frame else {
-                if result.isUnavailable { recover(key) }
-                return nil
-            }
-            ring.insert(decoded, for: key.fileName)
-            // The ring changed by a hand other than the walk's, so what the walk settled no longer
-            // holds; the next `kick` re-walks from the playhead.
-            ringWalk = nil
-            return decoded.makeImage()
-        }
+        PlaybackTrace.mark(.bakeRead, value: 0)
+        requestRead(key, atFrame: frame)
+        return nil
     }
 
     /// The finished picture for `frame`, or nil. The two calls above, in the order the display path
     /// wants them.
     func image(atFrame frame: Int) -> CGImage? {
         guard let key = currentKey(atFrame: frame) else { return nil }
-        return image(for: key)
+        return image(for: key, atFrame: frame)
+    }
+
+    /// `frame`'s picture if it is in memory, asking for nothing — for a picture wanted only if it is
+    /// free, such as the frame a step is leaving, whose read must not cancel the new frame's.
+    func residentImage(atFrame frame: Int) -> CGImage? {
+        guard !isClosed, let key = currentKey(atFrame: frame) else { return nil }
+        let resident = ring.frame(for: key.fileName) ?? answered.flatMap { $0.name == key.fileName ? $0.frame : nil }
+        return resident?.makeImage()
+    }
+
+    // MARK: - The answer: the frame on screen, read as R1
+
+    /// The last frame an answer read **that the ring refused** — a ring at its budget may, and the
+    /// canvas asked for exactly this one.
+    private var answered: (name: String, frame: DecodedFrame)?
+    /// The file the answer in flight is reading, so a pass asking again does not restart it.
+    private var reading: String?
+    /// The answer's latest-wins key: a newer frame cancels the read of the older (rule 4).
+    private var readKey: JobKey { JobKey("FrameBaker.read", ObjectIdentifier(self)) }
+
+    /// **Reads `key`'s file off the main thread as an answer** — not held by the touch flag, not behind
+    /// the bake, and cancelled by the next frame's read. A frame with no file has nothing to read:
+    /// the bake has it at the head of its queue (band 1 is the playhead), and the canvas keeps the
+    /// last whole picture meanwhile (owner Q1, 2026-11-25).
+    private func requestRead(_ key: FrameBakeKey, atFrame frame: Int) {
+        guard reading != key.fileName else { return }
+        guard store.contains(key) else {
+            // A frame the loop recorded whose file is gone (evicted, or lost) is dirty again; one it
+            // has not reached yet is already in its queue.
+            if keyByFrame[frame] == key { recover(key) } else { kick() }
+            return
+        }
+        reading = key.fileName
+        let store = store
+        Scheduler.shared.submit(Job(key: readKey, jobClass: .answer, name: "frame read", visible: true, work: { context in
+            try context.checkpoint()
+            return MemoryBudget.withLane(.answer) { store.read(key) }
+        }, land: { [weak self] (result: FrameBakeStore.ReadResult) in
+            self?.finishRead(key, atFrame: frame, result: result)
+        }))
+    }
+
+    private func finishRead(_ key: FrameBakeKey, atFrame frame: Int, result: FrameBakeStore.ReadResult) {
+        guard !isClosed else { return }
+        if reading == key.fileName { reading = nil }
+        if result.isUnavailable {
+            recover(key)
+            return
+        }
+        guard let decoded = result.frame else { return }
+        // The ring's budget may refuse it; the frame the canvas asked for is then held here, outside
+        // the ring, until the next answer — one frame, the R1 reserve SCHEDULER_DESIGN.md §3 sizes.
+        answered = ring.insert(decoded, for: key.fileName, keeping: ringKept(around: frame)) ? nil : (key.fileName, decoded)
+        ringWalk = nil
+        for shown in (framesByDigest[key.fileName] ?? []).union([frame]) { notifyFrameFinished(shown, .resident) }
+        topUpRing()
     }
 
     /// The scheduler's clean key remains in the shared store inventory. Timeline painting never
@@ -388,6 +423,13 @@ final class FrameBaker {
     /// otherwise claim files that are gone.
     func reset() {
         jobs.cancel()
+        Scheduler.shared.cancel(key: readKey)
+        Scheduler.shared.cancel(key: ringKey)
+        answered = nil
+        reading = nil
+        ringFilling = false
+        bakeIsIdle = false
+        ringIsIdle = false
         bakeQueue = BakeQueue()
         keyByFrame = [:]
         framesByDigest = [:]
@@ -417,6 +459,8 @@ final class FrameBaker {
     /// is minted only after the previous landing, using the current playhead and model.
     func kick() {
         guard !isSuspended, !isClosed else { return }
+        bakeIsIdle = false
+        topUpRing()
         jobs.request { [weak self] in self?.nextWork() }
     }
 
@@ -427,7 +471,7 @@ final class FrameBaker {
         // **SCHEDULER.md rule 3: no bake starts while a touch is down or just lifted.** A bake is a
         // whole-frame composite (5.3–8.8 s at the owner's 5000² on the iPad 9) of a picture the
         // canvas is not showing while the artist edits; it looks again when the gate has settled.
-        guard !InteractionGate.shared.isClosed else {
+        guard !Scheduler.shared.touchHeld else {
             lookAgainWhenTheGateSettles()
             return nil
         }
@@ -447,16 +491,14 @@ final class FrameBaker {
                                          direction: direction,
                                          playbackRange: range,
                                          looping: looping) else {
-            // Nothing left to composite. The frames ahead of the playhead may still be cold in the
-            // ring, though — see `fillRingAhead`, which is the other half of §3.5's promise that
-            // play never decodes on the display thread.
-            if let work = fillRingAhead(playhead: playhead, direction: direction, range: range, looping: looping) {
-                return work
-            }
-            onIdle?()
+            // Nothing left to composite. The ring's own walk is not behind this loop any more
+            // (`topUpRing`), so idle is both of them stopped.
+            bakeIsIdle = true
+            reportIdleIfDone()
             return nil
         }
 
+        bakeIsIdle = false
         // Step 1, on the main actor and O(layers) with no pixel work — RENDER §3.2's whole seam.
         // Nothing proportional to canvas area may join these two lines.
         guard let recipe = Self.recipe(manager, atFrame: frame) else {
@@ -547,7 +589,7 @@ final class FrameBaker {
     private func lookAgainWhenTheGateSettles() {
         guard !gateRetryArmed else { return }
         gateRetryArmed = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + InteractionGate.settle) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + TouchFlag.settle) { [weak self] in
             guard let self else { return }
             self.gateRetryArmed = false
             self.kick()
@@ -556,124 +598,136 @@ final class FrameBaker {
 
     // MARK: - Ring top-up
 
-    /// Decodes one frame from the store into the ring, for the frames inside the lookahead the loop
-    /// will never visit — and returns whether it started a job.
+    /// **Decodes the frames around the playhead into the ring, one at a time, as R2** — the frames a
+    /// step or a play is about to ask for, so the read it makes is a hit and the whole frame is up on
+    /// the next display frame (SCHEDULER_DESIGN.md §3, "Predictive loading").
     ///
-    /// **The loop cannot fill the ring on its own, and that gap is what this closes.** The bake job
-    /// rings the frame it just wrote, so the ring is warm on the pass that *dirties* the document.
-    /// Playback dirties nothing: on the second lap every frame is clean, `BakeQueue.next` answers
-    /// nil, and the ring holds whatever survived from the first lap — which at a realistic budget is
-    /// a handful of frames. Every tick past those would miss in `image(for:)`, which is exactly
-    /// what §3.5 rules out (*"Play never decodes on the display thread"*).
+    /// **Its own lane, not the bake's worker**: it used to run only when no frame in the scene was
+    /// dirty, so during a bake it waited for the whole scene (§0). It is R2 work nobody is looking at
+    /// yet, so the touch flag holds it — a scrub warms nothing but the frame under the finger, which
+    /// is an answer (`requestRead`).
     ///
-    /// `keyByFrame` rather than a fresh mint, and that is what makes this cheap enough to sit in
-    /// `kick`: a frame the loop has visited and nothing has dirtied since resolves to the key
-    /// recorded there, so the whole scan is dictionary lookups. A frame the baker has never seen is
-    /// simply skipped — it is dirty, so the branch above this one is handling it.
+    /// `keyByFrame` rather than a fresh mint, so the scan is dictionary lookups: a frame the loop has
+    /// visited and nothing has dirtied since resolves to the key recorded there; a frame it has never
+    /// seen is dirty and the bake is handling it.
     ///
-    /// **One frame per call, under `isBaking`**, so this obeys the same one-job-at-a-time discipline
-    /// the composite does and cannot run beside it. `finishRingFill` goes round again.
-    ///
-    /// ## The walk is play's own walk, and the ring keeps the near end of it
-    ///
-    /// Distance `d` from the playhead is `d` steps of `BakeQueue.step` — the rule `advancePlayback`
-    /// uses — so the frames this decodes are the frames play is about to ask for, **wrap included**:
-    /// on the last frame of a loop the frame one ahead is the loop's first, and a walk that counted
-    /// `playhead + d` instead found nothing ahead there and left every lap's first flip to miss.
-    ///
-    /// And the frame at distance `d` is inserted **keeping the frames at distances 1 to `d − 1`**
-    /// (`DecodedFrameRing.insert(_:for:keeping:)`). Without that the walk evicted the very frame it
-    /// was for: filling the frame two ahead into a ring that holds two threw out the one ahead,
-    /// because LRU knows only which entry is older, and the next flip decoded on the display thread.
-    /// MEASURED at 80% of flips on a 3-frame loop at 4096², iPad 9 and simulator alike. The frame on
-    /// screen is deliberately *not* kept: it has been read, its bytes live on in the `CGImage` the
-    /// canvas holds, and a slot spent on it is a slot the frame after next cannot have. So a ring
-    /// that holds K frames holds the K frames *ahead* of the playhead, which is what a playhead about
-    /// to walk through them wants, and the refusal ends the walk for this playhead.
-    ///
-    /// The walk only ever moves outward for a given playhead, and it is bounded by the lookahead and
-    /// by one lap of the range, since past a lap it would be asking for frames it has already asked
-    /// for. The marker is dropped the moment the playhead or the direction moves, so a tick re-walks
-    /// — and finds the near frames already in.
-    private func fillRingAhead(playhead: Int, direction: BakeQueue.Direction,
-                               range: ClosedRange<Int>?, looping: Bool) -> LatestWins.Work? {
-        guard ringLookahead > 0, let manager else { return nil }
-        let low = max(range?.lowerBound ?? 0, 0)
-        let high = min(range?.upperBound ?? manager.contentEndFrame - 1, manager.contentEndFrame - 1)
-        guard low <= high else { return nil }
-        let reach = min(ringLookahead, high - low)
-
-        var distance = 0
-        if let walk = ringWalk, walk.playhead == playhead, walk.direction == direction {
-            distance = walk.nextDistance
-        }
-        var frame = playhead
-        var nearer: Set<String> = []
-        // Re-walk the distances already settled so `nearer` names them; each is a dictionary lookup.
-        for d in 0..<min(distance, reach + 1) {
-            if d > 0 {
-                guard let next = BakeQueue.step(from: frame, low: low, high: high,
-                                                direction: direction, looping: looping) else { break }
-                frame = next
-            }
-            if d > 0, let key = keyByFrame[frame] { nearer.insert(key.fileName) }
-        }
-        while distance <= reach {
-            if distance > 0 {
-                guard let next = BakeQueue.step(from: frame, low: low, high: high,
-                                                direction: direction, looping: looping) else { break }
-                frame = next
-            }
-            guard let key = keyByFrame[frame] else {
-                distance += 1
-                continue
-            }
+    /// **A frame is inserted keeping every nearer one** (`ringTargets`' order), so a ring that holds K
+    /// frames holds the K nearest, and filling a far frame never evicts the near one it was for. A
+    /// refusal ends the walk for this playhead and direction until either moves.
+    private func topUpRing() {
+        guard !ringFilling, ringLookahead > 0, !isSuspended, let manager else { return }
+        let playhead = exportFocus?.frame ?? manager.currentFrame
+        let direction: BakeQueue.Direction = exportFocus == nil ? playbackDirection : .forward
+        let targets = ringTargets(around: playhead, direction: direction)
+        var start = 0
+        if let walk = ringWalk, walk.playhead == playhead, walk.direction == direction { start = walk.next }
+        // The targets already walked still name what an insert keeps.
+        var nearer = Set(targets.prefix(start).dropFirst().compactMap { keyByFrame[$0]?.fileName })
+        for index in targets.indices.dropFirst(start) {
+            let frame = targets[index]
+            guard let key = keyByFrame[frame] else { continue }
             if ring.contains(key.fileName) {
-                if distance > 0 { nearer.insert(key.fileName) }
-                distance += 1
+                if index > 0 { nearer.insert(key.fileName) }
                 continue
             }
-            ringWalk = (playhead, direction, distance + 1)
-            let kept = nearer
-            return { [weak self, store] in
-                let result = store.read(key)
-                return {
-                    PlaybackTrace.span(.renderLanded) {
-                        self?.finishRingFill(key: key, result: result, keeping: kept)
-                    }
-                }
+            guard store.contains(key) else {
+                // Recorded, but its file is gone: dirty again, and the bake rebuilds it.
+                recover(key)
+                return
             }
+            ringWalk = (playhead, direction, index + 1)
+            ringFilling = true
+            ringIsIdle = false
+            let kept = nearer, store = store
+            Scheduler.shared.submit(Job(key: ringKey, jobClass: .soon,
+                                        name: "ring top-up", work: { context in
+                try context.checkpoint()
+                return MemoryBudget.withLane(.soon) { store.read(key) }
+            }, land: { [weak self] (result: FrameBakeStore.ReadResult) in
+                PlaybackTrace.span(.renderLanded) {
+                    self?.finishRingFill(key: key, result: result, keeping: kept, playhead: playhead, direction: direction)
+                }
+            }))
+            return
         }
-        ringWalk = (playhead, direction, reach + 1)
-        return nil
+        ringWalk = (playhead, direction, targets.count)
+        ringIsIdle = true
+        reportIdleIfDone()
     }
 
-    /// How far the top-up has already walked, and from where. See `fillRingAhead`.
-    private var ringWalk: (playhead: Int, direction: BakeQueue.Direction, nextDistance: Int)?
+    /// **The frames worth holding decoded, nearest first** — the playhead's own, then one ahead and —
+    /// stopped — one behind (a step goes either way), then on ahead through the lookahead. Distance is
+    /// play's own walk (`BakeQueue.step`), wrap included: on the last frame of a loop the frame one
+    /// ahead is the loop's first.
+    private func ringTargets(around playhead: Int, direction: BakeQueue.Direction) -> [Int] {
+        guard let manager else { return [] }
+        let range = exportFocus?.range ?? Self.playbackRange(of: manager)
+        let low = max(range?.lowerBound ?? 0, 0)
+        let high = min(range?.upperBound ?? manager.contentEndFrame - 1, manager.contentEndFrame - 1)
+        guard low <= high else { return [playhead] }
+        let looping = exportFocus == nil && manager.isLoopEnabled
+        let reach = min(ringLookahead, high - low)
+        var targets = [playhead]
+        var frame = playhead
+        for _ in 0..<reach {
+            guard let next = BakeQueue.step(from: frame, low: low, high: high, direction: direction,
+                                            looping: looping) else { break }
+            frame = next
+            if !targets.contains(next) { targets.append(next) }
+            if targets.count == 2, !manager.isPlaying, exportFocus == nil,
+               let behind = BakeQueue.step(from: playhead, low: low, high: high,
+                                           direction: direction == .forward ? .backward : .forward, looping: looping),
+               !targets.contains(behind) {
+                targets.append(behind)
+            }
+        }
+        return targets
+    }
 
-    /// Takes one decoded frame in and goes round again — **but only if the ring took it**.
-    ///
-    /// A missing/invalid file requeues the frames sharing it. A valid decode refused by the ring
-    /// budget, or a decode allocation refusal, ends this playhead's walk without re-rendering.
-    ///
-    /// A frame that landed is announced to every frame it serves, the way a frame the loop bakes
-    /// is: a canvas that missed on it during playback is showing the previous picture (§2.10) and is
-    /// waiting to be told this one is resident.
-    private func finishRingFill(key: FrameBakeKey, result: FrameBakeStore.ReadResult, keeping kept: Set<String>) {
+    /// The ring entries nearer `frame` than whatever is inserted for it — what an answer keeps.
+    private func ringKept(around frame: Int) -> Set<String> {
+        Set(ringTargets(around: frame, direction: playbackDirection).dropFirst().compactMap { keyByFrame[$0]?.fileName })
+    }
+
+    private var ringKey: JobKey { JobKey("FrameBaker.ring", ObjectIdentifier(self)) }
+    /// A top-up's decode is in flight.
+    private var ringFilling = false
+    /// **How far the walk has gone, and from where** — it only ever moves outward for one playhead and
+    /// direction, which is what makes it terminate when the ring is narrower than the targets: a far
+    /// frame inserted may evict a near one, and a walk that rescanned from the playhead would decode
+    /// the two in turn for ever. Dropped when anything else changes the ring, and moved past the end
+    /// by a refusal.
+    private var ringWalk: (playhead: Int, direction: BakeQueue.Direction, next: Int)?
+    /// The two halves of idle: the bake loop has no frame, and the ring walk has nothing to decode.
+    private var bakeIsIdle = false
+    private var ringIsIdle = false
+
+    /// `onIdle` once the bake and the ring walk have stopped and no answer is being read.
+    private func reportIdleIfDone() {
+        guard bakeIsIdle, ringIsIdle, !ringFilling, reading == nil else { return }
+        onIdle?()
+    }
+
+    /// Takes one decoded frame in and walks on — **but only if the ring took it**. A missing or
+    /// invalid file requeues the frames sharing it; a refusal by the ring's budget ends the walk for
+    /// this playhead. A frame that landed is announced to every frame it serves: a canvas that missed
+    /// on it is showing the previous picture and is waiting to be told this one is resident.
+    private func finishRingFill(key: FrameBakeKey, result: FrameBakeStore.ReadResult, keeping kept: Set<String>,
+                                playhead: Int, direction: BakeQueue.Direction) {
+        ringFilling = false
+        guard !isClosed else { return }
         if result.isUnavailable {
             recover(key)
             return
         }
         guard let decoded = result.frame, ring.insert(decoded, for: key.fileName, keeping: kept) else {
-            if var walk = ringWalk {
-                walk.nextDistance = ringLookahead + 1
-                ringWalk = walk
-            }
-            onIdle?()
+            ringWalk = (playhead, direction, Int.max)
+            ringIsIdle = true
+            reportIdleIfDone()
             return
         }
         for frame in framesByDigest[key.fileName] ?? [] { notifyFrameFinished(frame, .resident) }
-        kick()
+        topUpRing()
     }
 
     /// What one iteration did.
