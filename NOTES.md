@@ -44,3 +44,9 @@ is never reset, and everything tied to it stays terminal. The recognizers that n
 | tracked contact vanishes without an end | treated as cancelled at the next event | stroke interrupted |
 | app presses (fill/eyedropper/text/place/catchAll/moveBoxCommit) | unchanged: simultaneous with everything | fill drag cancelled on nav |
 | trackpad pinch/rotate | was inert: `.changed` guard needs numberOfTouches>=2, indirect gestures report 0 | — |
+
+## Measured on the old build (iPad 9 sim, 2026-11-24, evidence slop2.log)
+pinch slop 8 pt of finger distance, subtracted (scale = d/(d0±8)); rotation slop 5°, subtracted; pan slop 10 pt (UIPan
+`_hysteresis`). UITap: allowableMovement 45, touch separation 0.75 s, max duration 1.5 s.
+A staggered pair on a drawing layer with fingers painting never navigated at all (slop.log: 0 of 50 gestures) — the
+finger's stroke `.began` failed the pan. Documented in CanvasTransformLeavesStandingUITests too. New design fixes it.
