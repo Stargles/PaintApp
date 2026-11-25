@@ -10,11 +10,10 @@ From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
 
 ## Resume here — November 21, 2026
 
-0. **PAUSED by the owner (Nov 21) at the checkpoint after `tmp/nov21-budget` (SCHEDULER stage 3, one
-   memory budget; the install gate `tools/playcheck.sh` must go green) reports — start nothing new until he
-   says continue.** On continue: merge/verify that branch, then install only if the gate is green; next is
-   TODO queue (5). The owner will AirDrop Test1 to this Mac later — when it arrives, make the gate run on it
-   (delete the copy when the item closes). The resigner now never installs while the app is running.
+0. **Running (Nov 25; owner said continue).** Stage 3 is merged and its signed build `adc8e327` staged in
+   `resign_state` (installs itself when the app is closed). In flight: `tmp/nov24-touch` (canvas freezes,
+   Opus). Next: scheduler stage 2 (TODO queue (5)) — an Opus design page reviewed before code. He will
+   AirDrop Test1 later; make the gate run on it. Root stays high level (AGENTS.md).
 1. **Nov 21 plan, in order (owner: "fix everything and do it right"; TODO.md top item).** Installed:
    `8545ac57` (= `2891caad` code), profile to Nov 28 — the owner's check of it FAILED: Play still takes
    the iPad down, steps ~400 ms and staggered, bake bars slow, version label never changes. **No device

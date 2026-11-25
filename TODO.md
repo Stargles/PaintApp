@@ -13,7 +13,8 @@ Every status report to the owner lists this queue with each item's state, not on
 1. **Play crash** — measured: it is the **app's own memory** (1.9–2.5 GB on the simulator against the
    iPad 9's 1,850 MiB app limit), not the render server (≤ 206 MiB now). Two producers fixed and merged
    Nov 21 (renderers recording display lists; heavy objects freed only on main). **SCHEDULER.md stage 3
-   (one budget) on `tmp/nov21-budget`, not merged: `tools/playcheck.sh` GREEN three times**, app peak
+   (one budget) merged Nov 25 (`adc8e327`), staged for the iPad — the installer puts it on when the app is
+   closed: `tools/playcheck.sh` GREEN four times**, app peak
    1,138–1,142 MiB against the 1,165 gate (was 1,725 entering the scene at `ee0e672d`); every other
    phase ≤ 1,073. `Engine/MemoryBudget.swift` is the one admission point (888 MiB on the iPad 9,
    derivation in its header and PERFORMANCE.md §37). **Thin spot: Undo** — ~250 MiB the budget is not
@@ -29,8 +30,8 @@ Every status report to the owner lists this queue with each item's state, not on
 3. **Crash catcher** — merged Nov 21; reaches the iPad with the next install (with (1)).
 4. **Open lasso acts as closed for every action** (Nov 17 ruling) — merged Nov 21; reaches the iPad
    with (1). Owner to check: draw an open C, then Copy, To New Layer, Clear.
-5. **Frame steps instant and unstaggered + bake speed** — scheduler stage 2, after (1). MEASURED on
-   `tmp/nov21-budget` (iPad 9 simulator, playcheck, end to end through a screen probe that reads to
+5. **Frame steps instant and unstaggered + bake speed** — scheduler stage 2, after (1). MEASURED with
+   stage 3 (iPad 9 simulator, playcheck, end to end through a screen probe that reads to
    ~0.3 s): **one step to a whole settled frame 2.23–2.38 s**; **bake 0.19–1.52 s a frame** (six frames
    in 1.1–9.1 s — the frame on screen costs no walk; the spread is the bake waiting for memory behind
    the entering renders).
@@ -38,7 +39,7 @@ Every status report to the owner lists this queue with each item's state, not on
    moment late** — caused by `d72eb69f`'s window-sized pictures (only the visible window is drawn, so
    newly revealed edges wait for a redraw). Owner: minor, fix along the way. Likely shape: keep a small
    whole-canvas picture under the window so revealed edges show at once (soft) until the sharp redraw.
-6. **Undo latency / raster Undo budget** — rides on stage 3's one budget (`tmp/nov21-budget`). Undo is
+6. **Undo latency / raster Undo budget** — rides on stage 3's one budget (merged). Undo is
    the playcheck's peak phase: ~250 MiB transient outside the budget (not the vector walk's
    transparency layers). `UndoHistory`'s own 192 MiB cap is not yet an entry in the one budget.
 7. **Re-check against `main`, then fix what remains:** stroke briefly disappears, stroke latency and
