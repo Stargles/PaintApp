@@ -30,7 +30,7 @@ Cancel: **W** = waiting request only (`LatestWins`), **G** = pauses at gate chec
 | Layer picture | `StrokeCanvasView.startVectorRender` | `DeferredVectorRender.queue`, serial, userInit. | 1–2 pictures | R1 | superseded only before it starts | landing |
 | Layer/onion window draw | `CanvasPictureView` | concurrent, userInit. | window | R0 feed | W | — |
 | Live ink, live eraser | `StrokeScratch.renderQueue` | serial | window | R0/R1 | W | `settleCelContent()` renders; live dab stamping |
-| Sandwich halves, eyedropper | `CanvasView.sandwichQueue` | serial, no/userInit. | 2–3 pictures | R2 | W | O(layers) mint |
+| Sandwich halves, eyedropper | `CanvasView.sandwichQueue` | serial, userInit. | 2–3 pictures | R2 | W | O(layers) mint |
 | Onion skin | `CanvasView.onionQueue` | serial | reduced | R2 | W | — |
 | Thumbnails | `thumbnailRegenQueue`, `thumbnailBackfillQueue` | utility | 1 picture flatten | R2 | task only | install |
 | Fill | `CanvasManager.fillQueue` + `MetalFillEngine` | serial, **userInteractive** | up to picture + reference | R1 | W | `fillQueue.sync {}` (`+Fill:243`); GPU waits ×5 |
@@ -127,3 +127,181 @@ set; the screen keeps what it has. Nothing else may set contents, so "mixed" has
 per-host landings, `isAwaitingFirstPicture`, `coverTheHostsWithTheBakeWhileTheyRender`, the held frame,
 `frameStepSettleSeconds`, `presentFirst`'s draw on main. It is not a diagnosis of the flicker when laying several
 strokes — that is re-tested on the build (TODO item 7) — but it makes that class of flicker inexpressible.
+
+## 3. Memory manager — `MemoryBudget` grown, not replaced
+
+Kept: one number (0.48 of the app's limit, 888 MiB on the minimum machine), entries, grants, the device
+valve, pressure trims. Added: what an entry declares, reservation, tiers, arbitration. Deleted at the end:
+`Priority` as three hand-set levels, `waitForRoom`, `currentLane` in thread dictionaries, per-cache shares
+(`frameRingShareDivisor`, `UndoBudget.physical/16`, `defaultByteCeiling`, `CompositorBudget.textureBudgetBytes`
+as a *budget* — it stays as a strip height).
+
+**What an entry declares (item 9 (a)) — mechanism central, policy per feature:**
+
+```swift
+struct EntryFacts { owner: Feature; key: ContentKey; bytes: Int
+    comesBack: .rebuild(ms) | .disk(ms) | .never             // measured by the manager: last real cost, not a guess
+    nextUse: .now | .soon(rank: Int) | .unlikely             // rank 0 = the next frame / adjacent layer
+    standIns: [StandIn] }                                    // .half, .quarter, .merged(into: key)
+protocol FeaturePolicy { var floorBytes: Int { get }         // what it may always keep
+    func nextUse(of: ContentKey, _ view: ViewState) -> NextUse   // playhead, direction, active layer, window
+    func accepts(_ s: StandIn, for: ContentKey) -> Bool
+    func encode(_ key: ContentKey) -> Encoder?               // how it spills; nil = never spilled
+    func restored(_ key: ContentKey, _ tier: Tier) }         // "your picture is back" — never "free yours now"
+```
+A feature answers questions; only the manager decides *when*. No feature frees, spills or loads on its own;
+the manager deletes the bytes, so a hook that forgets cannot leak.
+
+**Reservation (b) — real time first.** Two pots nothing else may take: **R0** = the on-screen window surfaces and
+the live stroke's window (derived: ≤ 4 windows; 53 MiB at 2160×1620) and **R1** = one picture plus a
+half-picture scratch (143 MiB at 5000², capped at 1/5 of the budget). R2/R3 and predictions draw only from
+what is left. R0/R1 never read disk: what R1 may need next (the active layer, its neighbours' inputs, the shown
+frame) is memory by policy, and an R1 job that finds it on disk does not wait — the last complete picture
+stays and the load runs as a promoted R2 job (counted: `r1DiskWaits` must be 0).
+
+**A job asks once.** `Need.bytes` is the peak; admission grants it whole or not at all; sub-allocations draw from
+that grant (`workspace`), so nothing is refused half-way and **no job holding memory ever waits for more**.
+R2/R3 that do not fit stay queued holding nothing and are re-tried when bytes are returned (an event, not a
+0.05 s poll). An R1 that cannot fit even after eviction says so through the existing notices.
+
+**Tiers**: memory → **disk** (one `PictureStore`: tiled LZ4, 512×512 tiles, SHA-256 content key) → **rebuild**.
+- *Evict* drops the bytes if a file or rebuild exists; *spill* (R3) writes first. Spill only when
+  `rebuildMs > 2 × reloadMs` **and** it compressed below 60%. A vector layer (350–640 ms to walk on device,
+  MEASURED; 25–115 ms to reload one-core, from PERFORMANCE §10.2 scaled ×1.49–5.96, ESTIMATE) always passes; a
+  thumbnail never does. `.never` entries (raster undo) must spill before they may be evicted.
+- *Disk limit (d)*: one number for bakes + spill + undo: `min(4 GiB, 10% of free disk)`, always leaving 2 GiB
+  free (below that: no spill, bakes near the playhead only). Read at launch and when a write fails.
+- *Write rate*: a token bucket at ¼ of the write speed measured on the first writes (floor 20 MiB/s), shared by
+  bakes and spill. Writes are R3 and stop under a touch.
+- Rebuildable files live in Caches; `.never` files in an excluded-from-backup session folder, emptied on close.
+
+**Where the OS helps, and where it does not.** (Stated plainly; nothing here relies on the unsure ones.)
+| Mechanism | Verdict |
+|---|---|
+| Untouched pages of a zeroed (`calloc`) buffer | **Helps.** `PixelOps.drawImage` already callocs and never clears: blank rows are never resident, so we *over*-charge sparse layers. M6 measures by how much; if ≥ 25%, charge the touched pages (`mincore`) after a render. |
+| `mmap` of a clean file | Not in the footprint, so good for **compressed** files read by R2/R3 (the store's reads become mapped). **Not** for pixels R0/R1 touch: a page fault is a hidden disk wait, and 95 MiB uncompressed files would quadruple the writes. |
+| Purgeable memory / `NSCache` | Not used: the system drops in its own order, invisible to our floors, and a purged picture is found at draw time — on the path that may not wait. |
+| Memory compression | Not relied on. Whether a compressed page still counts in full against the app's jetsam limit is disputed in our own notes (PERFORMANCE.md §6 item says compressed size; XNU's ledger reads as full page size). It can only slow a touch that faults a page back in. |
+| App killed at its own limit regardless of system free memory | The reason the manager exists: no OS mechanism trades one of our pictures for another. |
+
+**Arbitration (c)** — one order, whenever room is needed:
+1. Who is asking: R1 may evict `.soon`/`.unlikely`; R2 only `.unlikely` and `.soon` of a lower rank than itself;
+   R3 only `.unlikely`. `.now` (on screen) is never evicted.
+2. Before evicting, take an accepted stand-in (a half-size frame frees ¾ and still draws).
+3. Victims by `nextUse`, then **cost to get back per byte freed, cheapest first**, then least recently used.
+4. **Floors**: each feature keeps `floorBytes` against everyone but R1 (undo 8 MiB and its newest step; ring 1 half
+   frame; stream 1 frame; thumbnails 4 MiB; layers 0 — they are `.now` or nothing). Floors sum to ≤ 10%.
+5. **Anti-thrash**: a loaded entry stays ≥ 2 s unless R1 needs the bytes; evicted and wanted again within 2 s counts
+   as a thrash and doubles that entry's stay (to 30 s); a file-backed entry is dropped, not re-written; a prediction
+   never evicts another prediction of equal or better rank; predictions stop when thrashes > 2 in 10 s.
+
+**Predictive loading** (R2, only from free room): stopped — frames ±1, then 2 more in the last step's direction,
+then the adjacent layers' pictures; playing — the next second, half size at fit zoom; scrubbing — nothing but the
+frame under the finger. A touch on the canvas cancels it.
+
+### 3.1 Layouts
+
+**Layer pictures.** Today 5 × 95 = 477 MiB on screen, growing with the layer count. New: `below` (everything under
+the active layer, merged), the active layer, `above` (merged) — **≤ 286 MiB at any layer count** — using the existing
+`SandwichRecipe`/`LivePairCut` composites for every document; the flat row of per-layer hosts is deleted. Where
+something above blends or grades, the existing `.overHost` cut: one merged picture + active. A live stream or
+float widens the middle run as `liveHostRun` says: one picture per layer in it. The other layers' own pictures are
+`.soon` (the two neighbours) or on disk.
+
+Pictures become **app-private and repaired in place**: since `d72eb69f` the render server only ever gets window
+surfaces, so nothing outside holds a picture. An edit renders its damage into a damage-sized scratch, then copies it
+in under the picture's short lock (≤ 2 ms) and stamps the revision. Reads mint a fresh `CGImage` wrapper each time, so
+CoreGraphics cannot serve a stale copy; a bake reads in ≤ 10 ms bands and is cancelled if the revision moves.
+This deletes the 95 MiB copy per landed edit and the copy per Undo. Not chosen: tiling the in-memory picture (seams
+under fractional scaling; every reader rewritten) and copy-on-write pages (Apple-only; double-counted footprint risk).
+
+| Event | What happens | Latency on the minimum machine (ESTIMATE) |
+|---|---|---|
+| Stroke lands | damage repaired in place; `below`/`above` untouched | one damage walk; ≤ 100 ms |
+| Layer switch, neighbour | screen unchanged at once; R2 makes the new cut: `below ∪ old`, rest merged from memory | 0 visible; cut ≈ 60–120 ms |
+| Layer switch, far | same, leaves loaded from disk (parallel) | 0 visible; cut ≈ 150–300 ms |
+| Pen down before the cut is ready | ink draws at once over the last complete picture; swaps in at its true depth when the cut lands; the cut is promoted to R1 | ink 0; depth ≤ 300 ms |
+| Undo/Redo on the active layer | the step's kept pixels are copied back (below); no walk | ≤ 50 ms + window draw |
+| Undo elsewhere (other frame/layer) | model at once; whole picture held until the new set is complete | as a frame step / layer switch |
+| Move, Liquify, lasso float | the active leaf + existing `aroundRuns` bands; hole repaired in place; extra ≤ 1 picture from the R1 pot | lift ≤ 100 ms off main |
+| Pan / zoom | window redraw from resident pictures at display rate; half-size `whole` sits under the window | revealed edges 0 (soft), sharp ≤ 50 ms |
+| Multi-layer group/transform edit | existing bands, made from leaves (disk or neighbours) | ≤ 300 ms, held picture until then |
+
+**Baked frames.** File v2: the frame at full size **and** half size (box filter; quarter when the canvas exceeds
+3× the window), each in 512-px tiles, each tile its own LZ4 block, index in the header. Display reads the
+smallest level at least as fine as the screen, and only tiles the window needs. At fit zoom on 5000² that is the half
+level: 24 MiB, not 95. So the ring keeps 8 frames in the bytes that hold 2 today. Half levels are kept for the whole
+scene; full levels for the nearest the disk limit allows. (Not "rendering below the knob", RENDER §2.12: the
+screen cannot show the difference at that zoom, and zooming in loads the full tiles.) `whole` at half size of the shown
+frame stays `.now` — it is the picture under the window (§4, edges).
+
+**Undo.** `UndoHistory` becomes a feature: its steps are entries. An edit's replaced pixels (its damage rectangle, LZ4) are
+kept with the step, keyed before-revision → after-revision. For a **vector** layer this is a cache (a chain mismatch or
+eviction falls back to the repair walk); for **raster** it *is* the step, priced by damage instead of 190.7 MB a step,
+`.never`, spilled oldest first instead of dropped. The 192 MiB cap goes; depth is bounded by disk and the floor.
+The unattributed ~250 MiB at Undo: **M2 before S3** (§9).
+
+**Stream.** One decoded frame + two window surfaces, R2, fixed at connect and charged; no entry until measured (M7).
+Queue depth 1, late frames dropped. Nothing else about it changes in these merges.
+
+| Minimum machine, Test1 shape, idle | today (MEASURED 667) | design (ESTIMATE) |
+|---|---|---|
+| layer pictures | 477 | 286 |
+| frame/halves/ring/other | ~190 | 72 (3 half frames) + M2's remainder |
+| undo kept pixels | outside | 64 |
+| R0 + R1 reserve | 0 | 196 |
+| a bake's working set | +191 (two pictures) | +96 (§5) |
+| **total of 888** | 858 + waits | **≈ 714** |
+
+## 4. Frame step — tap to screen
+
+Budgets are for the minimum machine; every line is a named span, and the counts are what the tests assert.
+
+| # | Step | Where | Budget |
+|---|---|---|---|
+| 1 | tap → `currentFrame`, one editor pass | main | ≤ 4 ms canvas work (the SwiftUI pass itself is measured, M1) |
+| 2 | `scheduler.request(key: .frame)` — R1, cancels the last one; not held by the touch flag, not behind the bake | — | 0 |
+| 3a | **in memory** (±1 predicted): wrap | R1 | < 1 ms |
+| 3b | **on disk**: read + decode the level's visible tiles, parallel | R1 | 10–30 ms half level at fit (dense, 3 tiles wide; ESTIMATE from §10.2: 19 ms per 2048² painted, one core) |
+| 4 | draw into the back surface (one window) | R1 | 10–20 ms (M5) |
+| 5 | swap `Presented.whole`, one transaction | main | < 1 ms, next vsync |
+| | **tap → whole frame** | | **memory ≤ 50 ms, disk ≤ 85 ms** — firm R1 is 100 |
+| 6 | still for 150 ms: R2 makes the cut; all parts ready → one swap | R2 | 0.2–0.6 s, **invisible** if M3 holds |
+
+- **The whole frame at once.** Step 5 puts one flattened picture up; step 6 replaces it in one turn or not at all. The
+  active layer is never shown ahead of the rest. M3 measures whole-vs-cut at the same window; if the
+  difference exceeds 2/255 on more than 0.1% of pixels, the cut's parts are drawn from half levels too (+25%
+  memory on three pictures), so both go through one filter.
+- **Rapid stepping**: one key, so a newer step cancels the older read at the next tile (≤ 5 ms); no cuts, no predictions
+  beyond ±1 while steps come < 150 ms apart; each tap still presents something if its read finished.
+- **Unbaked**: the last complete picture stays; the frame jumps to the head as **R1** (not a bake: built for the screen,
+  then handed to the bake writer so it is never built twice). 5 walks, 350–640 ms each, across tiles:
+  ~0.8–1.5 s on the minimum machine (ESTIMATE). Above 100 ms — hence question Q1.
+- **Pen down during 3–6**: `promote(.answer)` on the cut; ink as in §3.1.
+- **Playing** uses the same path: reads are R1 one frame ahead of the clock; predictions fill a second ahead.
+- **Edges**: the half-size `whole` is drawn in a canvas-placed layer under the window surfaces (24 MiB of pixels, one
+  reduced IOSurface handed to the server: ≤ 1620² ≈ 10 MiB). Pan and zoom move it in the same
+  transaction as the canvas, so revealed areas are never blank.
+
+## 5. Bake throughput
+
+**Why it waits today**: `waitForRoom(2 × 95 MiB)` against 667 held leaves 221 of 888 — room for a bake only when no host
+render is in flight (each holds 1–2 pictures), and a refusal part-way repeats the walks. **How it ends**: idle holds
+fall to ~400–450; the bake asks for **bands**, not frames: 5000×1024 rows; each core needs a leaf band + destination
+band + encode buffer ≈ 60 MiB, so 96 MiB runs one band always and more when free; nothing is granted part-way.
+
+1. **Never walk a cel twice.** A walked leaf goes to `PictureStore` (keyed by content, not frame). The frame on screen
+   costs no walk (its pictures are there). **Count: walks = distinct cel revisions, not frames × layers.**
+2. **Reuse held runs.** Order bakes by cel, not only distance: frames that share a bottom or top run of layers reuse
+   one merged picture. Backgrounds and holds then cost one merge a run, not one a frame. `BakeQueue`'s bands stay:
+   playhead first, direction, outward; reordering happens only inside a band.
+3. **Use every core**: tiles of one frame across cores while idle (1 fast + 4 efficient on the minimum machine);
+   two frames at once only when memory allows both bands. Stops within 50 ms of a touch, keeping finished bands —
+   **a pause or cancel no longer throws work away**.
+4. **Pay once for the levels**: half/quarter are box-filtered from each band as it leaves the composite.
+5. **Keep more**: the disk limit (§3) holds half levels for a whole scene; see Q2 for keeping them between launches.
+
+Expected, Test1 shape, minimum machine (ESTIMATE): frame with no new cel ≈ 0.15–0.3 s; frame of five new cels
+≈ 0.8–1.3 s (walk-bound: 1.75–3.2 core-seconds over ~3 effective cores); simulator counts are the gate.
+**The floor is the vector walk.** If M4 shows placed images dominate it, cache their window-scaled decode; if dabs do,
+GPU stamping is a separate future project, not promised here.
