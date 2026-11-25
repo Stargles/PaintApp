@@ -50,3 +50,8 @@ pinch slop 8 pt of finger distance, subtracted (scale = d/(d0±8)); rotation slo
 `_hysteresis`). UITap: allowableMovement 45, touch separation 0.75 s, max duration 1.5 s.
 A staggered pair on a drawing layer with fingers painting never navigated at all (slop.log: 0 of 50 gestures) — the
 finger's stroke `.began` failed the pan. Documented in CanvasTransformLeavesStandingUITests too. New design fixes it.
+
+## State (2026-11-25)
+Done: core + recognizers + overlays; repair deleted; tests; docs; mutations (evidence/mutations.txt); Debug fast tier
+5734 (5730+4 skipped, 0 failed) at 'freeze notice' commit. Next: UI batch (evidence/uibatch.log), Release fast tier,
+screenshots, delete NOTES.md, simulator delete, report.
