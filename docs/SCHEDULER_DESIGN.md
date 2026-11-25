@@ -1,6 +1,6 @@
 # SCHEDULER_DESIGN — the scheduler and the memory manager, one page
 
-Status: **design, not built (2026-11-25, `tmp/nov25-sched`).** [SCHEDULER.md](SCHEDULER.md) is the rules;
+Status: **S1 built (2026-11-25, `tmp/nov25-s1`) — see "S1 as built" under §6; S2–S9 designed, not built.** [SCHEDULER.md](SCHEDULER.md) is the rules;
 this page is what gets built, in what order, and how each step is proved. It answers TODO.md queue items
 5, 6 and 9 (a)–(f). Figures are labelled MEASURED (with where), CODE (read off the source) or ESTIMATE.
 The iPad 9 is the **minimum machine** (A13: 2 fast + 4 efficient cores, 3 GB, app limit 1,850 MiB); its
@@ -327,6 +327,35 @@ tests of the old path, doc text.
 | **S9** | Rule 9 on the device | `DeviceStressUITests` burst + trace assertions | — | device burst when the iPad is already unlocked | max main pass, R1 p95 ≤ 100 ms, the counts above | ~300; **Sonnet** |
 
 S1 ships the owner's most visible fix on its own; S2 makes the step cheap at any zoom. S3b waits for M2; S5 waits for S4.
+
+### S1 as built (2026-11-25)
+
+**M1, the cause as measured** (iPad 9 simulator, Test1 shape, `FrameStepUITests` on the old code, app clock via
+`step:` / `FrameStepCensus`): the step's decode began **267–268 ms after every slow step** — the touch flag's
+250 ms settle plus a frame, §0's cause exactly — and the whole frame was up at **324–347 ms**; **8 main-thread
+decodes in 8 steps**. The owner's recording of a ruler scrub on a baked 2048×1024 scene read **0 ring hits in
+110 flips**: with a pencil down the whole scrub, every read waited. After S1, same simulator and test: **39–94 ms**
+at 5000², **18–27 ms** on the 2048×1024 scene (one or two display frames), 0 main-thread decodes, 0 mixed
+samples. The playcheck's screen probe still reads ~2.2 s: it polls through `XCTNSPredicateExpectation` (about a
+second) and element screenshots, so it timed the probe; the gate now prints the app clock beside it.
+
+**Built:** `Engine/Scheduling/` (`JobClass`, `JobKey`, `CancelToken`, `Job`, `JobContext.checkpoint`, `TouchFlag`,
+`Executor`, `Machine`, `LanePolicy`, `Scheduler`) and `Platform/AppleExecutor.swift`, `AppleMachine.swift`;
+`tools/check-scheduling-seam.py` with today's 18-file allowlist. Not yet: `Need`/admission (S4), `tiles` and
+`workspace` (S6), `promote` and `request(key:mint:)` (S3a) — each lands with its first user. On it in S1: the
+frame read (R1, `FrameBaker.requestRead`, never held by the touch, never on main; a ring-refused answer is kept
+beside the ring) and the ring top-up (R2, `FrameBaker.topUpRing`, its own lane; stopped it also holds the frame
+behind the playhead). The bake stays on its own worker until S6 and parks on the scheduler's touch flag.
+
+**Presenter, as built:** not §2.1's `Presented` enum — the hosts still draw themselves — but its rule.
+`CanvasPresenter` holds; each host's `WindowSurfaceView` parks its finished draw instead of swapping; a set goes up
+in one `CATransaction` when complete (`CanvasView.Coordinator.settlePresentation`: the bake shows this frame, or
+every visible host is ready, then the bake comes down with them). A step holds; the hosts taking over from the
+bake hold; a stroke releases at once. Deleted: `InteractionGate`, `coverTheHostsWithTheBakeWhileTheyRender`,
+`bakedFrameCoveringTheHosts`, `isAwaitingFirstPicture`, the canvas's `presentFirst` draw, the main-thread decode in
+`image(for:)`, `fillRingAhead` behind the bake. `frameStepSettleSeconds` stays, at **0.15 s** (was 0.5): it now
+only spares a burst renders nobody sees. Not replaced in S1: the held frame of a slider hold (TODO (179)),
+`ShapeOverlayView`'s own `presentFirst`.
 
 ## 7. Owner rulings (Nov 25)
 

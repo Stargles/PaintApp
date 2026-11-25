@@ -31,9 +31,11 @@ Every status report to the owner lists this queue with each item's state, not on
 4. **Open lasso acts as closed for every action** (Nov 17 ruling) — merged Nov 21; reaches the iPad
    with (1). Owner to check: draw an open C, then Copy, To New Layer, Clear.
 5. **Scheduler build, S1–S9 (docs/SCHEDULER_DESIGN.md, merged Nov 25; owner rulings §7 pending).**
-   **S1 in flight** (`tmp/nov25-s1`): scheduler core, frame reads not held by the touch, one presenter that
-   swaps whole pictures — the frame-step fix. Cause found: the tap that steps holds back the decode
-   (`InteractionGate`), the decode waits for no dirty frame, then `image(for:)` decodes on main.
+   **S1 built on `tmp/nov25-s1`, awaiting merge**: scheduler core, frame reads as R1 (not held by the touch,
+   never on main), the ring holds the frames either side of a stopped playhead, one presenter that swaps
+   whole picture sets. MEASURED (iPad 9 sim, app clock): tap → whole frame **324–347 ms → 39–94 ms** at
+   5000², **18–27 ms** on the owner's 2048×1024 shape; cause confirmed — the decode began 267 ms after every
+   step (the touch's 250 ms settle). Owner to check on the iPad after install: step and scrub a baked scene.
    Then S2 bake format + zoom-out edges, S3a/b R1 onto the scheduler + Undo, S4 memory manager (= (9)),
    S5 three layer pictures, S6 bake throughput, S7 rest, S8 stream, S9 device gate.
    **Owner rulings Nov 25 (design §7):** Q1 — stepping onto a never-drawn frame keeps the previous frame

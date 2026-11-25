@@ -27,7 +27,7 @@ final class FrameStepUITests: PaintUITestCase {
         }
     }
 
-    private func probe(_ app: XCUIApplication, _ canvas: XCUIElement, size: CGSize) -> Probe {
+    private func frameRowProbe(_ app: XCUIApplication, _ canvas: XCUIElement, size: CGSize) -> Probe {
         let paper = paperRect(in: canvas, canvasSize: size)
         let visible = visiblePaperRect(app, in: canvas, canvasSize: size)
         let host = canvas.frame
@@ -93,7 +93,7 @@ final class FrameStepUITests: PaintUITestCase {
     private func stepThroughABakedScene(size: CGSize) throws -> [Int] {
         let (app, canvas) = launchOwnersScene(size: size)
         waitForEveryFrameBaked(app)
-        let probe = probe(app, canvas, size: size)
+        let probe = frameRowProbe(app, canvas, size: size)
         watch(probe, for: 30, allowed: ["0"], "the baked first frame", until: { $0.allSatisfy { $0 == "0" } })
         mixes = []
         attachScreenshot(XCUIScreen.main, "frame-step-baked")

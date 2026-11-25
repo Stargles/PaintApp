@@ -15,8 +15,12 @@ Owner ruled Q1 (2026-11-25): keep the previous frame until the new one is whole.
 - FrameBaker: R1 answer read (`requestRead`), no main decode, ring top-up on R2 lane (`topUpRing`,
   outward walk, +-1 when stopped). Baker logic tests updated (awaitImage). CanvasPresenter + logic tests.
 
+- Presenter wired (WindowSurfaceView parks; settlePresentation); cover/awaiting/presentFirst deleted; quiet 0.15 s.
+- FrameStepUITests green: 5000² 39-94 ms, 2048x1024 18-27 ms, 0 mixes, 0 main decodes; old things test green.
+- Mutations run: presenter isComplete (red), answer held by touch (Scheduler red), R1 as later + no behind
+  prefetch (UI 182-196 ms -> threshold set 150). Playcheck GREEN (app peak 1140, backboardd 187).
+- Rebased on 63269845 (owner Q1/Q2 rulings). Docs: SCHEDULER_DESIGN "S1 as built", SCHEDULER status, TODO 5.
+
 ## Next
-- Run FrameStepUITests on old code (M1 before numbers) -> evidence/m1-before.txt
-- Presenter into CanvasView: WindowSurfaceView parks swaps; delete coverTheHosts*/isAwaitingFirstPicture/
-  presentFirst use; settle 0.5 -> 0.15
-- FrameStepUITests on a small baked 2048x1024 scene too (owner's shape); after numbers; playcheck; fast tier
+- Fast tier Debug + Release (running), reconcile counts; playcheck rerun for the app-clock step line.
+- Delete simulator + evidence after merge (keep evidence until the orchestrator reads the report).
