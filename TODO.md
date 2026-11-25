@@ -29,9 +29,11 @@ Every status report to the owner lists this queue with each item's state, not on
    whole-canvas picture under the window so revealed edges show at once (soft) until the sharp redraw.
 6. **Undo latency / raster Undo budget** — rides on stage 3's one budget (in flight under (1)).
 7. **Re-check against `main`, then fix what remains:** stroke briefly disappears, stroke latency and
-   pan hitches, canvas freezes, rapid-edit whole-iPad failures, Liquify shown while held, Move-exit gap,
+   pan hitches, rapid-edit whole-iPad failures, Liquify shown while held, Move-exit gap,
    the red `SelectionEditUITests` swatch test.
-8. Audit follow-through, streaming on the real link, smaller asks below.
+8. **Canvas freezes** (owner, Nov 24: *"iPad has new canvas freeze reports because I was drawing"*) —
+   in flight on `tmp/nov24-touch`: 43 flights pulled and read, see "Find and fix the cause" below.
+9. Audit follow-through, streaming on the real link, smaller asks below.
 
 ## Current — iPad build `8545ac57` (= `2891caad` code) installed 2026-11-21, owner re-test pending
 
@@ -276,7 +278,19 @@ Every status report to the owner lists this queue with each item's state, not on
   rotation / stroke bindings (repair #23); a Nov 11 sequence loses all four recognizers on the next
   admission after pinch/rotation fail at lift; a previous lift's watchdog can evaluate a newer gesture.
   The automatic recorder saves both patterns plus a moving pair with sound bindings and unchanged view.
-  Retrieve new automatic flights independently. Root cause is open.
+  Retrieve new automatic flights independently. 
+  **Nov 24, 43 automatic flights read** (`~/PaintWork/ipad-crashes/app/`, Nov 17–24, counter 24 → 49;
+  build `8545ac57` for the last 31): 25 `stranded`, 18 `navigation`. Three triggers, one victim:
+  (i) **three-finger redo taps** whose third finger lands 10–30 ms after the pair, 0 moves — pan left
+  `failed touches:2`, and pinch, rotation and the layer's stroke recognizer stuck `failed touches:0`
+  with it (15 of 25); (ii) **a pair one of whose contacts iOS cancels and reissues 1–30 ms later**: the
+  new contact reaches pan but not pinch or rotation (all 17 `cancelReissue` misses — the artist's pan
+  loses zoom and turn mid-gesture), 5 of which also strand; (iii) **a lone contact cancelled at once**
+  (a palm the system rejects, 4 in `Ships`): all four `failed touches:0` and never reset. In every case
+  the stuck set is exactly the component `shouldRequireFailureOf` ties together, and the one that holds
+  it is UIKit's `UIPanGestureRecognizer`. The always-`.possible` `canvas.touchCounter` counted all of
+  them right. Direction: one recognizer of our own that owns every canvas touch, does pan, pinch and
+  turn from the touches themselves, and has no failure-requirement web to jam; then the repair goes.
 - [ ] **Confirm the one-tap Move report in Test.** On a saved scene, lasso visible vector ink and tap Move
   once; the untouched box stays up; one Undo cancels the zero-nudge lift. Use a disposable copy for a
   drag or Set Down. Also verify older physical workflows on real scenes (clipboard menus, Mend All Fills,
