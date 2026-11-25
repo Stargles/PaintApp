@@ -59,7 +59,12 @@ Every status report to the owner lists this queue with each item's state, not on
    (c) *arbitration when several are queued* — one order (class, then cost-to-get-back per byte freed, then
    recency), a floor per feature so none starves, limits against thrash (minimum stay, no spill of what
    was just loaded), and a job that holds memory never waits for more; (d) one disk limit, write rate
-   bounded, spill only what is dearer to rebuild than to reload; (e) proof: the gate with a trace — zero
+   bounded, spill only what is dearer to rebuild than to reload; (f) **use every core** (owner, Nov 25): the
+   iPad 9's A13 is 2 fast + 4 efficient cores and a GPU — classes map to QoS (R0/R1 on the fast cores, bake /
+   thumbnails / spill on the efficient ones), big jobs split into tiles that run across cores, how many at
+   once set by cores *and* by memory (each parallel job needs its own buffers; today's bake allows 3), a
+   core always left for the pencil, GPU for what it does better, measured as throughput on the device's core
+   count and not the Mac's; (e) proof: the gate with a trace — zero
    R1 waits on disk, zero spill/load work on main, hit rates per feature. Start with layer pictures (~500 of
    888 MiB measured; unedited layers as two merged pictures); measure the stream before touching it.
 10. Audit follow-through, streaming on the real link, smaller asks below.
