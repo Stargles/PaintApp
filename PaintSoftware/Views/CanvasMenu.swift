@@ -6,7 +6,7 @@ import SwiftUI
 //
 // **Why not a `Menu`.** UIKit presents a `Menu` and tears it down itself, and that teardown cancels the
 // touch that closed it: a stroke begun outside an open menu was drawn and then cancelled, the layer held
-// none of it, and the canvas's wedge detector announced a freeze it had repaired (BUGS.md, 2026-10-07).
+// none of it.
 // A menu drawn by `CanvasPresentationHost` is dismissed by `AnchoredMenuRouter` like every other
 // presentation over the canvas, without consuming the touch: the stroke lands and the menu goes.
 
