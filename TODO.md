@@ -59,8 +59,8 @@ Every status report to the owner lists this queue with each item's state, not on
    (c) *arbitration when several are queued* — one order (class, then cost-to-get-back per byte freed, then
    recency), a floor per feature so none starves, limits against thrash (minimum stay, no spill of what
    was just loaded), and a job that holds memory never waits for more; (d) one disk limit, write rate
-   bounded, spill only what is dearer to rebuild than to reload; (f) **use every core** (owner, Nov 25): the
-   iPad 9's A13 is 2 fast + 4 efficient cores and a GPU — classes map to QoS (R0/R1 on the fast cores, bake /
+   bounded, spill only what is dearer to rebuild than to reload; (f) **use every core** (owner, Nov 25): core counts
+   read from the machine (the minimum, the iPad 9's A13, is 2 fast + 4 efficient cores and a GPU) — classes map to QoS (R0/R1 on the fast cores, bake /
    thumbnails / spill on the efficient ones), big jobs split into tiles that run across cores, how many at
    once set by cores *and* by memory (each parallel job needs its own buffers; today's bake allows 3), a
    core always left for the pencil, GPU for what it does better, measured as throughput on the device's core
@@ -411,6 +411,9 @@ rendered."*
   over the other nineteen presets and a real-Pencil tilt test. BRUSH.md §13 holds nine open questions.
 
 ## Later — the long-term features
+
+- [ ] **Audit for code specific to this iPad (very low priority, owner Nov 25).** Only as part of a Windows or
+  Android version, if he ever decides on one. The standing rule (AGENTS.md) covers new and touched code.
 
 None is designed; each needs its own conversation with the owner before it starts.
 

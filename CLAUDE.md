@@ -27,6 +27,9 @@ only the last five remain — `git log` is the real history.
 [docs/SCHEDULER.md](docs/SCHEDULER.md): main never waits and never does canvas-sized work, a touch
 outranks everything, stale work is cancelled. A change that breaks a rule there is not done.
 
+**Machine-independent is a requirement (owner, 2026-11-25).** The iPad 9 is the minimum spec, never the
+design target: read limits from the machine. See AGENTS.md's standing engineering rules.
+
 ## Build and test
 
 **Build from a worktree outside `~/Desktop` (2026-09-24).** After the macOS 26.5.2 update `actool`

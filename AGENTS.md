@@ -80,6 +80,13 @@ own branch, so `main`'s HANDOFF.md can be behind.
 ## Standing engineering rules
 
 - **Clean modular architecture is the top priority.** No clutter, no zombie, unused or legacy code.
+- **Never designed for one machine (owner, permanent, 2026-11-25).** The owner's iPad 9 is the *minimum*
+  spec, not the target: the app must run well on anything at or above it, and may one day be sold or moved
+  to Android or Windows. Core counts, memory limits, screen size and scale, refresh rate and input devices
+  are read from the machine or derived from it, never assumed; iPad 9 figures are floors, gates and test
+  fixtures, not constants in the product. Keep engine and model logic free of Apple UI and device APIs where
+  it costs nothing, with platform calls behind one seam. No audit of old code for this — apply it to what
+  you write or touch.
 - **Solve the root cause**; if the cause is a bad structure, refactor it. Never bolt a fix on top.
 - **Reuse and extend what exists**; never build the same thing twice. Take nearby clean-ups in scope.
 - **Remove cleanly**: a deleted feature leaves no vestigial parameter, half-live control or "this used
