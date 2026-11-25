@@ -47,21 +47,25 @@ final class FrameStepUITests: PaintUITestCase {
         return (Int(parts[0]), Int(parts[1]), Int(parts[2]), Int(parts[3]))
     }
 
-    /// Samples from now for `seconds`, failing on any sample that is not one frame in `allowed`.
+    /// Every sample that was not one frame in its allowed set, as `what: sample` — asserted at the end, so
+    /// one run measures every step.
+    private var mixes: [String] = []
+
+    /// Samples from now for `seconds` (or until `done`), noting any sample that is not one frame in
+    /// `allowed`. Answers the samples and the seconds from `since` to the last one.
     @discardableResult
     private func watch(_ probe: Probe, for seconds: TimeInterval, allowed: Set<String>, _ what: String,
-                       until done: ((Sample) -> Bool)? = nil) -> [Sample] {
+                       since: Date = Date(), until done: ((Sample) -> Bool)? = nil) -> (samples: [Sample], seconds: Double) {
         var samples: [Sample] = []
         let end = Date().addingTimeInterval(seconds)
         repeat {
             let sample = probe.sample(self)
             samples.append(sample)
             let frames = Set(sample)
-            XCTAssertTrue(frames.count == 1 && frames.isSubset(of: allowed),
-                          "\(what): the screen showed \(sample) — one of \(allowed.sorted()) on every layer, never a mix")
+            if !(frames.count == 1 && frames.isSubset(of: allowed)) { mixes.append("\(what): \(sample)") }
             if let done, done(sample) { break }
         } while Date() < end
-        return samples
+        return (samples, Date().timeIntervalSince(since))
     }
 
     func testAStepShowsTheWholeNewFrameAtOnceAndNeverAMix() throws {
@@ -69,6 +73,7 @@ final class FrameStepUITests: PaintUITestCase {
         waitForEveryFrameBaked(app)
         let probe = probe(app, canvas)
         watch(probe, for: 30, allowed: ["0"], "the baked first frame", until: { $0.allSatisfy { $0 == "0" } })
+        mixes = []
         attachScreenshot(XCUIScreen.main, "frame-step-baked")
         let forward = app.buttons["timeline.stepForwardButton"], back = app.buttons["timeline.stepBackButton"]
         XCTAssertTrue(forward.waitForExistence(timeout: 5))
@@ -78,16 +83,17 @@ final class FrameStepUITests: PaintUITestCase {
         var current = 0
         for (index, delta) in [1, 1, 1, -1, -1, 1, 1, -1].enumerated() {
             let next = current + delta
+            let tapped = Date()
             (delta > 0 ? forward : back).tap()
             let arrived = watch(probe, for: 5, allowed: [String(current), String(next)], "slow step \(index + 1) to \(next)",
-                                until: { $0.allSatisfy { $0 == String(next) } })
-            XCTAssertEqual(arrived.last.map { Set($0) }, [String(next)], "slow step \(index + 1): frame \(next) whole within 5 s")
+                                since: tapped, until: { $0.allSatisfy { $0 == String(next) } })
+            XCTAssertEqual(arrived.samples.last.map { Set($0) }, [String(next)], "slow step \(index + 1): frame \(next) whole within 5 s")
             watch(probe, for: 1.5, allowed: [String(next)], "slow step \(index + 1) settling on \(next)")
             let census = stepCensus(app)
-            XCTAssertEqual(census.frame, next, "the probe names the step's frame")
-            if let ms = census.shownMs { shown.append(ms) } else { XCTFail("step \(index + 1): no whole frame recorded") }
+            shown.append(census.frame == next ? census.shownMs ?? -1 : -1)
             print("FRAMESTEP slow step \(index + 1) to \(next): decode \(census.decodeMs.map(String.init) ?? "-") ms, "
-                  + "whole frame \(census.shownMs.map(String.init) ?? "-") ms, probe saw it in \(arrived.count) samples")
+                  + "whole frame \(census.shownMs.map(String.init) ?? "-") ms (app); screen probe whole by "
+                  + String(format: "%.2f s over %d samples", arrived.seconds, arrived.samples.count))
             current = next
         }
         attachScreenshot(XCUIScreen.main, "frame-step-slow")
@@ -103,8 +109,10 @@ final class FrameStepUITests: PaintUITestCase {
 
         let census = stepCensus(app)
         let sorted = shown.sorted()
-        print("FRAMESTEP whole frame after a slow step: median \(sorted[sorted.count / 2]) ms, max \(sorted.last ?? -1) ms; "
-              + "main-thread decodes \(census.mainDecodes.map(String.init) ?? "?")")
+        print("FRAMESTEP whole frame after a slow step (app, ms): \(shown); main-thread decodes "
+              + "\(census.mainDecodes.map(String.init) ?? "?"); mixed or blank samples: \(mixes.count)")
+        XCTAssertEqual(mixes, [], "the screen showed one frame on every layer, never a mix or a blank")
+        XCTAssertFalse(shown.contains(-1), "every slow step recorded its whole frame on screen: \(shown)")
         XCTAssertEqual(census.mainDecodes, 0, "SCHEDULER.md rule 2: no baked frame is ever decoded on the main thread")
         XCTAssertLessThanOrEqual(sorted.last ?? .max, 300, "S1's target: a baked step is whole on screen within 0.3 s")
     }
