@@ -10,10 +10,11 @@ From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
 
 ## Resume here — November 21, 2026
 
-0. **Running (Nov 25; owner said continue).** Stage 3 is merged; `adc8e327` is on the iPad (installed
-   Nov 25 01:05), owner's check pending. In flight: `tmp/nov24-touch` (canvas freezes,
-   Opus). Next: scheduler stage 2 (TODO queue (5)) — an Opus design page reviewed before code. He will
-   AirDrop Test1 later; make the gate run on it. Root stays high level (AGENTS.md).
+0. **Running (Nov 25).** `c15ad799` (one memory budget + the canvas-freeze fix) is on the iPad, gate green,
+   owner's check pending. In flight: `tmp/nov25-sched` — Opus design page `docs/SCHEDULER_DESIGN.md`
+   (stage 2 + memory manager, TODO queue (5) and (9)); root reviews it before any code. `~/PaintWork/rel.sh`
+   = gate + sign + stage for a `PaintApp-rel` worktree at main. He will AirDrop Test1 later; make the gate
+   run on it. Root stays high level (AGENTS.md).
 1. **Nov 21 plan, in order (owner: "fix everything and do it right"; TODO.md top item).** Installed:
    `8545ac57` (= `2891caad` code), profile to Nov 28 — the owner's check of it FAILED: Play still takes
    the iPad down, steps ~400 ms and staggered, bake bars slow, version label never changes. **No device

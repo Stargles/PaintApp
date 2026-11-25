@@ -46,8 +46,8 @@ Every status report to the owner lists this queue with each item's state, not on
    pan hitches, rapid-edit whole-iPad failures, Liquify shown while held, Move-exit gap,
    the red `SelectionEditUITests` swatch test.
 8. **Canvas freezes** — merged Nov 25 (`71f4fd6e`): one touch recognizer of our own replaces UIKit's pan /
-   pinch / rotation / tap web and the repair; all 43 flights replay clean. Goes to the iPad with the next
-   install; owner to confirm with fast three-finger redos and palm-down pans. Seven UI tests red on old
+   pinch / rotation / tap web and the repair; all 43 flights replay clean. On the iPad since
+   Nov 25 (`c15ad799`); owner to confirm with fast three-finger redos and palm-down pans. Seven UI tests red on old
    main too, to triage under (7): Distort corner, two `FillLiveAdjust`, `GuideUITests` grid, wide-picture
    Move box, `MenuInterruption` toolbar gap, `testDenyOutsideSelection…`.
 9. **One memory manager, not one per feature (owner, Nov 25: *"you decide … different features may have
@@ -72,7 +72,7 @@ Every status report to the owner lists this queue with each item's state, not on
    888 MiB measured; unedited layers as two merged pictures); measure the stream before touching it.
 10. Audit follow-through, streaming on the real link, smaller asks below.
 
-## Current — iPad build `adc8e327` installed 2026-11-25, owner check pending (items below name older builds)
+## Current — iPad build `c15ad799` installed 2026-11-25, owner check pending (items below name older builds)
 
 - [ ] **Owner's check of `2891caad` FAILED (Nov 20, ~22:45, Test1).** Installed build confirmed `2891caad`
   (latest main: includes the window surfaces `d72eb69f` and the To Cross fix `bd52b37f`).
