@@ -68,10 +68,13 @@ final class FrameStepUITests: PaintUITestCase {
         return (samples, Date().timeIntervalSince(since))
     }
 
-    /// The owner's Test1 shape at 5000²: a baked step is whole on screen within S1's 0.3 s.
+    /// The owner's Test1 shape at 5000²: a baked step is whole on screen well inside S1's 0.3 s target.
+    /// MEASURED on the iPad 9 simulator: 324–347 ms before S1 (the read held by its own tap, then
+    /// decoded), 39–94 ms after. Asserted at 150 ms because a read held by the touch again — the
+    /// mutation, run — measured 182–196 ms here and must go red.
     func testAStepShowsTheWholeNewFrameAtOnceAndNeverAMix() throws {
         let shown = try stepThroughABakedScene(size: OwnersScene.canvasSize)
-        XCTAssertLessThanOrEqual(shown.max() ?? .max, 300, "S1's target: a baked step is whole on screen within 0.3 s")
+        XCTAssertLessThanOrEqual(shown.max() ?? .max, 150, "a baked step is whole on screen within 150 ms (S1's target 0.3 s)")
     }
 
     /// **The owner's report of 2026-11-25, on his iPad at c15ad799**: a small fully baked scene
