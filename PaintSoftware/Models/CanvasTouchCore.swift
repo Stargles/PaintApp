@@ -126,6 +126,10 @@ struct CanvasTouchCore {
 
     /// The contact that may draw, if one may.
     private(set) var drawer: Int?
+    /// Two fingers have been down together since the first contact of this sequence landed, so what one of
+    /// them does on its own — a tap, a lasso — is not what the hand is doing. Stands until the next
+    /// sequence begins, because a tap is decided as its last finger lifts.
+    private(set) var hadPair = false
 
     var count: Int { touches.count }
     var isNavigating: Bool { navigation != nil }
@@ -174,7 +178,10 @@ struct CanvasTouchCore {
     private mutating func land(_ contacts: [Contact], at time: TimeInterval, _ events: inout [Event]) {
         let landings = contacts.filter { contact in !touches.contains { $0.id == contact.id } }
         guard !landings.isEmpty else { return }
-        if touches.isEmpty { tap = Tap(startedAt: time, fingers: 0) }
+        if touches.isEmpty {
+            tap = Tap(startedAt: time, fingers: 0)
+            hadPair = false
+        }
         let fingersMoveTheView = navigation != nil && fingers.count >= 2
         touches += landings.map { Touch(id: $0.id, kind: $0.kind, point: $0.point) }
 
@@ -221,6 +228,7 @@ struct CanvasTouchCore {
             pair = nil
             return
         }
+        hadPair = true
         let now = Pair(fingers[0], fingers[1])
         guard let start = pair, start.isOf(fingers[0], fingers[1]) else {
             pair = now

@@ -51,6 +51,10 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
     /// two-finger pan would otherwise begin in the same breath as the pan that is meant to win.
     var isDragging: Bool { drag != nil }
 
+    /// Whether two fingers have been down on the canvas since the first of them landed, so no lift of
+    /// either is a tap outside (`CanvasTouchCore.hadPair`).
+    var isTwoFingers: (() -> Bool)?
+
     /// Mirrors `CanvasManager.pencilOnlyDrawing`, pushed down every `updateFloatingOverlay()` call —
     /// the same pattern `SelectionOverlayView.pencilOnlyDrawing`'s doc comment describes. TODO (47):
     /// the tap-outside commit below used to run unconditionally, on the theory that settling a float
@@ -143,7 +147,8 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
         // `handleTapOutside` and `pencilOnlyDrawing`'s doc comment (TODO 47). Its delegate is what
         // decides, at touch-down, whether a touch is outside the piece at all — see
         // `gestureRecognizer(_:shouldReceive:)`.
-        // The tap is one finger's, and it has to hear of a second to know it is not.
+        // A view hears of one touch at a time unless told otherwise, and the second of two fingers that
+        // land here is the canvas's to hear of.
         isMultipleTouchEnabled = true
         let tap = TouchTypeTapGestureRecognizer(target: self, action: #selector(handleTapOutside(_:)))
         tap.delegate = self
@@ -487,7 +492,7 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
     /// pen's and fight it for the piece. The pan that owns the drag begins; every other waits.
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard gestureRecognizer is TouchDownPanGestureRecognizer else {
-            return super.gestureRecognizerShouldBegin(gestureRecognizer)
+            return isTwoFingers?() != true && super.gestureRecognizerShouldBegin(gestureRecognizer)
         }
         return drag == nil || drag?.handle === gestureRecognizer
     }

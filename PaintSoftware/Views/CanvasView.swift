@@ -403,6 +403,8 @@ struct CanvasView: UIViewRepresentable {
         // the right touch-type gating, the right coordinate space and a live preview, so the fill
         // tool's lasso mode borrows it whole rather than growing a fourth lasso implementation —
         // see `updateSelectionOverlay`, which is what decides which of the two is armed.
+        selectionOverlay.isTwoFingers = { [weak coordinator = context.coordinator] in coordinator?.isTwoFingers ?? false }
+        floatingOverlay.isTwoFingers = { [weak coordinator = context.coordinator] in coordinator?.isTwoFingers ?? false }
         selectionOverlay.onFinishPath = { [weak coordinator = context.coordinator] path in
             guard let coordinator else { return }
             if coordinator.isLassoFilling {
@@ -4956,6 +4958,13 @@ struct CanvasView: UIViewRepresentable {
                 // `undo()` itself resolves any in-flight fill first, so this does exactly one thing.
                 if fingers == 2 { canvasManager.undo() } else { canvasManager.redo() }
             }
+        }
+
+        var isTwoFingers: Bool { canvasTouches?.core.hadPair ?? false }
+
+        /// The tap away from the Move box is one finger's.
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            !(gestureRecognizer === moveBoxCommitRecognizer && isTwoFingers)
         }
 
         /// **The view does not follow fingers while a drag has hold of one of them.** An assisted drag is

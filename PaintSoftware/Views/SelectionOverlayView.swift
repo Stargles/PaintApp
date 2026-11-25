@@ -15,6 +15,14 @@ final class SelectionOverlayView: CanvasPlaneView {
     var onAutomaticTap: ((CGPoint) -> Void)?
     var onObjectTap: ((CGPoint) -> Void)?
 
+    /// Whether two fingers have been down on the canvas since the first of them landed — a pair moves the
+    /// view or taps undo (`CanvasTouchCore.hadPair`), and neither finger of it draws a loop or taps a corner.
+    var isTwoFingers: (() -> Bool)?
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        isTwoFingers?() != true && super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
+
     /// What a drag or a tap on this view does.
     enum Gesture {
         /// A freehand stroke closed on lift — the fill tool's lasso, which borrows this view's lasso
@@ -211,9 +219,8 @@ final class SelectionOverlayView: CanvasPlaneView {
         diagnosticLoopLayer.isHidden = true
         layer.addSublayer(diagnosticLoopLayer)
 
-        // Both are for one finger, and a second one landing before either has begun is the canvas's
-        // (`CanvasTouchCore`): they have to hear of it to stand down, and a view hears of one touch at a
-        // time unless told otherwise.
+        // A view hears of one touch at a time unless told otherwise, and the second of two fingers that
+        // land here is the canvas's to hear of.
         isMultipleTouchEnabled = true
         let pan = TouchTypePanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.maximumNumberOfTouches = 1

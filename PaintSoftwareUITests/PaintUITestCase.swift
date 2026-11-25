@@ -1880,7 +1880,11 @@ class PaintUITestCase: XCTestCase {
     }
 
     /// **Any number of fingers, each on its own clock** — the taps and joinings a hand makes, whose fingers
-    /// land and lift in events of their own. See `twoFingerGesture` for how they are synthesised.
+    /// land and lift in events of their own. See `twoFingerGesture` for how they are synthesised. Give the
+    /// fingers in the order they land and lift the last of them first: the synthesiser matches the
+    /// contacts of one event to the last's by their place in the list, so an earlier finger that lifts
+    /// before a later one hands it its own place — and the later one jumps there. It cannot put a third down
+    /// beside two already there without doing the same.
     func fingersGesture(_ fingers: [GestureFinger], steps: Int = 12) throws {
         let screenToPortrait = SynthesizedTouch.screenToPortrait()
         let paths: [AnyObject] = try fingers.map { finger in

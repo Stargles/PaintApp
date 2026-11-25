@@ -431,6 +431,20 @@ final class CanvasTouchCoreLogicTests: XCTestCase {
                        "already zooming, so the new pair zooms from its first movement, from where the view was")
     }
 
+    /// What a lone finger's own tap or lasso asks (`SelectionOverlayView`), as its last finger lifts.
+    func testAPairIsRememberedUntilTheNextSequenceBegins() {
+        send([(1, .finger, 0, 0)])
+        XCTAssertFalse(core.hadPair)
+        send([(1, .finger, 0, 0), (2, .finger, 100, 0)])
+        send([(1, .finger, 0, 0)], ends: [2: .lifted])
+        send([], ends: [1: .lifted])
+        XCTAssertTrue(core.hadPair, "a tap is decided after its last finger has gone")
+        send([(3, .finger, 0, 0)])
+        XCTAssertFalse(core.hadPair)
+        send([(3, .finger, 0, 0), (4, .pencil, 50, 0)])
+        XCTAssertFalse(core.hadPair, "a palm beside a pencil is no pair")
+    }
+
     func testAThirdFingerWhileNavigatingIsIgnoredAndTakesOverWhenOneLeaves() {
         send([(1, .finger, 0, 0), (2, .finger, 200, 0)])
         send([(1, .finger, 0, 50), (2, .finger, 200, 50)])
