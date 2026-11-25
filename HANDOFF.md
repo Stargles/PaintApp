@@ -10,8 +10,8 @@ From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
 
 ## Resume here — November 21, 2026
 
-0. **Running (Nov 25; owner said continue).** Stage 3 is merged and its signed build `adc8e327` staged in
-   `resign_state` (installs itself when the app is closed). In flight: `tmp/nov24-touch` (canvas freezes,
+0. **Running (Nov 25; owner said continue).** Stage 3 is merged; `adc8e327` is on the iPad (installed
+   Nov 25 01:05), owner's check pending. In flight: `tmp/nov24-touch` (canvas freezes,
    Opus). Next: scheduler stage 2 (TODO queue (5)) — an Opus design page reviewed before code. He will
    AirDrop Test1 later; make the gate run on it. Root stays high level (AGENTS.md).
 1. **Nov 21 plan, in order (owner: "fix everything and do it right"; TODO.md top item).** Installed:

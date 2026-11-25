@@ -1,7 +1,7 @@
 # Graph Report - PaintSoftware  (2026-11-25)
 
 ## Corpus Check
-- 875 files · ~3,405,519 words
+- 875 files · ~3,405,713 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `29359e48`
+- Built from commit: `1c8b7d87`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -2829,7 +2829,7 @@ Nodes (3): Exact inverse batching — quiet Release qualification, 2026-10-22, L
   BUGS.md · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **3014 isolated node(s):** `Queue — the order work happens in (owner, Nov 21: *"communicate better … plan correctly"*)`, `Current — iPad build `8545ac57` (= `2891caad` code) installed 2026-11-21, owner re-test pending`, `Open reports and asks`, `(27) Stream the computer's screen as a layer`, `Deferred by the owner — written down, not work` (+3009 more)
+- **3014 isolated node(s):** `Read, in this order`, `The owner, and how to work with them`, `Standing engineering rules`, `The bar for done`, `Git, simulators and the machine` (+3009 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **51 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 

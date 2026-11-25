@@ -13,8 +13,8 @@ Every status report to the owner lists this queue with each item's state, not on
 1. **Play crash** — measured: it is the **app's own memory** (1.9–2.5 GB on the simulator against the
    iPad 9's 1,850 MiB app limit), not the render server (≤ 206 MiB now). Two producers fixed and merged
    Nov 21 (renderers recording display lists; heavy objects freed only on main). **SCHEDULER.md stage 3
-   (one budget) merged Nov 25 (`adc8e327`), staged for the iPad — the installer puts it on when the app is
-   closed: `tools/playcheck.sh` GREEN four times**, app peak
+   (one budget) merged and (as `adc8e327`) installed on the iPad Nov 25, owner to check:
+   `tools/playcheck.sh` GREEN four times**, app peak
    1,138–1,142 MiB against the 1,165 gate (was 1,725 entering the scene at `ee0e672d`); every other
    phase ≤ 1,073. `Engine/MemoryBudget.swift` is the one admission point (888 MiB on the iPad 9,
    derivation in its header and PERFORMANCE.md §37). **Thin spot: Undo** — ~250 MiB the budget is not
@@ -69,7 +69,7 @@ Every status report to the owner lists this queue with each item's state, not on
    888 MiB measured; unedited layers as two merged pictures); measure the stream before touching it.
 10. Audit follow-through, streaming on the real link, smaller asks below.
 
-## Current — iPad build `8545ac57` (= `2891caad` code) installed 2026-11-21, owner re-test pending
+## Current — iPad build `adc8e327` installed 2026-11-25, owner check pending (items below name older builds)
 
 - [ ] **Owner's check of `2891caad` FAILED (Nov 20, ~22:45, Test1).** Installed build confirmed `2891caad`
   (latest main: includes the window surfaces `d72eb69f` and the To Cross fix `bd52b37f`).
