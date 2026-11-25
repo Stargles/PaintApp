@@ -258,6 +258,7 @@ final class FlightRecorderLogicTests: XCTestCase {
         XCTAssertEqual(runPair(third: true), [.unmoved(first: 1, second: 2, travel: 45, samples: 2)],
                        "a third finger ends the watch on the pair, and it is still the finding it was")
         XCTAssertEqual(runPair(deltas: [(1, 1), (2, 2)]), [], "an ordinary tap")
+        XCTAssertEqual(runPair(deltas: [(8, 8), (16, 16)]), [], "a drift short of a gesture")
         XCTAssertEqual(runPair(deltas: [(28, 28), (28, 28)]), [], "one movement and then a rest")
         XCTAssertEqual(runPair(writes: 11), [], "the view moved")
         XCTAssertEqual(runPair(refusals: 4), [], "a drag turned it down")
