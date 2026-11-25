@@ -143,6 +143,8 @@ final class FloatingPieceOverlayView: TransformOverlayView, UIGestureRecognizerD
         // `handleTapOutside` and `pencilOnlyDrawing`'s doc comment (TODO 47). Its delegate is what
         // decides, at touch-down, whether a touch is outside the piece at all — see
         // `gestureRecognizer(_:shouldReceive:)`.
+        // The tap is one finger's, and it has to hear of a second to know it is not.
+        isMultipleTouchEnabled = true
         let tap = TouchTypeTapGestureRecognizer(target: self, action: #selector(handleTapOutside(_:)))
         tap.delegate = self
         addGestureRecognizer(tap)

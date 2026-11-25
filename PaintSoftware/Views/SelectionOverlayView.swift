@@ -211,6 +211,10 @@ final class SelectionOverlayView: CanvasPlaneView {
         diagnosticLoopLayer.isHidden = true
         layer.addSublayer(diagnosticLoopLayer)
 
+        // Both are for one finger, and a second one landing before either has begun is the canvas's
+        // (`CanvasTouchCore`): they have to hear of it to stand down, and a view hears of one touch at a
+        // time unless told otherwise.
+        isMultipleTouchEnabled = true
         let pan = TouchTypePanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.maximumNumberOfTouches = 1
         addGestureRecognizer(pan)

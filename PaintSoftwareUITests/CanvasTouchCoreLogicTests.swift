@@ -31,11 +31,17 @@ final class CanvasTouchCoreLogicTests: XCTestCase {
             guard let cancel = lines.firstIndex(where: { $0.phase == "c" && $0.down >= 1 }) else { return false }
             return lines[cancel...].contains { $0.phase == "b" }
         }
-        var isStill: Bool {
+        /// The furthest any contact went.
+        var travel: CGFloat {
             let from = Dictionary(lines.filter { $0.phase == "b" }.map { ($0.id, $0.point) }, uniquingKeysWith: { a, _ in a })
-            return lines.allSatisfy { line in
-                from[line.id].map { hypot(line.point.x - $0.x, line.point.y - $0.y) < 3 } ?? true
-            }
+            return lines.compactMap { line in from[line.id].map { hypot(line.point.x - $0.x, line.point.y - $0.y) } }.max() ?? 0
+        }
+        /// The gesture the reissue happened in, and not the tap after it.
+        var reissuedGesture: Recording {
+            let cancel = lines.firstIndex { $0.phase == "c" && $0.down >= 1 } ?? 0
+            var end = lines[cancel...].firstIndex { $0.down == 0 } ?? lines.count - 1
+            while end + 1 < lines.count, lines[end + 1].down == 0, lines[end + 1].phase != "b" { end += 1 }
+            return Recording(name: name, trigger: trigger, isFinding: isFinding, lines: Array(lines[...end]))
         }
     }
 
@@ -199,8 +205,8 @@ final class CanvasTouchCoreLogicTests: XCTestCase {
     /// took away and gave back: after the reissue the view still follows their centre, and their spread
     /// and turn are still being read.
     func testARecordedReissueKeepsTheViewFollowingThePair() throws {
-        let findings = try recordings().filter { $0.isFinding && $0.isReissue }
-        XCTAssertEqual(findings.count, 22, "5 strandings and 17 navigation misses")
+        let findings = try recordings().filter { $0.isFinding && $0.isReissue }.map(\.reissuedGesture)
+        XCTAssertEqual(findings.count, 21, "5 strandings and 16 navigation misses")
         for finding in findings {
             var core = CanvasTouchCore()
             let steps = replay(finding, into: &core)
@@ -222,7 +228,7 @@ final class CanvasTouchCoreLogicTests: XCTestCase {
     /// The same recordings, cut where the reissued contact has landed: from there the pair pans, spreads
     /// and turns, and the view pans, zooms and turns with it.
     func testPanZoomAndTurnAllSurviveEveryRecordedReissue() throws {
-        for finding in try recordings().filter({ $0.isFinding && $0.isReissue }) {
+        for finding in try recordings().filter({ $0.isFinding && $0.isReissue }).map(\.reissuedGesture) {
             let cancel = try XCTUnwrap(finding.lines.firstIndex { $0.phase == "c" && $0.down >= 1 })
             let reissue = try XCTUnwrap(finding.lines.lastIndex { $0.phase == "b" && $0.time >= finding.lines[cancel].time })
             var core = CanvasTouchCore()
@@ -256,6 +262,19 @@ final class CanvasTouchCoreLogicTests: XCTestCase {
         }
     }
 
+    /// The one flight of a pair that bound no navigation recognizer at all: a palm cancelled, then two
+    /// fingers 10 ms apart.
+    func testTheRecordedPairAfterACancelledPalmMovesTheView() throws {
+        let finding = try XCTUnwrap(try recordings().first {
+            $0.isFinding && $0.trigger == "navigation" && !$0.isReissue
+        })
+        XCTAssertEqual(finding.lines.map(\.phase), ["b", "c", "b", "b", "e", "e"])
+        var core = CanvasTouchCore()
+        let steps = replay(finding, into: &core)
+        XCTAssertEqual(navigations(steps), 1)
+        XCTAssertGreaterThan(moves(steps).count, 10)
+    }
+
     func testARecordedPalmCancelledAtOnceIsNothing() throws {
         let findings = try recordings().filter { $0.isFinding && $0.landings == 1 }
         XCTAssertEqual(findings.count, 4)
@@ -280,15 +299,15 @@ final class CanvasTouchCoreLogicTests: XCTestCase {
                 XCTAssertEqual(navigations(steps), 0, control.name)
                 XCTAssertEqual(taps(steps), [], control.name)
                 strokes += 1
-            } else if control.isStill, !control.cancelled, control.mostDown == 2 {
+            } else if control.travel < 3, !control.cancelled, control.mostDown == 2 {
                 XCTAssertEqual(taps(steps), [2], "\(control.name) is an undo")
                 undos += 1
-            } else if control.isStill, !control.cancelled, control.mostDown == 3 {
+            } else if control.travel < 3, !control.cancelled, control.mostDown == 3 {
                 XCTAssertEqual(taps(steps), [3], "\(control.name) is a redo")
                 redos += 1
             } else if control.cancelled {
                 XCTAssertEqual(taps(steps), [], "\(control.name) was cancelled, and undoes nothing")
-            } else if control.mostDown == 2 {
+            } else if control.mostDown == 2, control.travel > 25 {
                 XCTAssertEqual(navigations(steps), 1, "\(control.name) moves the view")
                 pans += 1
             }
@@ -392,6 +411,7 @@ final class CanvasTouchCoreLogicTests: XCTestCase {
         for step in 1...30 {
             let x = CGFloat(step) * 10, wobble: CGFloat = step % 2 == 0 ? 2 : -2
             let events = send([(1, .finger, x, wobble), (2, .finger, 200 + x + wobble, 0)])
+            guard step > 1 else { continue }  // the first is still inside the slop
             XCTAssertEqual(lastScale(events), 1)
             XCTAssertEqual(lastTurn(events), 0)
         }

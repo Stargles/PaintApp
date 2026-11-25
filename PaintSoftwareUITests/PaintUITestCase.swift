@@ -1862,20 +1862,41 @@ class PaintUITestCase: XCTestCase {
     func twoFingerGesture(from: (a: CGPoint, b: CGPoint), to: (a: CGPoint, b: CGPoint),
                           stagger: TimeInterval = 0.02, duration: TimeInterval = 0.6,
                           steps: Int = 12) throws {
+        let lifts = stagger + duration + 0.02
+        try fingersGesture([
+            GestureFinger(from: from.a, to: to.a, lands: 0, travels: stagger...(stagger + duration), lifts: lifts),
+            GestureFinger(from: from.b, to: to.b, lands: stagger, travels: stagger...(stagger + duration), lifts: lifts)
+        ], steps: steps)
+    }
+
+    /// One finger of a `fingersGesture`: where it lands and when, the stretch of time it travels over, and
+    /// when it lifts. A finger that stays where it landed passes nil for `to`.
+    struct GestureFinger {
+        let from: CGPoint
+        var to: CGPoint?
+        let lands: TimeInterval
+        var travels: ClosedRange<TimeInterval> = 0...0
+        let lifts: TimeInterval
+    }
+
+    /// **Any number of fingers, each on its own clock** — the taps and joinings a hand makes, whose fingers
+    /// land and lift in events of their own. See `twoFingerGesture` for how they are synthesised.
+    func fingersGesture(_ fingers: [GestureFinger], steps: Int = 12) throws {
         let screenToPortrait = SynthesizedTouch.screenToPortrait()
-        var paths: [AnyObject] = []
-        for (origin, destination, down) in [(from.a, to.a, 0.0), (from.b, to.b, stagger)] {
-            let path = try SynthesizedTouch.path(at: origin.applying(screenToPortrait), offset: down)
-            for step in 1...steps {
-                let t = Double(step) / Double(steps)
-                try SynthesizedTouch.move(path, to: CGPoint(x: origin.x + (destination.x - origin.x) * t,
-                                                            y: origin.y + (destination.y - origin.y) * t)
-                                            .applying(screenToPortrait), at: stagger + duration * t)
+        let paths: [AnyObject] = try fingers.map { finger in
+            let path = try SynthesizedTouch.path(at: finger.from.applying(screenToPortrait), offset: finger.lands)
+            if let to = finger.to {
+                for step in 1...steps {
+                    let t = Double(step) / Double(steps)
+                    let point = CGPoint(x: finger.from.x + (to.x - finger.from.x) * t, y: finger.from.y + (to.y - finger.from.y) * t)
+                    try SynthesizedTouch.move(path, to: point.applying(screenToPortrait),
+                                              at: finger.travels.lowerBound + (finger.travels.upperBound - finger.travels.lowerBound) * t)
+                }
             }
-            try SynthesizedTouch.lift(path, at: stagger + duration + 0.02)
-            paths.append(path)
+            try SynthesizedTouch.lift(path, at: finger.lifts)
+            return path
         }
-        try SynthesizedTouch.synthesize(paths, named: "two-finger gesture")
+        try SynthesizedTouch.synthesize(paths, named: "\(fingers.count)-finger gesture")
     }
 
     /// **A pinch in the upper-left of `element`, where no docked panel and no rail's menu reaches.**
