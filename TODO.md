@@ -33,7 +33,14 @@ Every status report to the owner lists this queue with each item's state, not on
    the red `SelectionEditUITests` swatch test.
 8. **Canvas freezes** (owner, Nov 24: *"iPad has new canvas freeze reports because I was drawing"*) —
    in flight on `tmp/nov24-touch`: 43 flights pulled and read, see "Find and fix the cause" below.
-9. Audit follow-through, streaming on the real link, smaller asks below.
+9. **One memory manager, not one per feature (owner's thought, Nov 25 — proposed, awaiting his go):** he
+   asks whether the shared budget and scheduler should decide for every feature what stays in memory and
+   what goes to disk, the way baked frames already do, instead of each feature coding it; example: a still
+   stream. Proposed shape, as stage 3b after stage 2 (disk reads need its lanes): each `MemoryBudget` entry
+   declares how it comes back — rebuild, reload from disk, or never drop — its cost to get back, and what
+   is about to need it; the budget picks, off main, with one disk limit. Start with the biggest holders
+   (layer pictures, 500 of 888 MiB measured), measure the stream before touching it.
+10. Audit follow-through, streaming on the real link, smaller asks below.
 
 ## Current — iPad build `8545ac57` (= `2891caad` code) installed 2026-11-21, owner re-test pending
 
