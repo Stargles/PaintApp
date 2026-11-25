@@ -181,7 +181,7 @@ R2/R3 that do not fit stay queued holding nothing and are re-tried when bytes ar
 | Untouched pages of a zeroed (`calloc`) buffer | **Helps.** `PixelOps.drawImage` already callocs and never clears: blank rows are never resident, so we *over*-charge sparse layers. M6 measures by how much; if ≥ 25%, charge the touched pages (`mincore`) after a render. |
 | `mmap` of a clean file | Not in the footprint, so good for **compressed** files read by R2/R3 (the store's reads become mapped). **Not** for pixels R0/R1 touch: a page fault is a hidden disk wait, and 95 MiB uncompressed files would quadruple the writes. |
 | Purgeable memory / `NSCache` | Not used: the system drops in its own order, invisible to our floors, and a purged picture is found at draw time — on the path that may not wait. |
-| Memory compression | Not relied on. Whether a compressed page still counts in full against the app's jetsam limit is disputed in our own notes (PERFORMANCE.md §6 item says compressed size; XNU's ledger reads as full page size). It can only slow a touch that faults a page back in. |
+| Memory compression | Not relied on. Whether a compressed page still counts in full against the app's jetsam limit is disputed in our own notes (PERFORMANCE.md, the residency item's unmeasured terms, says compressed size; XNU's ledger reads as full page size). It can only slow a touch that faults a page back in. |
 | App killed at its own limit regardless of system free memory | The reason the manager exists: no OS mechanism trades one of our pictures for another. |
 
 **Arbitration (c)** — one order, whenever room is needed:
