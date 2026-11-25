@@ -47,13 +47,21 @@ Every status report to the owner lists this queue with each item's state, not on
    the red `SelectionEditUITests` swatch test.
 8. **Canvas freezes** (owner, Nov 24: *"iPad has new canvas freeze reports because I was drawing"*) —
    in flight on `tmp/nov24-touch`: 43 flights pulled and read, see "Find and fix the cause" below.
-9. **One memory manager, not one per feature (owner's thought, Nov 25 — proposed, awaiting his go):** he
-   asks whether the shared budget and scheduler should decide for every feature what stays in memory and
-   what goes to disk, the way baked frames already do, instead of each feature coding it; example: a still
-   stream. Proposed shape, as stage 3b after stage 2 (disk reads need its lanes): each `MemoryBudget` entry
-   declares how it comes back — rebuild, reload from disk, or never drop — its cost to get back, and what
-   is about to need it; the budget picks, off main, with one disk limit. Start with the biggest holders
-   (layer pictures, 500 of 888 MiB measured), measure the stream before touching it.
+9. **One memory manager, not one per feature (owner, Nov 25: *"you decide … different features may have
+   different specific memory management behaviors that they want programmed in … with some things needing
+   to be strictly real time"*).** Decided: **go, designed together with stage 2 as one page** (time and memory
+   are one admission question), reviewed before code. The page must settle:
+   (a) *mechanism central, policy per feature* — a feature states facts (how it comes back: rebuild / disk /
+   never; cost to get back; predicted next use; smaller stand-ins it accepts, e.g. half-size or merged)
+   and may supply its own hooks; the manager alone decides when; no feature frees or spills on its own;
+   (b) *real time first* — R0/R1 run on reserved memory that nothing else may take and never wait on disk;
+   spilling and loading are R3 (R2 when predicted next), off main, stopped by a touch;
+   (c) *arbitration when several are queued* — one order (class, then cost-to-get-back per byte freed, then
+   recency), a floor per feature so none starves, limits against thrash (minimum stay, no spill of what
+   was just loaded), and a job that holds memory never waits for more; (d) one disk limit, write rate
+   bounded, spill only what is dearer to rebuild than to reload; (e) proof: the gate with a trace — zero
+   R1 waits on disk, zero spill/load work on main, hit rates per feature. Start with layer pictures (~500 of
+   888 MiB measured; unedited layers as two merged pictures); measure the stream before touching it.
 10. Audit follow-through, streaming on the real link, smaller asks below.
 
 ## Current — iPad build `8545ac57` (= `2891caad` code) installed 2026-11-21, owner re-test pending
