@@ -12,3 +12,4 @@
   bake waits for room (3 frames) before starting, defers on refusal; ring .current only while playing;
   decoded frames admitted for pixel lifetime; CPU compositor/strip/flat-stack/fill reference -> drawImage.
 - Left: fast tier Debug+Release, check scripts, drive draw/Move, TODO/PERFORMANCE/SCHEDULER docs.
+- g9..green3 GREEN x3 at 0.48 (1138-1142 peak). mutations A/B all caught. fast tier running.

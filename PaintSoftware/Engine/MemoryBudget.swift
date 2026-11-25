@@ -357,10 +357,6 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
         let evictable: Priority = lane == .answer ? .current : .cache
         let mayWait = waiting && !Thread.isMainThread
         let deadline = Date().addingTimeInterval(Self.longestWait)
-        // **Stops evicting once an eviction freed nothing.** A picture evicted from a cache while a
-        // job still draws from it stays counted (its pixels hold their grant), so evicting on would
-        // empty every cache for no byte; what is in use is waited for or refused instead.
-        var stalled = false
         lockState()
         while true {
             let liveAvailable = available ?? Int(os_proc_available_memory())
@@ -370,12 +366,14 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
                 condition.unlock()
                 return true
             }
-            let victims = stalled ? [] : victimsLocked(need: max(bytes - free, 1), upTo: evictable, keeping: nil)
+            // A picture evicted while a job still draws from it stays counted (its pixels hold their
+            // grant), so this can take more than `need` from the caches before the room appears —
+            // which is right: the room is needed, and a cache is what gives it.
+            let victims = victimsLocked(need: max(bytes - free, 1), upTo: evictable, keeping: nil)
             if !victims.isEmpty {
                 condition.unlock()
                 victims.forEach { $0.evict() }
                 lockState()
-                stalled = total - residentBytes - grantedBytes <= free
                 continue
             }
             if !mayWait || cancelled() || Date() >= deadline {
@@ -386,7 +384,6 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
                 return false
             }
             condition.wait(until: min(deadline, Date().addingTimeInterval(0.05)))
-            stalled = false
         }
     }
 

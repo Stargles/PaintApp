@@ -496,6 +496,13 @@ final class InterpolationModelLogicTests: XCTestCase {
         // A budget of two entries' worth, so the scrub below has to evict. The fixture canvas is
         // 64x64, so a memo is 16 KiB and the entry ceiling of 12 would never bind on six cels.
         let entryBytes = 64 * 64 * 4
+        // Other suites' background work (bakes, thumbnails) holds and gives back grants in this one
+        // budget; narrowing it against a moving figure would test their timing, not this rule.
+        for _ in 0..<30 {
+            let before = MemoryBudget.shared.inFlightBytes
+            Thread.sleep(forTimeInterval: 0.1)
+            if MemoryBudget.shared.inFlightBytes == before { break }
+        }
         MemoryBudget.shared.totalBytes = MemoryBudget.shared.heldBytes + entryBytes * 2
         defer { MemoryBudget.shared.totalBytes = MemoryBudget.deviceTotalBytes }
 
