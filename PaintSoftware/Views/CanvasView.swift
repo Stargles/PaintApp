@@ -4516,8 +4516,9 @@ struct CanvasView: UIViewRepresentable {
             // rather than one per SwiftUI pass — the guard already thins this to the transitions a
             // reader cares about. Both halves go in: the committed baseline and the live gesture
             // contribution are folded together only when the gesture ends (`commitNavigation`), so a
-            // recording that shows `live` never returning to identity is showing one that never did. A recording only: one per frame of a
-            // pan is the rate `ifRecordingInFull` exists to keep out of the flight ring.
+            // recording that shows `live` never returning to identity is showing one that never did. A
+            // recording only: one per frame of a pan is the rate `ifRecordingInFull` exists to keep out
+            // of the flight ring.
             ActionRecorder.ifRecordingInFull {
                 $0.transform(committedScale: committedScale, committedRotation: committedRotation,
                              committedOffset: committedOffset,

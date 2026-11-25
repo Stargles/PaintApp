@@ -77,8 +77,8 @@ final class CanvasPresentationLogicTests: XCTestCase {
     /// **No `.popover` may be declared anywhere in the app.**
     ///
     /// A popover over this canvas presents behind a `_UIPassthroughGateGestureRecognizer` bound to
-    /// the canvas's own touches, and when that gate goes away under a live two-finger gesture the
-    /// transform recognizers strand for good — the owner's canvas freeze, twice. Every presentation
+    /// the canvas's own touches, and when that gate goes away under a live two-finger gesture every UIKit
+    /// recognizer bound beside it strands for good — the owner's canvas freeze, twice. Every presentation
     /// the editor raises goes through `View.canvasPresentation`, which draws an `AnchoredMenu`
     /// instead; this is the gate that keeps it that way. Swift has no way to forbid a standard-library
     /// modifier, so this is a test-time gate rather than a compile-time one — a real one nonetheless,
@@ -112,8 +112,7 @@ final class CanvasPresentationLogicTests: XCTestCase {
     /// **No SwiftUI `Menu`, `.contextMenu` or `.confirmationDialog` may be declared over the canvas.**
     ///
     /// UIKit presents all three and tears them down itself, and the teardown cancels the touch that
-    /// closed them: a stroke begun outside an open `Menu` was drawn and then lost, and the canvas
-    /// announced a freeze it had repaired (BUGS.md, 2026-10-07). A menu over the canvas is
+    /// closed them: a stroke begun outside an open `Menu` was drawn and then lost. A menu over the canvas is
     /// `CanvasMenu` / `canvasContextMenu`, which `CanvasPresentationHost` draws and
     /// `AnchoredMenuRouter` closes without consuming the touch.
     ///

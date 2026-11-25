@@ -92,8 +92,7 @@ final class ActionRecorder: ObservableObject {
     /// directory, or a window whose `sendEvent` could not be intercepted. Never fails silently: a
     /// recorder that quietly records nothing is worse than no recorder.
     @Published private(set) var problem: String?
-    /// What the last flight save wrote, for a few seconds after it — the badge that tells the owner a
-    /// freeze was caught without their having done anything (`ActionRecorderIndicator`).
+    /// What the last flight save wrote, for a few seconds after it (`ActionRecorderIndicator`).
     @Published private(set) var flightNotice: String?
 
     // MARK: - Session state

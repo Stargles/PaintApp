@@ -4,8 +4,7 @@ import XCTest
 ///
 /// A menu raised over the canvas has to close on the touch that lands outside it **and** let that touch
 /// do what it was going to do. A SwiftUI `Menu` did the first and wrecked the second: UIKit's teardown
-/// cancelled the stroke the same touch had begun, so the first stroke was drawn, then lost, and the
-/// canvas's wedge detector announced a freeze it had repaired (BUGS.md, 2026-10-07). Every menu is an
+/// cancelled the stroke the same touch had begun, so the first stroke was drawn, then lost. Every menu is an
 /// `AnchoredMenu` now (`CanvasMenu`), closed by `AnchoredMenuRouter` without consuming the touch, and
 /// this class pins it with the layer's blend-mode menu — the one the owner met it in — and the
 /// timeline's four, which were the first to be anchored.
@@ -38,11 +37,7 @@ final class MenuInterruptionUITests: PaintUITestCase {
     ///    popover-with-passthrough outcome the owner ruled against.
     /// 3. **Did the stroke reach the canvas, and stay?** The layer row's `.vector` marker counts
     ///    committed `.paint` strokes. This is the reading that was 0.
-    /// 4. **Did the canvas say it had to repair itself?** The flight recorder's badge is the app's
-    ///    own announcement that a recogniser was stranded; a clean stroke raises none.
-    /// 5. **Is the canvas still alive?** The original freeze: all three transform recognizers wait on
-    ///    the stroke recognizer failing, so one stranded without `reset()` kills pan/pinch/rotate for
-    ///    the life of the drawing view.
+    /// 4. **Is the canvas still alive?** Two fingers still move it.
     func testDrawingStraightThroughAnOpenBlendModeMenu() throws {
         let app = XCUIApplication()
         XCTAssertTrue(launchIntoEditor(app))
@@ -85,10 +80,6 @@ final class MenuInterruptionUITests: PaintUITestCase {
 
         XCTAssertFalse(menuStillUp,
                        "the touch outside the menu closes it — a menu left up over a canvas being drawn on is wrong")
-        XCTAssertFalse(app.staticTexts["recorder.flightNotice"].waitForExistence(timeout: 2), """
-            The canvas announced a freeze it had repaired. A stroke drawn through an open menu stranded \
-            a recogniser, which is what a menu torn down by UIKit under the touch does.
-            """)
         assertPinchMovesCanvas(app, canvas, """
             THE FREEZE: two-finger pinch/pan/rotate stopped working after a stroke drawn through an \
             open blend-mode menu

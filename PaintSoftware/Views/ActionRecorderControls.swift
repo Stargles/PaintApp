@@ -185,9 +185,8 @@ struct ActionRecorderSection: View {
     }
 }
 
-/// The always-visible "you are being recorded" badge — and, for a few seconds after the flight
-/// recorder saves, the badge that says so: *"The canvas froze — saved the last 90 s"* is how the owner
-/// learns a freeze was caught without having done anything.
+/// The always-visible "you are being recorded" badge — and, for a few seconds after the artist saves
+/// the flight recorder's last 90 s, or reopens after a crash, the badge that says so.
 ///
 /// Sits over the canvas next to the perf HUD and renders **nothing at all** otherwise, so it costs
 /// one `if` in `DrawingView`'s body. `allowsHitTesting(false)`: it must never eat a touch, least of
