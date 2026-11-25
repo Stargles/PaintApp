@@ -928,19 +928,17 @@ and palette libraries. Do not add a product cleanup hook or delete unowned/gener
 The owner can reproduce a device-only bug in four seconds; an agent poking a simulator cannot
 reproduce it at all. `PaintSoftware/Debug/ActionRecorder.swift` turns those four seconds into one
 greppable JSONL file. **Reach for it before spending runs trying to reproduce something the owner
-saw and you can't** — the fill-tool gesture bug in [BUGS.md](BUGS.md) is exactly that shape.
+saw and you can't** — the canvas freezes were found from 43 of its files.
 
-**Turning it on**: Settings menu → **"Record My Actions"**, in the recorder section beside
-"Canvas freezes caught: N" (the lifetime repair count, also in every flight header). Reproduce the
-bug, then **"Stop Recording"**.
+**Turning it on**: Settings menu → **"Record My Actions"**. Reproduce the bug, then **"Stop Recording"**.
 
 **The flight recorder is always on and writes nothing until asked.** From the editor's first
 appearance `ActionRecorder` keeps the last 90 s of the cheap events (touch-began/-ended with the
-recognizers each bound, recognizer transitions, `requireFailure`, model changes, presentations) in
-memory, and saves them as `flight-*.jsonl` beside the recordings when the canvas replaces stranded
-recognizers (a `stranded` flight ends in two notes: which it replaced, and every recognizer under the
-window then out of `.possible` or still counting a touch), when `CanvasWedgeDetector` sees the canvas
-still wedged, or on Settings → **"Save Last 90 Seconds"** — so after a device-only glitch the owner does
+recognizers each bound, recognizer transitions, what the canvas decided about its touches, model changes,
+presentations) in memory, and saves them as `flight-*.jsonl` beside the recordings when
+`CanvasTouchAudit` finds the canvas not answering a hand (trigger `canvas`, silent; the `canvasMiss` line
+names what and every recognizer under the window then not at rest), or on Settings →
+**"Save Last 90 Seconds"** — so after a device-only glitch the owner does
 nothing, or taps that one row. Its cost on a
 stroke is PERFORMANCE.md §23 (below the stroke's own run-to-run noise).
 
@@ -955,7 +953,7 @@ xcrun devicectl device copy from --device E3B83820-DF74-5042-B52B-0D5BA17E4877 \
 ```
 
 **What is in it**: every touch with its pencil-vs-finger type and hit-test target, every gesture
-recognizer state transition, every answer `shouldRequireFailureOf` gave and who it named, model
+recognizer state transition, what the canvas decided about its touches (`canvas.touches`, `stroke`), model
 changes and canvas transforms — all on one clock, so cause sits beside effect.
 
 **Its one real limitation, and it is not a missing identifier in the app.** A tap on SwiftUI chrome

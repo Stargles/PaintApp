@@ -75,6 +75,5 @@ guesses. The real cost is migration: each heavy job has to be made cancellable a
 
 ## 6. What this does not cover
 
-The recurring canvas freeze is a gesture-recognizer state bug (a pan left `.ended` after a touch was
-cancelled and began again mid-gesture, flight 2026-11-17 19:11), not a scheduling one, though long main
-stalls make that kind of touch sequence likelier. It is fixed on its own (TODO.md).
+The recurring canvas freeze was a gesture-recognizer state bug, not a scheduling one, and was fixed on its
+own (BUGS.md, "The canvas stops answering two fingers").

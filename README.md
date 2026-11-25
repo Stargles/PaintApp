@@ -346,9 +346,7 @@ reasoning for all of it is in `Services/SaveDamageGate.swift`.
 
 ## Known limitations / open work
 
-See [BUGS.md](BUGS.md) for the tracked list. Notable ones: **two-finger pan/pinch/rotate is reported
-dead on device while the Fill tool is selected**, unexplained and unreproduced on the simulator;
-Distort works on a raster floating piece, a text box and lassoed vector ink, but not yet on a floating
+See [BUGS.md](BUGS.md) for the tracked list. Notable ones: Distort works on a raster floating piece, a text box and lassoed vector ink, but not yet on a floating
 placed image or video — six numbers and a mirror bit have nowhere to keep a projective residue; and
 Cut/Copy/Paste are still stubs with an "isn't available yet" notice.
 

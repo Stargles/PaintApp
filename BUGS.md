@@ -30,16 +30,6 @@ The scene includes a Recolour layer. Trace whether the after frame is still an u
 overlay or whether effect ownership/settlement was lost. The setup-only UI test passed; this
 color discrepancy does not have appearance qualification or physical crash attribution.
 
-## Freeze-repair notice during successful text selection — October29
-
-Two preserved simulator flights identify canvas.textPress ending while UIKit text selection is
-still active. The existing touch owner was checked too late, after the canvas recognizer began.
-The harvested correction applies that same owner at touch-down. OLD count0→2; fixed whole34
-passed before/after2controls, three direct assertion targets reached, and root inspected native
-Select All and red words with no notice. Existing watchdog timings/recovery code stay on their
-original path. This proves premature text-recognizer repair, not an artist-visible freeze.
-Packet: `/Users/juliapark/PaintWork/s55-recorded-regressions/text-owner-harvest-f2-to-a6/`.
-
 ## macOS cloud-access prompts during agent work — October 28
 
 Owner reports repeated ChatGPT prompts for OneDrive access. No agent reports intentionally reading
@@ -724,144 +714,29 @@ right to a function or two, but the frame addresses are not exact. What would se
 the layer panel's `reload()` on the iPad 9 with a document the size of the owner's, and whether it
 reloads on SwiftUI passes that change nothing about the layers.
 
-## The canvas's recognizers strand when a touch joins two others, and the repair caught it five times in thirty minutes (2026-10-10)
+## The canvas stops answering two fingers, or answers them in part (2026-09-16 … 2026-11-24) — fixed in code, awaiting the owner's confirmation on the iPad
 
-**Owner follow-up completed, 2026-10-22:** six new stranded flights dated October16–18 have repair counters
-1–6, appv1.0.43(1), executable build stamp2026-10-15T04:07:09Z. Headers themselves have no Git SHA;
-the exact stamp matches archived physical-probe and renewal evidence for Releasef813346, app source
-840d68a, predating Liquify. Eleven recordings are preserved under `~/PaintWork/s50-freeze-logs/` with
-device metadata, local hashes and `build-correlation.json`. No app launch, reset or install was needed.
+**Cause.** The canvas's pan, pinch and rotation, its two- and three-finger taps and the layer's stroke
+recognizer were one UIKit component, tied by failure requirements. UIKit resets such a component only as a
+whole, and in three shapes of touch it left a member terminal with nothing to end it: a third finger landing
+in an event of its own (17 flights: `canvas.pan` *failed touches:2*), a contact the system cancels and begins
+again 1–30 ms later (5, *ended touches:0*; 16 more where the new contact reached the pan and not the pinch or
+rotation, so zoom and turn went dead for the rest of the gesture), and a lone contact cancelled at once (4,
+all four *failed touches:0*). Everything tied to it stayed deaf. Beside it, a pair landing in two events on a
+layer a finger can paint never moved the view at all: the first finger's stroke was *recognized*, which fails
+whatever was waiting on it. (The Fill-tool report of 2026-08-15, never reproduced and closed by the owner, was
+the same symptom; nothing it could have been is left.)
 
-**Owner confirmation, 2026-10-23:** "I only noticed the repair message." The owner did not report a visible input freeze around those repairs; retain the repair and do not treat these flights as six observed freezes.
+**What replaced it.** `CanvasTouchCore` decides whose a canvas touch is and where the fingers have taken the
+view, from the live set of touches and nothing else; `CanvasTouchRecognizer` and `StrokeGestureRecognizer`
+are `ListeningGestureRecognizer`s, which never leave `.possible`, and no canvas recognizer is in a failure
+requirement. The recognizer-replacing watchdog, its count and its notice are deleted. The touches of all 43
+flights, with 120 healthy gestures from the same files, are
+[canvas-touches-2026-11-24.jsonl](docs/bug-evidence/canvas-touches-2026-11-24.jsonl), replayed by
+`CanvasTouchCoreLogicTests`.
 
-The reproducible comparison (`analyze-stranded.py`, `stranded-analysis-20261022.txt` and
-`stranded-sequences.json` there) deduplicates overlapping rings into346 complete pan-bound sequences:
-340 controls and6 associated with repairs. These selected windows are **not a field failure rate**.
-
-| Flight suffix | Final sequence | Census at repair |
-|---|---|---|
-| Oct16-033442 | two fingers together, third20ms later; all moves0 | pan failed, touches2 |
-| Oct16-033555 | same begin pattern; three separate lifts | pan failed, touches2 |
-| Oct16-033556 | three staggered begins, `(1,1,1)`; a distinct second repair | pan failed, touches2 |
-| Oct17-042134 | one of a pair cancels, distinct-uid replacement joins; pan count reaches0 | pan ended, touches0 |
-| Oct17-042612 | late third; no stroke recognizer bound to the sequence | pan failed, touches2 |
-| Oct18-003734 | direct cancellation/reset, then a short Pencil stroke; no third finger | pan failed, touches1 |
-
-Healthy controls disprove separate lifts or a reused touch fingerprint as sufficient causes. All126
-healthy Pencil sequences reset pan/count0 within0–10ms of model count0;210 of214 healthy direct
-sequences have paired observations within0–60ms (four lack a pair). Repair notes follow100–110ms later
-in five cases and260ms in the Pencil case, but are emitted **after replacement**, so that gap is not a
-measurement of the decision time or proof of a main-thread stall. The only external window recognizer
-in a final census is an Oct18 system gate, failed/count0; no active positive-count blocker is observed.
-
-These are six repair-predicate hits, **not six proven user-visible freezes**: replacement happens before
-a later gesture can establish whether UIKit would recover. UIKit's reported touch count does not prove
-which raw end callbacks it received. `uid` is a truncated24-bit identity hash, not a pointer; equality
-is consistent with reuse but cannot exclude collision. Ignoring a third finger cannot explain all six;
-`delaysTouchesEnded` is untested. Keep the current repair, with no speculative behavioral change.
-The next useful evidence is a user-observed loss of input correlated to its flight/counter. If more
-diagnostics are needed, timestamp the existing repair decision **before replacement** and correlate
-canvas/window counts; this would separate delayed checking from replacement work, not explain UIKit
-by itself. The older exclusive-trigger/no-Pencil claims below describe the older sample only.
-
-**What the owner's iPad saved.** Build 55c4fc7 (Release), iPad 9 on iPadOS 26.6.2, landscape: five
-`flight-…` files at 19:11, 19:15, 19:23, 19:34 and 19:40, all with trigger `stranded` — 0.10 s after
-the last touch lifted, `CanvasView.Coordinator.replaceStrandedRecognizers` found `canvas.pan` (all
-five), `canvas.pinch`, `canvas.rotation` and the active layer's stroke recognizer (four) out of
-`.possible` and replaced them. The fifth was on the Select tool, where pan waits on no stroke
-recognizer, and only `canvas.pan` was stranded. The last six seconds of each are in
-[stranded-recognizers-2026-10-10.jsonl](docs/bug-evidence/stranded-recognizers-2026-10-10.jsonl).
-
-**The sequence, every time.** Each is the last sequence of its 90 s, which also holds 22–57 two-finger
-sequences (undo taps and pans) and 23–37 pencil strokes that did not strand:
-
-| file | the stranding sequence |
-|---|---|
-| 191141, 191559, 192305 | two fingers land in one event; 20–30 ms later one is **cancelled** and a new touch begins on the same spot within a millisecond; the pair then pans |
-| 193435 | a three-finger tap (redo), the fifth in a second: two land in one event, the third 20 ms later; 50 ms of contact |
-| 194056 | the same, on a vector layer with Select |
-
-In all five the touch that begins last is bound to `canvas.pan` but to neither pinch nor rotation
-(nor stroke, where there is one). Of the 442 sequences in the five files **exactly these five** begin
-a touch in a later event than two that landed together; the other 437 — including three-finger taps
-that land all three in one event, and one finger followed by two — reset normally. Not main-thread
-stalls: the check ran on time (0.10–0.12 s after the lift) and the model lines trail the touches by
-10–20 ms.
-
-**Three more, with the census, 2026-10-12** (build `95e5507`, owner's iPad, files in
-`~/PaintWork/recordings-1012/`): `flight-20261012-140611` (2048×1024 "Test") replaced `canvas.pan`, found
-*"failed touches:2 on CanvasPlaneView"*; `-171926` (2668×1644) replaced pan, pinch, rotation and the stroke
-recognizer — pan *failed touches:2*, the other three *failed touches:0*; `-173237` replaced `canvas.pan`,
-found *"ended touches:0"*. So the stranded pan is usually **failed while still counting two touches**
-after every touch is up — its touches were never delivered an end or cancel — and once it was `ended`
-with none. Not yet analysed against the touch sequence before each.
-
-**Older analysis, 2026-10-13** (`~/PaintWork/design/s48-stranded-analysis.md`): `canvas.pan` is in all 8
-strands; that sample suggested a third distinct touch joining a pair that landed together — a late third finger
-(~20 ms) or a system cancel-and-reissue (1–4 ms) — **8 of the 9** such sequences stranded; the one that
-did not had the pair end in one event. Ruled out by the data: pencil, hierarchy changes, the hold shield
-(the 10-10 build predates it), a touch that never ended. Best hypothesis (INFERRED): UIKit's
-`UIPanGestureRecognizer` (min = max = 2) bookkeeping is not reset after a third touch. **The owner ruled
-the next build carries diagnostics only** (per-touch move counts, each recogniser's `numberOfTouches` in
-the sweep by dispatching phase, a `UITouch` identity per touch line, and a persistent repair counter);
-the candidate fixes (a pan subclass that ignores touches beyond two; `delaysTouchesEnded = false`)
-then awaited one or two more strands. The October22 analysis above supersedes that waiting state.
-
-**Cause: still not found.** The recognizers are left out of `.possible` after every touch is up:
-`StrokeGestureRecognizer.reset()` (which writes a line when it runs) never ran, and
-`canvas.touchCounter` read 0. **Not reproduced**: about 1,400 synthesised shapes
-(`XCPointerEventPath`: three fingers with the third landing 10–40 ms late, lifts staggered, drifting
-pans, a second finger lifted and replaced within 3–10 ms) on an iPad Pro 13" and an iPad 9th
-generation simulator, Debug and Release, pencil-only on, with the main thread stalled 15/30/60 ms
-per touch so the late touch arrives in the same run-loop pass — none stranded, on 55c4fc7 or on
-main. `XCPointerEventPath` cannot cancel a touch, and the simulator's window carries a
-`HomeAffordanceGate` the iPad 9's does not; the simulator runtime is 26.5, the device 26.6.2. The
-system's own recognizers (`_UISystemGestureGateGestureRecognizer`, `_UIFlexInteraction.Pan`) are
-bound to every touch on both.
-
-**Not a main-thread hang.** The four `UIKit-runloop` hang reports from the same session (19:41–19:46,
-1.2–1.7 s, see the entry below) all come after the last flight, and no repair followed any of them
-though 73, 4 and 28 digitizer events were delivered during three. In the flights a canvas touch
-reaches the model 10–20 ms after its hardware stamp (150 ms at worst), at all five strands included;
-and a stall merges a late touch into the event of the others, which is the opposite of the shape. A
-400 ms and a 1 s main-thread stall per touch, so each synthesised gesture arrives whole in one pass
-(70 shapes each), stranded nothing either.
-
-**Main.** Nothing in TODO (159)–(168) touches `replaceStrandedRecognizers` or how pan, pinch,
-rotation and stroke are bound. (168) adds a second `TouchCountRecognizer` on the window
-(`window.touchCounter`, always `.possible`, like `canvas.touchCounter`) and removes the stroke
-recognizer's snap-companion paths, which only act while a pencil stroke or a handle drag is running.
-Nothing fixed it, and nothing in the evidence says anything worsened it.
-
-**What it costs, and the open question.** The repair makes it a lost gesture at worst (a touch
-landing inside the 0.1 s defers the repair to its own lift), and it costs five files in half an hour.
-`ActionRecorder.canvasRecognizersReplaced` now also writes what else under the window was out of
-`.possible` or still counting a touch (`WindowEventTap.unquietRecognizers`) — the one thing these
-files could not say, and the difference between a recognizer UIKit thinks is still being touched
-(`touches:3`) and one left terminal with nothing to wait for (`touches:0`). The repair has no
-simulator trigger any more (the popover that stranded it is gone), so that note is covered by a logic
-test of the census and by reading, not by a run. **To get the answer from the device:** after the
-next install, make the shape on purpose — three fingers, two down together and one a hair late, the
-way a fast redo tap lands — until the "Caught a canvas freeze and fixed it" badge shows, and send the
-newest `flight-…` from the recordings list. Once the cause is known, the file-per-repair can stop.
-
-**What that flight carries now (diagnostics only; `replaceStrandedRecognizers` is untouched).**
-Every touch line has `uid`, the `UITouch` object's identity — `touch` numbers *sequences* and cannot say
-whether UIKit handed an object back; the simulator reuses one object across sequences that do not
-overlap, so a shared `uid` is only a finding when the two touches were alive together or the
-replacement begins in the cancel's own event — and an `ended`/`cancelled` line has `moves:N`. The
-recognizer lines for `canvas.pan`, `canvas.pinch`, `canvas.rotation` and the layers' `stroke.*` carry
-`touches:N`, and a line of their own when only the count moves (`from` = `to`). A sweep's `src` is
-`sweep:` and the letters of the phases the event it followed carried (`b` `m` `e` `c`): `sweep:b` is a
-recognizer that failed in the event that began a touch, `sweep:e` at a lift, and a move with three or
-more fingers down is swept too (`sweep:m`), so *pan failed in the third touch's begin or after a move*
-and *when its count dropped* are read off the file. The Settings menu shows **Canvas freezes caught: N**
-beside Save Last 90 Seconds — the app's lifetime total, kept across launches and over-installs, and in every
-flight and recording header as `canvasFreezesCaught` — so the number read before installing a build and
-after using it is that build's repair rate, and a build that is right stops counting. The October22
-comparison above reads those fields and shows neither proposed behavioral fix is established as a
-complete cure. Not covered by any test: that a repair itself counts — it has no simulator
-trigger — which is one line, `CanvasRepairCount.record()`, in `replaceStrandedRecognizers`.
+**If it returns**, `CanvasTouchAudit` saves a `flight-…` by itself with trigger `canvas`: a landing the canvas
+never heard, a touch it still holds with none down, or two fingers moving and a view that does not.
 
 ## An effect layer between two live hosts is left out of the live picture (2026-10-11)
 
@@ -2429,21 +2304,11 @@ path in two. `StrokeGiveUp.handedOver` still rolls back, so a two-finger pan beg
 leaves no permanent mark; `StrokeGiveUp.interrupted` commits, with an undo step, exactly as a lift
 would have. The stub therefore no longer survives the lift and no longer vanishes when the next stroke
 starts. Since TODO (110) no presentation over the canvas is a UIKit popover at all
-(`CanvasPresentation`), so the teardown this entry is about has no popover left to come from; and a
-stroke recognizer still out of `.possible` once the canvas touches lift is replaced then, its stroke
-committed as `.interrupted` (`CanvasView.Coordinator.replaceStrandedRecognizers`).
+(`CanvasPresentation`), so the teardown this entry is about has no popover left to come from.
 
-**Two costs remain, both known and both deliberate:**
-
- * **The stroke is still short.** Closing the presentation a frame earlier does not stop the teardown
-   landing mid-sequence; nothing in this app can recover samples UIKit never delivered. The artist gets
-   a truncated stroke they can undo or draw over, instead of one that disappears.
- * **The touch that discovers the stranded stroke is spent discovering it.** `touchesBegan` commits the
-   corpse and returns, so the *third* attempt is the first that draws, not the second. Binding the new
-   touch instead means driving `state` from `.changed`/`.ended` back to `.began`, which is not a
-   documented transition and whose failure mode is "drawing stops working" rather than "drawing is
-   delayed by one touch". `StrokeInterruptionLogicTests.testTheTouchThatDiscoversACorpseIsSpentDiscoveringIt`
-   records it so it stays a known cost.
+**One cost remains, known and deliberate: the stroke is still short.** Closing the presentation a frame
+earlier does not stop the teardown landing mid-sequence; nothing in this app can recover samples UIKit never
+delivered. The artist gets a truncated stroke they can undo or draw over, instead of one that disappears.
 
 Still unseparated, and it no longer changes a decision: whether delivery stops because of a view-level
 `isUserInteractionEnabled` flip (`reconcileLayers`) or because UIKit drops the sequence as the
@@ -2599,91 +2464,6 @@ means. Dropping the floor to remove it would merge layers on a two-finger rest.
 The seven samples are the regression fixture, as literals in `PinchMergeGateLogicTests.ownersPinch`:
 replaying them merges, replaying them with the vertical motion removed does not, and the old radial rule
 (reproduced in the test file only, so its rejection stays documented) fires on neither.
-
-## Two-finger pan/pinch/rotate is dead while the Fill tool is selected, on device (2026-08-15) — CLOSED 2026-08-27, not reproducible
-
-**The owner cannot reproduce it any more and ruled it solved**, 2026-08-27: *"I cant seem to replicate the
-freezing bug, so I'll let you know if I ever encounter it again. Chances are the new text UI could have
-fixed it, so treat it like its solved. I will bring it up if i ever see it."* That was said of the
-**`.text`** half; this Fill entry closes with it because the two were argued to be **one bug** — see the
-`.text`-is-this-report's-twin paragraph below, which is the argument, and it is the reason a single answer
-settles both. The owner's own guess at the cure, the new text UI, is consistent with that: the bottom-bar
-Add Text panel (`e0d5e57`) replaced the presentation the report was taken against.
-
-**Kept rather than deleted, because nothing was diagnosed.** No mechanism was ever found, no fix was ever
-written, and the capture that would have named it was never taken. If it returns, everything below is the
-investigation to resume — in particular that the two regression nets in `CanvasTransformFreezeUITests`
-still pass on the simulator and always did, so a green suite is not evidence the defect is gone.
-
-The original report and the reading that eliminated the obvious hypothesis follow.
-
-
-The product owner reports it from their iPad: pick Fill and the canvas will not pan, pinch or rotate;
-pick any other tool and it does. **Unexplained and not fixed.**
-
-Three simulator attempts failed to reproduce it — including a `-configuration Release` build and a
-real two-finger drag rather than the canned `pinch`/`rotate` gestures — and the canvas moved every
-time, so this is not something the shipped XCUITests are failing to notice. It may be device-specific
-(a real pencil/palm in play, `UIPencilInteraction`, or hover events the simulator never delivers).
-
-Do not "fix" it by guessing at recognizer priorities. **Next step is a capture, not a patch**: turn on
-the action recorder (see CLAUDE.md), reproduce it on the iPad, and read which recognizer answered what
-— the recording carries every state transition and every `shouldRequireFailureOf` answer, which is
-exactly the evidence the simulator refused to produce.
-
-**`.text` is this report's twin, and the pair is the sharpest form of the hypothesis (2026-08-27).**
-The owner clarified that report (6)'s *"try to resize the canvas"* meant *"moving the canvas with two
-fingers"* — this symptom — reached from the text keyboard. `Tool.paintsOnCanvas` is false for exactly
-`.fill`, `.eyedropper` and `.text`, and that is the property `shouldRequireFailure` reads before it
-stakes pan/pinch/rotate on anything. So the two device reports name the two *non-momentary* members of
-one set, which recasts the question from "what is wrong with Fill" to **"is two-finger transform dead
-whenever `paintsOnCanvas` is false?"** — one capture answers it for both. `CanvasTransformFreezeUITests`
-now covers the `.text` half beside the `.fill` half; **both pass on the simulator**, which is the same
-non-answer the three earlier Fill attempts gave and is further evidence the split is device-only.
-
-**One hypothesis is now eliminated by reading, 2026-08-22, and it was the obvious one.**
-`shouldRequireFailure` (`CanvasView.swift`) is the code that can wedge a transform behind a stroke
-recognizer — its own comment at the call site says so — so it was the natural suspect. It cannot be
-this instance. Its guard requires `activeHost.isUserInteractionEnabled`, which is `shouldInteract`,
-which requires `selectedTool.paintsOnCanvas` — and **`Tool.fill.paintsOnCanvas` is false**. So with
-Fill selected the guard fails and the function returns `false`: *no failure dependency is stated at
-all*, and there is nothing in that state to wedge. Reached independently by two readers before the
-`CanvasTouchOwner` refactor and confirmed after it, which changed this line from reading flags
-`reconcileLayers` had pushed onto the host to recomputing the predicate live — the right direction for
-the *class* of defect, but it does not intersect this instance, and the owner should **not** be asked
-to re-test this as a fix check.
-
-Two facts found on the way, worth keeping: **`strokeRecognizer.isEnabled` is read here and assigned
-nowhere in the app**, so that third conjunct has always been a no-op defaulting to `true`; and a
-staleness race between an input changing and the next `reconcileLayers` pass would be *intermittent*,
-where this report is deterministic ("pick Fill and the canvas will not pan"). The capture is now
-**more** worth taking than it was, because `shouldRequireFailureOf` records every answer to the
-ActionRecorder and that answer is now computed from live state rather than from a flag pushed a pass
-earlier — so the `failureRequirement` lines are evidence about the moment of the gesture.
-
-## Whether UIKit honours a `.began -> .failed` transition is unverified, in both directions (2026-08-15)
-
-`StrokeGestureRecognizer.failTrackedStroke` exists to fail a stroke that has already begun, and
-**nothing in the suite reaches it.** Every two-finger gesture — synthetic *and* real, confirmed by an
-action recording — delivers both touches in a single event, so the recognizer is still `.possible`
-and takes the legal `.possible -> .failed` guard instead.
-
-So the question is open on both sides: it is not established that UIKit honours the transition, and it
-is not established that it refuses. A defensive conditional readback is in place and is documented in
-the code as unproven — do not read its presence as evidence it works.
-
-What would settle it: a test that delivers the second touch in **its own event**, some frames after
-the first, so the recognizer is genuinely `.began` when the failure arrives. Until someone writes
-that, treat the path as unexercised.
-
-**Update (2026-08-16): the *device* half of this is now reachable, and the reason it was not is the
-entry at the top of this file.** A real hand does deliver the second touch in its own event; it was
-being dropped before any recognizer saw it, because `isMultipleTouchEnabled` was left at its `false`
-default on every canvas view. With that set, a second finger during a *finger* stroke now reaches
-`failTrackedStroke` for the first time, and a recording that shows `.cancelled` rather than `.failed`
-in the transition line settles the question on the spot. (A finger during a *pencil* stroke does not
-reach it — it is refused by type as palm rejection, deliberately.) The suite still cannot reach it,
-so the "what would settle it" paragraph above stands for XCUITest.
 
 ## Interpolate mode's onion skin is still unmasked (2026-08-17)
 

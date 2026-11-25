@@ -48,16 +48,15 @@ tap got out. That is why the timeline's four menus were the first to be `Anchore
 `cbd248f`, TODO (110)). A `.popover`, a `Menu` and a `.contextMenu` all do the same: the drag pans, UIKit
 tears the presentation down under it, and the recognizers the teardown was bound to — `canvas.pan`,
 `canvas.pinch`, `canvas.rotation`, the taps, the catch-all — are stranded for good. That is the owner's
-canvas freeze. `CanvasView.Coordinator.replaceStrandedRecognizers` replaces whatever is stranded 0.1 s
-after the last finger lifts, so a freeze the editor did not cause (a share sheet, a stock colour picker)
-still costs the artist nothing.
+canvas freeze of that date. The canvas's recognizers are its own since 2026-11-25 and never leave
+`.possible` (`CanvasTouchCore`), so a presentation the editor did not raise (a share sheet, a stock colour
+picker) has nothing of the canvas's to strand.
 
 **A touch outside an open `Menu` begins a stroke the menu's teardown then cancels** (MEASURED
 2026-10-07, iPad Pro 13" M4, iOS 26.5). The 2026-08-20 reading, that a `Menu` "absorbs the whole touch
 sequence", was true only for a touch on the menu's own surface: it started ten points inside the menu's
 frame, because the left rail was 20 pt wider. Started outside, the menu comes down, the stroke is drawn
-and cancelled, the layer holds none of it, and the flight recorder announces *"Caught a canvas freeze
-and fixed it"*. A `Menu` exposes no `isPresented` for `CanvasPresentation` to observe, so the family
+and cancelled, and the layer holds none of it. A `Menu` exposes no `isPresented` for `CanvasPresentation` to observe, so the family
 could not be covered the way the popovers were; it had to stop being a `Menu`. The cases for every
 family are in `CanvasPresentation`, and `MenuInterruptionUITests` draws straight through the blend-mode
 menu, the one the owner met it in.

@@ -48,7 +48,8 @@ each spelling its own predicate over the same four inputs (`selectedTool`, `acti
 | `isUserInteractionEnabled` | `:836` (`shouldInteract`, the layer host), `:1654` (`isCapturingGestures`), `:1713` (shape), `FloatingPieceOverlayView.swift:82`, `ObjectTransformOverlayView.swift:134` |
 | `hitTest` override | `ShapeOverlayView.swift:380`, `TextOverlayView.swift:397`, `TextTransformOverlayView.swift:183`, `ObjectTransformOverlayView.swift:220`, `GuideOverlayView.swift:233` |
 
-and `shouldRequireFailure` (`:2676`) reads three of them back out to answer a fourth question.
+and `shouldRequireFailure` (`:2676`; gone since `CanvasTouchCore`) read three of them back out to answer a
+fourth question.
 
 **The evidence is four defects, three of them in the last week.**
 - 2026-08-22, the owner: the pick tool was dead with the Select panel open. `:1791` consulted

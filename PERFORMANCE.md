@@ -5334,11 +5334,12 @@ notice.
 TODO (110): the owner's freeze recordings both started after the wedge, and *"constantly recording my
 actions would produce way too much data space."* So `ActionRecorder` keeps a ninety-second ring of the
 cheap events — touch-began/-ended with the recognizers each began bound, recognizer transitions,
-`requireFailure` answers, model changes, presentations shown and dismissed — from the editor's first
-appearance, and writes nothing until the canvas repairs stranded recognizers, the wedge detector
-trips, or the owner picks Save Last 90 Seconds. Per touch *move* it does a phase check and returns;
-per stroke sample, one `.changed` action message reaches the tap's registry (a dictionary lookup that
-writes nothing); per touch-began/-ended event, one sweep of the registry's recognizer states.
+the canvas's decisions, model changes, presentations shown and dismissed — from the editor's first
+appearance, and writes nothing until `CanvasTouchAudit` finds the canvas not answering a hand or the owner
+picks Save Last 90 Seconds. Per touch *move* it does a phase check and returns (with exactly two touches
+down, the audit reads their places); per touch-began/-ended event, one sweep of the registry's recognizer
+states. **The tables below were taken while the canvas's navigation and strokes were UIKit state machines**,
+over thirteen named recognizers and with an action message per stroke sample that no longer exists.
 
 **MEASURED 2026-09-24**, Debug, the `freeze` iOS 26.5 simulator (iPad Pro 13-inch M4) on the 8-core
 MacBook, 97% idle, `PerfBaselineTests.testFlightRecorderCostOnAStroke` — the real tap installed on the
@@ -5369,20 +5370,14 @@ lookup to a dictionary before this was merged. Not included, because no headless
 it: UIKit's own delivery and the `sendEvent` interception's per-move `contains(where:)`. Memory: the
 ring holds at most 5,000 events, INFERRED at ~1 MB when full.
 
-**Added 2026-10-13: the stranded-canvas diagnostics** (BUGS.md, "The canvas's recognizers strand…").
-The flight file now counts each touch's moves (`moves`, on its end line), names the `UITouch` object
-(`uid`), writes `numberOfTouches` for `canvas.pan`/`pinch`/`rotation` and the `stroke.*` recognizers
-(a line of their own when only the count moves), tags a sweep with the phases of the event it followed
-(`sweep:b`), and sweeps a move with three or more fingers down. What that adds to a stroke: one
-dictionary increment per move event (`willSend`), four `numberOfTouches` reads per sweep, and one more
-field on a recognizer line. **MEASURED 2026-10-13**, the same test, base (`70a6fc4`) and this change
-built in two worktrees and run alternately on the same simulator, 66% idle at the start, three runs of
-each (four of the base in Debug) — medians:
+**Added 2026-10-13: per-touch move counts and identities.** The flight file counts each touch's moves
+(`moves`, on its end line), names the `UITouch` object (`uid`) and tags a sweep with the phases of the event
+it followed (`sweep:b`). **MEASURED 2026-10-13**, the same test, base (`70a6fc4`) and that change built in two
+worktrees and run alternately on the same simulator, 66% idle at the start, three runs of each (four of the
+base in Debug) — medians, with the recognizer touch counts it also carried then:
 
 | | Debug before | Debug after | Release before | Release after |
 |---|---|---|---|---|
-| an event into the ring (`recognizer`; 5 fields, now 6) | 580 ns | 700 ns | 134 ns | 198 ns |
-| per stroke sample (`.changed` action → registry lookup) | 185 ns | 182 ns | 17 ns | 17 ns |
 | per touch-began/-ended event (sweep of 12 recognizers) | 4.63 µs | 5.18 µs | 2.63 µs | 2.87 µs |
 | per move event: the count (a **stand-in**, below) | — | 400 ns | — | 83 ns |
 | 500-sample stroke delta, flight on against off | +0.03 ms | +0.24 ms | −0.01 ms | −0.02 ms |
