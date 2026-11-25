@@ -445,6 +445,17 @@ final class CanvasTouchCoreLogicTests: XCTestCase {
         XCTAssertFalse(core.hadPair, "a palm beside a pencil is no pair")
     }
 
+    /// The last finger down lifting in the very event another lands: the gesture is still the hand's.
+    func testAFingerThatReplacesTheLastOneInOneEventCarriesTheGestureOnAndDoesNotDraw() {
+        send([(1, .finger, 0, 0), (2, .finger, 100, 0)])
+        send([(1, .finger, 0, 50), (2, .finger, 100, 50)])
+        send([(1, .finger, 0, 50)], ends: [2: .lifted])
+        XCTAssertEqual(send([(3, .finger, 30, 50)], ends: [1: .cancelled]), [])
+        XCTAssertNil(core.drawer)
+        XCTAssertTrue(core.isNavigating)
+        XCTAssertEqual(send([], ends: [3: .lifted]), [.countChanged(0), .navigationEnded])
+    }
+
     func testAThirdFingerWhileNavigatingIsIgnoredAndTakesOverWhenOneLeaves() {
         send([(1, .finger, 0, 0), (2, .finger, 200, 0)])
         send([(1, .finger, 0, 50), (2, .finger, 200, 50)])
