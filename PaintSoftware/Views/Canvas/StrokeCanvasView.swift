@@ -283,9 +283,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                 // The memo of a canvas on screen is the picture this view holds; evicting it frees
                 // nothing (`VectorRenderCache.pin`).
                 displayPin = vectorCanvas.map(VectorRenderCache.DisplayPin.init)
-                pacedRender?.cancel()
-                pacedRender = nil
-                renderPacing.reset()
+                vectorRenders.cancel()
                 dropUnlandedInk("a different canvas")
                 // What a derived picture contains is a version of the canvas it was derived from.
                 interpolationPresentation.invalidateCoverage()
@@ -420,8 +418,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         }
     }
 
-    /// The background rasterize this host is waiting for, always about `vectorCanvas` — or, while
-    /// `pacedRender` is armed, the newest one it will start when the interval is up.
+    /// The background rasterize this host is waiting for, always about `vectorCanvas`.
     private var pendingVectorRender: DeferredVectorRender.Revision?
 
     /// **Whether this layer's picture of what it now holds is ready for the canvas's next set** — on
@@ -446,10 +443,10 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// (shown, superseded or refused), so `CanvasView` can re-ask whether the frame is complete.
     var onRenderSettled: (() -> Void)?
 
-    /// When this host may next start a canvas-sized render — `DeferredVectorRender.Pacing`.
-    private var renderPacing = DeferredVectorRender.Pacing()
-    /// The render held back by `renderPacing`, armed at most once.
-    private var pacedRender: DispatchWorkItem?
+    /// This host's canvas-sized renders (`startVectorRender`): one in flight, and an edit made while it
+    /// runs replaces any request still waiting — so an Undo storm is as many pictures as the render
+    /// takes, never one per Undo.
+    private let vectorRenders = DeferredVectorRender.lane("layer picture")
 
     /// Holds `vectorCanvas` out of `VectorRenderCache`'s budget while this view shows it.
     private var displayPin: VectorRenderCache.DisplayPin?
@@ -878,7 +875,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         let surface: WindowSurfaceView
         if let existing = heldEditSurface { surface = existing }
         else {
-            surface = WindowSurfaceView(queue: DeferredVectorRender.queue)
+            surface = WindowSurfaceView(draws: DeferredVectorRender.lane("edit picture"))
             insertSubview(surface, belowSubview: poseSpace)
             heldEditSurface = surface
         }
@@ -972,7 +969,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         if let existing = heldDerivationSurface {
             surface = existing
         } else {
-            surface = WindowSurfaceView(queue: DeferredVectorRender.queue)
+            surface = WindowSurfaceView(draws: DeferredVectorRender.lane("edit picture"))
             insertSubview(surface, belowSubview: poseSpace)
             heldDerivationSurface = surface
         }
@@ -1186,7 +1183,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                     renderedSynchronously = true
                 } else {
                     pendingVectorRender = revision
-                    paceVectorRender(of: vectorCanvas, at: revision, streamHasWindow: streamHasWindow)
+                    startVectorRender(of: vectorCanvas, at: revision, streamHasWindow: streamHasWindow)
                     // The base slot keeps what it has, and so does the held ink — which is the
                     // whole of this defect's fix: the picture the base is missing stays up until the
                     // render that contains it lands.
@@ -1219,31 +1216,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         return true
     }
 
-    /// Starts the render now, or — inside `DeferredVectorRender.Pacing.interval` of the last one —
-    /// once the interval is up, for wherever the canvas has got to by then.
-    private func paceVectorRender(of canvas: VectorCanvas, at revision: DeferredVectorRender.Revision,
-                                  streamHasWindow: Bool) {
-        let now = CACurrentMediaTime()
-        let delay = renderPacing.delay(at: now)
-        guard delay > 0 else {
-            renderPacing.started(at: now)
-            startVectorRender(of: canvas, at: revision, streamHasWindow: streamHasWindow)
-            return
-        }
-        guard pacedRender == nil else { return }
-        let paced = DispatchWorkItem { [weak self] in
-            guard let self, self.vectorCanvas === canvas else { return }
-            self.pacedRender = nil
-            // `pendingVectorRender` names the newest held-back revision, which nothing is running
-            // for: renders start only here and at the leading edge, and the leading one was older.
-            self.pendingVectorRender = nil
-            self.refreshDisplayIfStale()
-        }
-        pacedRender = paced
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: paced)
-    }
-
-    /// Rasterizes the requested base on `DeferredVectorRender.queue` and hands the result back on main.
+    /// Asks for the requested base to be rasterized as an R1 job and handed back on main.
     ///
     /// The required revision makes a superseded request cheap: a drag that invalidates faster
     /// than this can rasterize gets one lock acquisition per abandoned request. When a stream
@@ -1258,23 +1231,26 @@ final class StrokeCanvasView: CanvasPlaneView {
         let coverage = contentRevisions.committed(canvas)
         let requirement = revision.requirement(streamHasWindow: streamHasWindow)
         if scratch != nil { gestureBaseRenders += 1 }
-        DeferredVectorRender.queue.async { [weak self] in
-            // **Zero on every ordinary launch** — `-uiTestSlowVectorRenderMillis` and nothing else,
-            // simulator only. See `UITestSeeds.slowVectorRenderDelay` for why the defect this file's
-            // `unlandedInk` closes needs a seam to be reachable from a test at all.
-            if UITestSeeds.slowVectorRenderDelay > 0 {
-                Thread.sleep(forTimeInterval: UITestSeeds.slowVectorRenderDelay)
-            }
-            // The flat row's per-layer, per-flip cost, and the one the composite path exists to stop
-            // paying — so it is a named row in a `PlaybackTrace` report rather than something a
-            // reader has to infer from `VectorCanvas.totalRasterizations` moving.
-            let image = PlaybackTrace.span(.vectorRasterize) {
-                canvas.render(quality: .full, requiring: requirement)
-            }
-            DispatchQueue.main.async {
-                PlaybackTrace.span(.renderLanded) {
-                    self?.finishVectorRender(image, of: canvas, at: revision, covering: coverage,
-                                             streamHadWindow: streamHasWindow)
+        vectorRenders.request { [weak self] in
+            guard let self, self.vectorCanvas === canvas else { return nil }
+            return {
+                // **Zero on every ordinary launch** — `-uiTestSlowVectorRenderMillis` and nothing else,
+                // simulator only. See `UITestSeeds.slowVectorRenderDelay` for why the defect this file's
+                // `unlandedInk` closes needs a seam to be reachable from a test at all.
+                if UITestSeeds.slowVectorRenderDelay > 0 {
+                    Thread.sleep(forTimeInterval: UITestSeeds.slowVectorRenderDelay)
+                }
+                // The flat row's per-layer, per-flip cost, and the one the composite path exists to stop
+                // paying — so it is a named row in a `PlaybackTrace` report rather than something a
+                // reader has to infer from `VectorCanvas.totalRasterizations` moving.
+                let image = PlaybackTrace.span(.vectorRasterize) {
+                    canvas.render(quality: .full, requiring: requirement)
+                }
+                return {
+                    PlaybackTrace.span(.renderLanded) {
+                        self?.finishVectorRender(image, of: canvas, at: revision, covering: coverage,
+                                                 streamHadWindow: streamHasWindow)
+                    }
                 }
             }
         }

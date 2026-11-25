@@ -857,9 +857,9 @@ final class FillObjectLogicTests: XCTestCase {
             manager.brushColor = Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1)
             manager.beginInteractiveFill(at: CGPoint(x: 40, y: 40))
             manager.endInteractiveFill()
-            manager.fillQueue.sync {}
+            manager.waitForFillWork()
             manager.commitInteractiveFill()
-            manager.fillQueue.sync {}
+            manager.waitForFillWork()
 
             let saved = try XCTUnwrap(vector.elements.first?.fill, "a real bucket commit creates the saved fill")
             XCTAssertEqual(vector.elements.count, 1)
@@ -1101,7 +1101,7 @@ final class FillObjectLogicTests: XCTestCase {
 
         manager.beginInteractiveFill(at: CGPoint(x: 32, y: 32))
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}
+        manager.waitForFillWork()
         // The worker enqueues its refusal before returning. This barrier observes that callback
         // without waiting for the behavior under test, so a missing notice fails by assertion.
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
@@ -1137,7 +1137,7 @@ final class FillObjectLogicTests: XCTestCase {
         let fixture = try mendFixture()
         let manager = fixture.manager
         let gate = DispatchSemaphore(value: 0)
-        manager.fillQueue.async { gate.wait() }
+        manager.fillWork { gate.wait() }
         defer { gate.signal() }
         let started = expectation(description: "the batch exposes its busy state")
         let observation = manager.$fillMendingLayerID.compactMap { $0 }.prefix(1).sink { _ in started.fulfill() }
@@ -1165,7 +1165,7 @@ final class FillObjectLogicTests: XCTestCase {
         let manager = fixture.manager
         let baseline = steps(manager)
         let gate = DispatchSemaphore(value: 0)
-        manager.fillQueue.async { gate.wait() }
+        manager.fillWork { gate.wait() }
         defer { gate.signal() }
         let started = expectation(description: "the batch has captured its original geometry")
         let observation = manager.$fillMendingLayerID.compactMap { $0 }.prefix(1).sink { _ in started.fulfill() }

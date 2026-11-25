@@ -144,8 +144,14 @@ final class WindowSurfaceView: UIView {
     var presentedWindow: CGRect? { isHidden ? nil : presented?.window }
 
     /// `queue` is where every picture is drawn. Views sharing a serial queue take turns.
-    init(queue: DispatchQueue, surfaceFactory: @escaping SurfaceFactory = WindowSurfaceView.makeSurface) {
-        draws = LatestWins(queue: queue)
+    convenience init(queue: DispatchQueue, surfaceFactory: @escaping SurfaceFactory = WindowSurfaceView.makeSurface) {
+        self.init(draws: LatestWins(queue: queue), surfaceFactory: surfaceFactory)
+    }
+
+    /// `draws` is where every picture is drawn — a `LatestWins` on the scheduler, shared by views that
+    /// are to take turns.
+    init(draws: LatestWins, surfaceFactory: @escaping SurfaceFactory = WindowSurfaceView.makeSurface) {
+        self.draws = draws
         self.surfaceFactory = surfaceFactory
         super.init(frame: .zero)
         isUserInteractionEnabled = false

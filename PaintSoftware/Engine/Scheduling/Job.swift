@@ -56,6 +56,11 @@ struct Job<Result>: @unchecked Sendable {
     let name: String
     /// Whether what it makes is on screen now — the only R2 work that runs while a touch is down.
     var visible = false
+    /// Jobs of one group run one at a time, in the order they were submitted — what a serial queue
+    /// shared by several owners gave (state one of them owns, or two canvas-sized pictures never held
+    /// at once). Nil for a job that shares nothing. Until the memory manager admits work by its peak
+    /// (SCHEDULER_DESIGN.md §6, S4) this is the only thing keeping two renders from piling up.
+    var group: AnyHashable?
     let work: (JobContext) throws -> Result
     let land: (Result) -> Void
 }

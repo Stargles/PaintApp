@@ -176,7 +176,9 @@ final class WindowSurfaceViewLogicTests: XCTestCase {
 
         // The gate stands in for the wait before drawStreamWindow takes the canvas lock.
         let committedRenderRan = expectation(description: "a committed render can run while the stream waits")
-        DeferredVectorRender.queue.async { committedRenderRan.fulfill() }
+        Scheduler.shared.submit(Job(key: JobKey("test.committedRender", UUID()), jobClass: .answer, name: "committed render",
+                                    group: DeferredVectorRender.group,
+                                    work: { _ in committedRenderRan.fulfill() }, land: { _ in }))
         wait(for: [committedRenderRan], timeout: 2)
         XCTAssertEqual(view.presentedCount, 1, "the prior frame stays up while the next frame waits")
 

@@ -12,7 +12,7 @@ import SwiftUI
 //
 // The temptation is to hand the compositor `[Layer]` and let it pull pixels as it walks — which is
 // what `CanvasManager+Fill.swift`'s `compositeReferenceRGBA` does, capturing `(layer, cel)` tuples
-// and calling `cel.raster.renderToUIImage()` from `fillQueue`. That works only because
+// and calling `cel.raster.renderToUIImage()` from the fill lane. That works only because
 // `RasterLayerTexture` and `VectorCanvas` each hold an `NSLock`, so it is thread-*safe* without
 // being a snapshot: the bytes it reads are whatever the user had drawn by the time the lock was
 // taken, which for a boundary reference is fine and for a rendered frame is a torn image. §9.1 is

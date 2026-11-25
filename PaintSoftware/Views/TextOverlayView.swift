@@ -110,10 +110,10 @@ final class TextOverlayView: CanvasPlaneView, UITextViewDelegate {
     /// What the glyph bitmap on the layer was rendered for. `nil` forces a render.
     private var renderedKey: RenderKey?
     /// The glyph renders — one in flight, minted from the newest recipe and box when the last lands.
-    private let glyphRenders = LatestWins(queue: TextOverlayView.glyphQueue)
-    /// Where the glyphs are laid out and drawn — its own queue, so a box never waits behind a layer's
-    /// committed render.
-    private static let glyphQueue = DispatchQueue(label: "TextOverlayView.glyphs", qos: .userInitiated)
+    /// Where the glyphs are laid out and drawn — an R1 job group of its own, so a box never waits behind
+    /// a layer's committed render.
+    private let glyphRenders = LatestWins(scheduler: .shared, key: JobKey("TextOverlayView.glyphs", UUID()),
+                                          name: "text glyphs")
     /// **How many glyph bitmaps have landed** — `glyphs:` on `canvas.host`, so a test that cannot look
     /// during its synchronous drag reads how often the box kept up with it.
     private(set) var glyphRenderCount = 0

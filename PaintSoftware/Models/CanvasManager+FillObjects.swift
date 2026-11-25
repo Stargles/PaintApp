@@ -90,7 +90,7 @@ extension CanvasManager {
                                         maximumPointCount: min(undoPoints, geometryPoints),
                                         maximumPathDataBytes: remainingUndo, validity: validity)
                 let patch = await withCheckedContinuation { continuation in
-                    fillQueue.async {
+                    fillWork {
                         let result = autoreleasepool { Self.prepareFillMend(work) }
                         continuation.resume(returning: result)
                     }

@@ -12,7 +12,7 @@ import UIKit
 //
 // This subsystem was the candidate for promotion to a real `InteractiveFillService` owned by
 // CanvasManager, and it was measured for that rather than assumed. The machinery *is* private —
-// nothing outside CanvasManager's own files names `fillQueue`, `fillLock`, `fillSession`, `FillKey`
+// nothing outside CanvasManager's own files names the fill lane, `fillLock`, `fillSession`, `FillKey`
 // or any of the gesture fields. But the operations are not separable from the document: this file
 // touches `layers` 29 times (10 of them writes into the `@Published` array, including the vector
 // materialisation in `commitInteractiveFill`), plus `selection`, `currentFrame`,
@@ -35,7 +35,7 @@ extension CanvasManager {
     ///
     /// `inset` is how far the artwork rect sits inside the canvas: `canvasPadding`, less the
     /// extension the artist asked the boundary to reach into it (`fillSettings.canvasEdgeExtension`) —
-    /// carried here rather than read in `renderFill` because that runs on `fillQueue` and both are
+    /// carried here rather than read in `renderFill` because that runs on the fill lane and both are
     /// `@Published` main-thread state. The key is already the main-thread-captured carrier for
     /// everything the render used, so putting it here keeps that invariant. The padding cannot change
     /// mid-gesture (`setCanvasPadding` calls `commitAllInteractiveState` first); the extension can,
@@ -49,10 +49,10 @@ extension CanvasManager {
         var mendReach: Int
     }
 
-    /// Everything a `fillQueue` render needs from the gesture that asked for it, snapshotted on the
+    /// Everything a fill-lane render needs from the gesture that asked for it, snapshotted on the
     /// main thread and handed to the worker as a value.
     ///
-    /// **This exists because "set before any `fillQueue` work runs, then only read after" was not
+    /// **This exists because "set before any fill-lane work runs, then only read after" was not
     /// true of a second gesture**, which is the whole of the owner's *"using the fill tool more than
     /// once breaks it sometimes"*. The render used to read `fillGestureSeed`,
     /// `fillGestureColor`, `fillGestureLayerID` and `fillGestureCelID` — all main-thread state —
@@ -70,7 +70,7 @@ extension CanvasManager {
         var layerID: UUID, celID: UUID
     }
 
-    /// A finished render, as `fillQueue` produced it — stored under `fillLock` the instant it exists,
+    /// A finished render, as the fill lane produced it — stored under `fillLock` the instant it exists,
     /// *before* the landing on the main thread that installs it as the preview.
     ///
     /// **The commit path reads this, and that is the point.** `liveFill`'s render is written by that
@@ -189,10 +189,25 @@ extension CanvasManager {
                                   color: fillGestureColor, layerID: layerID, celID: celID)
     }
 
+    /// Runs `body` on the fill lane — an R1 job of `fillGroup`, after every job already on it. Any
+    /// thread. Each is its own job (never latest-wins: a session's setup, its teardown and a mend's
+    /// work must all run, in order); the gesture's renders are `fillRenders`, which are.
+    func fillWork(_ body: @escaping @Sendable () -> Void) {
+        Scheduler.shared.submit(Job(key: JobKey("fill", UUID()), jobClass: .answer, name: "fill", group: fillGroup,
+                                    work: { _ in body() }, land: { _ in }))
+    }
+
+    /// **The one place main waits on the scheduler.** Holds the calling thread until the fill lane is
+    /// empty: the jobs already on it have run (their landings may not have). Called by the commit
+    /// (`awaitFillRenderIfNothingProduced`), and by tests that need the work finished.
+    func waitForFillWork() {
+        Scheduler.shared.waitUntilIdle(group: fillGroup)
+    }
+
     /// Claims the next gesture generation, and gives the gesture renders of its own (`fillRenders`).
     /// Main thread only; the write is under `fillLock` so the queue's reads pair with it.
     ///
-    /// The caller enqueues the gesture's session on `fillQueue` and then asks for its first render
+    /// The caller enqueues the gesture's session on the fill lane and then asks for its first render
     /// (`requestFillRender`), in that order: the new `fillRenders` is idle, so the render is enqueued
     /// at once, behind the session it reads.
     private func beginFillGeneration() -> UInt64 {
@@ -204,12 +219,13 @@ extension CanvasManager {
         fillMintedKey = nil
         MainActor.assumeIsolated {
             fillRenders?.cancel()
-            fillRenders = LatestWins(queue: fillQueue)
+            fillRenders = LatestWins(scheduler: .shared, key: JobKey("fill.render", generation), name: "fill render",
+                                     group: fillGroup)
         }
         return generation
     }
 
-    /// Blocks until `fillQueue` has produced the live gesture's pixels, when it has produced none at
+    /// Waits until the fill lane has produced the live gesture's pixels, when it has produced none at
     /// all yet. Called by `commitInteractiveFill` **before** `endFillGeneration`, because the moment
     /// the generation is retired the worker discards its own result.
     ///
@@ -226,12 +242,13 @@ extension CanvasManager {
     /// bake would have it flood against content that is about to change, which is the reordering bug
     /// that chokepoint exists to prevent. So the bake is synchronous or it is wrong.
     ///
-    /// It costs nothing in the ordinary case: the queue is idle by then, and `sync` on an idle serial
-    /// queue is a hop. In the case it is for, it costs the remainder of a render the artist was
+    /// It costs nothing in the ordinary case: the lane is idle by then and the wait returns at once.
+    /// **It is the one rule-1 exception left on the fill path** — removing it means the edit chokepoint
+    /// itself becomes asynchronous (SCHEDULER_DESIGN.md §6, S3a as built). In the case it is for, it costs the remainder of a render the artist was
     /// already waiting to see, once, and it is bounded by one — a gesture holds one render in flight,
     /// and the next is minted on the main thread, which is the thread parked here.
     ///
-    /// **Which is why the test for this cannot hold `fillQueue` with a semaphore signalled from the
+    /// **Which is why the test for this cannot hold the fill lane with a semaphore signalled from the
     /// main thread**: this would park on it and never return. `FillGestureRestartLogicTests` signals
     /// its gate off a background queue for exactly that reason.
     private func awaitFillRenderIfNothingProduced() {
@@ -240,10 +257,10 @@ extension CanvasManager {
         let produced = fillRenderedRegion != nil
         fillLock.unlock()
         guard !produced else { return }
-        fillQueue.sync {}
+        waitForFillWork()
     }
 
-    /// Ends the live gesture's claim on `fillQueue`: nothing in flight may publish onto the document
+    /// Ends the live gesture's claim on the fill lane: nothing in flight may publish onto the document
     /// after this — the render running finds itself retired on the queue, and its landing is dropped
     /// with the gesture's `fillRenders`. Called by both `commitInteractiveFill` and
     /// `cancelInteractiveFill`, and it returns the render the queue had already produced for the
@@ -261,7 +278,7 @@ extension CanvasManager {
         return queued?.generation == live ? queued : nil
     }
 
-    /// Lets go of everything the retired gesture held on `fillQueue`: the GPU session, its window, and
+    /// Lets go of everything the retired gesture held on the fill lane: the GPU session, its window, and
     /// the layers it read. Queued behind any render still running for the gesture.
     private func endFillSession() {
         fillSession = nil
@@ -324,7 +341,7 @@ extension CanvasManager {
                                          seedX: seedX, seedY: seedY,
                                          color: fillGestureColor, layerID: layerID, celID: celID)
 
-        fillQueue.async { [weak self] in
+        fillWork { [weak self] in
             guard let self, self.isCurrentFillGeneration(context.generation) else { return }
             self.fillGestureReferences = references
             self.fillGestureNeighbours = neighbours
@@ -337,7 +354,7 @@ extension CanvasManager {
     }
 
     /// Builds the live gesture's session for `window` and installs it beside the window, on
-    /// `fillQueue` — the one place a session is made, for the first window of a gesture and for
+    /// the fill lane — the one place a session is made, for the first window of a gesture and for
     /// every window `renderFill` grows it to.
     ///
     /// The reference pixels, path walls and canonical certificate share one frozen selected list.
@@ -412,7 +429,7 @@ extension CanvasManager {
         return session != nil
     }
 
-    /// Whether `generation` is still the gesture `fillQueue` is working for. Safe from either thread:
+    /// Whether `generation` is still the gesture the fill lane is working for. Safe from either thread:
     /// only the main thread writes `fillGeneration`, and always under `fillLock`.
     ///
     /// The early-out it guards at the top of each `begin*Fill` worker is not only tidiness — a tap
@@ -428,7 +445,7 @@ extension CanvasManager {
     /// **Tells the artist the fill is not going to happen** — the one place the four ways
     /// `makeSession` can decline become a banner.
     ///
-    /// Called from `fillQueue`, so it hops to main, and it checks the generation on arrival for the
+    /// Called from the fill lane, so it hops to main, and it checks the generation on arrival for the
     /// reason a render's landing is dropped with its gesture: a refusal belonging to a gesture the
     /// artist has already abandoned is not news.
     ///
@@ -606,7 +623,7 @@ extension CanvasManager {
         if fillGestureActive { requestFillRender() }
     }
 
-    /// Asks for a render of the live gesture at the fill settings as they stand when `fillQueue` comes
+    /// Asks for a render of the live gesture at the fill settings as they stand when the fill lane comes
     /// free (`fillRenders`). O(1); a request made while a render is in flight replaces any still
     /// waiting, so a burst of slider ticks is one render of the newest. Main thread only.
     private func requestFillRender() {
@@ -617,7 +634,7 @@ extension CanvasManager {
 
     /// **One render, minted on the main thread as the queue comes free**: the settings and the gesture
     /// as they are now, or nothing when the last render was already of these settings. The render runs
-    /// on `fillQueue` (`renderFill`) and its result lands back here (`landFillRender`).
+    /// on the fill lane (`renderFill`) and its result lands back here (`landFillRender`).
     private func mintFillRender() -> LatestWins.Work? {
         let key = currentFillKey()
         guard fillGestureActive, key != fillMintedKey,
@@ -786,7 +803,7 @@ extension CanvasManager {
         fillFingerDown = false
         fillGestureIsLasso = false
         _ = endFillGeneration()
-        fillQueue.async { [weak self] in self?.endFillSession() }
+        fillWork { [weak self] in self?.endFillSession() }
         endLiveFill(landing: landing)
         fillGestureLayerID = nil
         fillGestureCelID = nil
@@ -986,7 +1003,7 @@ extension CanvasManager {
         // this is the case that timer cannot cover, because it fires from a fill, not a clock.
         lassoFillDiagnostic = nil
 
-        fillQueue.async { [weak self] in
+        fillWork { [weak self] in
             guard let self, self.isCurrentFillGeneration(context.generation) else { return }
             self.lassoFillReportedEmpty = false
             self.fillGestureLoopPath = path
@@ -1011,11 +1028,11 @@ extension CanvasManager {
         fillGestureActive = false
         fillFingerDown = false
         fillGestureIsLasso = false
-        _ = endFillGeneration()   // retires it on `fillQueue` and drops its landing, so a restart can't inherit its work
+        _ = endFillGeneration()   // retires it on the fill lane and drops its landing, so a restart can't inherit its work
         endLiveFill()
         fillGestureLayerID = nil
         fillGestureCelID = nil
-        fillQueue.async { [weak self] in self?.endFillSession() }
+        fillWork { [weak self] in self?.endFillSession() }
         refreshUndoRedoState()
     }
 
@@ -1026,7 +1043,7 @@ extension CanvasManager {
         cancelInteractiveFill()
     }
 
-    /// What one render produced, carried from `fillQueue` to its landing: the bytes the commit bakes
+    /// What one render produced, carried from the fill lane to its landing: the bytes the commit bakes
     /// (nil for a lasso that enclosed nothing), and §7's picture when this render begins an empty
     /// streak.
     private struct FillRenderOutcome {
@@ -1035,7 +1052,7 @@ extension CanvasManager {
         let diagnostic: LassoFillDiagnostic?
     }
 
-    /// **Runs on `fillQueue`.** Recomputes the fill for `key` against the live gesture's session, and
+    /// **Runs on the fill lane.** Recomputes the fill for `key` against the live gesture's session, and
     /// stores the result for the commit path before it is handed back to land. Nil when there is
     /// nothing to land: the gesture was retired while this waited, or it has no session.
     ///
@@ -1096,7 +1113,7 @@ extension CanvasManager {
         // preview is shown, which makes `commitInteractiveFill`'s "nothing was previewed" guard
         // return before it records anything.
         //
-        // `session.isLasso` rather than `fillGestureIsLasso`: this runs on `fillQueue` and that
+        // `session.isLasso` rather than `fillGestureIsLasso`: this runs on the fill lane and that
         // flag is main-thread state. The count is the session's own, read on the same queue that
         // just wrote it.
         guard let session else { return nil }
@@ -1173,7 +1190,7 @@ extension CanvasManager {
     /// closed early somewhere the artist did not intend. It is *not* a picture of a leak; see
     /// `MetalFillSession.lastReachedMask` for why a leak never reaches this path at all.
     ///
-    /// Runs on `fillQueue`. Both of its inputs belong to that queue — the session's buffers, and
+    /// Runs on the fill lane. Both of its inputs belong to that lane — the session's buffers, and
     /// `fillGestureLoopPath` — and neither is safe to read anywhere else. Returns nil without a loop
     /// rather than showing a tint with no fence beside it: half the picture invites the wrong reading
     /// (that the tinted area is what *would* have been filled), and §7.4 is there precisely because

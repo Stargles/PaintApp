@@ -70,7 +70,7 @@ final class FillLiveSliderLogicTests: XCTestCase {
 
         for gap in stride(from: CGFloat(5), through: 40, by: 5) {
             manager.setFillGapClosing(gap)
-            manager.fillQueue.sync {}
+            manager.waitForFillWork()
             settle(0.15)
         }
 
@@ -91,7 +91,7 @@ final class FillLiveSliderLogicTests: XCTestCase {
         let before = manager.history.undoStack.count
         for gap in stride(from: CGFloat(5), through: 40, by: 5) {
             manager.setFillGapClosing(gap)
-            manager.fillQueue.sync {}
+            manager.waitForFillWork()
             settle(0.15)
         }
         XCTAssertEqual(manager.history.undoStack.count, before, "no step while the slider moves")
@@ -134,7 +134,7 @@ final class FillLiveSliderLogicTests: XCTestCase {
     }
 
     /// **A burst of ticks while a render is in flight is one more render: the newest.** Forty ticks of
-    /// the slider with `fillQueue` held — the first is minted at once and waits on the queue, and every
+    /// the slider with the fill lane held — the first is minted at once and waits on the queue, and every
     /// tick after it replaces the one waiting behind it — so when the queue frees, two renders land:
     /// the first tick's and the last's. None of the thirty-eight between is ever rendered, and the
     /// picture left on screen is the last value's: sealed.
@@ -144,7 +144,7 @@ final class FillLiveSliderLogicTests: XCTestCase {
         let renders = try XCTUnwrap(manager.fillRenders, "Fixture check: the adjustable fill has its renders")
         let landed = renders.landedCount
         let gate = DispatchSemaphore(value: 0)
-        manager.fillQueue.async { gate.wait() }
+        manager.fillWork { gate.wait() }
         for gap in stride(from: CGFloat(1), through: 40, by: 1) { manager.setFillGapClosing(gap) }
         gate.signal()
         spin { renders.landedCount >= landed + 2 }

@@ -1153,7 +1153,7 @@ final class CanvasManager: ObservableObject {
     /// (`CanvasView.Coordinator.liveVectorFloatPose`).
     /// Geometry and its complete preview are prepared together before a held surface is sized.
     lazy var liquifyPictures: LatestWins = MainActor.assumeIsolated {
-        LatestWins(queue: DispatchQueue(label: "com.paintapp.liquify", qos: .userInitiated))
+        LatestWins(scheduler: .shared, key: JobKey("liquify", ObjectIdentifier(self)), name: "liquify picture")
     }
     var liveEdit: HeldEdit?
 
@@ -3963,22 +3963,23 @@ final class CanvasManager: ObservableObject {
     static let fillExpandRange: ClosedRange<CGFloat> = 0...6
     static let fillMendReachRange: ClosedRange<CGFloat> = 1...40
 
-    /// Serial queue that owns every fill computation for the active gesture. Keeping it serial means
-    /// the GPU session and the window below are only ever touched from one thread.
     /// The layer edit currently preparing its bounded mend windows. Observed only at start/end so
     /// reopening the menu shows progress and cannot launch a second retained edit plan.
     @Published var fillMendingLayerID: UUID?
 
-    let fillQueue = DispatchQueue(label: "com.paintsoftware.interactiveFill", qos: .userInteractive)
+    /// **The fill lane**: every fill computation for the active gesture is an R1 job of this group
+    /// (`fillWork`), so they run one at a time in the order they were asked, and the GPU session and
+    /// the window below are only ever touched by one at once.
+    let fillGroup = UUID()
     let fillLock = NSLock()
 
-    /// **The live gesture's renders, on `fillQueue`** — TODO (179): one job in flight, the newest
+    /// **The live gesture's renders, on the fill lane** — TODO (179): one job in flight, the newest
     /// request minted when it lands, and each result shown before the next is minted, so a drag across
     /// a fill slider renders as fast as the GPU can and no faster, and the main thread holds at most one
     /// landing. Made by `beginFillGeneration` and let go by `endFillGeneration`.
     ///
     /// **One per gesture, not one for the manager, because of the commit.** A gesture's first render
-    /// has to be on `fillQueue` the moment the gesture begins — `commitInteractiveFill` waits on the
+    /// has to be on the fill lane the moment the gesture begins — `commitInteractiveFill` waits on the
     /// queue for the render a second tap would otherwise drop (`awaitFillRenderIfNothingProduced`), and
     /// a request standing behind the last gesture's job, not yet minted, is not on it. A new instance
     /// is idle, so its first request is minted and enqueued at once, behind whatever the last gesture
@@ -3992,9 +3993,9 @@ final class CanvasManager: ObservableObject {
     /// mints nothing, so a touch-move that moves no quantized value costs no render. Main thread only.
     var fillMintedKey: FillKey?
 
-    /// **Which gesture `fillQueue` is working for.** Bumped by every `begin*Fill`, and again by
+    /// **Which gesture the fill lane is working for.** Bumped by every `begin*Fill`, and again by
     /// `commitInteractiveFill`/`cancelInteractiveFill` when the gesture retires. Written on the main
-    /// thread under `fillLock`, read on `fillQueue` under it, read freely on main (the only writer).
+    /// thread under `fillLock`, read on the fill lane under it, read freely on main (the only writer).
     ///
     /// It exists because a *second* fill is the case the old invariant did not cover — the owner's
     /// *"using the fill tool more than once breaks it sometimes"*. A render whose gesture has been
@@ -4004,19 +4005,19 @@ final class CanvasManager: ObservableObject {
     /// `beginFillGeneration` / `FillGestureContext`.
     var fillGeneration: UInt64 = 0
 
-    /// The live gesture's latest render, stored by `renderFill` on `fillQueue` under `fillLock`
+    /// The live gesture's latest render, stored by `renderFill` on the fill lane under `fillLock`
     /// *before* the hop to main that installs it — so `commitInteractiveFill` can bake a fill whose
     /// pixels exist but have not reached the main thread yet. See `FillRenderResult`.
     var fillRenderedRegion: FillRenderResult?
 
     /// Gesture context. `fillSession`/`fillWindow`/`fillGestureReferences`/`fillSeedColor`/
-    /// `fillGestureLoopPath` are only touched on `fillQueue`; everything below is main-thread only.
-    /// **Nothing here is read from `fillQueue`** — a worker gets what it needs as an immutable
+    /// `fillGestureLoopPath` are only touched on the fill lane; everything below is main-thread only.
+    /// **Nothing here is read from the fill lane** — a worker gets what it needs as an immutable
     /// `FillGestureContext` snapshot instead, because the old arrangement ("set on the main thread
-    /// before any `fillQueue` work runs, then only read after") is false the moment a second gesture
+    /// before any fill-lane work runs, then only read after") is false the moment a second gesture
     /// starts while the first is still on the GPU.
     var fillSession: MetalFillSession?
-    /// The window `fillSession` was built for — TODO (86). A bucket's grows on `fillQueue` as the
+    /// The window `fillSession` was built for — TODO (86). A bucket's grows on the fill lane as the
     /// paint reaches its rim (`renderFill`), and the session is rebuilt with it; the two are
     /// written together and only there.
     var fillWindow: FillWindow?
@@ -4025,14 +4026,14 @@ final class CanvasManager: ObservableObject {
     /// cannot change while a fill is adjustable, since every edit runs `beginCanvasEdit` first.
     var fillGestureReferences: [(layer: Layer, cel: Cel)] = []
     /// The cel the live gesture lands on, in the shape `fillGestureReferences` has so the same
-    /// composite reads it — what a mend grows toward (TODO (113)). `fillQueue` only, held for the
+    /// composite reads it — what a mend grows toward (TODO (113)). The fill lane only, held for the
     /// gesture for the same reason the references are: a grown window composites it again.
     var fillGestureNeighbours: [(layer: Layer, cel: Cel)] = []
 
     /// The loop the live lasso gesture drew, in canvas coordinates — kept so an empty result can
     /// redraw the artist's own fence (LASSO_FILL.md §7.4). Nil for a bucket fill.
     ///
-    /// **Written beside `fillSession`, on `fillQueue`, and that pairing is the point**: the path and
+    /// **Written beside `fillSession`, on the fill lane, and that pairing is the point**: the path and
     /// the session are two halves of one gesture, and the queue is serial, so a second loop drawn
     /// while the first is still rendering cannot pair one gesture's fence with the other's result.
     /// Setting it on the main thread would allow exactly that.
@@ -4054,13 +4055,13 @@ final class CanvasManager: ObservableObject {
     /// signal to once per empty *streak*, so dragging a slider through a run of empty results does
     /// not flicker the banner; cleared as soon as a fill lands, or when a new gesture starts.
     ///
-    /// **`fillQueue`-owned, not main-thread**, and that is load-bearing rather than incidental: the
+    /// **fill-lane-owned, not main-thread**, and that is load-bearing rather than incidental: the
     /// §7.2 collar tint is built from the session's buffers on that queue, so the decision *whether
     /// to build it* has to be taken there too. Latching on main would mean rendering a canvas-sized
     /// tint on every empty render just so the main thread could throw all but the first away — a
     /// full-canvas allocation per slider tick, for a picture nobody sees. One latch rather than two
     /// because two would drift, and the drift would show as a banner without its tint.
-    var lassoFillReportedEmpty = false  // fillQueue only
+    var lassoFillReportedEmpty = false  // the fill lane only
     /// True when a fill exists and the finger is NOT pressing (adjustable state). The coordinator checks
     /// this in the fill-press handler so that a two-finger pan's first touch doesn't commit the fill.
     var isFillInAdjustableState: Bool { fillGestureActive && !fillFingerDown }

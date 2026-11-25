@@ -345,7 +345,7 @@ struct LassoFillDiagnostic: Identifiable {
 ///
 /// Linear in strokes, and **once per gesture rather than per render**: the artwork cannot change
 /// while the artist drags Threshold or Gap Closing, so a slider sweep re-runs only the GPU stages —
-/// the same argument `MetalFillSession` makes for the lasso's ring. It runs on `fillQueue`, never on
+/// the same argument `MetalFillSession` makes for the lasso's ring. It runs on the fill lane, never on
 /// the main thread.
 ///
 /// So against a *cold* cel it is 1.4% of what the reference composite beside it already pays, and

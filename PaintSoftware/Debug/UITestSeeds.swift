@@ -54,8 +54,8 @@ enum UITestSeeds {
     /// how it survived from 2026-09-04 to 2026-09-09.
     ///
     /// This makes it reachable by slowing the *one* thing whose duration the defect is about, and
-    /// nothing else: the sleep is on `StrokeCanvasView.renderQueue`, or on the sandwich's own queue
-    /// for the live pair, both background serial queues whose job is that rasterize. The main thread
+    /// nothing else: the sleep is inside the layer's R1 render job (`StrokeCanvasView.startVectorRender`), or on the
+    /// sandwich's own queue for the live pair, both background workers whose job is that rasterize. The main thread
     /// is untouched, so a test that stages the race is still driving the app the artist drives.
     ///
     /// Simulator-only, on `applyTextureBudgetOverrideIfRequested`'s rule and for its reason: a flag

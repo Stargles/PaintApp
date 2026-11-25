@@ -140,7 +140,8 @@ final class SchedulerLogicTests: XCTestCase {
     func testLanesFollowTheMachine() {
         for (fast, efficient) in [(1, 0), (2, 4), (4, 4), (8, 0)] {
             let machine = VirtualExecutor.Machine(fastCores: fast, efficientCores: efficient)
-            XCTAssertEqual(LanePolicy.capacity(of: .answer, touchHeld: true, answersRunning: 0, machine: machine), 1)
+            XCTAssertEqual(LanePolicy.capacity(of: .answer, touchHeld: true, answersRunning: 0, machine: machine),
+                           max(1, fast - 1) + (efficient + 1) / 2, "R1: every fast core but one and half the efficient ones, on \(fast)+\(efficient)")
             XCTAssertEqual(LanePolicy.capacity(of: .later, touchHeld: true, answersRunning: 0, machine: machine), 0)
             XCTAssertEqual(LanePolicy.capacity(of: .later, touchHeld: false, answersRunning: 1, machine: machine), 1)
             XCTAssertEqual(LanePolicy.capacity(of: .later, touchHeld: false, answersRunning: 0, machine: machine),

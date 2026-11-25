@@ -789,7 +789,7 @@ final class InkPoseLogicTests: XCTestCase {
 
         manager.beginInteractiveFill(at: CGPoint(x: 160, y: 60))
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}
+        manager.waitForFillWork()
         let done = expectation(description: "fill settles")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { done.fulfill() }
         wait(for: [done], timeout: 6)

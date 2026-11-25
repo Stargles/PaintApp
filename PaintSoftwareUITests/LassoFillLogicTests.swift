@@ -1026,7 +1026,7 @@ final class LassoFillLogicTests: XCTestCase {
 
     // MARK: - What the gesture does to the document
 
-    /// Pumps the main run loop long enough for `fillQueue`'s work and its main-thread hop to land.
+    /// Pumps the main run loop long enough for the fill lane's work and its main-thread hop to land.
     /// `beginInteractiveLassoFill` is asynchronous by design — the GPU pass must not block a stylus —
     /// so a test that reads the result immediately reads nothing.
     private func settle(_ seconds: TimeInterval = 0.5) {
@@ -1390,7 +1390,7 @@ final class LassoFillLogicTests: XCTestCase {
     }
 
     /// A mask that is not the size it is being read at produces no tint rather than reading past its
-    /// end. The caller is `fillQueue` pairing a session's buffers with a canvas size; they cannot
+    /// end. The caller is the fill lane pairing a session's buffers with a canvas size; they cannot
     /// disagree today, and this is what happens if they ever do.
     func testTheCollarTintRefusesAMaskTooShortForTheCanvas() {
         XCTAssertTrue(LassoFillMask.collarTintRGBA(reached: [UInt8](repeating: 1, count: 5),

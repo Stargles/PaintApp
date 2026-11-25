@@ -191,9 +191,9 @@ final class ShapeOverlayView: CanvasPlaneView {
     private(set) var previewDrawCount = 0
     /// A picture landed — the canvas republishes its state.
     var onPreviewDrawn: (() -> Void)?
-    /// The queue every shape's ink is stamped on — its own, so a preview never waits behind a layer's
-    /// committed render.
-    private static let previewQueue = DispatchQueue(label: "ShapeOverlayView.preview", qos: .userInitiated)
+    /// Where every shape's ink is stamped: an R1 job group of its own, so a preview never waits behind a
+    /// layer's committed render.
+    private let previewKey = JobKey("ShapeOverlayView.preview", UUID())
     private let shapeLayer = CAShapeLayer()
     private let handleLayer = CALayer()
     private var handles: [HandleInfo] = []
@@ -316,7 +316,7 @@ final class ShapeOverlayView: CanvasPlaneView {
             }
             return
         }
-        let surface = WindowSurfaceView(queue: Self.previewQueue)
+        let surface = WindowSurfaceView(draws: LatestWins(scheduler: .shared, key: previewKey, name: "shape preview"))
         previewHost.addSubview(surface)
         preview = surface
         surface.presentFirst(previewFrame(of: ink))

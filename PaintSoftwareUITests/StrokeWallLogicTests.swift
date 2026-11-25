@@ -510,7 +510,7 @@ final class StrokeWallLogicTests: XCTestCase {
     /// perfectly correct shader could ship behind a `beginInteractiveFill` that never passes one and
     /// the whole fast tier would stay green.
     ///
-    /// Drives the real tap through the real `fillQueue` and asks the session it produced.
+    /// Drives the real tap through the real the fill lane and asks the session it produced.
     func testTappingTheFillToolOnAVectorLayerHandsTheSessionItsPathWall() throws {
         let manager = CanvasFixture.manager(layerCount: 0)
         manager.addVectorLayer()
@@ -521,7 +521,7 @@ final class StrokeWallLogicTests: XCTestCase {
 
         manager.beginInteractiveFill(at: CGPoint(x: 5, y: 5))
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}
+        manager.waitForFillWork()
         XCTAssertEqual(try XCTUnwrap(manager.fillSession).hasPathWall, false,
                        "premise: a vector cel with no strokes in it hands over no wall at all")
 
@@ -530,7 +530,7 @@ final class StrokeWallLogicTests: XCTestCase {
 
         manager.beginInteractiveFill(at: CGPoint(x: 5, y: 5))
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}
+        manager.waitForFillWork()
         XCTAssertTrue(try XCTUnwrap(manager.fillSession).hasPathWall,
                       "a tap on a vector layer that has a stroke on it must reach the GPU with that "
                       + "stroke's path, or every assertion above is about code the app never runs")
@@ -543,7 +543,7 @@ final class StrokeWallLogicTests: XCTestCase {
         loop.addRect(CGRect(x: 4, y: 4, width: 40, height: 40))
         manager.beginInteractiveLassoFill(path: loop)
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}
+        manager.waitForFillWork()
         XCTAssertTrue(try XCTUnwrap(manager.fillSession).hasPathWall,
                       "a lasso fill on the same layer must reach the GPU with the same path wall")
     }

@@ -1106,7 +1106,8 @@ extension CanvasManager {
         canvasUpdatePhase = announceImmediately ? .announced(id) : .preparing(id)
         MainActor.assumeIsolated {
             if canvasPreparations == nil {
-                canvasPreparations = LatestWins(queue: DispatchQueue(label: "com.paintapp.canvasPixels", qos: .userInitiated))
+                canvasPreparations = LatestWins(scheduler: .shared, key: JobKey("canvasPixels", ObjectIdentifier(self)),
+                                                name: "canvas pixels")
             }
             canvasPreparations?.request { [weak self] in
                 guard let self, self.canvasUpdatePhase.operationID == id else { return nil }
@@ -1434,7 +1435,7 @@ extension CanvasManager {
 // **The cel thumbnail was the fifth renderer in the app and the last one still drawing on the main
 // thread.** RENDER.md §2.2 rules that the main thread never composites, and §17 counted four
 // renderers with queues of their own — `FrameBaker.workQueue`, the sandwich halves on
-// `sandwichQueue`, the vector base on `StrokeCanvasView.renderQueue`, and the onion skin on
+// `sandwichQueue`, the vector base as an R1 job (`StrokeCanvasView.vectorRenders`), and the onion skin on
 // `CanvasView.Coordinator.onionQueue`. Nobody had counted this one, so it kept an exemption it was
 // never granted.
 //

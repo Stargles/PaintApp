@@ -29,6 +29,11 @@ import Dispatch
 ///    return, so a landing may ask again without re-entering itself.
 /// 5. `cancel` drops the waiting request and the in-flight job's landing.
 ///
+/// **Where its jobs run**: on a serial queue it is handed (`init(queue:)` — what the producers not yet
+/// moved still use), or as R1/R2 jobs of the scheduler under one `JobKey` (`init(scheduler:…)`,
+/// SCHEDULER_DESIGN.md §2's `request(key:mint:)`). On the scheduler a job of the instance never runs
+/// beside another of it, and `cancel` drops a job still waiting for a worker so it never starts.
+///
 /// Main-actor and Dispatch only — no UIKit — so it lives in `Engine/` and is compiled into the test
 /// target, where `LatestWinsLogicTests` pins every clause on a queue of its own.
 @MainActor
@@ -39,7 +44,12 @@ final class LatestWins {
     /// The main-thread half of one job — the result put where the artist sees it.
     typealias Landing = () -> Void
 
-    private let queue: DispatchQueue
+    private enum Lane {
+        case queue(DispatchQueue)
+        case scheduler(Scheduler, key: JobKey, jobClass: JobClass, name: String, group: AnyHashable)
+    }
+
+    private let lane: Lane
     /// The newest request not yet minted.
     private var waiting: (() -> Work?)?
     private var inFlight = false
@@ -54,7 +64,13 @@ final class LatestWins {
     private(set) var landedCount = 0
 
     init(queue: DispatchQueue) {
-        self.queue = queue
+        lane = .queue(queue)
+    }
+
+    /// Jobs of `jobClass` named `name` on `scheduler`, under `key`. Instances sharing a `group` take
+    /// turns, as instances sharing a serial queue do; the default is a group of the instance's own.
+    init(scheduler: Scheduler, key: JobKey, jobClass: JobClass = .answer, name: String, group: AnyHashable? = nil) {
+        lane = .scheduler(scheduler, key: key, jobClass: jobClass, name: name, group: group ?? key)
     }
 
     /// Whether a job is in flight or a request is waiting for one — the question a caller asks before
@@ -73,6 +89,12 @@ final class LatestWins {
     func cancel() {
         waiting = nil
         generation &+= 1
+        // A job still waiting for a worker never starts, and a cancelled one's landing never comes
+        // to free the instance, so it is free now.
+        if case .scheduler(let scheduler, let key, _, _, _) = lane {
+            scheduler.cancel(key: key)
+            inFlight = false
+        }
     }
 
     private func startIfIdle() {
@@ -87,9 +109,18 @@ final class LatestWins {
             guard let work = minted else { continue }
             inFlight = true
             let generation = self.generation
-            queue.async { [weak self] in
-                let landing = work()
-                DispatchQueue.main.async { self?.land(landing, minted: generation) }
+            switch lane {
+            case .queue(let queue):
+                queue.async { [weak self] in
+                    let landing = work()
+                    DispatchQueue.main.async { self?.land(landing, minted: generation) }
+                }
+            case .scheduler(let scheduler, let key, let jobClass, let name, let group):
+                scheduler.submit(Job(key: key, jobClass: jobClass, name: name, group: group,
+                                     work: { _ in work() },
+                                     land: { [weak self] landing in
+                    MainActor.assumeIsolated { self?.land(landing, minted: generation) }
+                }))
             }
             return
         }

@@ -27,12 +27,14 @@ final class Scheduler: @unchecked Sendable {
         var cancelled = 0
         /// Answers that landed past `JobClass.answerDeadline` after they were asked for.
         var lateAnswers = 0
+        /// The late answers by job name — which kind of answer missed, for the gate's trace.
+        var lateByName: [String: Int] = [:]
         /// The last answer to land: its name, and how long it waited and ran, in ms.
         var lastAnswer: (name: String, waitedMs: Int, ranMs: Int)?
 
         static func == (a: Stats, b: Stats) -> Bool {
             a.started == b.started && a.landed == b.landed && a.cancelled == b.cancelled
-                && a.lateAnswers == b.lateAnswers && a.lastAnswer?.name == b.lastAnswer?.name
+                && a.lateAnswers == b.lateAnswers && a.lateByName == b.lateByName && a.lastAnswer?.name == b.lastAnswer?.name
                 && a.lastAnswer?.waitedMs == b.lastAnswer?.waitedMs && a.lastAnswer?.ranMs == b.lastAnswer?.ranMs
         }
     }
@@ -43,10 +45,12 @@ final class Scheduler: @unchecked Sendable {
     let executor: Executor
     let machine: Machine
 
-    private let lock = NSLock()
+    private let lock = NSCondition()
     private var touch = TouchFlag()
     private var waiting: [JobClass: [Pending]] = [:]
     private var running: [JobClass: Int] = [:]
+    /// The groups with a job running — a group's next job waits for it (`Job.group`).
+    private var runningGroups: Set<AnyHashable> = []
     /// The newest job's token for each key, waiting or running.
     private var tokens: [JobKey: CancelToken] = [:]
     /// The moment a look at held work is already arranged for.
@@ -64,6 +68,7 @@ final class Scheduler: @unchecked Sendable {
         let jobClass: JobClass
         let name: String
         let visible: Bool
+        let group: AnyHashable?
         let token: CancelToken
         let submittedAt: Double
         /// Runs the work; answers the landing, or nil when it stopped at a cancelled checkpoint.
@@ -78,7 +83,7 @@ final class Scheduler: @unchecked Sendable {
     func submit<Result>(_ job: Job<Result>) -> CancelToken {
         let token = CancelToken()
         let pending = Pending(key: job.key, jobClass: job.jobClass, name: job.name, visible: job.visible,
-                              token: token, submittedAt: executor.now, perform: { context in
+                              group: job.group, token: token, submittedAt: executor.now, perform: { context in
             // Any throw is a stop: `checkpoint()` throws only once the job is cancelled.
             do {
                 let result = try job.work(context)
@@ -103,6 +108,18 @@ final class Scheduler: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// **Holds the calling thread until no job of `group` is waiting or running.** A job of the group
+    /// that is cancelled while waiting counts as gone. This is the one wait the scheduler offers, and
+    /// it is main-thread-hostile: it exists for the fill commit's contract (`beginCanvasEdit` must read a
+    /// canvas the pending fill is already part of) and for tests that need the work finished.
+    func waitUntilIdle(group: AnyHashable) {
+        lock.lock()
+        while runningGroups.contains(group) || waiting.values.contains(where: { $0.contains { $0.group == group } }) {
+            lock.wait()
+        }
+        lock.unlock()
+    }
+
     private func dropLocked(_ key: JobKey) {
         guard let token = tokens.removeValue(forKey: key) else { return }
         token.cancel()
@@ -110,6 +127,7 @@ final class Scheduler: @unchecked Sendable {
             if let index = waiting[jobClass]?.firstIndex(where: { $0.token === token }) {
                 waiting[jobClass]?.remove(at: index)
                 counters.cancelled += 1
+                lock.broadcast()
             }
         }
     }
@@ -154,9 +172,12 @@ final class Scheduler: @unchecked Sendable {
             let capacity = LanePolicy.capacity(of: jobClass, touchHeld: held,
                                                answersRunning: running[.answer, default: 0], machine: machine)
             while running[jobClass, default: 0] < capacity,
-                  let index = waiting[jobClass]?.firstIndex(where: { !held || jobClass != .soon || $0.visible }) {
+                  let index = waiting[jobClass]?.firstIndex(where: {
+                      (!held || jobClass != .soon || $0.visible) && !($0.group.map(runningGroups.contains) ?? false)
+                  }) {
                 let pending = waiting[jobClass]!.remove(at: index)
                 running[jobClass, default: 0] += 1
+                if let group = pending.group { runningGroups.insert(group) }
                 counters.started += 1
                 starts.append(pending)
             }
@@ -190,6 +211,8 @@ final class Scheduler: @unchecked Sendable {
         let ranFor = executor.now - startedAt
         lock.lock()
         running[pending.jobClass, default: 0] -= 1
+        if let group = pending.group { runningGroups.remove(group) }
+        lock.broadcast()
         lock.unlock()
         pump()
         executor.main { [weak self] in
@@ -204,7 +227,10 @@ final class Scheduler: @unchecked Sendable {
             self.counters.landed += 1
             if pending.jobClass == .answer {
                 let total = self.executor.now - pending.submittedAt
-                if total > JobClass.answerDeadline { self.counters.lateAnswers += 1 }
+                if total > JobClass.answerDeadline {
+                    self.counters.lateAnswers += 1
+                    self.counters.lateByName[pending.name, default: 0] += 1
+                }
                 self.counters.lastAnswer = (pending.name, Int(((startedAt - pending.submittedAt) * 1000).rounded()),
                                             Int((ranFor * 1000).rounded()))
             }

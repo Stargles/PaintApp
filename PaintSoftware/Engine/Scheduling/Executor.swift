@@ -30,8 +30,11 @@ protocol Machine: Sendable {
 /// **How many jobs of each class may run at once** — SCHEDULER_DESIGN.md §2's lanes table, as a pure
 /// function of the machine and the moment, so a test can walk it on any core count.
 ///
-/// - R1: one job at a time — the answer the artist is waiting for gets the cores it needs, and a
-///   second different-key answer waits for it rather than splitting them.
+/// - R1: the cores R1 may use — all the fast ones but one (the pencil's, the main thread's and the
+///   window server's) and half the efficient ones, at least one. A job takes one of them until work
+///   is cut into tiles (S6); a job of a `Job.group` still waits for the group's running one. Fewer
+///   than that and a live stroke's picture would queue behind an Undo's whole-layer render (500 ms
+///   at 5000²), which separate queues never made it do.
 /// - R2: one, and only work on screen (`visible`), while a touch is down or just lifted; two otherwise.
 /// - R3: none while a touch is down or just lifted — a running one parks at its next checkpoint; one
 ///   while an answer runs; otherwise every core but one, which stays the pencil's, the main
@@ -39,7 +42,7 @@ protocol Machine: Sendable {
 enum LanePolicy {
     static func capacity(of jobClass: JobClass, touchHeld: Bool, answersRunning: Int, machine: Machine) -> Int {
         switch jobClass {
-        case .answer: return 1
+        case .answer: return max(1, machine.fastCores - 1) + (machine.efficientCores + 1) / 2
         case .soon: return touchHeld ? 1 : 2
         case .later:
             if touchHeld { return 0 }

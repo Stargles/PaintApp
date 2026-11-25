@@ -216,7 +216,7 @@ final class FillWindowLogicTests: XCTestCase {
         }
         vectorManager.beginInteractiveFill(at: CGPoint(x: 32, y: 32))
         vectorManager.endInteractiveFill()
-        vectorManager.fillQueue.sync {}
+        vectorManager.waitForFillWork()
         settle()
         expectedRender = try XCTUnwrap(vectorManager.liveFill?.render, "the preview render exists before commit")
         XCTAssertEqual(vectorManager.liveFill?.clip?.boundingBoxOfPath, previewBounds)
@@ -239,7 +239,7 @@ final class FillWindowLogicTests: XCTestCase {
         }
         rasterManager.beginInteractiveFill(at: CGPoint(x: 32, y: 32))
         rasterManager.endInteractiveFill()
-        rasterManager.fillQueue.sync {}
+        rasterManager.waitForFillWork()
         settle()
         rasterManager.commitInteractiveFill()
         XCTAssertTrue(rasterLandingObserved,
@@ -254,7 +254,7 @@ final class FillWindowLogicTests: XCTestCase {
         }
         cancelledManager.beginInteractiveFill(at: CGPoint(x: 32, y: 32))
         cancelledManager.endInteractiveFill()
-        cancelledManager.fillQueue.sync {}
+        cancelledManager.waitForFillWork()
         settle()
         XCTAssertNotNil(cancelledManager.liveFill?.preview, "the cancellation starts from a visible fill")
         cancelledManager.cancelInteractiveFill()
@@ -297,7 +297,7 @@ final class FillWindowLogicTests: XCTestCase {
         let manager = largeManager()
         manager.beginInteractiveFill(at: CGPoint(x: 700, y: 700))
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}
+        manager.waitForFillWork()
         settle()
 
         let render = try XCTUnwrap(manager.fillLastRender, "the tap previewed nothing")
@@ -327,7 +327,7 @@ final class FillWindowLogicTests: XCTestCase {
 
         manager.beginInteractiveFill(at: CGPoint(x: 700, y: 700))
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}
+        manager.waitForFillWork()
         settle()
 
         let render = try XCTUnwrap(manager.fillLastRender, "the tap previewed nothing")
@@ -359,7 +359,7 @@ final class FillWindowLogicTests: XCTestCase {
         loop.addRect(CGRect(x: 600, y: 600, width: 200, height: 200))
         manager.beginInteractiveLassoFill(path: loop)
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}
+        manager.waitForFillWork()
         settle()
 
         let render = try XCTUnwrap(manager.fillLastRender, "the loop previewed nothing")
@@ -405,7 +405,7 @@ final class FillWindowLogicTests: XCTestCase {
         loop.addRect(CGRect(x: 28, y: 28, width: 200, height: 200))
         manager.beginInteractiveLassoFill(path: loop)
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}
+        manager.waitForFillWork()
         settle()
 
         let render = try XCTUnwrap(manager.fillLastRender, "the loop previewed nothing")

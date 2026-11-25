@@ -8,7 +8,7 @@ import CoreGraphics
 /// do something with it being in the transient state, then another thing is filled, and it doesnt
 /// bake the first one properly before going to the second."* Their reading is exactly right, and
 /// the window they are describing is real: `beginInteractiveFill` composites the reference, uploads
-/// a GPU session and runs the flood on `fillQueue`, then lands the preview back on the main thread
+/// a GPU session and runs the flood on the fill lane, then lands the preview back on the main thread
 /// (`CanvasManager.fillRenders`). A tap that lands before that hop runs used to break three ways at
 /// once, and each of the three has a test below.
 ///
@@ -24,11 +24,11 @@ import CoreGraphics
 /// a test that hopes to lose a race is worth nothing in either direction — it can pass on broken
 /// code and fail on correct code. Two primitives do all the work, and both are exact:
 ///
-///  - **`manager.fillQueue.sync {}`** runs after everything already enqueued, so it means *"the GPU
+///  - **`manager.waitForFillWork()`** runs after everything already enqueued, so it means *"the GPU
 ///    render has finished"*. The hop it queued to main provably has **not** run, because XCTest
 ///    bodies run on the main thread and nothing has pumped the run loop. That is the window in which
 ///    the artist's first fill exists as pixels but not as document state.
-///  - **A semaphore block on `fillQueue`** holds the serial queue, so work enqueued behind it can be
+///  - **A semaphore block on the fill lane** holds the serial queue, so work enqueued behind it can be
 ///    ordered deliberately. That is how a *superseded* render is made to run after the gesture that
 ///    replaced it, which is what happens on device whenever the second tap lands while the first
 ///    gesture's next render is still waiting for the GPU.
@@ -88,7 +88,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
         return (bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3])
     }
 
-    /// Pumps the main run loop long enough for a `fillQueue` render's main-thread hop to land — the
+    /// Pumps the main run loop long enough for a the fill lane render's main-thread hop to land — the
     /// same helper `LassoFillLogicTests` uses. Deliberately absent from the middle of every sequence
     /// below: not settling is the bug.
     private func settle(_ seconds: TimeInterval = 0.5) {
@@ -97,12 +97,12 @@ final class FillGestureRestartLogicTests: XCTestCase {
         wait(for: [done], timeout: seconds + 5)
     }
 
-    /// Runs a tap-and-lift, then waits for `fillQueue` **without** pumping main. On return the flood
+    /// Runs a tap-and-lift, then waits for the fill lane **without** pumping main. On return the flood
     /// has run and its preview has not been installed: the exact state a second tap arrives in.
     private func tapAndRenderWithoutPublishing(_ manager: CanvasManager, at point: CGPoint) {
         manager.beginInteractiveFill(at: point)
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}
+        manager.waitForFillWork()
     }
 
     private func rectangleLoop(_ rect: CGRect) -> CGPath {
@@ -152,7 +152,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
 
         manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 30, y: 30, width: 32, height: 32)))
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}
+        manager.waitForFillWork()
         XCTAssertNil(manager.liveFill?.preview, "Fixture check: rendered, not yet published")
 
         manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 2, y: 2, width: 24, height: 24)))
@@ -172,14 +172,14 @@ final class FillGestureRestartLogicTests: XCTestCase {
 
         manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 8, y: 8, width: 24, height: 24)))
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}
+        manager.waitForFillWork()
         manager.beginInteractiveFill(at: Self.onThePaper)
 
         XCTAssertEqual(manager.history.undoStack.count, before, "Nothing was recorded for the empty loop")
     }
 
     /// **Three taps inside one turn of the main thread bake the first two.** The third tap's commit
-    /// waits on `fillQueue` for the second tap's render, so that render has to be *on* the queue the
+    /// waits on the fill lane for the second tap's render, so that render has to be *on* the queue the
     /// moment the second tap begins — though the first tap's render has not landed, and still holds
     /// the one job a gesture's renders may have in flight. Each gesture gets renders of its own
     /// (`CanvasManager.fillRenders`) for exactly this: a request left waiting behind the first tap's
@@ -222,7 +222,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
 
         // Hold the serial queue so the next two renders can be ordered deliberately.
         let gate = DispatchSemaphore(value: 0)
-        manager.fillQueue.async { gate.wait() }
+        manager.fillWork { gate.wait() }
         // A gesture-1 render, queued behind the gate: this is the one that must not speak later.
         manager.setFillGapClosing(5)
 
@@ -231,7 +231,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
         manager.endInteractiveFill()
 
         gate.signal()
-        manager.fillQueue.sync {}   // stale worker, session teardown and gesture 2's worker all run
+        manager.waitForFillWork()   // stale worker, session teardown and gesture 2's worker all run
         settle()
 
         XCTAssertGreaterThan(try previewAlpha(manager, Self.onThePaper), 0,
@@ -254,7 +254,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
 
         manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 8, y: 8, width: 24, height: 24)))
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}   // the empty result exists; its hop to main is still queued
+        manager.waitForFillWork()   // the empty result exists; its hop to main is still queued
 
         manager.beginInteractiveFill(at: CGPoint(x: 40, y: 40))
         manager.endInteractiveFill()
@@ -312,7 +312,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
     /// tap; drawing the next loop while the last one is still on the GPU is ordinary use.
     ///
     /// **The gate is signalled off a background queue, and that is not decoration.** The fix waits on
-    /// `fillQueue` from the main thread, so a gate signalled from the test body — which is the main
+    /// the fill lane from the main thread, so a gate signalled from the test body — which is the main
     /// thread — would park there for ever. Signalling it from elsewhere keeps the interleaving just
     /// as forced (gesture 1's worker provably has not run when gesture 2 begins) while leaving the
     /// wait a wait rather than a deadlock.
@@ -321,7 +321,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
         let before = manager.history.undoStack.count
 
         let gate = DispatchSemaphore(value: 0)
-        manager.fillQueue.async { gate.wait() }
+        manager.fillWork { gate.wait() }
         manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 30, y: 30, width: 32, height: 32)))
         manager.endInteractiveFill()
         XCTAssertNil(manager.fillRenderedRegion,
@@ -345,7 +345,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
         let before = manager.history.undoStack.count
 
         let gate = DispatchSemaphore(value: 0)
-        manager.fillQueue.async { gate.wait() }
+        manager.fillWork { gate.wait() }
         manager.beginInteractiveFill(at: Self.onTheSquare)
         manager.endInteractiveFill()
 
@@ -366,7 +366,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
         let before = manager.history.undoStack.count
 
         let gate = DispatchSemaphore(value: 0)
-        manager.fillQueue.async { gate.wait() }
+        manager.fillWork { gate.wait() }
         manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 8, y: 8, width: 24, height: 24)))
         manager.endInteractiveFill()
 
@@ -390,7 +390,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
         settle()   // landed, so the gesture's next render is minted the moment it is asked for
 
         let gate = DispatchSemaphore(value: 0)
-        manager.fillQueue.async { gate.wait() }
+        manager.fillWork { gate.wait() }
         manager.setFillGapClosing(5)   // a gesture-1 render, queued behind the gate
 
         manager.brushColor = Self.blue
@@ -398,7 +398,7 @@ final class FillGestureRestartLogicTests: XCTestCase {
         manager.beginInteractiveLassoFill(path: rectangleLoop(Self.loopB))
         manager.endInteractiveFill()
 
-        manager.fillQueue.sync {}
+        manager.waitForFillWork()
         settle()
 
         XCTAssertGreaterThan(try previewAlpha(manager, Self.onSquare2), 0,

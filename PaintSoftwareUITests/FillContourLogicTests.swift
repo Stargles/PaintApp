@@ -558,7 +558,7 @@ final class FillContourLogicTests: XCTestCase {
         // --- the artist's first lasso, around both squares ---
         manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 4, y: 4, width: 34, height: 34)))
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}
+        manager.waitForFillWork()
         settle()
 
         let render = try XCTUnwrap(manager.fillLastRender, "the first lasso previewed nothing")
@@ -579,7 +579,7 @@ final class FillContourLogicTests: XCTestCase {
         // --- the artist's second lasso, elsewhere; this is what bakes the first ---
         manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 40, y: 40, width: 20, height: 20)))
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}
+        manager.waitForFillWork()
         settle()
 
         let celIndex = try XCTUnwrap(manager.activeCelIndex(inLayer: vectorIndex, atFrame: manager.currentFrame))
@@ -614,7 +614,7 @@ final class FillContourLogicTests: XCTestCase {
         return path
     }
 
-    /// Pumps the main run loop long enough for a `fillQueue` render's main-thread hop to land — the
+    /// Pumps the main run loop long enough for a the fill lane render's main-thread hop to land — the
     /// same helper `FillGestureRestartLogicTests` and `LassoFillLogicTests` both use.
     private func settle(_ seconds: TimeInterval = 0.5) {
         let done = expectation(description: "fill settles")

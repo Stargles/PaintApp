@@ -671,7 +671,7 @@ final class RasterResidencyLogicTests: XCTestCase {
         let width = Int(size.width), height = Int(size.height)
         let window = FillWindow.fitting(CGRect(origin: .zero, size: size), in: size, pixelBudget: width * height)
         let targetIndex = Int(target.y) * width + Int(target.x)
-        let expected = try manager.fillQueue.sync {
+        let expected = try manager.onFillLane {
             let vectorOnly = try XCTUnwrap(CanvasManager.makeFillReference(references: Array(references.dropFirst()), window: window))
             let withFreshRaster = try XCTUnwrap(CanvasManager.makeFillReference(references: references, window: window))
             XCTAssertEqual(withFreshRaster.rgba, vectorOnly.rgba, "Clear reference pixels do not alter the drawn ink")
@@ -687,7 +687,7 @@ final class RasterResidencyLogicTests: XCTestCase {
                                            size: CGSize(width: 1, height: 1))
         try raster.restore(patch: dot, at: .zero).get()
         let changed = manager.fillReferenceSources()
-        try manager.fillQueue.sync {
+        try manager.onFillLane {
             let painted = try XCTUnwrap(CanvasManager.makeFillReference(references: changed, window: window))
             XCTAssertEqual(painted.rgba[3], 255, "PREMISE: the new raster version really contains opaque ink")
             let protected = try self.mendCoverage(painted, width: width, height: height)
@@ -2456,5 +2456,20 @@ extension RasterResidencyLogicTests {
                        "ImageIO downsamples from the file; no pixel buffer is admitted")
         XCTAssertEqual(owner.usage.pixelBytes, 0)
         XCTAssertEqual(owner.usage.highWaterBytes, before.highWaterBytes)
+    }
+}
+
+extension CanvasManager {
+    /// Runs `body` on the fill lane, as the gesture's own work does, and returns what it answers —
+    /// the thread the fill reference's factory is made for.
+    func onFillLane<T>(_ body: @escaping () throws -> T) throws -> T {
+        let done = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var outcome: Result<T, Error>?
+        fillWork {
+            outcome = Result { try body() }
+            done.signal()
+        }
+        done.wait()
+        return try outcome!.get()
     }
 }

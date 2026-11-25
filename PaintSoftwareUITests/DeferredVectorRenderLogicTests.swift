@@ -55,44 +55,6 @@ final class DeferredVectorRenderLogicTests: XCTestCase {
                        "A second refresh while the same version is rasterizing must not queue a second one")
     }
 
-    /// **A run of edits starts at most one canvas-sized render per interval, the first at once and
-    /// the last after the run** — `DeferredVectorRender.Pacing`, the bound on what twenty quick
-    /// undos hand the render server. Unpaced, each was a 95 MB picture at 5000², and the iPad's
-    /// `backboardd` died at 1,850 MiB (November 16).
-    func testARunOfEditsStartsAtMostOneCanvasRenderPerInterval() {
-        let interval = DeferredVectorRender.Pacing.interval
-        // Twenty undos at seven a second — the XCUITest tap rate that drove the simulator's server
-        // to 2.7 GB — then quiet. A held-back request starts when its interval is up, as
-        // `StrokeCanvasView.paceVectorRender` arms it.
-        let taps = (0..<20).map { Double($0) / 7 }
-        var pacing = DeferredVectorRender.Pacing()
-        var starts: [CFTimeInterval] = []
-        var armed: CFTimeInterval?
-        var pendingSinceStart = false
-        for tick in 0...4000 {
-            let now = Double(tick) / 1000
-            if let at = armed, now >= at {
-                armed = nil
-                if pendingSinceStart { pacing.started(at: now); starts.append(now); pendingSinceStart = false }
-            }
-            guard taps.contains(where: { abs($0 - now) < 0.0005 }) else { continue }
-            let delay = pacing.delay(at: now)
-            if delay == 0 { pacing.started(at: now); starts.append(now) }
-            else { pendingSinceStart = true; if armed == nil { armed = now + delay } }
-        }
-        XCTAssertEqual(starts.first, 0, "the first undo after a pause renders at once")
-        XCTAssertTrue(zip(starts, starts.dropFirst()).allSatisfy { $1 - $0 >= interval - 1e-9 },
-                      "no two renders start inside one interval: \(starts)")
-        // The bound the render server needs, stated in pictures rather than derived from the
-        // constant: at most four a second over the 2.7 s run, plus the one at the start.
-        XCTAssertLessThanOrEqual(starts.count, 12,
-                                 "twenty edits must share renders rather than paying one each: \(starts.count)")
-        XCTAssertGreaterThanOrEqual(starts.last!, taps.last! - 0.001, "and the last edit is rendered after it")
-
-        pacing.reset()
-        XCTAssertEqual(pacing.delay(at: starts.last!), 0, "a different cel's first picture is never held back")
-    }
-
     func testStreamFramesLeaveAnAwaitedDocumentRenderCurrentOnlyWhileAWindowOwnsThem() throws {
         let stream = VectorStreamElement(naturalSize: CGSize(width: 8, height: 8),
             host: "laptop", port: 47301, sourceLabel: "Screen",

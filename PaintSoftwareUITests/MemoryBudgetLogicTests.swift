@@ -1299,7 +1299,7 @@ final class MemoryBudgetLogicTests: XCTestCase {
         manager.notice = nil
         manager.beginInteractiveFill(at: CGPoint(x: 8, y: 8))
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}
+        manager.waitForFillWork()
         let settled = expectation(description: "the refusal reaches main")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { settled.fulfill() }
         wait(for: [settled], timeout: 5)

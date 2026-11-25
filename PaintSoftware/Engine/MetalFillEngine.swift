@@ -476,7 +476,7 @@ nonisolated final class MetalFillSession {
     /// raises a notice on it (§7.1).
     ///
     /// Meaningful only for a lasso session, and only after `fill(...)` returns. Written and read on
-    /// `fillQueue`, which is serial and the only place `fill(...)` is called from in the app.
+    /// the fill lane, which is serial (one `Job.group`) and the only place `fill(...)` is called from in the app.
     private(set) var lastFilledPixelCount: Int = 0
 
     /// The collar's **reached** set from the last `fill(...)` — one byte per pixel, non-zero wherever
@@ -503,7 +503,7 @@ nonisolated final class MetalFillSession {
     /// Read lazily rather than snapshotted inside `fill(...)` because it is wanted only on the empty
     /// path, which is rare, while `fill` runs on every slider tick. The buffers are
     /// `.storageModeShared` and `fill` waits on its last command buffer, so their contents are
-    /// settled by the time this can be called — from `fillQueue`, which is the serial queue that ran
+    /// settled by the time this can be called — from the fill lane, which is the serial group that ran
     /// the fill and the only place either is touched.
     func lastReachedMask() -> [UInt8]? {
         guard isLasso else { return nil }
@@ -1139,7 +1139,7 @@ nonisolated final class MetalFillSession {
     /// walls beyond it, so a window is trusted only where the paint keeps `band` clear of every edge
     /// that is not the canvas's own.
     ///
-    /// Read on `fillQueue` after `fill` returned, so the shared buffer is settled — the same standing
+    /// Read on the fill lane after `fill` returned, so the shared buffer is settled — the same standing
     /// `lastReachedMask()` relies on.
     func paintedReaches(band: Int, of sides: FillWindow.Sides) -> FillWindow.Sides {
         let out = outBuf.contents().bindMemory(to: UInt8.self, capacity: count * 4)

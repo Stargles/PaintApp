@@ -183,13 +183,13 @@ final class FillFootprintBench: XCTestCase {
             measurement = try measuredPeak {
                 manager.beginInteractiveFill(at: CGPoint(x: 16, y: 16))
                 manager.endInteractiveFill()
-                manager.fillQueue.sync {}
+                manager.waitForFillWork()
             }
         } else {
             let start = CACurrentMediaTime()
             manager.beginInteractiveFill(at: CGPoint(x: 16, y: 16))
             manager.endInteractiveFill()
-            manager.fillQueue.sync {}
+            manager.waitForFillWork()
             let footprint = try footprintBytes()
             measurement = FootprintMeasurement(baseline: footprint, peak: footprint,
                                                seconds: CACurrentMediaTime() - start)
@@ -262,7 +262,7 @@ final class FillFootprintBench: XCTestCase {
         // paper around the true brush footprint, which Mend All must preserve.
         manager.beginInteractiveFill(at: CGPoint(x: 16, y: 16))
         manager.endInteractiveFill()
-        manager.fillQueue.sync {}
+        manager.waitForFillWork()
         XCTAssertTrue(manager.commitInteractiveFill(), "the ordinary bucket fill commits")
         let sample = try XCTUnwrap(manager.layers[fillLayer].cels[0].vector)
         let fill = try XCTUnwrap(sample.elements.first?.fill, "the bucket creates a stored vector fill")
@@ -355,7 +355,7 @@ final class FillFootprintBench: XCTestCase {
             loop.addRect(box.insetBy(dx: -40, dy: -40))
             manager.beginInteractiveLassoFill(path: loop)
             manager.endInteractiveFill()
-            manager.fillQueue.sync {}
+            manager.waitForFillWork()
             settle()
             let render = try XCTUnwrap(manager.fillLastRender, "the lasso previewed nothing at \(side)²")
             XCTAssertTrue(manager.isPointInPendingFill(at: centre), "the box is filled at \(side)²")
@@ -370,7 +370,7 @@ final class FillFootprintBench: XCTestCase {
             let beforeBucket = try footprintBytes()
             manager.beginInteractiveFill(at: centre)
             manager.endInteractiveFill()
-            manager.fillQueue.sync {}
+            manager.waitForFillWork()
             settle()
             let tap = try XCTUnwrap(manager.fillLastRender, "the tap previewed nothing at \(side)²")
             XCTAssertTrue(manager.isPointInPendingFill(at: centre))

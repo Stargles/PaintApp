@@ -118,9 +118,9 @@ nonisolated final class StrokeScratch: DabTarget {
     /// **Where a `.replacing` scratch's pictures are drawn** (SCHEDULER rules 1, 2 and 4). Rendering the
     /// admitted window re-draws every element in it, which at 5000² with five vector layers took a
     /// 6.1 s main-thread pass in one eraser stroke (nov17 `handoff-1`), so main never does it: it
-    /// records the newest display list and the render runs on this queue, latest wins.
-    private static let renderQueue = DispatchQueue(label: "com.paintapp.StrokeScratch.render",
-                                                   qos: .userInitiated)
+    /// records the newest display list and the render runs as an R1 job (the artist is looking at it),
+    /// latest wins. Scratches take turns: two window pictures are never drawn at once.
+    private static let renderGroup = "StrokeScratch.render"
     private var renders: LatestWins?
     /// The newest replacement asked for, and the one whose picture `contentPresentation` holds.
     private var requestedRender = 0
@@ -157,7 +157,10 @@ nonisolated final class StrokeScratch: DabTarget {
         requestedRevision = contentRevision
         let revision = requestedRender
         let placement = updated.placement
-        let renders = self.renders ?? MainActor.assumeIsolated { LatestWins(queue: Self.renderQueue) }
+        let renders = self.renders ?? MainActor.assumeIsolated {
+            LatestWins(scheduler: .shared, key: JobKey("StrokeScratch.render", ObjectIdentifier(self)),
+                       name: "scratch picture", group: Self.renderGroup)
+        }
         self.renders = renders
         MainActor.assumeIsolated {
             renders.request { [weak self] in
