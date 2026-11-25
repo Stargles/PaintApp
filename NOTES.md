@@ -21,6 +21,8 @@ Owner ruled Q1 (2026-11-25): keep the previous frame until the new one is whole.
   prefetch (UI 182-196 ms -> threshold set 150). Playcheck GREEN (app peak 1140, backboardd 187).
 - Rebased on 63269845 (owner Q1/Q2 rulings). Docs: SCHEDULER_DESIGN "S1 as built", SCHEDULER status, TODO 5.
 
+- Fast tier Debug + Release: 5755/5755 run (= static count), 5751 passed, 4 skipped, 0 failed.
+- Playcheck GREEN again: step 42 ms (app clock), probe 2.35 s; app peak 1143, backboardd 206. BakeWiringUITests 4/4.
+
 ## Next
-- Fast tier Debug + Release (running), reconcile counts; playcheck rerun for the app-clock step line.
-- Delete simulator + evidence after merge (keep evidence until the orchestrator reads the report).
+- Nothing on this branch; orchestrator merges. Simulator deleted; evidence in ~/PaintWork/nov25-s1-evidence.
