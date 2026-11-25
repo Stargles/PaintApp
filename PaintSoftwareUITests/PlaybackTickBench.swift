@@ -207,7 +207,7 @@ final class PlaybackTickBench: XCTestCase {
                     manager.currentFrame = frame
                     sweeps.append(ms { manager.syncFrameBake(suspended: false) })
                     var image: CGImage?
-                    reads.append(ms { image = baker.image(atFrame: frame) })
+                    reads.append(ms { image = baker.picture(atFrame: frame)?.image })
                     if image == nil { misses += 1 }
                 }
             }

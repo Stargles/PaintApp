@@ -139,9 +139,9 @@ final class BakeWiringLogicTests: XCTestCase {
 
         // …and end to end: the pixels the canvas is handed at rest are that size too.
         drain(baker)
-        XCTAssertEqual(baker.image(atFrame: 0)?.width, Int(live.width),
+        XCTAssertEqual(baker.picture(atFrame: 0)?.image.width, Int(live.width),
                        "The baked frame is the picture the canvas shows at rest, so it is the canvas's size")
-        XCTAssertEqual(baker.image(atFrame: 0)?.height, Int(live.height))
+        XCTAssertEqual(baker.picture(atFrame: 0)?.image.height, Int(live.height))
     }
 
     // MARK: - 2. The suspension
@@ -486,7 +486,7 @@ final class BakeWiringLogicTests: XCTestCase {
                     autoreleasepool {
                         manager.currentFrame = frame
                         manager.syncFrameBake(suspended: false)
-                        if baker.image(atFrame: frame) != nil, lap == 1 { served += 1 }
+                        if baker.picture(atFrame: frame)?.image != nil, lap == 1 { served += 1 }
                     }
                 }
             }

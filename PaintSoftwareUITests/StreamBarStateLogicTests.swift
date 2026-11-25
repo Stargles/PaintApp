@@ -603,7 +603,7 @@ final class StreamBarStateLogicTests: XCTestCase {
         manager.syncFrameBake(suspended: false)
         drain(baker)
         let key = try XCTUnwrap(baker.currentKey(atFrame: 0))
-        let baked = try XCTUnwrap(baker.image(atFrame: 0), "the baker has frame 0")
+        let baked = try XCTUnwrap(baker.picture(atFrame: 0)?.image, "the baker has frame 0")
         let centre = pixel(baked, 32, 32)
         XCTAssertGreaterThan(Int(min(centre.r, centre.g, centre.b)), 245,
                              "no stream in the bake: the centre is the bare paper, not the green frame (\(centre))")
@@ -615,7 +615,7 @@ final class StreamBarStateLogicTests: XCTestCase {
         manager.syncFrameBake(suspended: false)
         drain(baker)
         XCTAssertEqual(baker.currentKey(atFrame: 0), key, "a frame moves no bake key")
-        let after = pixel(try XCTUnwrap(baker.image(atFrame: 0)), 32, 32)
+        let after = pixel(try XCTUnwrap(baker.picture(atFrame: 0)?.image), 32, 32)
         XCTAssertGreaterThan(Int(min(after.r, after.g, after.b)), 245, "and the bake is still bare paper there (\(after))")
 
         // Pixel-level: the document with the stream equals the document without the stream layer.

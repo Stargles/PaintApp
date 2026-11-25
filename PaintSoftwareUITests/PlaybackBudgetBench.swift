@@ -314,7 +314,7 @@ final class PlaybackBudgetBench: XCTestCase {
                         rasterized += flatRowFlip(manager, to: frame, hostIsBlanked: true, shown: &shown)
                         // …and what `updateSandwich` puts on screen instead.
                         manager.syncFrameBake(suspended: false)
-                        displayed = baker.image(atFrame: frame)
+                        displayed = baker.picture(atFrame: frame)?.image
                         if displayed == nil { misses += 1 }
                         peak = max(peak, residentBytes())
                     }

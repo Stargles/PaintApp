@@ -84,7 +84,7 @@ final class FrameBakerLogicTests: XCTestCase {
     /// when nothing lands within `timeout`. A read never decodes on the main thread, so a test that
     /// wants the picture waits for it the way the canvas does.
     private func awaitImage(_ baker: FrameBaker, atFrame frame: Int, timeout: TimeInterval = 10) -> CGImage? {
-        if let hit = baker.image(atFrame: frame) { return hit }
+        if let hit = baker.picture(atFrame: frame)?.image { return hit }
         let listener = NSObject()
         let landed = expectation(description: "frame \(frame) is read")
         landed.assertForOverFulfill = false
@@ -93,7 +93,7 @@ final class FrameBakerLogicTests: XCTestCase {
         }
         defer { baker.stopObservingFrameFinished(listener) }
         guard XCTWaiter.wait(for: [landed], timeout: timeout) == .completed else { return nil }
-        return baker.image(atFrame: frame)
+        return baker.picture(atFrame: frame)?.image
     }
 
     /// A document whose every frame is a **different picture**, so every frame is its own bake key.
@@ -257,7 +257,7 @@ final class FrameBakerLogicTests: XCTestCase {
         manager.play()
         defer { manager.stopPlayback() }
         let count = composites {
-            XCTAssertNil(baker.image(atFrame: 0), "A playback miss never decodes on the display thread.",
+            XCTAssertNil(baker.picture(atFrame: 0)?.image, "A playback miss never decodes on the display thread.",
                          file: file, line: line)
             drain(baker)
         }
@@ -280,7 +280,7 @@ final class FrameBakerLogicTests: XCTestCase {
         manager.play()
         defer { manager.stopPlayback() }
         let count = composites {
-            XCTAssertNil(baker.image(atFrame: 0))
+            XCTAssertNil(baker.picture(atFrame: 0)?.image)
             drain(baker)
         }
         XCTAssertEqual(count, 0, "Ring admission refusal is not a corrupt or missing file.")
@@ -335,7 +335,7 @@ final class FrameBakerLogicTests: XCTestCase {
         manager.playbackNow = { 0 }
         manager.play()
         defer { manager.stopPlayback() }
-        XCTAssertNil(baker.image(atFrame: 0), "Premise: a miss, so the frame's answer read is in flight.")
+        XCTAssertNil(baker.picture(atFrame: 0)?.image, "Premise: a miss, so the frame's answer read is in flight.")
         baker.reset()
         // Whatever the read did off the main thread, its landing was cancelled with it.
         RunLoop.main.run(until: Date().addingTimeInterval(0.5))
@@ -1123,7 +1123,7 @@ final class FrameBakerLogicTests: XCTestCase {
         drain(baker)
 
         for frame in 0..<3 {
-            XCTAssertNil(baker.image(atFrame: frame), "Frame \(frame) was never written.")
+            XCTAssertNil(baker.picture(atFrame: frame)?.image, "Frame \(frame) was never written.")
             XCTAssertFalse(baker.isBaked(atFrame: frame))
         }
     }
@@ -1172,7 +1172,7 @@ final class FrameBakerLogicTests: XCTestCase {
 
         XCTAssertNotEqual(baker.currentKey(atFrame: 1), recorded,
                           "The key is derived from the model, so it moved the moment the model did.")
-        XCTAssertNil(baker.image(atFrame: 1),
+        XCTAssertNil(baker.picture(atFrame: 1)?.image,
                      "A key with no file is a miss — §2.10's previous picture, never a stale one.")
         XCTAssertEqual(baker.keyByFrame[1], recorded,
                        "The baker's own record is what is stale, which is why nothing reads it for a picture.")
@@ -1271,7 +1271,7 @@ final class FrameBakerLogicTests: XCTestCase {
                 XCTAssertTrue(baker.ring.contains(key.fileName),
                               "Flip \(flips) to frame \(playhead) missed the ring — play would decode on the display thread.")
             }
-            XCTAssertNotNil(flips == 0 ? awaitImage(baker, atFrame: playhead) : baker.image(atFrame: playhead))
+            XCTAssertNotNil(flips == 0 ? awaitImage(baker, atFrame: playhead) : baker.picture(atFrame: playhead)?.image)
             drain(baker)
             flips += 1
         }
@@ -1296,7 +1296,7 @@ final class FrameBakerLogicTests: XCTestCase {
         manager.currentFrame = 1
         baker.ring.removeAll()
 
-        XCTAssertNil(baker.image(atFrame: 1),
+        XCTAssertNil(baker.picture(atFrame: 1)?.image,
                      "A miss during playback is a miss; nothing is decoded on the display thread.")
         XCTAssertFalse(baker.ring.contains(key.fileName), "Nothing was decoded on the read's behalf.")
 
@@ -1309,13 +1309,13 @@ final class FrameBakerLogicTests: XCTestCase {
         XCTAssertTrue(baker.ring.contains(key.fileName), "The top-up decoded it off the main thread.")
         XCTAssertTrue(resident.contains(1),
                       "The canvas showing the previous picture is told the moment this frame is resident.")
-        XCTAssertNotNil(baker.image(atFrame: 1), "And the next read is a hit.")
+        XCTAssertNotNil(baker.picture(atFrame: 1)?.image, "And the next read is a hit.")
 
         manager.stopPlayback()
         baker.ring.removeAll()
         guard let stepped = baker.keyByFrame[2] else { return XCTFail("Frame 2 must be baked.") }
         manager.currentFrame = 2
-        XCTAssertNil(baker.image(atFrame: 2), "At rest a miss is a miss too: the display thread decodes nothing.")
+        XCTAssertNil(baker.picture(atFrame: 2)?.image, "At rest a miss is a miss too: the display thread decodes nothing.")
         XCTAssertNotNil(awaitImage(baker, atFrame: 2), "The answer read lands the frame the step landed on.")
         XCTAssertTrue(baker.ring.contains(stepped.fileName), "And rings it on the way past.")
     }

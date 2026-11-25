@@ -31,44 +31,58 @@ import Compression
 /// metadata-only readiness uses its own short lock, independently of pixel reads and decompression.
 nonisolated final class FrameBakeStore {
 
-    // MARK: - Format
+    // MARK: - Format (version 2: tiles and two levels)
 
     /// **Bumped whenever the bytes on disk change meaning.** It is in the header *and* in the bake
     /// key, which is belt and braces on purpose: the key means an old file is never even looked for,
     /// and the header means one that is looked for anyway is rejected rather than decoded as
     /// something it is not.
-    static let formatVersion: UInt16 = 1
+    ///
+    /// **Version 2 replaced version 1 outright and nothing reads version 1.** A bake file is a cache
+    /// (RENDER.md §2.11): a file this build cannot read is a miss and the frame is baked again, so
+    /// there is no repair pass and no second decoder. The launch dump (`purgeEverything`) removes the
+    /// files an earlier build left.
+    static let formatVersion: UInt16 = 2
 
-    /// `PBK1`.
-    static let magic: [UInt8] = [0x50, 0x42, 0x4B, 0x31]
+    /// `PBK2`.
+    static let magic: [UInt8] = [0x50, 0x42, 0x4B, 0x32]
 
-    /// **64 bytes, not the 32 §3.5 wrote.** A SHA-256 digest alone fills 32, so the original number
-    /// left no room for the width, height, stride, sizes and flags the same sentence asked for.
-    /// Little-endian throughout:
+    /// The side of a tile, in pixels (SCHEDULER_DESIGN.md §3: "tiled LZ4, 512×512 tiles"). A tile is
+    /// compressed alone, so a reader holds one tile's scratch and a later window read needs only the
+    /// tiles it shows.
+    static let tileSide = 512
+
+    /// **64 bytes, then the tile directory, then the payload.** Little-endian throughout:
     ///
     /// | offset | size | field |
     /// |---|---|---|
-    /// | 0 | 4 | magic `PBK1` |
+    /// | 0 | 4 | magic `PBK2` |
     /// | 4 | 2 | format version |
-    /// | 6 | 2 | flags — bit 0 set = LZ4 payload, clear = stored raw |
-    /// | 8 | 4 | pixel width |
-    /// | 12 | 4 | pixel height |
-    /// | 16 | 4 | bytes per row |
-    /// | 20 | 4 | uncompressed payload bytes |
-    /// | 24 | 4 | compressed payload bytes |
+    /// | 6 | 2 | reserved, zero |
+    /// | 8 | 4 | full level width |
+    /// | 12 | 4 | full level height |
+    /// | 16 | 4 | half level width (`ceil(width / 2)`) |
+    /// | 20 | 4 | half level height |
+    /// | 24 | 4 | tile side |
     /// | 28 | 4 | reserved, zero |
     /// | 32 | 32 | key digest |
+    ///
+    /// The directory is one `UInt32` per tile, the full level's tiles row by row and then the half
+    /// level's: the low 31 bits are the stored length, bit 31 is set when the tile is stored raw
+    /// because LZ4 did not shrink it. The payload is the tiles in the same order, so a level's
+    /// bytes are one contiguous range — a step at fit zoom reads the half level and never the full.
+    /// Tiles are BGRA premultiplied-first, tightly packed.
     static let headerBytes = 64
 
-    /// Bit 0 of the flags word.
-    static let flagCompressed: UInt16 = 1
+    /// Bit 31 of a directory entry.
+    static let rawTileBit: UInt32 = 0x8000_0000
 
     /// **`COMPRESSION_LZ4_RAW`, and this is a correction to §3.5's `COMPRESSION_LZ4`.** Apple's
     /// `COMPRESSION_LZ4` wraps the stream in its own `bv41` block framing, which no other LZ4
     /// decoder reads — and §3.5's stated reason for choosing LZ4 at all is that "the format is
     /// portable to any platform with an LZ4 decoder, which is all of them". `_RAW` is the standard
     /// raw block, whose only extra requirement is knowing the uncompressed size before decoding,
-    /// and the header above already carries it. So the portable choice costs nothing here.
+    /// and a tile's size follows from its place in the level.
 
     // MARK: - Roots
 
@@ -99,9 +113,10 @@ nonisolated final class FrameBakeStore {
 
     let root: URL
 
-    /// This facade's write ceiling (§3.5). Each accepted write evicts against this limit; another
-    /// facade may request a larger cap, so shared totalBytes can exceed a smaller facade's cap.
-    let byteCeiling: Int
+    /// This facade's own write ceiling, or nil for the disk limit (`BakeDiskLimit`). Each accepted
+    /// write evicts against the ceiling; another facade may request a larger one, so shared
+    /// `totalBytes` can exceed a smaller facade's.
+    private let explicitCeiling: Int?
 
     /// All facades for the same directory share one I/O and inventory owner, including a freshly
     /// loaded CanvasManager while an older baker still owes frozen work. Facades retain their
@@ -122,6 +137,8 @@ nonisolated final class FrameBakeStore {
         private var bytes: Int
         private var revision: UInt64 = 0
         private var reads = 0
+        /// Free disk plus what this root holds, as last read; `Int.max` until the first read answers.
+        private var capacityBytes = Int.max
 
         init(_ url: URL) {
             self.url = url
@@ -139,6 +156,19 @@ nonisolated final class FrameBakeStore {
         var readCount: Int {
             metadata.lock(); defer { metadata.unlock() }
             return reads
+        }
+
+        var capacity: Int {
+            metadata.lock(); defer { metadata.unlock() }
+            return capacityBytes
+        }
+
+        /// Reads the volume again (a store opening, a write failing). A volume that cannot say
+        /// leaves the figure as it was.
+        func refreshCapacity() {
+            guard let read = BakeDiskLimit.capacity(at: url, held: totalBytes) else { return }
+            metadata.lock(); defer { metadata.unlock() }
+            capacityBytes = read
         }
 
         func noteRead() {
@@ -205,16 +235,17 @@ nonisolated final class FrameBakeStore {
         case malformedKey
     }
 
-    init(root: URL, byteCeiling: Int = FrameBakeStore.defaultByteCeiling) {
+    /// - Parameter byteCeiling: nil (the app) takes the disk limit — `min(4 GiB, 10% of free disk)`,
+    ///   read from the machine now and again when a write fails; a test passes its own.
+    init(root: URL, byteCeiling: Int? = nil) {
         self.root = URL(fileURLWithPath: root.standardizedFileURL.path, isDirectory: true)
-        self.byteCeiling = byteCeiling
+        explicitCeiling = byteCeiling
         owner = Self.rootOwner(self.root)
+        if byteCeiling == nil { owner.refreshCapacity() }
     }
 
-    /// 512 MiB. A number rather than a fraction of the device, because §2.6 forbids a budget
-    /// hard-coded to an iPad and a *disk* ceiling has no portable device signal to read. The caller
-    /// passes its own where it knows better.
-    static let defaultByteCeiling = 512 * 1024 * 1024
+    /// What one write may take the store to: the explicit ceiling, else the disk limit as last read.
+    var ceiling: Int { explicitCeiling ?? BakeDiskLimit.bytes(capacity: owner.capacity) }
 
     /// What the store is holding, in bytes, right now.
     var totalBytes: Int {
@@ -261,38 +292,16 @@ nonisolated final class FrameBakeStore {
                playhead: Int = 0,
                frames: [String: Set<Int>] = [:]) -> Result<Int, WriteFailure> {
         guard key.digest.count == 32 else { return .failure(.malformedKey) }
-        // LZ4's worst-case output is the frame's size, admitted for the encode.
+        // The file's bytes are at most the frame's own (a tile LZ4 does not shrink goes down raw),
+        // admitted for the encode; the half level is filtered a tile at a time and never held whole.
         guard let encoding = MemoryBudget.shared.admit(pixels.bytes.count) else { return .failure(.notAdmitted) }
         defer { encoding.release() }
-
-        let rawCount = pixels.bytes.count
-        var flags: UInt16 = 0
-        var payload = pixels.bytes
-        if let compressed = Self.compress(pixels.bytes), compressed.count < rawCount {
-            payload = compressed
-            flags |= Self.flagCompressed
-        }
-        // An encoder must never make a file bigger than the pixels: if LZ4 did not shrink this
-        // frame — noise, or a photograph — the raw bytes go down with the flag clear and the reader
-        // takes the other branch.
-
-        var file = Data(capacity: Self.headerBytes + payload.count)
-        file.append(contentsOf: Self.magic)
-        file.appendLE(Self.formatVersion)
-        file.appendLE(flags)
-        file.appendLE(UInt32(pixels.width))
-        file.appendLE(UInt32(pixels.height))
-        file.appendLE(UInt32(pixels.width * 4))
-        file.appendLE(UInt32(rawCount))
-        file.appendLE(UInt32(payload.count))
-        file.appendLE(UInt32(0))
-        file.append(key.digest)
-        assert(file.count == Self.headerBytes)
-        file.append(contentsOf: payload)
+        guard let file = BakeFile.encode(bgra: pixels.bytes, width: pixels.width, height: pixels.height,
+                                         digest: key.digest) else { return .failure(.unreadableImage) }
 
         let size = file.count
-        guard size <= byteCeiling else {
-            return .failure(.exceedsCeiling(needed: size, ceiling: byteCeiling))
+        guard size <= ceiling else {
+            return .failure(.exceedsCeiling(needed: size, ceiling: ceiling))
         }
 
         owner.io.lock()
@@ -301,12 +310,16 @@ nonisolated final class FrameBakeStore {
         let existing = owner.entry(.bake(key))?.size ?? 0
         let delta = size - existing
         evictLocked(toFree: delta, playhead: playhead, frames: frames, keeping: key)
-        guard !needsSpace(adding: delta) else { return .failure(.couldNotWrite) }
+        guard !needsSpace(adding: delta) else {
+            if explicitCeiling == nil { owner.refreshCapacity() }
+            return .failure(.couldNotWrite)
+        }
 
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             try file.write(to: destination, options: .atomic)
         } catch {
+            if explicitCeiling == nil { owner.refreshCapacity() }
             return .failure(.couldNotWrite)
         }
         owner.record(.bake(key), size: size)
@@ -348,37 +361,60 @@ nonisolated final class FrameBakeStore {
         }
     }
 
-    func loadDecoded(_ key: FrameBakeKey) -> DecodedFrame? { read(key).frame }
+    func loadDecoded(_ key: FrameBakeKey, level: BakeLevel = .full) -> DecodedFrame? { read(key, level: level).frame }
 
-    /// Owned bytes from one file read. Keeping the revision with the bytes prevents a decode of
-    /// old invalid data from deleting a good replacement written while the decode was running.
+    /// What one file read found: the level's stored bytes and the directory that says how to decode
+    /// them, with the revision of the inventory entry they came from. Keeping the revision with the
+    /// bytes prevents a decode of old invalid data from deleting a good replacement written while the
+    /// decode was running.
     struct ReadSnapshot {
         fileprivate let owner: Root
         fileprivate let key: FrameBakeKey
+        fileprivate let level: BakeLevel
         fileprivate let revision: UInt64?
-        fileprivate let file: Data?
+        fileprivate let found: (directory: BakeFile.Directory, payload: Data, fileSize: Int)?
+
+        /// Bytes the read brought in from disk — the level's tiles, not the file.
+        var payloadBytes: Int { found?.payload.count ?? 0 }
     }
 
     var fileReadCount: Int { owner.readCount }
 
-    func readSnapshot(_ key: FrameBakeKey) -> ReadSnapshot {
+    /// Reads `level` of `key`'s file: the header and directory, then that level's contiguous range and
+    /// nothing else — a step at fit zoom never touches the full level's bytes.
+    func readSnapshot(_ key: FrameBakeKey, level: BakeLevel = .full) -> ReadSnapshot {
         owner.io.lock(); defer { owner.io.unlock() }
         owner.noteRead()
-        return ReadSnapshot(owner: owner, key: key,
+        return ReadSnapshot(owner: owner, key: key, level: level,
                             revision: owner.entry(.bake(key))?.revision,
-                            file: try? Data(contentsOf: url(for: key)))
+                            found: Self.readLevel(at: url(for: key), key: key, level: level))
     }
 
-    func read(_ key: FrameBakeKey) -> ReadResult {
+    func read(_ key: FrameBakeKey, level: BakeLevel = .full) -> ReadResult {
         FrameStepCensus.decodeStarted(onMain: Thread.isMainThread)
-        return PlaybackTrace.span(.storeDecode) { Self.decode(readSnapshot(key)) }
+        return PlaybackTrace.span(.storeDecode) { Self.decode(readSnapshot(key, level: level)) }
+    }
+
+    private static func readLevel(at url: URL, key: FrameBakeKey,
+                                  level: BakeLevel) -> (directory: BakeFile.Directory, payload: Data, fileSize: Int)? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let head = try? handle.read(upToCount: headerBytes),
+              let header = BakeFile.Header.parse(head), header.digest == key.digest,
+              let directoryData = try? handle.read(upToCount: header.directoryBytes),
+              let directory = BakeFile.Directory(header: header, data: directoryData), directory.isConsistent,
+              let end = try? handle.seekToEnd(), Int(end) == directory.fileLength else { return nil }
+        let range = directory.payload(of: level)
+        guard (try? handle.seek(toOffset: UInt64(range.lowerBound))) != nil,
+              let payload = try? handle.read(upToCount: range.count), payload.count == range.count else { return nil }
+        return (directory, payload, Int(end))
     }
 
     static func decode(_ snapshot: ReadSnapshot) -> ReadResult {
         do {
-            guard let file = snapshot.file else { throw ReadFailure.invalid }
-            let decoded = try decodeFile(file, key: snapshot.key)
-            settle(snapshot, decodedSize: file.count)
+            guard let found = snapshot.found else { throw ReadFailure.invalid }
+            let decoded = try decodeLevel(found.directory, level: snapshot.level, payload: found.payload)
+            settle(snapshot, decodedSize: found.fileSize)
             return .decoded(decoded)
         } catch ReadFailure.allocationRefused {
             return .allocationRefused
@@ -404,34 +440,36 @@ nonisolated final class FrameBakeStore {
 
     private enum ReadFailure: Error { case invalid, allocationRefused }
 
-    private static func decodeFile(_ file: Data, key: FrameBakeKey) throws -> DecodedFrame {
-        guard file.count >= Self.headerBytes,
-              Array(file.prefix(4)) == Self.magic,
-              file.readLE(at: 4) as UInt16 == Self.formatVersion else { throw ReadFailure.invalid }
-
-        let flags: UInt16 = file.readLE(at: 6)
-        let width = Int(file.readLE(at: 8) as UInt32)
-        let height = Int(file.readLE(at: 12) as UInt32)
-        let bytesPerRow = Int(file.readLE(at: 16) as UInt32)
-        let rawCount = Int(file.readLE(at: 20) as UInt32)
-        let payloadCount = Int(file.readLE(at: 24) as UInt32)
-        let digest = file.subdata(in: 32..<64)
-
-        guard digest == key.digest,
-              let expectedBytes = pixelByteCount(width: width, height: height, bytesPerRow: bytesPerRow),
-              rawCount == expectedBytes,
-              payloadCount > 0,
-              file.count == Self.headerBytes + payloadCount else { throw ReadFailure.invalid }
-
-        let payload = file.subdata(in: Self.headerBytes..<(Self.headerBytes + payloadCount))
-        let raw: Data
-        if flags & Self.flagCompressed != 0 {
-            raw = try Self.decompressChecked(payload, to: rawCount)
-        } else {
-            guard payloadCount == rawCount else { throw ReadFailure.invalid }
-            raw = payload
+    /// **The frame's bytes come from `malloc` directly and a refusal is a nil answer.** `Data(count:)`
+    /// traps when the host refuses the bytes — Foundation's initialiser is a `fatalError` on a nil
+    /// `malloc`, and that is the trap the owner's iPad logged on the bake queue (`Data.init(count:)`
+    /// under `loadDecoded`, 2026-09-08) while a canvas-sized frame was being decoded with no memory
+    /// left. The caller treats a refusal as a miss, and `MemoryPressure` is told (`.allocationRefused`)
+    /// so the caches trim and the artist hears why. Admitted by the one budget, and charged for as
+    /// long as the pixels live — the ring, the screen or a playback tick may hold them after the ring
+    /// lets go. `DecodedFrame` rather than `CGImage`: `makeImage()` wraps the same `Data` in a
+    /// `CGDataProvider` and copies nothing.
+    private static func decodeLevel(_ directory: BakeFile.Directory, level: BakeLevel, payload: Data) throws -> DecodedFrame {
+        let size = directory.header.size(of: level)
+        guard let count = pixelByteCount(width: size.width, height: size.height, bytesPerRow: size.width * 4) else {
+            throw ReadFailure.invalid
         }
-        return DecodedFrame(width: width, height: height, bytesPerRow: bytesPerRow, pixels: raw)
+        guard let grant = MemoryBudget.shared.admit(count) else {
+            MemoryPressure.signal(.allocationRefused)
+            throw ReadFailure.allocationRefused
+        }
+        guard let bytes = malloc(count) else {
+            grant.release()
+            MemoryPressure.signal(.allocationRefused)
+            throw ReadFailure.allocationRefused
+        }
+        var out = Data(bytesNoCopy: bytes, count: count, deallocator: .custom { pointer, _ in
+            free(pointer)
+            grant.release()
+        })
+        let decoded = out.withUnsafeMutableBytes { BakeFile.decode(level: level, directory: directory, payload: payload, into: $0) }
+        guard decoded else { throw ReadFailure.invalid }
+        return DecodedFrame(width: size.width, height: size.height, bytesPerRow: size.width * 4, pixels: out)
     }
 
     /// Header arithmetic is checked before allocating or attempting any payload decompression.
@@ -524,7 +562,7 @@ nonisolated final class FrameBakeStore {
     /// Physical bytes removed are reporting only; authoritative inventory decides headroom.
     private func needsSpace(adding bytes: Int) -> Bool {
         let projected = owner.totalBytes.addingReportingOverflow(bytes)
-        return projected.overflow || projected.partialValue > byteCeiling
+        return projected.overflow || projected.partialValue > ceiling
     }
 
     // MARK: - Pixels
@@ -546,65 +584,6 @@ nonisolated final class FrameBakeStore {
                                   bitmapInfo: info) else { return nil }
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
         return (bytes, width, height)
-    }
-
-    // MARK: - LZ4
-
-    /// Nil when the encoder declines — which for `_RAW` is what incompressible input looks like, and
-    /// is the caller's cue to store the pixels as they are.
-    static func compress(_ raw: [UInt8]) -> [UInt8]? {
-        guard !raw.isEmpty else { return nil }
-        var out = [UInt8](repeating: 0, count: raw.count)
-        let written = raw.withUnsafeBufferPointer { src in
-            out.withUnsafeMutableBufferPointer { dst in
-                LZ4Block.encode(UnsafeRawBufferPointer(src), into: UnsafeMutableRawBufferPointer(dst))
-            }
-        }
-        guard written > 0, written < raw.count else { return nil }
-        return Array(out[0..<written])
-    }
-
-    /// Nil on anything short of `expected` bytes, which is what a truncated or corrupt payload
-    /// produces. The size comes from the header, which is what a raw LZ4 block needs and does not
-    /// carry itself.
-    ///
-    /// **`Data` out, not `[UInt8]`.** `DecodedFrame` holds `Data` so that `makeImage()` can hand the
-    /// same allocation straight to a `CGDataProvider`; returning an array here would put an
-    /// `Array` → `Data` copy of the whole frame between the decoder and the ring, which at 2048² is
-    /// 16.8 MB moved per frame at 24 fps for no reason at all.
-    ///
-    /// **`Data(count:)` traps when the host refuses the bytes** — Foundation's initialiser is a
-    /// `fatalError` on a nil `malloc`, and that is the trap the owner's iPad logged on the bake queue
-    /// (`Data.init(count:)` under `loadDecoded`, 2026-09-08) while a canvas-sized frame was being
-    /// decoded with no memory left. So the frame's bytes come from `malloc` directly and a refusal
-    /// is a nil answer: the caller treats it as a miss, and `MemoryPressure` is told
-    /// (`.allocationRefused`) so the caches trim and the artist hears why.
-    static func decompress(_ payload: Data, to expected: Int) -> Data? {
-        try? decompressChecked(payload, to: expected)
-    }
-
-    private static func decompressChecked(_ payload: Data, to expected: Int) throws -> Data {
-        guard expected > 0, !payload.isEmpty else { throw ReadFailure.invalid }
-        // Admitted by the one budget, and charged for as long as the pixels live — the ring, the
-        // screen or a playback tick may hold them after the ring lets go.
-        guard let grant = MemoryBudget.shared.admit(expected), let bytes = malloc(expected) else {
-            MemoryPressure.signal(.allocationRefused)
-            throw ReadFailure.allocationRefused
-        }
-        var out = Data(bytesNoCopy: bytes, count: expected, deallocator: .custom { pointer, _ in
-            free(pointer)
-            grant.release()
-        })
-        let written = out.withUnsafeMutableBytes { dst -> Int in
-            guard let destination = dst.bindMemory(to: UInt8.self).baseAddress else { return 0 }
-            return payload.withUnsafeBytes { src -> Int in
-                guard let base = src.bindMemory(to: UInt8.self).baseAddress else { return 0 }
-                return LZ4Block.decode(UnsafeRawBufferPointer(start: base, count: payload.count),
-                    into: UnsafeMutableRawBufferPointer(start: destination, count: expected)) ? expected : 0
-            }
-        }
-        guard written == expected else { throw ReadFailure.invalid }
-        return out
     }
 
     // MARK: - Disk arithmetic
@@ -638,23 +617,5 @@ nonisolated final class FrameBakeStore {
     private static func inventory(_ root: URL) -> [FileID: Int] {
         let urls = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.fileSizeKey])) ?? []
         return Dictionary(uniqueKeysWithValues: urls.map { (fileID($0), size(of: $0)) })
-    }
-}
-
-// MARK: - Little-endian header fields
-
-private extension Data {
-    mutating func appendLE<T: FixedWidthInteger>(_ value: T) {
-        Swift.withUnsafeBytes(of: value.littleEndian) { append(contentsOf: $0) }
-    }
-
-    /// Byte-wise rather than `load(fromByteOffset:)`, which traps on an unaligned address and would
-    /// turn a corrupt file into a crash — the one thing `load(_:)` promises never to do.
-    func readLE<T: FixedWidthInteger>(at offset: Int) -> T {
-        var value: T = 0
-        for i in 0..<MemoryLayout<T>.size {
-            value |= T(self[startIndex + offset + i]) << (8 * i)
-        }
-        return value
     }
 }

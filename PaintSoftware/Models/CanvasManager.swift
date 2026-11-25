@@ -63,8 +63,8 @@ final class CanvasManager: ObservableObject {
     ///
     /// `gradedWorkingSetBytes(atExtent:)` is the least-squares line through those three in
     /// canvas-*pixel-count* (not extent — the cost is areal): **≈42.25 bytes/px − 288.6 MiB.** The
-    /// negative intercept is not a rounding error to fold away: `frameRingByteBudget` switches the
-    /// decoded-frame ring off above ~4900², and all three measured points already sit past that
+    /// negative intercept is not a rounding error to fold away: the decoded-frame ring was
+    /// off above ~4900² when these were taken, and all three measured points already sit past that
     /// line, so the fit is pricing the *post-ring* regime, which grows a little slower than a strict
     /// `bytes/px` line because a smaller working set's own share of the (now-absent) ring is not
     /// there to add back in. `CanvasGeometryLogicTests` pins the fit against these three rows
@@ -3518,77 +3518,22 @@ final class CanvasManager: ObservableObject {
     /// closed document cannot restart decoding; other open documents keep their shared residency.
     private(set) var videoFrames = VideoFrameSource.shared.makeClient()
 
-    /// The decoded ring's ceiling, in bytes.
-    ///
-    /// A number rather than a fraction of the device, for `FrameBakeStore.defaultByteCeiling`'s
-    /// reason: §2.6 forbids a budget only one OS can compute. 96 MiB is eleven frames at the owner's
-    /// 2048×1024 and five at 2048², against a `ringLookahead` of 24 — so the ring is expected to be
-    /// the binding constraint on the lookahead rather than the other way round, which is what
-    /// `FrameBaker.topUpRing`'s walk is written to cope with.
-    ///
-    /// **Decoded bytes, which is the only budget that means anything here**, and `DecodedFrameRing`
-    /// already sums exactly that (`DecodedFrame.byteCount` is the decompressed BGRA). Stage 4e
-    /// MEASURED why the file size would have been the wrong quantity: decode time tracks *pixels*
-    /// rather than bytes, so a hold — a quarter of cel art's file — decodes **slower**, 24.6 ms
-    /// against 9.9 ms at 4096². A ring budgeted in file bytes would hold the most compressible
-    /// frames, which are the expensive ones to bring back.
+    /// The decoded ring's floor, in bytes: 96 MiB, which is four half-size frames at 5000² and eleven
+    /// full ones at the owner's 2048×1024.
     static let minimumFrameRingByteBudget = 96 * 1024 * 1024
 
-    /// **The budget for a document whose decoded frame is `frameBytes`, and the floor is two
-    /// frames** — MEASURED on the owner's iPad 9, which is what turned this from a constant into a
-    /// function.
+    /// **The decoded ring's budget: a flat share of the one budget, whatever the canvas** — a quarter
+    /// (222 MiB on the iPad 9's 888), and no more than that and no less than the floor above.
     ///
-    /// A frame flip's working set is exactly two decoded frames: the one on screen and the one the
-    /// scheduler is fetching. A ring that holds **one** cannot serve it and costs more than no ring
-    /// at all — the tick's own miss inserts and evicts what the ring walk (`FrameBaker.topUpRing`) just placed, so the
-    /// ahead-decode and the display fight over one slot forever. MEASURED on a two-frame document,
-    /// 4096², iPad 9, Release: **1 ring hit against 83 misses**, one `storeDecode` on the display
-    /// thread *and* one off it per flip, and RENDER.md §3.5's *"play never decodes on the display
-    /// thread"* void. At 3584² — the first size where two frames exceed the old 96 MiB constant —
-    /// it is 1 hit against 128. At 3072² and below, where two frames fit, it is **zero misses at
-    /// every size** and playback is 24.0 fps exactly.
-    ///
-    /// So this is not a tuning knob. It is the condition under which the ring is a cache rather than
-    /// a tax, and it is the same defect PERFORMANCE.md §16.1 recorded in `VectorRenderCache` —
-    /// a budget fixed by the device against a working set fixed by the document. That one held two
-    /// renders where the flip needed six; this one held one frame where the flip needed two.
-    /// **And a ring that cannot hold two frames holds none**, which is the other half of the same
-    /// argument and is MEASURED rather than reasoned. Two 6000² frames are 288 MB; asking for that
-    /// on a 3 GB iPad 9 alongside the bake's own compositing killed the app with **signal 9** —
-    /// jetsam — during this pass, at the largest canvas `maxCanvasExtent` allows. So the two-frame
-    /// floor is bounded by `CompositorBudget.textureBudgetBytes`, the device fraction this app
-    /// already argues for — now a share of the one `MemoryBudget` — and above the size
-    /// where two frames stop fitting the ring is switched off outright rather than left holding one.
-    ///
-    /// Holding one is strictly worse than holding none: the flip misses either way — MEASURED at
-    /// 1 hit against 83 misses — and a resident frame nobody can hit is 67-144 MB of a 3 GB device
-    /// spent on nothing. That is also exactly what `DecodedFrameRing.insert` already decides for a
-    /// single frame larger than the whole budget, stated one level up where the size is known.
-    ///
-    /// The cliff is at **~4900²** on this device, and above it playback decodes on the display
-    /// thread. That is the one place RENDER.md §3.5's promise is still void, and PERFORMANCE.md §17
-    /// carries the measurement of what it costs.
-    static func frameRingByteBudget(forFrameBytes frameBytes: Int,
-                                    sharedBudgetBytes: Int = MemoryBudget.deviceTotalBytes) -> Int {
-        guard frameBytes > 0 else { return minimumFrameRingByteBudget }
-        let twoFrames = 2 * frameBytes
-        guard twoFrames <= sharedBudgetBytes / frameRingShareDivisor else { return 0 }
-        return max(minimumFrameRingByteBudget, twoFrames)
-    }
-
-    /// **The ring's share of the one budget** (`MemoryBudget`, SCHEDULER.md rule 5): a quarter. Its
-    /// frames are charged there as `.current` like everything else; the share only decides whether
-    /// two frames — the least a flip can use — are worth holding at all. On the iPad 9's 888 MiB
-    /// budget that is 222 MiB, two frames up to ~5,270² (two 5000² frames are 191 MiB).
-    static let frameRingShareDivisor = 4
-
-    /// This document's decoded frame in bytes — BGRA at the size the knob actually renders, which is
-    /// what `DecodedFrame.byteCount` sums and therefore the only quantity the ring's budget can be
-    /// compared against.
-    var decodedFrameBytes: Int {
-        guard let canvasSize else { return 0 }
-        let rendered = renderResolution.renderSize(for: canvasSize)
-        return Int(rendered.width.rounded()) * Int(rendered.height.rounded()) * 4
+    /// It used to be a function of the frame's size with a cliff: two full frames or none, and none
+    /// from ~4900², where playback decoded on the display thread. Bake files now hold a half-size
+    /// level, and a canvas at fit zoom reads that — 25 MiB at 5000², so the share holds eight frames
+    /// where it held two — and a frame bigger than the share is still read for the screen (the
+    /// baker keeps the one answer outside the ring), so no size switches the ring off. What the
+    /// canvas is zoomed to decides which level it holds (`FrameBaker.displayLevel`); SCHEDULER_DESIGN.md
+    /// §3's manager replaces this share when it lands.
+    static func frameRingByteBudget(sharedBudgetBytes: Int = MemoryBudget.deviceTotalBytes) -> Int {
+        max(minimumFrameRingByteBudget, sharedBudgetBytes / 4)
     }
 
     @MainActor
@@ -3596,8 +3541,8 @@ final class CanvasManager: ObservableObject {
         FrameBaker(manager: self,
                    store: FrameBakeStore(root: FrameBakeStore.defaultRoot(projectID: projectID,
                                                                           renderResolution: renderResolution)),
-                   ring: DecodedFrameRing(byteBudget: Self.frameRingByteBudget(
-                       forFrameBytes: decodedFrameBytes), priority: .cache, charged: false))
+                   ring: DecodedFrameRing(byteBudget: Self.frameRingByteBudget(),
+                                          priority: .cache, charged: false))
     }
 
     /// **`FrameBaker.close()`'s real caller.** `ContentView.returnToGallery` calls this on the way
@@ -3685,13 +3630,6 @@ final class CanvasManager: ObservableObject {
         }
         lastBakePlayhead = currentFrame
 
-        // **The ring is re-budgeted here rather than only at `makeFrameBaker`**, because a canvas
-        // resize moves the frame's size without moving the store's root — see
-        // `frameRingByteBudget(forFrameBytes:)` for why a ring that holds fewer than two frames is
-        // worse than none. Guarded so an unchanged budget costs a comparison rather than the
-        // setter's lock and eviction sweep.
-        let wantedRingBudget = Self.frameRingByteBudget(forFrameBytes: decodedFrameBytes)
-        if baker.ring.byteBudget != wantedRingBudget { baker.ring.byteBudget = wantedRingBudget }
         // The decoded frames are the next ones on screen only while playing (`DecodedFrameRing.priority`).
         let ringPriority: MemoryBudget.Priority = isPlaying ? .current : .cache
         if baker.ring.priority != ringPriority { baker.ring.priority = ringPriority }

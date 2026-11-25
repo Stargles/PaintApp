@@ -61,6 +61,25 @@ final class FrameBaker {
     /// at rest; `CanvasManager.syncFrameBake` sets `.backward` when the playhead moved backwards.
     var playbackDirection: BakeQueue.Direction = .forward
 
+    /// **Which size of a baked frame the canvas draws from right now** — `.half` while the window
+    /// shows the canvas at no more than half its pixels (fit zoom on a big canvas), `.full` when it is
+    /// magnified past that. The canvas sets it as it zooms. Reads, the ring's top-up and a bake's own
+    /// ring fill all follow it, so a step at fit zoom decodes a quarter of the bytes.
+    var displayLevel: BakeLevel = .full {
+        didSet {
+            guard displayLevel != oldValue, !isClosed else { return }
+            ringWalk = nil
+            topUpRing()
+        }
+    }
+
+    /// A baked frame in memory, and the size it is. A canvas that wants `.half` is handed `.full` when
+    /// that is what is resident (sharper, never less); one that wants `.full` is never handed `.half`.
+    struct BakedPicture {
+        let image: CGImage
+        let level: BakeLevel
+    }
+
     /// **True while the artist's hand is down**, and the one thing that stops the loop starting a
     /// frame it has every other reason to start.
     ///
@@ -311,12 +330,14 @@ final class FrameBaker {
     /// behind the touch flag — the tap that stepped held its own frame back 250–500 ms (M1: the
     /// decode began 267 ms after every slow step on the iPad 9 simulator; the owner's scrub on a
     /// baked 2048×1024 scene read 0 hits in 110 flips).
-    func image(for key: FrameBakeKey, atFrame frame: Int) -> CGImage? {
+    func picture(for key: FrameBakeKey, atFrame frame: Int) -> BakedPicture? {
         guard !isClosed else { return nil }
         // `value` is the ring's answer — 1 resident, 0 a miss — so a `PlaybackTrace` report carries
         // the hit rate without a second counter.
-        if let resident = ring.frame(for: key.fileName) ?? answered.flatMap({ $0.name == key.fileName ? $0.frame : nil }) {
-            return PlaybackTrace.span(.bakeRead, value: 1) { resident.makeImage() }
+        if let resident = residentFrame(for: key) {
+            return PlaybackTrace.span(.bakeRead, value: 1) {
+                resident.frame.makeImage().map { BakedPicture(image: $0, level: resident.level) }
+            }
         }
         PlaybackTrace.mark(.bakeRead, value: 0)
         requestRead(key, atFrame: frame)
@@ -325,17 +346,31 @@ final class FrameBaker {
 
     /// The finished picture for `frame`, or nil. The two calls above, in the order the display path
     /// wants them.
-    func image(atFrame frame: Int) -> CGImage? {
+    func picture(atFrame frame: Int) -> BakedPicture? {
         guard let key = currentKey(atFrame: frame) else { return nil }
-        return image(for: key, atFrame: frame)
+        return picture(for: key, atFrame: frame)
     }
 
     /// `frame`'s picture if it is in memory, asking for nothing — for a picture wanted only if it is
     /// free, such as the frame a step is leaving, whose read must not cancel the new frame's.
-    func residentImage(atFrame frame: Int) -> CGImage? {
-        guard !isClosed, let key = currentKey(atFrame: frame) else { return nil }
-        let resident = ring.frame(for: key.fileName) ?? answered.flatMap { $0.name == key.fileName ? $0.frame : nil }
-        return resident?.makeImage()
+    func residentPicture(atFrame frame: Int) -> BakedPicture? {
+        guard !isClosed, let key = currentKey(atFrame: frame), let resident = residentFrame(for: key) else { return nil }
+        return resident.frame.makeImage().map { BakedPicture(image: $0, level: resident.level) }
+    }
+
+    /// The ring's name for one size of one frame.
+    private func ringName(_ key: FrameBakeKey, _ level: BakeLevel) -> String { key.fileName + level.ringSuffix }
+
+    /// The frame in memory at the wanted level, or — when `.half` is wanted — at `.full`.
+    private func residentFrame(for key: FrameBakeKey) -> (frame: DecodedFrame, level: BakeLevel)? {
+        let wanted = displayLevel
+        for level in wanted == .half ? [BakeLevel.half, .full] : [.full] {
+            let name = ringName(key, level)
+            if let frame = ring.frame(for: name) ?? answered.flatMap({ $0.name == name ? $0.frame : nil }) {
+                return (frame, level)
+            }
+        }
+        return nil
     }
 
     // MARK: - The answer: the frame on screen, read as R1
@@ -353,26 +388,28 @@ final class FrameBaker {
     /// the bake has it at the head of its queue (band 1 is the playhead), and the canvas keeps the
     /// last whole picture meanwhile (owner Q1, 2026-11-25).
     private func requestRead(_ key: FrameBakeKey, atFrame frame: Int) {
-        guard reading != key.fileName else { return }
+        let level = displayLevel, name = ringName(key, level)
+        guard reading != name else { return }
         guard store.contains(key) else {
             // A frame the loop recorded whose file is gone (evicted, or lost) is dirty again; one it
             // has not reached yet is already in its queue.
             if keyByFrame[frame] == key { recover(key) } else { kick() }
             return
         }
-        reading = key.fileName
+        reading = name
         let store = store
         Scheduler.shared.submit(Job(key: readKey, jobClass: .answer, name: "frame read", visible: true, work: { context in
             try context.checkpoint()
-            return MemoryBudget.withLane(.answer) { store.read(key) }
+            return MemoryBudget.withLane(.answer) { store.read(key, level: level) }
         }, land: { [weak self] (result: FrameBakeStore.ReadResult) in
-            self?.finishRead(key, atFrame: frame, result: result)
+            self?.finishRead(key, level: level, atFrame: frame, result: result)
         }))
     }
 
-    private func finishRead(_ key: FrameBakeKey, atFrame frame: Int, result: FrameBakeStore.ReadResult) {
+    private func finishRead(_ key: FrameBakeKey, level: BakeLevel, atFrame frame: Int, result: FrameBakeStore.ReadResult) {
         guard !isClosed else { return }
-        if reading == key.fileName { reading = nil }
+        let name = ringName(key, level)
+        if reading == name { reading = nil }
         if result.isUnavailable {
             recover(key)
             return
@@ -380,7 +417,7 @@ final class FrameBaker {
         guard let decoded = result.frame else { return }
         // The ring's budget may refuse it; the frame the canvas asked for is then held here, outside
         // the ring, until the next answer — one frame, the R1 reserve SCHEDULER_DESIGN.md §3 sizes.
-        answered = ring.insert(decoded, for: key.fileName, keeping: ringKept(around: frame)) ? nil : (key.fileName, decoded)
+        answered = ring.insert(decoded, for: name, keeping: ringKept(around: frame)) ? nil : (name, decoded)
         ringWalk = nil
         for shown in (framesByDigest[key.fileName] ?? []).union([frame]) { notifyFrameFinished(shown, .resident) }
         topUpRing()
@@ -513,6 +550,7 @@ final class FrameBaker {
         let delay = Self.compositeDelay
         let wantsRing = Self.isWithin(ringLookahead, of: playhead, frame: frame,
                                       direction: direction)
+        let level = displayLevel
         let frames = framesByDigest
 
         return { [weak self, store] in
@@ -526,7 +564,7 @@ final class FrameBaker {
             // copy, then that copy and LZ4's output — each pair let go before the next is made.
             let frameBytes = CompositorBudget.textureBytes(for: recipe.canvasSize)
             var refusedPartWay = false
-            let cached = wantsRing ? store.read(key) : nil
+            let cached = wantsRing ? store.read(key, level: level) : nil
             var decoded = cached?.frame
             let outcome: Outcome
             if cached?.isUnavailable != true, store.contains(key) {
@@ -570,12 +608,12 @@ final class FrameBaker {
             // the ring any other way would leave that path unexercised by every bake. One LZ4 decode
             // is single-digit milliseconds at 2048² (§3.5) and this queue is `.utility`.
             if wantsRing, outcome.isOnDisk, decoded == nil, cached?.isUnavailable != false {
-                decoded = store.loadDecoded(key)
+                decoded = store.loadDecoded(key, level: level)
             }
             return {
                 PlaybackTrace.span(.renderLanded) {
                     guard let self else { return }
-                    if let decoded { self.ring.insert(decoded, for: key.fileName) }
+                    if let decoded { self.ring.insert(decoded, for: self.ringName(key, level)) }
                     self.finish(frame: frame, key: key, outcome: outcome)
                 }
             }
@@ -622,12 +660,13 @@ final class FrameBaker {
         var start = 0
         if let walk = ringWalk, walk.playhead == playhead, walk.direction == direction { start = walk.next }
         // The targets already walked still name what an insert keeps.
-        var nearer = Set(targets.prefix(start).dropFirst().compactMap { keyByFrame[$0]?.fileName })
+        let level = displayLevel
+        var nearer = Set(targets.prefix(start).dropFirst().compactMap { keyByFrame[$0].map { ringName($0, level) } })
         for index in targets.indices.dropFirst(start) {
             let frame = targets[index]
             guard let key = keyByFrame[frame] else { continue }
-            if ring.contains(key.fileName) {
-                if index > 0 { nearer.insert(key.fileName) }
+            if ring.contains(ringName(key, level)) || ring.contains(ringName(key, .full)) {
+                if index > 0 { nearer.insert(ringName(key, level)) }
                 continue
             }
             guard store.contains(key) else {
@@ -642,10 +681,10 @@ final class FrameBaker {
             Scheduler.shared.submit(Job(key: ringKey, jobClass: .soon,
                                         name: "ring top-up", work: { context in
                 try context.checkpoint()
-                return MemoryBudget.withLane(.soon) { store.read(key) }
+                return MemoryBudget.withLane(.soon) { store.read(key, level: level) }
             }, land: { [weak self] (result: FrameBakeStore.ReadResult) in
                 PlaybackTrace.span(.renderLanded) {
-                    self?.finishRingFill(key: key, result: result, keeping: kept, playhead: playhead, direction: direction)
+                    self?.finishRingFill(key: key, level: level, result: result, keeping: kept, playhead: playhead, direction: direction)
                 }
             }))
             return
@@ -686,7 +725,8 @@ final class FrameBaker {
 
     /// The ring entries nearer `frame` than whatever is inserted for it — what an answer keeps.
     private func ringKept(around frame: Int) -> Set<String> {
-        Set(ringTargets(around: frame, direction: playbackDirection).dropFirst().compactMap { keyByFrame[$0]?.fileName })
+        let level = displayLevel
+        return Set(ringTargets(around: frame, direction: playbackDirection).dropFirst().compactMap { keyByFrame[$0].map { ringName($0, level) } })
     }
 
     private var ringKey: JobKey { JobKey("FrameBaker.ring", ObjectIdentifier(self)) }
@@ -712,7 +752,7 @@ final class FrameBaker {
     /// invalid file requeues the frames sharing it; a refusal by the ring's budget ends the walk for
     /// this playhead. A frame that landed is announced to every frame it serves: a canvas that missed
     /// on it is showing the previous picture and is waiting to be told this one is resident.
-    private func finishRingFill(key: FrameBakeKey, result: FrameBakeStore.ReadResult, keeping kept: Set<String>,
+    private func finishRingFill(key: FrameBakeKey, level: BakeLevel, result: FrameBakeStore.ReadResult, keeping kept: Set<String>,
                                 playhead: Int, direction: BakeQueue.Direction) {
         ringFilling = false
         guard !isClosed else { return }
@@ -720,7 +760,7 @@ final class FrameBaker {
             recover(key)
             return
         }
-        guard let decoded = result.frame, ring.insert(decoded, for: key.fileName, keeping: kept) else {
+        guard let decoded = result.frame, ring.insert(decoded, for: ringName(key, level), keeping: kept) else {
             ringWalk = (playhead, direction, Int.max)
             ringIsIdle = true
             reportIdleIfDone()

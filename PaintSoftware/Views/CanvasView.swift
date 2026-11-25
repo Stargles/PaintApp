@@ -1641,6 +1641,9 @@ struct CanvasView: UIViewRepresentable {
         private var sandwichFullKey: SandwichKey?
         /// The frame `sandwichFull` depicts — the M1 probe's (`FrameStepCensus`).
         private var sandwichFullFrame: Int?
+        /// Which size of the bake `sandwichFull` is (`FrameBaker.BakedPicture`): a canvas zoomed in
+        /// past what the half level can show asks for the full one and keeps this until it lands.
+        private var sandwichFullLevel: BakeLevel?
 
         /// **The one owner of when the canvas's pictures change** (SCHEDULER.md rule 10): every layer
         /// host's picture goes up through it, so a frame step, or the hosts taking over from the baked
@@ -1929,6 +1932,8 @@ struct CanvasView: UIViewRepresentable {
                 // are holding none it is a claim about nothing.
                 sandwichFull = nil
                 sandwichFullKey = nil
+                sandwichFullLevel = nil
+                dropUnderPicture()
                 // The mask image goes with them and for the same reason — it is another canvas-sized
                 // 16 MB, and re-engaging pays one `makeMaskImage` alongside the one rebuild.
                 liveMaskCache = nil
@@ -1976,15 +1981,6 @@ struct CanvasView: UIViewRepresentable {
             // to prevent.
             // Either product answers: the bake and the live picture are minted at one size, which is
             // `FrameBaker.recipe`'s whole argument for `.liveComposite`.
-            let composited = sandwichFull?.size ?? livePicture?.below?.size ?? .zero
-            let isReduced = composited != .zero
-                && composited != (canvasManager.canvasSize ?? composited)
-            let filter: CALayerContentsFilter = isReduced ? .linear : .nearest
-            if belowView.layer.magnificationFilter != filter {
-                for view in [belowView, aboveView] { view.layer.magnificationFilter = filter }
-                for view in bandViews { view.magnify(with: filter) }
-            }
-
             // **Which picture, as one pure choice** — `SandwichPresentation.next`, where the rules and
             // their reasons are written down. **Trap 2** is one of them: stay mid-stroke until this
             // frame's bake lands. On lift the key unfreezes, so the baker's key moves too and its
@@ -2006,6 +2002,18 @@ struct CanvasView: UIViewRepresentable {
                             livePair: LivePairFit(held: livePicture.map { (key: $0.key, cut: $0.cut) },
                                                   key: key, cut: cut),
                             bandsOfThisFrame: livePicture?.holdsBands(of: canvasManager.currentFrame) ?? false))
+            // What `belowView` shows decides its filter: at rest the reduced picture under the window
+            // surface, otherwise the live picture's below half (the bake itself reaches the screen
+            // through the window surface, which picks its own filter).
+            let restsOnTheBake = presentation == .rest || presentation == .disengaged
+            let composited = (restsOnTheBake ? underPicture?.size : livePicture?.below?.size) ?? .zero
+            let isReduced = composited != .zero
+                && composited != (canvasManager.canvasSize ?? composited)
+            let filter: CALayerContentsFilter = isReduced ? .linear : .nearest
+            if belowView.layer.magnificationFilter != filter {
+                for view in [belowView, aboveView] { view.layer.magnificationFilter = filter }
+                for view in bandViews { view.magnify(with: filter) }
+            }
             let live = presentation.activeHostDrawsItself
             var drawnByHosts = Set<UUID>()
             if live {
@@ -2039,6 +2047,7 @@ struct CanvasView: UIViewRepresentable {
                       let below = picture.below else { return paperIsNowPaintedBy(false) }
                 if belowView.image !== below { belowView.image = below }
                 if aboveView.image !== picture.above { aboveView.image = picture.above }
+                dropUnderPicture()
                 showBakedFrame(nil)
                 showMovingBands(picture, editIsLive: edit != nil)
             case .live, .midStroke:
@@ -2048,12 +2057,15 @@ struct CanvasView: UIViewRepresentable {
                 else { return paperIsNowPaintedBy(false) }
                 if belowView.image !== below { belowView.image = below }
                 if aboveView.image !== picture.above { aboveView.image = picture.above }
+                dropUnderPicture()
                 showBakedFrame(nil)
             case .rest, .disengaged:
                 guard let full = sandwichFull else { return paperIsNowPaintedBy(false) }
                 // The bake reaches the screen through the window-sized surfaces, never as a
-                // canvas-sized bitmap on `belowView` — see `BakedFrameWindow`.
-                if belowView.image != nil { belowView.image = nil }
+                // canvas-sized bitmap on `belowView` — see `BakedFrameWindow`. What `belowView` holds
+                // is the whole frame at a fraction of that size, under the surface: where a zoom out
+                // reveals canvas the surface has not been redrawn for yet, this is what shows.
+                showUnderPicture(of: full, in: belowView)
                 showBakedFrame(full)
                 // Nothing in the upper view at rest: the baked frame is the whole tree, so a second
                 // image over it would be everything above the active layer drawn a second time.
@@ -2830,26 +2842,111 @@ struct CanvasView: UIViewRepresentable {
         /// work, but it is O(layers) on the main thread on every SwiftUI pass, and a canvas at rest
         /// has a great many passes that change nothing.
         private func refreshBakedFull(for key: SandwichKey) {
-            guard sandwichFullKey != key else { return }
             let baker = canvasManager.frameBaker
-            guard let image = baker.image(atFrame: canvasManager.currentFrame) else {
+            // Held and sharp enough: this frame's, and either the full level or the one the window
+            // asks for. A half-size picture held for a window that now needs the full one is fetched
+            // again, and kept until the full one is resident.
+            guard sandwichFullKey != key || !(sandwichFullLevel == .full || sandwichFullLevel == baker.displayLevel)
+            else { return }
+            guard let picture = baker.picture(atFrame: canvasManager.currentFrame) else {
                 // **§2.10 from a standing start**: the first engaged pass of a step or a play has no
                 // picture held yet, and a frame not baked (or not resident) would leave the hosts
                 // drawing — each swapping to its new cel as its render lands, a mix of two frames. The
                 // frame the canvas is leaving is the last complete picture; it is held, unclaimed by
                 // `sandwichFullKey`, until this frame's bake lands.
                 if sandwichFull == nil, let left = frameOfTheLastPass, left != canvasManager.currentFrame,
-                   let previous = baker.residentImage(atFrame: left) {
-                    sandwichFull = UIImage(cgImage: previous, scale: 1, orientation: .up)
+                   let previous = baker.residentPicture(atFrame: left) {
+                    sandwichFull = UIImage(cgImage: previous.image, scale: 1, orientation: .up)
                     sandwichFullFrame = left
+                    sandwichFullLevel = previous.level
                 }
                 return
             }
             sandwichFull = PlaybackTrace.span(.bakeImageWrap) {
-                UIImage(cgImage: image, scale: 1, orientation: .up)
+                UIImage(cgImage: picture.image, scale: 1, orientation: .up)
             }
             sandwichFullKey = key
             sandwichFullFrame = canvasManager.currentFrame
+            sandwichFullLevel = picture.level
+        }
+
+        // MARK: The whole frame under the window
+
+        /// The longest side of the picture under the window surface: 1620 px is the iPad 9's window
+        /// at 2×, so a canvas that fits the screen is shown here at about its own resolution, and the
+        /// render server is handed one picture of at most 10 MiB however big the canvas is.
+        private static let underPictureSide = 1620
+        /// How long a frame stays on screen before its reduced picture is made: a burst of steps
+        /// makes one, and playback none (a picture per flip is what filled the render server).
+        private static let underPictureSettle: TimeInterval = 0.3
+
+        /// **The whole frame, reduced, behind the window surface** (SCHEDULER_DESIGN.md §4, "Edges").
+        /// The surface holds the host's pixels as of its last draw, off the main thread; a pinch out
+        /// outruns it, and what the container uncovers has nothing under it until the redraw lands.
+        /// This picture lives in `belowView`, which the container moves and scales with everything else
+        /// in the same transaction, so the uncovered canvas shows this frame, soft, at once.
+        private var underPicture: UIImage?
+        /// The `SandwichKey` `underPicture` was made for: it stays under a sharper picture of the same
+        /// frame (the level changing) and goes when the frame or its content moves.
+        private var underPictureKey: SandwichKey?
+        private var underPictureWork: (item: DispatchWorkItem, key: SandwichKey)?
+
+        private func showUnderPicture(of full: UIImage, in belowView: UIImageView) {
+            if let key = sandwichFullKey, key == underPictureKey, let under = underPicture {
+                if belowView.image !== under { belowView.image = under }
+                return
+            }
+            // Another frame's (or nothing yet): never show it under this one.
+            if underPicture != nil { underPicture = nil; underPictureKey = nil }
+            if belowView.image != nil { belowView.image = nil }
+            guard let key = sandwichFullKey, !canvasManager.framesAreFlipping, let image = full.cgImage else { return }
+            if let pending = underPictureWork {
+                if pending.key == key { return }
+                pending.item.cancel()
+                underPictureWork = nil
+            }
+            let work = DispatchWorkItem { [weak self] in
+                Coordinator.bakedFrameQueue.async {
+                    let reduced = Coordinator.reduced(image, toLongestSide: Coordinator.underPictureSide)
+                    DispatchQueue.main.async { self?.landUnderPicture(reduced, for: key) }
+                }
+            }
+            underPictureWork = (work, key)
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.underPictureSettle, execute: work)
+        }
+
+        private func landUnderPicture(_ reduced: CGImage?, for key: SandwichKey) {
+            if underPictureWork?.key == key { underPictureWork = nil }
+            guard let reduced, sandwichFullKey == key else {
+                // The frame moved on while it was drawn: the pass that moved it asks again.
+                if sandwichFullKey != key { applySandwichPresentationNow() }
+                return
+            }
+            underPicture = UIImage(cgImage: reduced, scale: 1, orientation: .up)
+            underPictureKey = key
+            applySandwichPresentationNow()
+        }
+
+        private func dropUnderPicture() {
+            underPictureWork?.item.cancel()
+            underPictureWork = nil
+            underPicture = nil
+            underPictureKey = nil
+        }
+
+        /// `image` drawn into a context whose longest side is `side` pixels (never larger than the
+        /// image), the aspect kept. Off the main thread.
+        nonisolated private static func reduced(_ image: CGImage, toLongestSide side: Int) -> CGImage? {
+            let longest = max(image.width, image.height)
+            let scale = min(1, CGFloat(side) / CGFloat(longest))
+            let width = max(1, Int((CGFloat(image.width) * scale).rounded()))
+            let height = max(1, Int((CGFloat(image.height) * scale).rounded()))
+            let info = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+            guard let cg = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                     space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: info) else { return nil }
+            cg.interpolationQuality = .high
+            cg.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return cg.makeImage()
         }
 
         // MARK: The baked frame on screen
@@ -2953,9 +3050,31 @@ struct CanvasView: UIViewRepresentable {
             })
         }
 
+        /// **Which size of the bake the window needs**: the half level while one of its pixels is at
+        /// least one surface pixel (fit zoom on a big canvas), the full level once the half would be
+        /// magnified. Switching to the full level at 1.0 and back at 1.25 keeps a pinch that hovers at
+        /// the boundary from reading the file on every tick. A level change brings the pass that picks
+        /// the picture of the new size (`refreshBakedFull`).
+        private func updateBakeLevel() {
+            guard let size = canvasManager.canvasSize, size.width > 0, let window = currentBakedFrameWindow()
+            else { return }
+            let baker = canvasManager.frameBaker
+            let halfWidth = (Int(canvasManager.renderResolution.renderSize(for: size).width) + 1) / 2
+            let halfPixelsPerSurfacePixel = window.canvasPointsPerPixel * CGFloat(halfWidth) / size.width
+            let wanted: BakeLevel = baker.displayLevel == .half
+                ? (halfPixelsPerSurfacePixel < 1 ? .full : .half)
+                : (halfPixelsPerSurfacePixel >= 1.25 ? .half : .full)
+            guard wanted != baker.displayLevel else { return }
+            baker.displayLevel = wanted
+            // After this transform pass, not inside it: the pass that picks the picture of the new
+            // size rebuilds the presentation.
+            DispatchQueue.main.async { [weak self] in self?.applySandwichPresentationNow() }
+        }
+
         /// A pan, zoom or turn of the canvas moves which part of the bake, of every layer's picture and
         /// of the onion skin the window holds.
         private func redrawWindowPicturesForTheView() {
+            updateBakeLevel()
             for host in layerHosts.values { host.windowMoved() }
             onionSkinView?.windowMoved()
             guard let picture = bakedFramePicture else { return }
