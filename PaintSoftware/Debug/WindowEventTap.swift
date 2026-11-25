@@ -13,7 +13,7 @@ struct TouchSample {
     let touchID: Int
     /// The `UITouch` object itself, by identity. **Not `touchID`**, which numbers sequences — a new
     /// number is minted at every `.began` — and so cannot say whether UIKit handed the same object back
-    /// for a touch it had just cancelled and begun again (BUGS.md, the stranded recognizers). Written as
+    /// for a touch it had just cancelled and begun again. Written as
     /// a recognizer's `obj` is.
     let object: ObjectIdentifier
     /// How many `.moved` deliveries the touch received between its `began` and this line. `ended` and
@@ -73,9 +73,10 @@ struct TouchSample {
 }
 
 @MainActor
-protocol CanvasNavigationSnapshotSource: AnyObject {
-    var recordNavigationSnapshot: ((String, Int?, ActionRecorder) -> Void)? { get }
-    var navigationActivity: ((UIView?) -> CanvasNavigationMiss.Activity?)? { get }
+protocol CanvasTouchAuditSource: UIView {
+    var canvasTouchReading: (() -> CanvasTouchAudit.Reading?)? { get }
+    /// Whether the canvas has heard of this touch and not of its end.
+    var canvasHears: ((UITouch) -> Bool)? { get }
 }
 
 /// Intercepts `UIWindow.sendEvent(_:)` for as long as either of `ActionRecorder`'s sinks is on — the
@@ -83,8 +84,8 @@ protocol CanvasNavigationSnapshotSource: AnyObject {
 ///
 /// **Two depths.** While a recording runs (`recordsInFull`) every touch sample is written and a
 /// touch-began's target is resolved against the accessibility tree too. For the flight recorder alone
-/// normal moves are skipped before target resolution. Intact pairs can contribute a sparse position
-/// sample to the navigation detector. Touch-began resolves by the cheap `UIView` walk only.
+/// normal moves are skipped before target resolution; only the canvas audit reads a pair's movement.
+/// Touch-began resolves by the cheap `UIView` walk only.
 ///
 /// **Why `sendEvent`.** It is the single funnel every touch in the app passes through, before
 /// hit-testing, before any gesture recognizer, before any view's `touchesBegan`. Tapping it once
@@ -178,7 +179,7 @@ protocol CanvasNavigationSnapshotSource: AnyObject {
         registryByID.removeAll()
         targeted.removeAll()
         tracks.removeAll()
-        navigationMiss = CanvasNavigationMiss()
+        audit = CanvasTouchAudit()
         window = nil
         originalClass = nil
         if Self.current === self { Self.current = nil }
@@ -212,9 +213,9 @@ protocol CanvasNavigationSnapshotSource: AnyObject {
                 let tap = WindowEventTap.current
                 // Touches are logged *before* dispatch and recognizer states *after*, so the file
                 // reads as cause then effect: the touch line, then the transitions it produced.
-                let edge = tap?.willSend(event, window: window)
+                tap?.willSend(event, window: window)
                 callOriginal(receiver, selector, event)
-                tap?.didSend(event, edge: edge)
+                tap?.didSend(event)
             }
         }
         guard class_addMethod(subclass, selector, imp_implementationWithBlock(block), method_getTypeEncoding(method)) else {
@@ -227,121 +228,77 @@ protocol CanvasNavigationSnapshotSource: AnyObject {
 
     // MARK: - Event handling
 
-    private struct NavigationEdge {
-        let host: (any CanvasNavigationSnapshotSource)?
-        let touch: Int?
-        let phases: EventPhases
-        let miss: CanvasNavigationMiss.Finding?
-        let wedge: Bool
-    }
-
-    private var navigationMiss = CanvasNavigationMiss()
+    private var audit = CanvasTouchAudit()
 
     @MainActor
-    private func willSend(_ event: UIEvent, window: UIWindow?) -> NavigationEdge? {
-        guard event.type == .touches, let window, let touches = event.allTouches else { return nil }
-        // Every move contributes to the touch's lift count. Only an eligible intact pair also
-        // takes a position sample, and only at the recorder's existing sparse move cadence.
+    private func willSend(_ event: UIEvent, window: UIWindow?) {
+        guard event.type == .touches, let window, let touches = event.allTouches else { return }
+        // Every move contributes to the touch's lift count.
         for touch in touches where touch.phase == .moved { tracks[ObjectIdentifier(touch)]?.moves += 1 }
-        let hasEdge = touches.contains { Self.isSequenceEdge($0.phase) }
-        if !hasEdge, navigationMiss.shouldSampleBoundPair(at: event.timestamp, interval: Self.moveMinInterval),
-           touches.contains(where: { $0.phase == .moved }),
-           let pair = boundPairPositions(in: touches, window: window) {
-            navigationMiss.sampleBoundPair(pair.first, pair.second, at: event.timestamp,
-                                           activity: pair.host.navigationActivity?(nil))
-        }
-        guard recordsInFull || hasEdge else { return nil }
+        guard recordsInFull || touches.contains(where: { Self.isSequenceEdge($0.phase) }) else { return }
         let recorder = ActionRecorder.shared
         // Counted from the whole event, not from the touches we end up writing: "how many fingers
         // are down" is the thing that separates a two-finger pan from a one-finger draw, and it has
         // to be right even on an event where only one of them moved.
         let concurrent = Self.touchesDown(in: touches)
-        // Whether this event starts a touch sequence: every touch in it has only just begun. For
-        // `CanvasWedgeDetector`, which counts sequences — so only the first began touch of such an
-        // event is reported as starting one.
-        let freshSequence = touches.allSatisfy { $0.phase == .began }
-        var startsSequence = freshSequence
-        var edgeSamples: [TouchSample] = []
-        var plainLandings: Set<Int> = []
-        var phases: EventPhases = []
-        var firstCanvasTouch: (host: any CanvasNavigationSnapshotSource, id: Int)?
-        var wedge = false
         for touch in touches {
             guard recordsInFull || Self.isSequenceEdge(touch.phase),
                   let sample = sample(touch, in: window, concurrent: concurrent) else { continue }
             recorder.touch(sample)
-            if Self.isSequenceEdge(touch.phase) {
-                edgeSamples.append(sample)
-                phases.formUnion(EventPhases(touch.phase))
-                if let host = Self.canvasHost(of: touch.view) {
-                    if firstCanvasTouch == nil { firstCanvasTouch = (host, sample.touchID) }
-                    if touch.phase == .began, touch.type == .direct, host.navigationActivity?(touch.view) != nil {
-                        plainLandings.insert(sample.touchID)
-                    }
-                }
-            }
-            if touch.phase == .began, let bound = sample.boundRecognizers {
-                watchNewlyBoundRecognizers(of: touch)
-                if recorder.touchBegan(startsSequence: startsSequence, boundRecognizers: bound) { wedge = true }
-                startsSequence = false
-            }
+            if touch.phase == .began { watchNewlyBoundRecognizers(of: touch) }
         }
-        guard !edgeSamples.isEmpty else { return nil }
-        let wasWatching = navigationMiss.isWatching
-        let activity = navigationMiss.isWatchingBoundPair ? firstCanvasTouch?.host.navigationActivity?(nil) : nil
-        let miss = navigationMiss.observe(edgeSamples, startsSequence: freshSequence,
-                                          plainLandings: plainLandings, activity: activity)
-        if navigationMiss.canStartBoundPair, let pair = boundPairPositions(in: touches, window: window),
-           let activity = pair.host.navigationActivity?(nil) {
-            navigationMiss.startBoundPair(pair.first, pair.second, at: event.timestamp, activity: activity)
-        }
-        if let firstCanvasTouch, wasWatching || navigationMiss.isWatching || wedge {
-            let id = miss?.touch ?? firstCanvasTouch.id
-            firstCanvasTouch.host.recordNavigationSnapshot?("before:" + phases.tag, id, recorder)
-            return NavigationEdge(host: firstCanvasTouch.host, touch: id, phases: phases, miss: miss, wedge: wedge)
-        }
-        guard miss != nil || wedge else { return nil }
-        return NavigationEdge(host: nil, touch: nil, phases: phases, miss: miss, wedge: wedge)
     }
 
-    @MainActor
-    private func boundPairPositions(in touches: Set<UITouch>, window: UIWindow) ->
-        (first: CanvasNavigationMiss.Position, second: CanvasNavigationMiss.Position, host: any CanvasNavigationSnapshotSource)? {
-        guard touches.count == 2, let first = touches.first, let second = touches.first(where: { $0 !== first }),
-              first.type == .direct, second.type == .direct,
-              let host = Self.canvasHost(of: first.view), host === Self.canvasHost(of: second.view),
-              let firstID = tracks[ObjectIdentifier(first)]?.touchID,
-              let secondID = tracks[ObjectIdentifier(second)]?.touchID else { return nil }
-        return (.init(id: firstID, point: first.location(in: window)),
-                .init(id: secondID, point: second.location(in: window)), host)
-    }
-
-    private static func canvasHost(of hitView: UIView?) -> (any CanvasNavigationSnapshotSource)? {
+    private static func canvasHost(of hitView: UIView?) -> (any CanvasTouchAuditSource)? {
         var view = hitView
         while let current = view {
-            if let host = current as? any CanvasNavigationSnapshotSource { return host }
+            if let host = current as? any CanvasTouchAuditSource { return host }
             view = current.superview
         }
         return nil
     }
 
+    /// The canvas audit's reading of this event, after its dispatch. A move is read only while exactly
+    /// two touches are down — the pair it watches.
+    @MainActor
+    private func auditCanvas(_ touches: Set<UITouch>, hasEdge: Bool) {
+        guard hasEdge || touches.count == 2 else { return }
+        var contacts: [CanvasTouchAudit.Contact] = []
+        var landed: Set<Int> = []
+        for touch in touches {
+            guard let host = Self.canvasHost(of: touch.view) else { continue }
+            auditedHost = host
+            guard Self.isDown(touch.phase), let id = tracks[ObjectIdentifier(touch)]?.touchID else { continue }
+            // A view that takes one touch at a time is not told of a second; that is UIKit's rule, not
+            // the canvas going deaf.
+            let isHeard = touch.view?.isMultipleTouchEnabled == false || (host.canvasHears?(touch) ?? true)
+            contacts.append(.init(id: id, point: touch.location(in: nil), isHeard: isHeard))
+            if touch.phase == .began { landed.insert(id) }
+        }
+        guard let reading = auditedHost?.canvasTouchReading?() else { return }
+        let finding = audit.observe(contacts.sorted { $0.id < $1.id }, landed: landed,
+                                    windowIsClear: Self.touchesDown(in: touches) == 0, reading)
+        guard let finding else { return }
+        ActionRecorder.shared.canvasMissed(finding, notAtRest: window.map(Self.unquietRecognizers) ?? [])
+    }
+    /// The canvas the last touch on one was on, so its state can be read once every touch has gone.
+    private weak var auditedHost: (any CanvasTouchAuditSource)?
+
     private static func isSequenceEdge(_ phase: UITouch.Phase) -> Bool {
         phase == .began || phase == .ended || phase == .cancelled
     }
 
+    private static func isDown(_ phase: UITouch.Phase) -> Bool {
+        phase == .began || phase == .moved || phase == .stationary
+    }
+
     /// The touches an event carries that are on the glass: all but the ones ending or cancelled.
     private static func touchesDown(in touches: Set<UITouch>) -> Int {
-        touches.reduce(into: 0) { count, touch in
-            switch touch.phase {
-            case .began, .moved, .stationary: count += 1
-            default: break
-            }
-        }
+        touches.filter { isDown($0.phase) }.count
     }
 
     /// Rescans when a touch is bound to a named recognizer the registry is not watching yet — a new
-    /// layer's `StrokeGestureRecognizer`, or the fresh set `CanvasView.Coordinator
-    /// .replaceStrandedRecognizers` installs. The recording also rescans on its two-second tick; the
+    /// layer's `StrokeGestureRecognizer`. The recording also rescans on its two-second tick; the
     /// flight recorder has no tick, and this is the moment such a recognizer starts to matter.
     ///
     /// At most once every two seconds, the tick's cadence: a named recognizer the walk cannot reach
@@ -361,28 +318,15 @@ protocol CanvasNavigationSnapshotSource: AnyObject {
     /// registry as an action message anyway, and the two a move can produce without one — `.failed`
     /// and the reset to `.possible` — are caught by the next sequence edge, which in a stroke or a
     /// pan is never more than the lift away.
-    ///
-    /// **The one move that is swept anyway is one with three fingers or more down**: the shape that
-    /// strands the canvas is a third touch joining a pair (BUGS.md), and a sweep after a move inside it
-    /// is what says a recognizer failed between the edges rather than at one. Rare and cheap — an undo
-    /// or redo tap, a few moves long.
     @MainActor
-    private func didSend(_ event: UIEvent, edge: NavigationEdge?) {
+    private func didSend(_ event: UIEvent) {
         guard event.type == .touches, let touches = event.allTouches else { return }
         var phases: EventPhases = []
         for touch in touches { phases.formUnion(EventPhases(touch.phase)) }
-        guard recordsInFull || !phases.isDisjoint(with: .sequenceEdges)
-                || (phases.contains(.moved) && Self.touchesDown(in: touches) >= Self.fingersThatSweepMoves) else { return }
-        sweepRecognizerStates(after: phases)
-        if let edge {
-            let recorder = ActionRecorder.shared
-            edge.host?.recordNavigationSnapshot?("after:" + edge.phases.tag, edge.touch, recorder)
-            if let miss = edge.miss { recorder.canvasNavigationMissed(miss) }
-            if edge.wedge { recorder.saveWedgeFlight() }
-        }
+        let hasEdge = !phases.isDisjoint(with: .sequenceEdges)
+        if recordsInFull || hasEdge { sweepRecognizerStates(after: phases) }
+        auditCanvas(touches, hasEdge: hasEdge)
     }
-
-    private static let fingersThatSweepMoves = 3
 
     // MARK: - Touch sampling and coalescing
 
@@ -797,29 +741,13 @@ protocol CanvasNavigationSnapshotSource: AnyObject {
         let name: String
         let objectID: ObjectIdentifier
         var lastState: UIGestureRecognizer.State
-        /// Whether the file follows this recognizer's `numberOfTouches` as well as its state
-        /// (`followsTouchCount`). Fixed by the name; `lastTouches` is 0 and unused when it is not.
-        let followsTouches: Bool
-        var lastTouches: Int
 
         init(recognizer: UIGestureRecognizer, name: String) {
             self.recognizer = recognizer
             self.name = name
             self.objectID = ObjectIdentifier(recognizer)
             self.lastState = recognizer.state
-            self.followsTouches = WindowEventTap.followsTouchCount(named: name)
-            self.lastTouches = followsTouches ? recognizer.numberOfTouches : 0
         }
-    }
-
-    /// **The recognizers whose touch count the file follows**: the three transform recognizers and the
-    /// layers' stroke recognizers (`CanvasView.Coordinator.configure` names them `stroke.<id>`) —
-    /// exactly the ones a stranded canvas leaves out of `.possible`. A stranded pan reads *failed with
-    /// two touches* after every finger is up in some flights and *ended with none* in another
-    /// (BUGS.md), and a state alone cannot say which; the count, written whenever it changes, says when
-    /// it dropped and which event it dropped in.
-    static func followsTouchCount(named name: String) -> Bool {
-        CanvasWedgeDetector.transformRecognizers.contains(name) || name.hasPrefix("stroke.")
     }
 
     private var registry: [Entry] = []
@@ -847,12 +775,9 @@ protocol CanvasNavigationSnapshotSource: AnyObject {
 
         // Preserve `lastState` for recognizers we were already watching, so a rescan mid-gesture
         // doesn't resynthesise a transition that already went into the file.
-        let previous = Dictionary(uniqueKeysWithValues: registry.map { ($0.objectID, (state: $0.lastState, touches: $0.lastTouches)) })
+        let previous = Dictionary(uniqueKeysWithValues: registry.map { ($0.objectID, $0.lastState) })
         for entry in found {
-            if let last = previous[entry.objectID] {
-                entry.lastState = last.state
-                entry.lastTouches = last.touches
-            }
+            if let last = previous[entry.objectID] { entry.lastState = last }
             if !targeted.contains(entry.objectID), let recognizer = entry.recognizer {
                 // Adding a target is additive: it makes UIKit deliver action messages we then log,
                 // and changes nothing about recognition, precedence or failure requirements. It is
@@ -892,10 +817,8 @@ protocol CanvasNavigationSnapshotSource: AnyObject {
     ///
     /// **This is what makes `.failed` visible.** UIKit sends action messages for `began`/`changed`/
     /// `ended`/`cancelled` but **not for `.failed`** — verified against this app's own recognizers,
-    /// and it is why the target-action route alone is not enough. `.failed` is exactly the state that
-    /// matters here: `StrokeGestureRecognizer.failTrackedStroke` drives the transform recognizers'
-    /// `require(toFail:)`, so a stroke recognizer that never reaches it is the deadlock. The sweep
-    /// catches it, along with UIKit's own reset back to `.possible`.
+    /// and it is why the target-action route alone is not enough. The sweep catches it, along with
+    /// UIKit's own reset back to `.possible`.
     ///
     /// Internal rather than private for one reader outside `didSend`:
     /// `PerfBaselineTests.testFlightRecorderCostOnAStroke`, which times it, since it is half of what
@@ -906,50 +829,40 @@ protocol CanvasNavigationSnapshotSource: AnyObject {
     ///
     /// **A sweep says which event it followed**: `src` is `sweep:` and the letters of the touch phases
     /// that event dispatched (`EventPhases.tag`) — `sweep:b` is a recognizer that failed in the event
-    /// that began a touch, `sweep:e` one that failed at a lift. A recognizer in `followsTouchCount` is
-    /// also written when only its touch count moved, `from` and `to` the same state, with `touches`.
+    /// that began a touch, `sweep:e` one that failed at a lift.
     func sweepRecognizerStates(after dispatched: EventPhases) {
         for entry in registry {
             guard let recognizer = entry.recognizer else { continue }
             let state = recognizer.state
-            let touches = entry.followsTouches ? recognizer.numberOfTouches : 0
-            guard state != entry.lastState || touches != entry.lastTouches else { continue }
+            guard state != entry.lastState else { continue }
             ActionRecorder.shared.recognizer(entry.name, object: entry.objectID, from: entry.lastState, to: state,
-                                             source: "sweep:" + dispatched.tag,
-                                             touches: entry.followsTouches ? touches : nil)
+                                             source: "sweep:" + dispatched.tag)
             entry.lastState = state
-            entry.lastTouches = touches
         }
     }
 
-    /// Records a transition for a recognizer we own the source of (`StrokeGestureRecognizer`), keeping
-    /// the registry's `lastState` in step so the sweep doesn't write it a second time.
+    /// Records a transition a recognizer's action announced, keeping the registry's `lastState` in step
+    /// so the sweep doesn't write it a second time.
     func noteTransition(_ recognizer: UIGestureRecognizer, to newState: UIGestureRecognizer.State, source: String) {
         guard let entry = registryByID[ObjectIdentifier(recognizer)] else {
             // Not discovered yet (created since the last rescan). Still worth writing — a nameless
             // line is better than a missing transition — and the name falls back to the class.
             let name = recognizer.name ?? String(describing: type(of: recognizer))
             ActionRecorder.shared.recognizer(name, object: ObjectIdentifier(recognizer),
-                                             from: recognizer.state, to: newState, source: source,
-                                             touches: Self.followsTouchCount(named: name) ? recognizer.numberOfTouches : nil)
+                                             from: recognizer.state, to: newState, source: source)
             return
         }
         guard entry.lastState != newState else { return }
-        let touches = entry.followsTouches ? recognizer.numberOfTouches : 0
         ActionRecorder.shared.recognizer(entry.name, object: entry.objectID, from: entry.lastState, to: newState,
-                                         source: source, touches: entry.followsTouches ? touches : nil)
+                                         source: source)
         entry.lastState = newState
-        entry.lastTouches = touches
     }
 
     private func note(_ recognizer: UIGestureRecognizer, source: String) {
         noteTransition(recognizer, to: recognizer.state, source: source)
     }
 
-    /// The name a recognizer is known by in the file, for the `requireFailure` lines — which name two
-    /// recognizers that may not both be in the registry yet.
-    func displayName(for recognizer: UIGestureRecognizer) -> String { Self.name(of: recognizer) }
-
+    /// The name a recognizer is known by in the file.
     static func name(of recognizer: UIGestureRecognizer) -> String {
         recognizer.name ?? String(describing: type(of: recognizer))
     }
@@ -993,14 +906,9 @@ protocol CanvasNavigationSnapshotSource: AnyObject {
     /// of `.possible`, or holding a touch — one line each: its name, its state, how many touches UIKit
     /// still has it tracking, and the view it hangs on.
     ///
-    /// For the moment `CanvasView.Coordinator.replaceStrandedRecognizers` finds the canvas's
-    /// recognizers out of `.possible` with no touch down. The flight file names what it replaced, and
-    /// the registry sweep sees only named recognizers, at touch edges: nothing in it says what else
-    /// UIKit was holding — a system gate, the window's observer, a recognizer that still counts a
-    /// touch the glass lost. A stranded recognizer that reads `touches:3` is one UIKit believes is
-    /// still being touched; one that reads `touches:0` was left in a terminal state with nothing to
-    /// wait for. That is the difference between two causes, and the files from 2026-10-10 could not
-    /// show it.
+    /// For the moment `CanvasTouchAudit` finds the canvas not answering a hand. The registry sweep sees
+    /// only named recognizers, at touch edges: nothing else says what UIKit was holding — a system gate,
+    /// the window's observer, a recognizer that still counts a touch the glass lost.
     static func unquietRecognizers(under root: UIView) -> [String] {
         var found: [String] = []
         func visit(_ view: UIView) {

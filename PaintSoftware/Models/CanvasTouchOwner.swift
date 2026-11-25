@@ -8,8 +8,8 @@ import Foundation
 /// independent decisions spread over three unrelated UIKit mechanisms — recognizer `isEnabled`, view
 /// `isUserInteractionEnabled`, and `hitTest` overrides — each of which spelled its own predicate over
 /// the same four inputs (`selectedTool`, `activePanel`, `floatingPiece`, the active layer's state),
-/// and a fifth question (`shouldRequireFailureOf`) read three of them back out. Four defects trace to
-/// that arrangement, three of them inside one week:
+/// and a fifth question (what the two-finger gestures waited on) read three of them back out. Four
+/// defects trace to that arrangement, three of them inside one week:
 ///
 ///  * 2026-08-22 — the pick tool was dead with the Select panel open. The eyedropper's recognizer
 ///    consulted `activePanel`; the selection overlay's gate never consulted `selectedTool`; **the
@@ -21,9 +21,6 @@ import Foundation
 ///  * 2026-08-17 — the eyedropper picked a colour **and** painted, because `shouldInteract`'s tool
 ///    clause was a hand-maintained `!= .fill` list. `Tool.paintsOnCanvas` was the fix, and is the
 ///    shape this file copies.
-///  * Still open — "two-finger pan/pinch/rotate is dead while Fill is selected, on device"
-///    (BUGS.md). See `transformDependencyIsUnresolvable` for what this type can and cannot say
-///    about it.
 ///
 /// **What makes it structural rather than sloppy, and why the function takes a value.**
 /// `activePanel` is `@State` on `DrawingView`, while `selectedTool` and `floatingPiece` live on
@@ -33,12 +30,9 @@ import Foundation
 /// the coordinator, exactly as before — and what makes the whole answer testable headlessly. The
 /// decision moved; the state did not. Same argument as `Tool.paintsOnCanvas`, one clause larger.
 ///
-/// **Scope: one finger, and the arbitration only.** Two-finger navigation (pan / pinch / rotate) is
-/// deliberately not an owner here. Those three recognizers are never gated by tool, panel, floating
-/// piece or layer state; the only thing that can stall them is the failure dependency in
-/// `CanvasView.shouldRequireFailure`, which this file models separately as
-/// `transformWaitsOnActiveStroke` / `transformDependencyIsUnresolvable` rather than folding into the
-/// owner.
+/// **Scope: one finger, and the arbitration only.** Two-finger navigation is deliberately not an owner
+/// here: it is never gated by tool, panel, floating piece or layer state, and `CanvasTouchCore` decides
+/// it, and whether a touch may draw at all, from the touches.
 ///
 /// **Where the fourteen live now.** Each is one property on `CanvasTouchInputs`, named after its
 /// site, and the site is one line that reads it:
@@ -57,7 +51,6 @@ import Foundation
 /// | | `updateShapeOverlay` | *producer* — `isShapeInAdjustableState`, see below |
 /// | | `updateTransformOverlay` | *producer* — `ObjectTransformOverlayView.isActive`, see below |
 /// | `hitTest` | all five overlays | *producers* — `claimsTouch(at:)` → `CanvasTouchChrome` |
-/// | the fifteenth | `shouldRequireFailure` | `transformWaitsOnActiveStroke` |
 ///
 /// **The seven marked *producer* are inputs to this type rather than consumers of it, and saying so
 /// is more honest than forcing them.** A `hitTest` override answers two questions at once — *is this
@@ -170,8 +163,7 @@ enum CanvasTouchOwner: String, CaseIterable, Hashable {
 /// `.vector` layer answer the gates differently from a hidden `.raster` one. A single enum with a
 /// `.hidden` case cannot say which kind is hidden, and both ways of resolving that lose a state the
 /// app can actually be in: fold a hidden value layer into `.hidden` and `shouldInteract` wrongly
-/// goes true (which stakes pan/pinch/rotate on a recognizer in an invisible view — see
-/// `transformDependencyIsUnresolvable`); fold it into `.noDrawingSurface` and the catch-all stops
+/// goes true for a host nothing can reach; fold it into `.noDrawingSurface` and the catch-all stops
 /// raising "this layer is hidden". Two axes cost one `Bool` and lose neither.
 enum CanvasActiveLayer: String, CaseIterable, Hashable {
     /// No layers at all, or `currentLayerIndex` parked out of range — `deleteLayer` leaves it at -1
@@ -515,44 +507,6 @@ extension CanvasTouchInputs {
     /// Whether *this* touch is the tap-away that settles the box: the box is up, and the finger did
     /// not land on it. A touch on the box is a drag, and `.objectTransformOverlay` already owns it.
     var moveBoxCommitsThisTouch: Bool { moveBoxCommitIsEnabled && chrome != .transformBoxOrHandle }
-}
-
-// MARK: - The fifteenth question: what the transform recognizers wait on
-
-extension CanvasTouchInputs {
-    /// `CanvasView.shouldRequireFailure`, reduced. It reads three flags back off the view hierarchy —
-    /// the host's `isUserInteractionEnabled`, the stroke view's, and the stroke recognizer's
-    /// `isEnabled` — and the first two are both `shouldInteract` while the third is never assigned
-    /// anywhere in the app. So the whole predicate is `activeHostIsInteractive`.
-    ///
-    /// `true` means pan / pinch / rotate must wait for the active layer's stroke recognizer to fail
-    /// before they may begin.
-    var transformWaitsOnActiveStroke: Bool { activeHostIsInteractive }
-
-    /// **When that dependency is staked on a recognizer that cannot resolve.**
-    ///
-    /// The dependency asks "is the active host accepting touches?". The question that decides
-    /// whether the stroke recognizer will ever reach a terminal state is "did *this* touch reach the
-    /// host?", and two things can answer no while `shouldInteract` is still true:
-    ///
-    ///  * the host is hidden (`!activeLayerIsOnScreen`) — `shouldInteract` never consults visibility,
-    ///    so it stays `true`, `host.isHidden` is set `true` one line above it, and UIKit delivers
-    ///    nothing to a hidden view's recognizers;
-    ///  * an overlay above the hosts claimed the touch in its `hitTest` — a shape outline, a text
-    ///    box or grip, a Move grip, a guide grip.
-    ///
-    /// In both, the stroke recognizer sits in `.possible` having received nothing, which is the
-    /// deadlock `shouldRequireFailure`'s own doc comment closed for *inactive* layers and left open
-    /// here. The symptom is a canvas that will not pan, pinch or rotate.
-    ///
-    /// **This does not explain BUGS.md's "two-finger pan is dead while Fill is selected".** With
-    /// Fill selected `Tool.paintsOnCanvas` is false, so `shouldInteract` is false, so no dependency
-    /// is stated at all — the arbitration layer exonerates itself there, and the search belongs
-    /// elsewhere. It does describe a *different* dead canvas, reachable with a brush selected.
-    var transformDependencyIsUnresolvable: Bool {
-        guard transformWaitsOnActiveStroke else { return false }
-        return !activeLayerIsOnScreen || chrome != .none
-    }
 }
 
 // MARK: - The answer

@@ -14,8 +14,6 @@ struct ActionRecorderSection: View {
     @ObservedObject var canvasManager: CanvasManager
     @ObservedObject private var recorder = ActionRecorder.shared
     @State private var showRecordings = false
-    /// `AppSettings`' own key for the count, observed so the row follows it while the menu is open.
-    @AppStorage(AppSettings.Key.canvasRepairCount) private var freezesCaught = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -27,7 +25,6 @@ struct ActionRecorderSection: View {
 
             saveFlightButton
 
-            freezesCaughtRow
 
             if let problem = recorder.problem {
                 Text(problem)
@@ -89,8 +86,8 @@ struct ActionRecorderSection: View {
         .accessibilityLabel(recorder.isRecording ? "Stop recording actions" : "Record my actions")
     }
 
-    /// **The flight recorder's manual trigger** — for a freeze, or anything else odd, that the wedge
-    /// detector did not catch. Writes the last ninety seconds as a `flight-…jsonl` beside the
+    /// **The flight recorder's manual trigger** — for anything odd that `CanvasTouchAudit`
+    /// did not catch. Writes the last ninety seconds as a `flight-…jsonl` beside the
     /// recordings and opens the list so the owner sees it land.
     private var saveFlightButton: some View {
         Button {
@@ -107,22 +104,6 @@ struct ActionRecorderSection: View {
             .contentShape(Rectangle())
         }
         .accessibilityIdentifier("recorder.saveFlight")
-    }
-
-    /// **How many canvas freezes the app has caught and fixed for itself**, across every launch — the
-    /// number to read off before installing a build and again after using it, to compare the build's
-    /// repair rate with the last one's (BUGS.md, the stranded recognizers). Plain text: nothing in it
-    /// is for tapping.
-    private var freezesCaughtRow: some View {
-        HStack {
-            Image(systemName: "ladybug").frame(width: 24)
-            Text(CanvasRepairCount.title(freezesCaught)).accessibilityIdentifier("recorder.freezesCaught")
-            Spacer()
-        }
-        .font(.caption)
-        .foregroundColor(.gray)
-        .padding(.horizontal)
-        .padding(.bottom, 6)
     }
 
     private var liveReadout: some View {

@@ -48,7 +48,6 @@ nonisolated struct AppSettings: @unchecked Sendable {
         static let projectsFolderName = "PaintApp.projectLocation.displayName"
         static let storageInvitationDismissed = "PaintApp.gallery.storageInvitationDismissed"
         static let galleryFolder = "paintapp.galleryFolder"
-        static let canvasRepairCount = "paintapp.canvasFreezesCaught"
         static let lastAppSignature = "PaintApp.projectBackup.lastAppSignature"
         static let palettes = "paletteStore.palettes.v1"
     }
@@ -79,20 +78,6 @@ nonisolated struct AppSettings: @unchecked Sendable {
             return resolution
         }
         nonmutating set { defaults.set(newValue.rawValue, forKey: Key.renderResolution) }
-    }
-
-    /// **How many times the canvas has found its gesture recognizers stranded and replaced them** —
-    /// `CanvasRepairCount`, a fact about the build the owner is holding and not about anything drawn.
-    var canvasRepairCount: Int {
-        defaults.integer(forKey: Key.canvasRepairCount)
-    }
-
-    /// One more repair, counted. Answers the new total.
-    @discardableResult
-    func recordCanvasRepair() -> Int {
-        let total = canvasRepairCount + 1
-        defaults.set(total, forKey: Key.canvasRepairCount)
-        return total
     }
 
     /// The app signature (version + build + binary date) seen at the previous launch — bookkeeping
@@ -187,7 +172,7 @@ nonisolated struct AppSettings: @unchecked Sendable {
         #if targetEnvironment(simulator)
         if arguments.contains("-resetEditorPreferences") || arguments.contains("-resetGallery") {
             for key in [Key.pencilOnlyDrawing, Key.renderResolution, Key.lastStreamHost, Key.lastStreamPort,
-                        Key.galleryFolder, Key.canvasRepairCount] {
+                        Key.galleryFolder] {
                 defaults.removeObject(forKey: key)
             }
         }

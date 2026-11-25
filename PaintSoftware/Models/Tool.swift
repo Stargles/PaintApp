@@ -117,9 +117,7 @@ extension Tool {
     /// `CanvasManager.enterTextMode`'s doc comment, from the other side — and `selectPreset` runs
     /// none. A `true` here would take `selectedTool` off `.text` while `textGestureActive` stayed
     /// true, which leaves `TextOverlayView` on screen claiming touches in its `hitTest` while
-    /// `activeHostIsInteractive` has just gone true underneath it. That pair is
-    /// `CanvasTouchInputs.transformDependencyIsUnresolvable`: pan/pinch/rotate then wait on a stroke
-    /// recognizer that receives nothing, which is the dead-canvas symptom, and it is why this is a
+    /// `activeHostIsInteractive` has just gone true underneath it, and it is why this is a
     /// `false` rather than a "commit first".
     ///
     /// **No reachable UI path is known to reach the bad state today** (`BrushSettingsPanel` is the

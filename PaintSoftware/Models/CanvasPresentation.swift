@@ -15,14 +15,11 @@ import Foundation
 /// is written anywhere over the canvas).
 ///
 /// A `.popover` cannot sit over this canvas. It presents behind a screen-covering
-/// `_UIPassthroughGateGestureRecognizer` that UIKit binds to the same touches as `canvas.pan`,
-/// `canvas.pinch` and `canvas.rotation`, and whenever that gate is removed while a two-finger gesture
+/// `_UIPassthroughGateGestureRecognizer` that UIKit binds to the same touches as the canvas's, and whenever that gate is removed while a two-finger gesture
 /// is live — by the app closing the popover on the gesture's first finger, or by UIKit closing it on
-/// its own because two fingers landed outside it — every recognizer bound alongside it is stranded
-/// in a terminal state UIKit never resets. The canvas then binds only `canvas.touchCounter` to every
-/// later touch and never pans, pinches or draws again until the project is reopened. MEASURED on the
-/// simulator, both ways, and it is the owner's canvas freeze (TODO (110), and before it 2026-09-16);
-/// `CanvasTransformFreezeUITests` drives it. `CanvasPresentationLogicTests` fails if a `.popover` is
+/// its own because two fingers landed outside it — every UIKit recognizer bound alongside it is stranded
+/// in a terminal state UIKit never resets: MEASURED on the simulator, both ways, when the canvas's own
+/// navigation was made of them (TODO (110), 2026-09-16; `CanvasTransformFreezeUITests`). `CanvasPresentationLogicTests` fails if a `.popover` is
 /// written anywhere in the app.
 ///
 /// Raw values are stable strings because the action recorder writes them into a capture — a

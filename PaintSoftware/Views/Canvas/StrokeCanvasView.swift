@@ -118,14 +118,8 @@ final class StrokeCanvasView: CanvasPlaneView {
         shapeFollowingTouch = true
     }
 
-    /// Constructed through `init(target:action:)` rather than the bare `init()` so the subclass's
-    /// own initialiser — which is where `requiresExclusiveTouchType` is turned off, and that flag is
-    /// the pen-plus-finger snap's entire fix — provably runs. Swift only inherits a superclass
-    /// initialiser under conditions this class's override changes; passing the arguments removes the
-    /// question. The recognizer reports through closures, so both arguments are nil by design.
-    ///
-    /// Replaced only by `replaceStrokeRecognizerIfStranded`, and wired by `wire(_:)` either way.
-    private(set) var strokeRecognizer = StrokeGestureRecognizer(target: nil, action: nil)
+    /// Hears every touch on this view and draws with the one the canvas allows (`CanvasTouchCore`).
+    let strokeRecognizer = StrokeGestureRecognizer(target: nil, action: nil)
     private let imageView = CanvasPictureView()
 
     /// The live vector-stroke preview, in a layer of its own directly above `imageView` — item 11's
@@ -612,15 +606,9 @@ final class StrokeCanvasView: CanvasPlaneView {
         // two fingers put down together pan the canvas perfectly while a finger added to a held pen
         // does nothing at all.
         //
-        // It is also why `StrokeGestureRecognizer.failTrackedStroke` has never once been reached in
-        // this repo (see BUGS.md): it is only reachable from a second touch in a later event, which is
-        // the class of touch that was never being delivered.
-        //
         // **This does not weaken palm rejection — it is what makes it explicit rather than accidental.**
-        // Until now a palm landing mid-stroke was invisible to us and harmless only because UIKit
-        // discarded it. Now it arrives, and `touchesBegan` refuses it by *type*: a finger can never
-        // interrupt a pencil stroke. See that guard, which ships in the same change and is not
-        // optional alongside this line.
+        // A palm landing mid-stroke arrives, and the canvas refuses it by *type*: a finger can never
+        // interrupt a pencil stroke (`CanvasTouchCore`).
         isMultipleTouchEnabled = true
         // The artist's own finished ink reaches the screen through `imageView` as the window, drawn
         // crisp when magnified and filtered when shrunk (`BakedFrameWindow.draw`) — which decides
@@ -687,7 +675,7 @@ final class StrokeCanvasView: CanvasPlaneView {
             heldInkView.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
 
-        wire(strokeRecognizer)
+        installStrokeRecognizer()
     }
 
     override func layoutSubviews() {
@@ -744,31 +732,14 @@ final class StrokeCanvasView: CanvasPlaneView {
         applyPose(shownPose)
     }
 
-    /// Installs a stroke recognizer on this view, wired to its four callbacks.
-    private func wire(_ recognizer: StrokeGestureRecognizer) {
-        recognizer.requiresPencilOnly = pencilOnlyDrawing
-        recognizer.onBegin = { [weak self] touch in self?.handleBegin(touch) }
-        recognizer.onMove = { [weak self] touch, event in self?.handleMove(touch, event) }
-        recognizer.onEnd = { [weak self] touch in self?.handleEnd(touch) }
-        recognizer.onGiveUp = { [weak self] reason in self?.handleGiveUp(reason) }
-        addGestureRecognizer(recognizer)
-    }
-
-    /// **Swaps in a fresh stroke recognizer if UIKit has stranded this one** — out of `.possible`
-    /// with no canvas touch down, which is a state it never leaves (`CanvasView.Coordinator
-    /// .replaceStrandedRecognizers` has the measurement). A stroke it was still tracking is handed to
-    /// `handleGiveUp` as `.interrupted` first, so its ink commits rather than hanging half-drawn.
-    ///
-    /// Returns the new recognizer for the caller to configure the way it configured the old one,
-    /// or nil when there was nothing to replace.
-    func replaceStrokeRecognizerIfStranded() -> StrokeGestureRecognizer? {
-        guard strokeRecognizer.state != .possible else { return nil }
-        strokeRecognizer.relinquishStrandedStroke()
-        removeGestureRecognizer(strokeRecognizer)
-        let fresh = StrokeGestureRecognizer(target: nil, action: nil)
-        wire(fresh)
-        strokeRecognizer = fresh
-        return fresh
+    /// Installs the stroke recognizer on this view, wired to its four callbacks.
+    private func installStrokeRecognizer() {
+        strokeRecognizer.requiresPencilOnly = pencilOnlyDrawing
+        strokeRecognizer.onBegin = { [weak self] touch in self?.handleBegin(touch) }
+        strokeRecognizer.onMove = { [weak self] touch, event in self?.handleMove(touch, event) }
+        strokeRecognizer.onEnd = { [weak self] touch in self?.handleEnd(touch) }
+        strokeRecognizer.onGiveUp = { [weak self] reason in self?.handleGiveUp(reason) }
+        addGestureRecognizer(strokeRecognizer)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

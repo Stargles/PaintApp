@@ -47,7 +47,7 @@ struct CanvasTouchSettle {
     /// The finger being watched, or nil when none is.
     private(set) var watching: Landing?
 
-    /// Touches currently on the canvas, as `TouchCountRecognizer` last reported them.
+    /// Touches currently on the canvas, as `CanvasTouchCore` last reported them.
     private(set) var touchesDown = 0
 
     /// A finger landed that might be the first of two.
@@ -65,7 +65,7 @@ struct CanvasTouchSettle {
         return .watch
     }
 
-    /// The canvas's touch count changed — fed from the host's `TouchCountRecognizer`, which sees
+    /// The canvas's touch count changed — fed from `CanvasTouchCore`, which sees
     /// every finger however it lands.
     mutating func touchCountChanged(to total: Int) -> Verdict {
         touchesDown = total
@@ -93,31 +93,5 @@ struct CanvasTouchSettle {
     /// it runs every consequence the watched finger would have.
     mutating func supersede() {
         watching = nil
-    }
-}
-
-/// Eligibility for the canvas recognizer repair after a lift. The coordinator owns the timer
-/// and only checks the recognizers if the counter and its most recent touch sequence still agree.
-struct CanvasRepairDeadline {
-    struct Check {
-        fileprivate let generation: UInt64
-        fileprivate weak var counter: AnyObject?
-    }
-
-    private var generation: UInt64 = 0
-    private var hadTouches = false
-
-    mutating func touchCountChanged(to total: Int, counter: AnyObject) -> Check? {
-        defer { hadTouches = total > 0 }
-        if total > 0 {
-            generation &+= 1
-            return nil
-        }
-        guard hadTouches else { return nil }
-        return Check(generation: generation, counter: counter)
-    }
-
-    func isCurrent(_ check: Check, counter: AnyObject, activeCount: Int) -> Bool {
-        check.generation == generation && check.counter === counter && activeCount == 0
     }
 }

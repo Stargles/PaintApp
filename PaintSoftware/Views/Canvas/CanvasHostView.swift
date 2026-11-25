@@ -4,10 +4,10 @@ import UIKit
 /// when the window/split-view size changes. Its bounds are the canvas area, and its clip is the
 /// only edge the canvas plane has (`CanvasPlaneView`): every touch inside it is hit-tested into the
 /// container, which is where the canvas's recognizers live.
-final class CanvasHostView: UIView, CanvasNavigationSnapshotSource {
+final class CanvasHostView: UIView, CanvasTouchAuditSource {
     var onLayout: (() -> Void)?
-    var recordNavigationSnapshot: ((String, Int?, ActionRecorder) -> Void)?
-    var navigationActivity: ((UIView?) -> CanvasNavigationMiss.Activity?)?
+    var canvasTouchReading: (() -> CanvasTouchAudit.Reading?)?
+    var canvasHears: ((UITouch) -> Bool)?
     /// Set once by `CanvasView.makeUIView`. `UndoManager` no longer backs undo/redo (see
     /// `CanvasManager.history`), so hardware-keyboard Cmd-Z/Cmd-Shift-Z needs an explicit
     /// `UIKeyCommand` pair instead of relying on the responder chain's built-in undo-manager

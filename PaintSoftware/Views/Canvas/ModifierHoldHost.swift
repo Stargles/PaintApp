@@ -64,7 +64,7 @@ struct ModifierHoldHost: UIViewRepresentable {
 
     /// Takes no touches itself and draws nothing; it is here to have a window to hang things on and a
     /// lifetime to match the editor's.
-    final class HostView: UIView, UIGestureRecognizerDelegate {
+    final class HostView: UIView {
         private let hold: ModifierHold
         private let counter = TouchCountRecognizer(target: nil, action: nil)
         private let shield: HoldShieldView
@@ -76,7 +76,6 @@ struct ModifierHoldHost: UIViewRepresentable {
             isUserInteractionEnabled = false
             backgroundColor = .clear
             counter.name = "window.touchCounter"
-            counter.delegate = self
             counter.onTouchesChanged = { [weak hold] total in
                 // SCHEDULER.md rule 3: the window's one touch count is what later work yields to.
                 InteractionGate.shared.touchesChanged(to: total)
@@ -101,15 +100,6 @@ struct ModifierHoldHost: UIViewRepresentable {
             counter.view?.removeGestureRecognizer(counter)
             shield.removeFromSuperview()
             if hold.counter === counter { hold.counter = nil }
-        }
-
-        /// **The counter recognises alongside everything.** It never recognises anything itself, but
-        /// UIKit makes recognisers exclusive by default and fails the rest of a touch's recognisers the
-        /// moment one of them recognises — which would end the count on the very touch it is there to
-        /// qualify.
-        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
-                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-            gestureRecognizer === counter
         }
     }
 }

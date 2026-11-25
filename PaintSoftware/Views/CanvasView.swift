@@ -329,12 +329,8 @@ struct CanvasView: UIViewRepresentable {
         context.coordinator.observeBrushColor()
         context.coordinator.observeOnionSkin()
         context.coordinator.containerView = container
-        host.recordNavigationSnapshot = { [weak coordinator = context.coordinator] edge, touch, recorder in
-            coordinator?.recordNavigationSnapshot(edge: edge, touch: touch, recorder: recorder)
-        }
-        host.navigationActivity = { [weak coordinator = context.coordinator] hitView in
-            coordinator?.navigationActivity(hitView: hitView)
-        }
+        host.canvasTouchReading = { [weak coordinator = context.coordinator] in coordinator?.canvasTouchReading() }
+        host.canvasHears = { [weak coordinator = context.coordinator] in coordinator?.canvasTouches?.hears($0) ?? true }
         context.coordinator.onionSkinView = onionSkin
         context.coordinator.paperView = paper
         context.coordinator.transformOverlay = transformOverlay
@@ -588,9 +584,6 @@ struct CanvasView: UIViewRepresentable {
         var onEditorOpened: (EditableKind) -> Void = { _ in }
         var layerHosts: [UUID: LayerHostView] = [:]
 
-        weak var panRecognizer: UIPanGestureRecognizer?
-        weak var pinchRecognizer: UIPinchGestureRecognizer?
-        weak var rotationRecognizer: UIRotationGestureRecognizer?
         weak var fillTapRecognizer: TouchTypePressRecognizer?
         /// Enabled when there are no layers or the active layer is hidden, so a drawing-tool touch
         /// raises a user-facing notice instead of being silently swallowed.
@@ -614,10 +607,9 @@ struct CanvasView: UIViewRepresentable {
         /// A resolved pick that still owes the tool revert. Set when the colour is applied, cleared
         /// when the revert actually happens. The other half of the join.
         var eyedropperRevertPending = false
-        /// Counts the touches on the canvas **alone** — what `CanvasTouchSettle` asks of "a second touch
-        /// joined" and what the stranded-recognizer repair asks of "nothing is down". The count a held
-        /// finger is read from is the window's (`ModifierHold`), which also sees the touches outside it.
-        weak var touchCountRecognizer: TouchCountRecognizer?
+        /// Hears every touch on the canvas plane and decides whose it is (`CanvasTouchCore`). The count a
+        /// held finger is read from is the window's (`ModifierHold`), which also sees the touches outside it.
+        weak var canvasTouches: CanvasTouchRecognizer?
 
         /// **What a touch that joins a handle's drag does to it, and the pill that reads a turn out** —
         /// shared by the four overlays with a handle to hold. The count it measures against is the
@@ -632,9 +624,8 @@ struct CanvasView: UIViewRepresentable {
 
         /// **Whether a drag that a joined touch assists is live right now** — a Move box dragged by
         /// either overlay, or a text box's or a shape's rotate knob held (`PrecisionDrag`). A finger
-        /// that lands while it is live is a hold (`ModifierHold`); a pan, pinch or rotation made of
-        /// fingers that were already down before the drag began is the one thing left for this to refuse
-        /// (`gestureRecognizerShouldBegin`).
+        /// that lands while it is live is a hold (`ModifierHold`); a pair of fingers that were already
+        /// down before the drag began is the one thing left for this to refuse (`mayNavigate`).
         private var assistedDragIsLive: Bool {
             (transformOverlay?.isDragging ?? false) || (floatingOverlay?.isDragging ?? false)
                 || (textTransformOverlay?.isTurning ?? false) || (shapeOverlay?.isTurning ?? false)
@@ -697,12 +688,19 @@ struct CanvasView: UIViewRepresentable {
         private var liveRotation: CGFloat = 0
         private var liveOffset: CGSize = .zero
 
-        // The fingers' centroid and the container's centre, captured when the first of
-        // pan/pinch/rotation begins and held as one `ViewportAnchor` — which keeps whatever content
-        // point is under the fingers fixed under them as scale/rotation change (rather than always
-        // zooming/rotating around the canvas's own centre). The centre rides along because
-        // `liveOffset` is how far it has moved from there.
-        private var gestureAnchor: (anchor: ViewportAnchor, center0: CGPoint)?
+        /// **Where the fingers hold the content**: the point under their centroid as the view began to
+        /// follow them, or as the fingers changed, and the live transform it was held at — so whatever
+        /// content point is under the fingers stays under them as scale and rotation change, rather than
+        /// always zooming and turning about the canvas's own centre, and a finger that joins mid-gesture
+        /// moves nothing.
+        private struct ViewHold {
+            let anchor: ViewportAnchor
+            let center: CGPoint
+            let scale: CGFloat
+            let rotation: CGFloat
+            let offset: CGSize
+        }
+        private var viewHold: ViewHold?
 
         // Rotation snaps to the nearest right angle when close to one, like Procreate, but releases
         // the snap if the user holds within the snap zone for more than a second.
@@ -1222,8 +1220,7 @@ struct CanvasView: UIViewRepresentable {
                 //
                 // The six clauses that follow "is this the active layer" are
                 // `CanvasTouchInputs.activeHostIsInteractive`, which every other gate that needs
-                // them reads too — including `shouldRequireFailureOf`, which used to read this
-                // property back off the view instead.
+                // them reads too.
                 let shouldInteract = (index == canvasManager.currentLayerIndex)
                     && touch.activeHostIsInteractive
                 if host.isUserInteractionEnabled != shouldInteract {
@@ -3652,7 +3649,7 @@ struct CanvasView: UIViewRepresentable {
         /// drag is measured through the canvas's transform, and a canvas that moved under it would chase
         /// its own finger.
         func followTextBox() {
-            guard let host = hostView, let container = containerView, gestureAnchor == nil else { return }
+            guard let host = hostView, let container = containerView, viewHold == nil else { return }
             let pan: CGFloat
             if canvasManager.textGestureActive {
                 guard !canvasManager.textFingerDown else { return }
@@ -4443,7 +4440,7 @@ struct CanvasView: UIViewRepresentable {
                 baseCenter = CGPoint(x: hostBounds.midX, y: hostBounds.midY)
                 // The first time the canvas has a host is the one moment the saved view applies —
                 // TODO (77). After it, the committed transform is the artist's and the record
-                // follows it (`commitLiveTransformIfAllEnded`), never the other way round.
+                // follows it (`commitNavigation`), never the other way round.
                 if let saved = canvasManager.viewTransform {
                     committedScale = max(CGFloat(saved.scale), 0.01)
                     committedRotation = CGFloat(saved.rotation)
@@ -4478,7 +4475,7 @@ struct CanvasView: UIViewRepresentable {
         /// handles stay a fixed size in screen points however far the artist has zoomed.
         private var canvasContentScale: CGFloat { fitScale * committedScale * liveScale }
 
-        private func applyTransform(navigation: CanvasNavigationGesture? = nil) {
+        private func applyTransform() {
             // On every exit, including the no-op early return: the label has to track the transform
             // even on the passes that change nothing in Core Animation, or a test reads a stale
             // value — and **after the container's transform is written**, because `movebox:` is
@@ -4516,9 +4513,8 @@ struct CanvasView: UIViewRepresentable {
             // After the identity guard above, so the recording gets one line per *actual* change
             // rather than one per SwiftUI pass — the guard already thins this to the transitions a
             // reader cares about. Both halves go in: the committed baseline and the live gesture
-            // contribution are folded together only when every one of pan/pinch/rotation has ended
-            // (`commitLiveTransformIfAllEnded`), so a recording that shows `live` never returning to
-            // identity is showing a gesture that never finished. A recording only: one per frame of a
+            // contribution are folded together only when the gesture ends (`commitNavigation`), so a
+            // recording that shows `live` never returning to identity is showing one that never did. A recording only: one per frame of a
             // pan is the rate `ifRecordingInFull` exists to keep out of the flight ring.
             ActionRecorder.ifRecordingInFull {
                 $0.transform(committedScale: committedScale, committedRotation: committedRotation,
@@ -4531,49 +4527,31 @@ struct CanvasView: UIViewRepresentable {
             container.transform = CGAffineTransform.identity.rotated(by: rotation).scaledBy(x: scale, y: scale)
             container.center = CGPoint(x: baseCenter.x + offset.width, y: baseCenter.y + offset.height)
             redrawWindowPicturesForTheView()
-            if ActionRecorder.isFlying {
-                navigationTransformWrites += 1
-                if let navigation { navigationDelivery[navigation.rawValue].writes += 1 }
-            }
+            if viewHold != nil { navigationWrites += 1 }
         }
 
         // MARK: - Gestures
 
-        private var navigationTransformWrites = 0
-        private var navigationDelivery = Array(repeating: CanvasNavigationGesture.Delivery(),
-                                               count: CanvasNavigationGesture.allCases.count)
+        /// How often the fingers' own gesture has moved the view, and how often it was refused — what the
+        /// flight recorder reads to say the canvas stopped following a hand (`CanvasTouchAudit`).
+        private var navigationWrites = 0
+        private var navigationRefusals = 0
 
-        func navigationActivity(hitView: UIView?) -> CanvasNavigationMiss.Activity? {
-            guard let container = containerView, canvasManager.openPresentations.isEmpty, !assistedDragIsLive else { return nil }
-            // Only a plain landing qualifies. Overlays own their hit tests, including live text,
-            // selection and floating pieces. They can take input before our navigation handlers.
-            if let hitView, hitView !== container, !(hitView is StrokeCanvasView) { return nil }
-            var writes = 0
-            var refusals = 0
-            for delivery in navigationDelivery {
-                writes += delivery.writes
-                refusals += delivery.refused
-            }
-            return .init(source: ObjectIdentifier(container), writes: writes, refusals: refusals)
+        func canvasTouchReading() -> CanvasTouchAudit.Reading? {
+            guard let container = containerView, let touches = canvasTouches else { return nil }
+            return .init(source: ObjectIdentifier(container), count: touches.core.count,
+                         fingers: touches.core.fingerCount, isAtRest: touches.core.isAtRest,
+                         writes: navigationWrites, refusals: navigationRefusals)
         }
 
-        func recordNavigationSnapshot(edge: String, touch: Int?, recorder: ActionRecorder) {
-            guard let container = containerView else { return }
-            recorder.canvasNavigationSnapshot(edge: edge, touch: touch, container: container,
-                                              writes: navigationTransformWrites, pan: panRecognizer,
-                                              pinch: pinchRecognizer, rotation: rotationRecognizer,
-                                              delivery: navigationDelivery)
-        }
-
-        /// **Everything this coordinator hangs on a layer's stroke recognizer**, in one place, because
-        /// there are two moments it happens: when the layer's host is built, and when
-        /// `replaceStrandedRecognizers` swaps in a fresh recognizer for one UIKit has stranded. The
-        /// stroke view wires its own four callbacks (`StrokeCanvasView.wire`).
+        /// **Everything this coordinator hangs on a layer's stroke recognizer**, when its host is built.
+        /// The stroke view wires its own four callbacks (`StrokeCanvasView.installStrokeRecognizer`).
         private func configure(_ recognizer: StrokeGestureRecognizer, forLayer id: UUID) {
-            // Debug-recorder name only (see `setUpGestures`). Per-layer rather than a bare "stroke":
-            // every layer has one of these, and `shouldRequireFailureOf` names exactly one of them,
-            // so a recording has to be able to tell them apart.
+            // Debug-recorder name only (see `setUpGestures`), per layer because every layer has one.
             recognizer.name = "stroke.\(id.uuidString.prefix(8))"
+            recognizer.mayDraw = { [weak self] touch, event in
+                self?.canvasTouches?.mayDraw(touch, in: event) ?? false
+            }
             // The canvas touch's one entry — see `CanvasManager.canvasInteractionBegan`.
             // **`mayContinueTake` is true here** (KEYFRAMES.md §7 stage 10): this is the entry that
             // can become a timing stroke, so it must not end the take it is part of. A finger is
@@ -4584,92 +4562,15 @@ struct CanvasView: UIViewRepresentable {
             }
         }
 
-        /// Every recognizer `setUpGestures` installed, so `replaceStrandedRecognizers` can take the
-        /// whole set down and build it again from the one function that knows how.
-        private var canvasGestures: [UIGestureRecognizer] = []
-
-        private func install(_ recognizer: UIGestureRecognizer, on view: UIView) {
-            view.addGestureRecognizer(recognizer)
-            canvasGestures.append(recognizer)
-        }
-
-        private var strandedCheck = CanvasRepairDeadline()
-
-        /// How long after the lift the repair looks. **Not the next turn of the main queue**: UIKit
-        /// returns a failed or ended recognizer to `.possible` from its own run-loop pass, and a block
-        /// queued at the lift can run before it — MEASURED, an ordinary one-finger tap read
-        /// `canvas.pan` still `.failed` and "repaired" a healthy recognizer. A new touch cancels
-        /// that lift's eligibility and its own final lift gets the full window.
-        private static let strandedCheckDelay: TimeInterval = 0.1
-
-        /// Replaces canvas recognizers still out of `.possible` after the latest lift's settlement
-        /// window. When UIKit leaves a recognizer stranded, a fresh instance built by the same code
-        /// works on the next touch. An `isEnabled` toggle, `reset()`, `state = .possible` or re-add
-        /// could not return the same stranded instance to service in the reproduced case.
-        ///
-        /// A UIKit presentation torn down under a live two-finger gesture could strand the
-        /// recognizers: a popover, `Menu` or `.contextMenu` over the canvas
-        /// dismisses itself when two fingers land outside it, and whatever recognizers it had bound
-        /// to those touches go with it mid-gesture. The owner's canvas freeze, TODO (110), reproduced
-        /// as exactly that — the Blend Mode / Effect menu open over a value layer, then a two-finger
-        /// pan (`CanvasTransformFreezeUITests`). Nothing the editor raises is a UIKit presentation any
-        /// more (`CanvasPresentation`). The owner's iPad also recorded late third touches and
-        /// cancelled-and-reissued touches before a repair (BUGS.md, "The canvas's recognizers strand
-        /// when a touch joins two others"). The trigger for that reset failure is still open.
-        ///
-        /// Counts itself (`CanvasRepairCount`, kept across launches and shown in the Settings menu), then
-        /// tells the action recorder, which saves its last ninety seconds and a census of what else
-        /// under the window was out of `.possible` or still holding a touch
-        /// (`WindowEventTap.unquietRecognizers`).
-        private func replaceStrandedRecognizers(after check: CanvasRepairDeadline.Check) {
-            guard let counter = touchCountRecognizer,
-                  strandedCheck.isCurrent(check, counter: counter, activeCount: counter.activeCount) else { return }
-            let strandedOwn = canvasGestures.filter { $0.isEnabled && $0.state != .possible }
-            let strandedStrokes = layerHosts.filter { $0.value.strokeView.strokeRecognizer.state != .possible }
-            guard !strandedOwn.isEmpty || !strandedStrokes.isEmpty else { return }
-            // Read before anything is replaced: the replacement takes the evidence away with the
-            // recognizers it replaces.
-            var notAtRest: [String] = []
-            ActionRecorder.ifRecording { recorder in
-                recordNavigationSnapshot(edge: "repair", touch: nil, recorder: recorder)
-                notAtRest = containerView?.window.map { WindowEventTap.unquietRecognizers(under: $0) } ?? []
-            }
-            var stranded: [String] = []
-            if !strandedOwn.isEmpty, let container = containerView {
-                stranded += strandedOwn.map { WindowEventTap.name(of: $0) }
-                for recognizer in canvasGestures { recognizer.view?.removeGestureRecognizer(recognizer) }
-                canvasGestures.removeAll()
-                setUpGestures(on: container)
-                // The five that are off unless a tool or layer wants them come back off; put them
-                // where the current state says, now rather than on the next SwiftUI pass.
-                updateActiveLayerAndTool()
-                catchAllTapRecognizer?.isEnabled = canvasTouchInputs().catchAllIsEnabled
-            }
-            for (layerID, host) in strandedStrokes {
-                let old = host.strokeView.strokeRecognizer.name
-                guard let fresh = host.strokeView.replaceStrokeRecognizerIfStranded() else { continue }
-                configure(fresh, forLayer: layerID)
-                stranded.append(old ?? "stroke")
-            }
-            guard !stranded.isEmpty else { return }
-            AppSettings.standard.recordCanvasRepair()
-            ActionRecorder.ifRecording { $0.canvasRecognizersReplaced(stranded, notAtRest: notAtRest) }
-        }
-
         /// **Which of these reject a finger while pencil-only drawing is on, and which must not.**
         /// The preference is `CanvasManager.pencilOnlyDrawing`, and the question is not "is this a
         /// touch?" but "would this input have drawn?" — pencil-only means *drawing* is the pen's job,
         /// never that the canvas stops listening to hands.
         ///
-        ///  * `pan` / `pinch` / `rotation` — **never gated.** They are the two-finger navigation
-        ///    transform and are the reason a hand is on the glass at all in pencil-only mode. Gating
-        ///    them would leave an artist holding a pen unable to pan their own canvas.
-        ///  * `twoFingerTap` (undo) / `threeFingerTap` (redo) — **never gated,** and deliberately so
-        ///    rather than incidentally: these are multi-finger by design, have no pen spelling, and
-        ///    the pen cannot supply a second contact. Gating them removes undo from the app.
-        ///  * `touchCounter` — **never gated.** It counts every touch on the canvas whatever its type
-        ///    (`CanvasTouchSettle` asks whether a watched finger is still alone), so a finger is not
-        ///    merely allowed here, it is the entire signal.
+        ///  * `canvas.touches` — **never gated.** Two-finger navigation is the reason a hand is on the
+        ///    glass at all in pencil-only mode, the undo and redo taps have no pen spelling, and a pencil
+        ///    cannot supply a second contact; gating it would leave an artist holding a pen unable to pan
+        ///    their own canvas or undo.
         ///  * `fillPress` — **gated,** in `handleFillPress`. A fill is a drawing edit: it replaces
         ///    pixels, pushes an undo entry, and `minimumPressDuration = 0` makes a stray palm tap a
         ///    completed flood. This was the second hole in pencil-only mode, reported by the owner.
@@ -4709,76 +4610,24 @@ struct CanvasView: UIViewRepresentable {
         /// **Every one of them goes on the container**, the root of the canvas plane, which takes a
         /// touch anywhere the host shows (`CanvasPlaneView`) — so a two-finger pan, a fill tap or the
         /// Move box's tap-away that begins on the surround reaches exactly the recognizers it would
-        /// have reached on the paper. The transform handlers read `location(in: host)`, the view
+        /// have reached on the paper. `canvasTouches` reads its touches in the host, the view
         /// that does not move under them; the rest read `location(in: container)`, which is canvas
         /// points at any zoom.
         func setUpGestures(on view: UIView) {
-            let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
-            pan.minimumNumberOfTouches = 2
-            pan.maximumNumberOfTouches = 2
-            pan.delegate = self
-            pan.cancelsTouchesInView = false
-            pan.name = "canvas.pan"
-            install(pan, on: view)
-            panRecognizer = pan
+            let touches = CanvasTouchRecognizer(target: nil, action: nil)
+            touches.name = "canvas.touches"
+            touches.space = hostView
+            touches.onEvent = { [weak self] in self?.canvasTouched($0) }
+            touches.mayNavigate = { [weak self] in self?.mayNavigate($0) ?? false }
+            view.addGestureRecognizer(touches)
+            canvasTouches = touches
+            canvasManager.canvasTouchCountChanged(0)
 
-            let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
-            pinch.delegate = self
-            pinch.cancelsTouchesInView = false
-            pinch.name = "canvas.pinch"
-            install(pinch, on: view)
-            pinchRecognizer = pinch
-
-            let rotation = UIRotationGestureRecognizer(target: self, action: #selector(handleRotation(_:)))
-            rotation.delegate = self
-            rotation.cancelsTouchesInView = false
-            rotation.name = "canvas.rotation"
-            install(rotation, on: view)
-            rotationRecognizer = rotation
-
-            let twoFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleTwoFingerTap))
-            twoFingerTap.numberOfTouchesRequired = 2
-            twoFingerTap.cancelsTouchesInView = false
-            twoFingerTap.name = "canvas.twoFingerTap"
-            install(twoFingerTap, on: view)
-
-            // Counts the touches on the canvas alone: a watched finger is no longer alone
-            // (`CanvasTouchSettle`), and the stranded-recognizer repair runs when the last one lifts.
-            // The shape's snap and every drag a held finger qualifies read the window's count instead
-            // (`ModifierHold`), which also sees the finger that rests off the canvas.
-            let touchCounter = TouchCountRecognizer(target: self, action: nil)
-            touchCounter.delegate = self
-            touchCounter.name = "canvas.touchCounter"
-            // It is the edge the stranded-recognizer repair runs on: soon after the last canvas
-            // touch lifts, every other recognizer here should be back in `.possible` — see
-            // `strandedCheckDelay` for how soon.
-            touchCounter.onTouchesChanged = { [weak self, weak touchCounter] total in
-                guard let self, let touchCounter, self.touchCountRecognizer === touchCounter else { return }
-                let check = self.strandedCheck.touchCountChanged(to: total, counter: touchCounter)
-                self.canvasManager.canvasTouchCountChanged(total)
-                guard let check else { return }
-                DispatchQueue.main.asyncAfter(deadline: .now() + Self.strandedCheckDelay) { [weak self] in
-                    self?.replaceStrandedRecognizers(after: check)
-                }
-            }
             // The drags a held finger qualifies declare themselves to the hold, which tells the shape's
             // snap when a finger joined or lifted (`ModifierHold`).
             let hold = canvasManager.modifierHold
             hold.register(self) { [weak self] in self?.modifierDragIsLive ?? false }
             hold.onTouchesChanged = { [weak self] in self?.refreshShapeConstraint() }
-            install(touchCounter, on: view)
-            touchCountRecognizer = touchCounter
-            // A new counter starts at zero, so the count the manager last heard (from a counter this
-            // one replaces) is stale — and a stale two would make every finger look like a companion.
-            canvasManager.canvasTouchCountChanged(0)
-
-            let threeFingerTap = UITapGestureRecognizer(target: self, action: #selector(handleThreeFingerTap))
-            threeFingerTap.numberOfTouchesRequired = 3
-            threeFingerTap.cancelsTouchesInView = false
-            threeFingerTap.name = "canvas.threeFingerTap"
-            install(threeFingerTap, on: view)
-
-            twoFingerTap.require(toFail: threeFingerTap)
 
             // One-finger press-drag driving the fill tool: press applies the fill, dragging adjusts
             // settings live. `minimumPressDuration = 0` makes a plain tap a one-shot fill. Disabled
@@ -4794,7 +4643,7 @@ struct CanvasView: UIViewRepresentable {
             fillPress.cancelsTouchesInView = false
             fillPress.isEnabled = false
             fillPress.name = "canvas.fillPress"
-            install(fillPress, on: view)
+            view.addGestureRecognizer(fillPress)
             fillTapRecognizer = fillPress
 
             // Catch-all for when no layers or the active layer is hidden: fires on any single touch
@@ -4813,7 +4662,7 @@ struct CanvasView: UIViewRepresentable {
             catchAll.cancelsTouchesInView = false
             catchAll.isEnabled = false
             catchAll.name = "canvas.catchAll"
-            install(catchAll, on: view)
+            view.addGestureRecognizer(catchAll)
             catchAllTapRecognizer = catchAll
 
             // The eyedropper's tap. Disabled except while the eyedropper is selected, exactly as the
@@ -4834,7 +4683,7 @@ struct CanvasView: UIViewRepresentable {
             eyedropperPress.cancelsTouchesInView = false
             eyedropperPress.isEnabled = false
             eyedropperPress.name = "canvas.eyedropperPress"
-            install(eyedropperPress, on: view)
+            view.addGestureRecognizer(eyedropperPress)
             eyedropperTapRecognizer = eyedropperPress
 
             // The text tool's placement tap. A fourth `TouchTypePressRecognizer` for the reason the
@@ -4852,7 +4701,7 @@ struct CanvasView: UIViewRepresentable {
             textPress.cancelsTouchesInView = false
             textPress.isEnabled = false
             textPress.name = "canvas.textPress"
-            install(textPress, on: view)
+            view.addGestureRecognizer(textPress)
             textTapRecognizer = textPress
 
             // The primed object's press-and-drag (TODO (149)): the press starts it, the drag sizes it
@@ -4869,7 +4718,7 @@ struct CanvasView: UIViewRepresentable {
             placementPress.cancelsTouchesInView = false
             placementPress.isEnabled = false
             placementPress.name = "canvas.placementPress"
-            install(placementPress, on: view)
+            view.addGestureRecognizer(placementPress)
             placementPressRecognizer = placementPress
 
             // The tap **away** from the vector Move box, which puts the box down — the vector half of
@@ -4904,7 +4753,7 @@ struct CanvasView: UIViewRepresentable {
             moveBoxCommit.delaysTouchesEnded = false
             moveBoxCommit.isEnabled = false
             moveBoxCommit.name = "canvas.moveBoxCommit"
-            install(moveBoxCommit, on: view)
+            view.addGestureRecognizer(moveBoxCommit)
             moveBoxCommitRecognizer = moveBoxCommit
         }
 
@@ -4991,9 +4840,7 @@ struct CanvasView: UIViewRepresentable {
         /// So the Move question is asked at touch-down through the shared `CanvasTouchOwner`, not at
         /// release against a box that has moved. The text recognizer uses the same owner gate: a tap
         /// inside a live text box belongs to its `UITextView`, which may still be processing
-        /// selection after the canvas touch count reaches zero. Letting `canvas.textPress` begin and
-        /// reject the touch later leaves it ended during that UIKit sequence, where the recognizer
-        /// repair check can mistake it for a stranded canvas. Refusing it here keeps the live text
+        /// selection after the canvas touch count reaches zero. Refusing it here keeps the live text
         /// interaction on its existing owner and leaves plain-canvas text placement available.
         ///
         /// The rest of the container recognizers keep their existing admission behavior. These two
@@ -5073,138 +4920,83 @@ struct CanvasView: UIViewRepresentable {
             textOverlay?.focusEditor()
         }
 
-        /// **The canvas's pan, pinch and rotation do not begin under an assisted drag.** The pen on the
-        /// handle is a touch on the container, and a hand that was already resting beside it makes two
-        /// — exactly what the two-finger pan asks for — so without this a palm that drifts while the
-        /// artist drags would move the canvas out from under the pen (TODO (146), (151)). A finger that
-        /// lands *after* the drag began is a hold and never reaches these (`ModifierHold`). A pan
-        /// already in progress when the drag begins is left alone; only a beginning is refused.
-        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            let navigation: CanvasNavigationGesture
-            if gestureRecognizer === panRecognizer { navigation = .pan }
-            else if gestureRecognizer === pinchRecognizer { navigation = .pinch }
-            else if gestureRecognizer === rotationRecognizer { navigation = .rotation }
-            else { return true }
-            let allowed = !assistedDragIsLive
-            if ActionRecorder.isFlying {
-                if allowed { navigationDelivery[navigation.rawValue].allowed += 1 }
-                else { navigationDelivery[navigation.rawValue].refused += 1 }
-            }
-            return allowed
-        }
-
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            let alwaysConcurrent: [UIGestureRecognizer?] = [fillTapRecognizer, catchAllTapRecognizer, touchCountRecognizer, eyedropperTapRecognizer, textTapRecognizer, placementPressRecognizer, moveBoxCommitRecognizer]
-            if alwaysConcurrent.contains(where: { $0 === gestureRecognizer }) || alwaysConcurrent.contains(where: { $0 === otherGestureRecognizer }) {
-                return true
+            let alwaysConcurrent: [UIGestureRecognizer?] = [fillTapRecognizer, catchAllTapRecognizer, eyedropperTapRecognizer, textTapRecognizer, placementPressRecognizer, moveBoxCommitRecognizer]
+            return alwaysConcurrent.contains { $0 === gestureRecognizer || $0 === otherGestureRecognizer }
+        }
+
+        // MARK: - Navigation
+
+        private func canvasTouched(_ event: CanvasTouchCore.Event) {
+            if !event.isContinuous {
+                ActionRecorder.ifRecording { $0.model("canvas.touches", String(describing: event)) }
             }
-            let transformRecognizers: [UIGestureRecognizer] = [panRecognizer, pinchRecognizer, rotationRecognizer].compactMap { $0 }
-            return transformRecognizers.contains(where: { $0 === gestureRecognizer }) &&
-                   transformRecognizers.contains(where: { $0 === otherGestureRecognizer })
-        }
-
-        /// Dynamically requires the transform recognizers to wait only on the currently active
-        /// layer's drawing recognizer. A static `require(toFail:)` against every layer, including
-        /// inactive ones that never reach `.failed`, would deadlock two-finger pan/zoom/rotate as
-        /// soon as a second layer exists.
-        ///
-        /// The liveness guard below is the same argument one step further in. The comment above
-        /// closed the *static* version of the deadlock — a named recognizer belonging to a layer that
-        /// is not the active one. It did not close the case where the recognizer named is the active
-        /// layer's and that layer is nonetheless not accepting touches: `reconcileLayers` turns
-        /// `isUserInteractionEnabled` off on the active host for the fill tool, the Select panel, a
-        /// floating Move piece, a vector layer mid-transform, and a layer with no drawing surface (see
-        /// `shouldInteract`). In every one of those the recognizer sits in `.possible` receiving
-        /// nothing, and stating a dependency on it is stating a dependency on something that has no
-        /// reason to resolve. Returning false means "no dependency", which is the safe direction to
-        /// err: the worst case is a stroke racing a transform on a host that is declining strokes
-        /// anyway, and the best case is that two-finger pan keeps working in five states where it had
-        /// no business being at risk.
-        ///
-        /// Kept deliberately narrow: it does not try to inspect `otherGestureRecognizer.state`. A
-        /// recognizer legitimately sitting in `.began` mid-stroke is *exactly* what the dependency
-        /// exists to wait for, so "is it in a terminal state?" is not a question that can be asked
-        /// here without breaking the feature. Making the terminal transition reachable at all is
-        /// `StrokeGestureRecognizer.failTrackedStroke`'s job. (The reported canvas freeze was *not*
-        /// that path — it was popover teardown stranding the recognizer, fixed in `AnimationTimeline`
-        /// and pinned by `CanvasTransformFreezeUITests`; see `failTrackedStroke`'s own doc.)
-        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            let answer = shouldRequireFailure(gestureRecognizer, of: otherGestureRecognizer)
-            // Recorded on **every** call, not only when the answer changes: a `true` here is the edge
-            // that can wedge pan/pinch/rotate behind a stroke recognizer, so the value of the line is
-            // in pairing it with the `recognizer` lines around it — a `true` naming a recognizer that
-            // the file then shows never reaching a terminal state *is* the bug, stated.
-            ActionRecorder.ifRecording {
-                $0.failureRequirement(asker: $0.nameFor(gestureRecognizer),
-                                      other: $0.nameFor(otherGestureRecognizer),
-                                      answer: answer)
+            switch event {
+            case .countChanged(let total):
+                canvasManager.canvasTouchCountChanged(total)
+            case .strokeRevoked(_, let reason):
+                for host in layerHosts.values { host.strokeView.strokeRecognizer.giveUp(reason) }
+            case .navigationBegan(let centroid):
+                canvasManager.cancelInteractiveFillDrag()
+                // The artist took the view: a text session's follow leaves it where they put it.
+                textFollow.artistNavigated()
+                holdView(at: centroid)
+            case .navigationRebased(let centroid):
+                holdView(at: centroid)
+            case .navigationMoved(let centroid, let scale, let turn):
+                liveScale = scale
+                liveRotation = turn
+                // After the scale it places the content by, or the content slips by one event.
+                updateLiveOffset(centroid: centroid)
+                applyTransform()
+            case .navigationEnded:
+                commitNavigation()
+                applyTransform()
+            case .tapped(let fingers):
+                // `undo()` itself resolves any in-flight fill first, so this does exactly one thing.
+                if fingers == 2 { canvasManager.undo() } else { canvasManager.redo() }
             }
-            return answer
         }
 
-        private func shouldRequireFailure(_ gestureRecognizer: UIGestureRecognizer, of otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            let transformRecognizers: [UIGestureRecognizer] = [panRecognizer, pinchRecognizer, rotationRecognizer].compactMap { $0 }
-            guard transformRecognizers.contains(where: { $0 === gestureRecognizer }) else { return false }
-            // **Asked, not read back.** This used to read three flags off the view hierarchy —
-            // `activeHost.isUserInteractionEnabled`, `strokeView.isUserInteractionEnabled` and
-            // `strokeView.strokeRecognizer.isEnabled` — which is a fourth question answered out of
-            // three other gates' answers, and the reason this line appears in the architecture
-            // review's finding at all. The first two are both `shouldInteract`, and the third is
-            // never assigned anywhere in the app, so the whole predicate always was
-            // `CanvasTouchInputs.activeHostIsInteractive`; it now says so, one pass earlier than
-            // `reconcileLayers` can have pushed it down.
-            //
-            // What it asks and what it *should* ask still differ, and
-            // `CanvasTouchInputs.transformDependencyIsUnresolvable` is where that is written down:
-            // the question here is "is the active host accepting touches", where the one that decides
-            // whether the stroke recognizer can ever reach a terminal state is "did *this* touch
-            // reach it". Converting to `activeHostReceivesTouches` would close that — and would
-            // change behaviour on a hidden active layer — so it is reported rather than shipped.
-            guard canvasTouchInputs().transformWaitsOnActiveStroke else { return false }
-            guard canvasManager.layers.indices.contains(canvasManager.currentLayerIndex) else { return false }
-            let activeLayer = canvasManager.layers[canvasManager.currentLayerIndex]
-            guard let activeHost = layerHosts[activeLayer.id] else { return false }
-            return otherGestureRecognizer === activeHost.strokeView.strokeRecognizer
+        /// **The view does not follow fingers while a drag has hold of one of them.** An assisted drag is
+        /// the pen on a handle with a hand resting beside it (TODO (146), (151)): without this a palm that
+        /// drifts would move the canvas out from under the pen. Any other is a recognizer of an overlay's
+        /// own that has begun — the lasso's, a floating piece's, the live text's. The presses on the
+        /// container are not drags and share their touch with everything.
+        private func mayNavigate(_ touches: Set<UITouch>) -> Bool {
+            guard let container = containerView else { return false }
+            let held = assistedDragIsLive || touches.contains { touch in
+                (touch.gestureRecognizers ?? []).contains { recognizer in
+                    guard recognizer.state == .began || recognizer.state == .changed,
+                          let view = recognizer.view, view !== container else { return false }
+                    return view.isDescendant(of: container)
+                }
+            }
+            if held { navigationRefusals += 1 }
+            return !held
         }
 
-        // MARK: - Shared anchor-preserving pan/zoom/rotate
-
-        /// Captures the touch centroid and container center at the start of whichever of
-        /// pan/pinch/rotation begins first, so all three can share one anchor for this touch sequence.
-        ///
-        /// Seeded unconditionally, a pending shape included. This used to early-return while
-        /// `shapeGestureActive`, on the rule "two fingers on a pending shape mean snap it, not pan
-        /// the canvas", and the only thing that then seeded the anchor was
-        /// `commitSnappedShapeIfTransforming` — the same call that baked the shape the owner wanted
-        /// left alone. Delete that bake without this and `updateLiveOffset` bails on a nil
-        /// `gestureAnchor`, so the canvas silently refuses to move at all whenever a shape is
-        /// pending: a dead-canvas symptom that looks nothing like the change that caused it. The old
-        /// rule now lives on the snap itself, gated to `isShapeFollowingFinger` in
-        /// `canvasTouchesChanged`, which is the more precise place for it.
-        private func beginAnchorIfNeeded(at location: CGPoint) {
-            canvasManager.cancelInteractiveFillDrag()
-            // The artist took the view: a text session's follow leaves it where they put it.
-            textFollow.artistNavigated()
-            guard gestureAnchor == nil, let container = containerView else { return }
-            gestureAnchor = (ViewportAnchor(fingers: location, contentOrigin: container.center), container.center)
+        /// Holds the content where the fingers are. **Always, a pending shape included**: moving the view
+        /// is not editing the canvas, so a pending smart shape survives it — only an edit that changes
+        /// content goes through `beginCanvasEdit` and bakes it.
+        private func holdView(at centroid: CGPoint) {
+            guard let container = containerView else { return }
+            viewHold = ViewHold(anchor: ViewportAnchor(fingers: centroid, contentOrigin: container.center),
+                                center: container.center, scale: liveScale,
+                                rotation: lastAppliedTransform?.rotation ?? effectiveRotation(),
+                                offset: liveOffset)
         }
 
-        /// Keeps the content point that was under the fingers at gesture-start pinned under the
-        /// fingers' *current* location as scale/rotation change, and also carries plain panning
-        /// (when scale/rotation are unchanged, this reduces to "offset by however far fingers moved").
-        private func updateLiveOffset(currentLocation: CGPoint) {
-            guard let (anchor, center0) = gestureAnchor else { return }
-            let origin = anchor.contentOrigin(fingersAt: currentLocation, scale: liveScale,
-                                              rotation: effectiveRotation() - committedRotation) // this gesture's contribution only
-            liveOffset = CGSize(width: origin.x - center0.x, height: origin.y - center0.y)
+        private func updateLiveOffset(centroid: CGPoint) {
+            guard let hold = viewHold else { return }
+            let origin = hold.anchor.contentOrigin(fingersAt: centroid, scale: liveScale / hold.scale,
+                                                   rotation: effectiveRotation() - hold.rotation)
+            liveOffset = CGSize(width: hold.offset.width + origin.x - hold.center.x,
+                                height: hold.offset.height + origin.y - hold.center.y)
         }
 
-        /// Folds live scale/rotation/offset into the committed baseline once all of pan/pinch/rotation
-        /// have ended, rather than each committing independently — fingers rarely lift in sync, and
-        /// committing one gesture's contribution while another is live would jump visually.
-        private func commitLiveTransformIfAllEnded() {
-            let states: [UIGestureRecognizer.State] = [panRecognizer, pinchRecognizer, rotationRecognizer].compactMap { $0?.state }
-            guard !states.contains(.began), !states.contains(.changed) else { return }
+        /// Folds the live scale, rotation and offset into the committed baseline as the last finger lifts.
+        private func commitNavigation() {
             // No upper bound on zoom; the tiny floor only guards against a pinch's fingers crossing.
             committedScale = max(committedScale * liveScale, 0.01)
             committedRotation = effectiveRotation()
@@ -5219,77 +5011,10 @@ struct CanvasView: UIViewRepresentable {
             liveScale = 1
             liveRotation = 0
             liveOffset = .zero
-            gestureAnchor = nil
+            viewHold = nil
             snapEngagedAt = nil
-            // The shape snap isn't released here: it follows the touches themselves (see
-            // `canvasTouchesChanged`), letting the pen lift out of a snapped shape while the
-            // snapping finger is still down.
-        }
-
-        /// The shared body of the three canvas-transform gestures: identical state machine, only the
-        /// live value each contributes differs (`applyLiveValue`; pan contributes none of its own).
-        ///
-        /// **Moving the viewport is not editing the canvas.** A pan/pinch/rotate changes what the
-        /// artist is looking at, not what is on the layer, so a pending smart shape must survive it —
-        /// the owner's report is exactly that two-finger moving the canvas baked the shape. Only an
-        /// edit that actually mutates content (a new stroke, a tool/layer/frame change, an undo) goes
-        /// through `beginCanvasEdit` and bakes it. `.changed` used to call a
-        /// `commitSnappedShapeIfTransforming` here that did the opposite.
-        ///
-        /// One ordering is load-bearing: `applyLiveValue` runs before `updateLiveOffset`, which reads
-        /// `liveScale` to place the anchor — a stale scale would slip the content out from under the
-        /// fingers by one event. The `numberOfTouches` guard also stays: a lifting finger can still
-        /// produce one more `.changed` as the recognizer collapses from 2 touches to fewer, and that
-        /// frame is not an intentional transform.
-        private func handleTransformGesture<Recognizer: UIGestureRecognizer>(
-            _ recognizer: Recognizer, navigation: CanvasNavigationGesture, applyLiveValue: (Recognizer) -> Void) {
-            let records = ActionRecorder.isFlying
-            let index = navigation.rawValue
-            guard let host = hostView else {
-                if records { navigationDelivery[index].noHost += 1 }
-                return
-            }
-            switch recognizer.state {
-            case .began:
-                if records { navigationDelivery[index].began += 1 }
-                beginAnchorIfNeeded(at: recognizer.location(in: host))
-                applyLiveValue(recognizer)
-                updateLiveOffset(currentLocation: recognizer.location(in: host))
-            case .changed:
-                if records { navigationDelivery[index].changed += 1 }
-                guard recognizer.numberOfTouches >= 2 else {
-                    if records { navigationDelivery[index].underTwo += 1 }
-                    return
-                }
-                applyLiveValue(recognizer)
-                updateLiveOffset(currentLocation: recognizer.location(in: host))
-            case .ended, .cancelled:
-                if records {
-                    if recognizer.state == .ended { navigationDelivery[index].ended += 1 }
-                    else { navigationDelivery[index].cancelled += 1 }
-                }
-                commitLiveTransformIfAllEnded()
-            default:
-                break
-            }
-            applyTransform(navigation: navigation)
-        }
-
-        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
-            handleTransformGesture(recognizer, navigation: .pan) { _ in }
-        }
-
-        @objc func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
-            handleTransformGesture(recognizer, navigation: .pinch) { self.liveScale = $0.scale }
-        }
-
-        @objc func handleRotation(_ recognizer: UIRotationGestureRecognizer) {
-            handleTransformGesture(recognizer, navigation: .rotation) { self.liveRotation = $0.rotation }
-        }
-
-        @objc func handleTwoFingerTap() {
-            // undo() itself resolves any in-flight fill first, so this does exactly one thing.
-            canvasManager.undo()
+            // The shape snap isn't released here: it follows the touches themselves, letting the pen lift
+            // out of a snapped shape while the snapping finger is still down.
         }
 
         // MARK: - Two-finger snap constraint
@@ -5374,10 +5099,6 @@ struct CanvasView: UIViewRepresentable {
             isShapeConstraintEngaged = on
             guard canvasManager.shapeGestureActive else { return }
             canvasManager.updateInteractiveShape(isConstrained: on)
-        }
-
-        @objc func handleThreeFingerTap() {
-            canvasManager.redo()
         }
 
         /// The touch the canvas cannot act on: no layers, the active layer hidden, or the active layer

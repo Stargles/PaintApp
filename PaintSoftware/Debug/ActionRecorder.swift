@@ -13,7 +13,7 @@ import QuartzCore
 ///
 /// 1. **A human or agent diagnosing the bug.** Touches alone say nothing about *why* the canvas
 ///    stopped panning, so app internals are interleaved on the same clock: recognizer transitions,
-///    the answer `shouldRequireFailureOf` gave and who it named, tool/frame/layer changes, and the
+///    what the canvas decided about its touches (`CanvasTouchCore`), tool/frame/layer changes, and the
 ///    canvas transform. Cause sits next to effect instead of being inferred.
 /// 2. **Mechanical conversion into an XCUITest** (`tools/recording2xcuitest.py`). That is the reason
 ///    every touch is recorded against an **accessibility identifier plus a normalised offset inside
@@ -23,13 +23,12 @@ import QuartzCore
 /// **Two sinks, one event stream.** A *recording* — Actions → Record My Actions — writes everything,
 /// every touch sample included, to a file. The **flight recorder** is on from the editor's first
 /// appearance and writes nothing at all: it keeps only the cheap, low-rate events (touch-began and
-/// -ended lines with the recognizers each began bound, recognizer transitions, `requireFailure`
-/// answers, model changes, presentations shown and dismissed) in a ring of the last ninety seconds,
-/// and puts the ring on disk only when the canvas wedges (`CanvasWedgeDetector`) or the owner picks
+/// -ended lines with the recognizers each began bound, recognizer transitions, the canvas's decisions,
+/// model changes, presentations shown and dismissed) in a ring of the last ninety seconds, and puts the
+/// ring on disk only when the canvas stops answering a hand (`CanvasTouchAudit`) or the owner picks
 /// "Save Last 90 Seconds". The owner, on why a file-writing recorder could not simply be left on:
 /// *"constantly recording my actions would produce way too much data space, so that is out of the
-/// question."* Their two freeze recordings both started after the wedge; the ring is how the next one
-/// starts before it.
+/// question."*
 ///
 /// Rejected alternative: **screen recording plus a log**. It is what the owner has today in effect,
 /// and it costs a human watching a video frame by frame trying to line "the canvas froze here" up
@@ -60,9 +59,8 @@ final class ActionRecorder: ObservableObject {
     /// the *arguments* — the interpolated strings, the point conversions — are never built.
     ///
     /// **What the flight recorder costs the drawing path**, which is what every one of these costs
-    /// while it is on: a stroke's per-sample `.changed` reaches `recognizerTransition`, which finds the
-    /// recognizer in the tap's registry and writes nothing because the state did not change; every
-    /// touch event is swept for recognizer states once after dispatch (`WindowEventTap`). MEASURED in
+    /// while it is on: every touch that begins or ends is sampled and the recognizers swept once after
+    /// its dispatch (`WindowEventTap`). MEASURED in
     /// PERFORMANCE.md's flight-recorder entry — `PerfBaselineTests.testFlightRecorderCostOnAStroke`.
     @inline(__always)
     static func ifRecording(_ body: (ActionRecorder) -> Void) {
@@ -101,11 +99,9 @@ final class ActionRecorder: ObservableObject {
     // MARK: - Session state
 
     private var writer: RecordingWriter?
-    /// Internal, not private: `StrokeGestureRecognizer` reports its own transitions through
-    /// `recognizerTransition(_:to:source:)` below, which needs the tap's registry to keep the sweep
-    /// from writing the same transition twice. Installed once, by whichever of `startFlight` and
-    /// `start` runs first, and kept for as long as either sink is on.
-    private(set) var tap: WindowEventTap?
+    /// Installed once, by whichever of `startFlight` and `start` runs first, and kept for as long as
+    /// either sink is on.
+    private var tap: WindowEventTap?
     private var tapReport: WindowEventTap.InstallReport?
     private var flushTimer: Timer?
     /// Monotonic (`CACurrentMediaTime`, i.e. uptime — unaffected by clock changes) start instant of
@@ -116,16 +112,14 @@ final class ActionRecorder: ObservableObject {
     private var writtenEvents = 0
 
     /// The flight recorder's ninety seconds. Five thousand events is an order of magnitude over what a
-    /// minute and a half of ordinary work produces (a touch-began is about a dozen lines, most of them
-    /// `requireFailure` answers), so in practice the window is the bound and the capacity only stops a
-    /// burst from growing it.
+    /// minute and a half of ordinary work produces, so in practice the window is the bound and the
+    /// capacity only stops a burst from growing it.
     private var ring = FlightRing<(event: String, fields: [(String, JSONValue)])>(capacity: 5000, window: 90)
     /// Bumped by every ring append; `persistRing` writes only when it has moved since the last write.
     private var ringRevision = 0
     private var persistedRevision = -1
     private var ringPersistTimer: Timer?
-    private var wedge = CanvasWedgeDetector()
-    private var pendingNavigationFlight: DispatchWorkItem?
+    private var pendingCanvasFlight: DispatchWorkItem?
     /// The editor the flight ring is watching, for a dump's header. Updated on every `startFlight`,
     /// which each editor appearance calls.
     private var flightContext: (canvasSize: CGSize?, projectName: String) = (nil, "")
@@ -178,8 +172,8 @@ final class ActionRecorder: ObservableObject {
     /// project it came from. A window whose `sendEvent` cannot be intercepted still flies — the model
     /// events do not need the tap — and says so on `problem`.
     func startFlight(canvasSize: CGSize?, projectName: String) {
-        if pendingNavigationFlight != nil, flightContext != (canvasSize, projectName) {
-            saveFlight(trigger: "navigation")
+        if pendingCanvasFlight != nil, flightContext != (canvasSize, projectName) {
+            saveFlight(trigger: "canvas")
         }
         flightContext = (canvasSize, projectName)
         guard !Self.isFlying else { return }
@@ -205,7 +199,7 @@ final class ActionRecorder: ObservableObject {
         let now = CACurrentMediaTime()
         let snapshot = ring  // a copy-on-write reference: the walk below runs off main, on this frozen copy
         let header = Self.headerLine(canvasSize: flightContext.canvasSize, projectName: flightContext.projectName,
-                                     tap: tapReport, url: url, freezesCaught: AppSettings.standard.canvasRepairCount,
+                                     tap: tapReport, url: url,
                                      flight: [("trigger", .str("crash-ring"))])
         let tool = toolSettingsProvider?() ?? []
         UncleanExitWatch.queue.async {
@@ -241,18 +235,16 @@ final class ActionRecorder: ObservableObject {
     }
 
     /// Puts the ring on disk as a recording of its own, `flight-<date>.jsonl`, beside the others in
-    /// the Actions menu's list. `trigger` goes into the header: `"stranded"` when the canvas
-    /// replaced recognizers UIKit had stranded, `"wedge"` when the detector saw a canvas that stayed
-    /// wedged anyway, `"manual"` for the menu row.
+    /// the Actions menu's list. `trigger` goes into the header: `"canvas"` when `CanvasTouchAudit` found
+    /// the canvas not answering a hand, `"manual"` for the menu row.
     ///
     /// The lines are built and written off the main thread — five thousand of them is milliseconds of
-    /// string building, and a save is usually the moment right after a freeze was repaired. The list
-    /// and the badge catch up when the file is on disk.
+    /// string building. The list and the badge catch up when the file is on disk.
     @discardableResult
     func saveFlight(trigger: String) -> URL? {
-        if trigger == "stranded" || trigger == "wedge" || trigger == "navigation" {
-            pendingNavigationFlight?.cancel()
-            pendingNavigationFlight = nil
+        if trigger == "canvas" {
+            pendingCanvasFlight?.cancel()
+            pendingCanvasFlight = nil
         }
         let now = CACurrentMediaTime()
         let entries = ring.elements(asOf: now)
@@ -266,16 +258,11 @@ final class ActionRecorder: ObservableObject {
         let base = entries.first?.time ?? now
         let tool = toolSettingsProvider?() ?? []
         let header = Self.headerLine(canvasSize: flightContext.canvasSize, projectName: flightContext.projectName,
-                                     tap: tapReport, url: url, freezesCaught: AppSettings.standard.canvasRepairCount,
+                                     tap: tapReport, url: url,
                                      flight: [("trigger", .str(trigger)), ("events", .int(entries.count)),
                                               ("seconds", .num(now - base))])
-        let notice: String?
-        switch trigger {
-        case "wedge": notice = "The canvas froze — saved the last 90 s"
-        case "stranded": notice = "Caught a canvas freeze and fixed it — saved the last 90 s"
-        case "navigation": notice = nil
-        default: notice = "Saved the last 90 s"
-        }
+        // A finding is a diagnosis for us and nothing the artist can act on.
+        let notice = trigger == "canvas" ? nil : "Saved the last 90 s"
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let text = Self.flightText(header: header, tool: tool, entries: entries, base: base)
             let written = FileManager.default.createFile(atPath: url.path, contents: Data(text.utf8))
@@ -296,83 +283,26 @@ final class ActionRecorder: ObservableObject {
         return url
     }
 
-    /// A touch has begun — fed by `WindowEventTap` for every one, so the wedge detector sees what the
-    /// ring sees. A trip is saved after the dispatch's final observations are recorded.
-    func touchBegan(startsSequence: Bool, boundRecognizers: [String]) -> Bool {
-        wedge.touchBegan(startsSequence: startsSequence, boundRecognizers: boundRecognizers)
-    }
-
-    func saveWedgeFlight() {
-        emit("note", [("text", .str("canvas wedge detected: \(wedge.strandedSequences) sequences in a row "
-                                    + "began on the canvas bound to none of pan/pinch/rotation"))])
-        saveFlight(trigger: "wedge")
-    }
-
-    func canvasNavigationMissed(_ finding: CanvasNavigationMiss.Finding) {
-        var fields: [(String, JSONValue)] = [
-            ("kind", .str(finding.kind)), ("touch", .int(finding.touch)),
-            ("cancelledTouch", finding.cancelledTouch.map(JSONValue.int) ?? .null),
-            ("survivor", finding.survivor.map(JSONValue.int) ?? .null),
-            ("lost", .str(finding.lost.joined(separator: ","))),
-            ("travel", .num(finding.travel)), ("moves", .int(finding.moves))
-        ]
-        if let motion = finding.motion {
-            fields += [("partner", .int(motion.partner)), ("centroidTravel", .num(motion.centroidTravel)),
-                       ("relativeTravel", .num(motion.relativeTravel)), ("motionSamples", .int(motion.samples))]
+    /// The canvas did not answer a hand (`CanvasTouchAudit`): writes what was found, and what else under
+    /// the window was not at rest, and saves the ring a moment later, once the rest of the hand has lifted
+    /// into it. Says nothing on screen.
+    func canvasMissed(_ finding: CanvasTouchAudit.Finding, notAtRest: [String]) {
+        var fields: [(String, JSONValue)]
+        switch finding {
+        case .unheard(let touch):
+            fields = [("kind", .str("unheard")), ("touch", .int(touch))]
+        case .held(let count):
+            fields = [("kind", .str("held")), ("count", .int(count))]
+        case .unmoved(let first, let second, let travel, let samples):
+            fields = [("kind", .str("unmoved")), ("touch", .int(first)), ("partner", .int(second)),
+                      ("travel", .num(travel)), ("samples", .int(samples))]
         }
-        emit("canvasNavigationMiss", fields)
-        // Let the existing 100 ms repair include this finding in its own flight if it runs.
-        // A diagnostic alone is silent. Only the actual repair announces itself.
-        guard pendingNavigationFlight == nil else { return }
-        let work = DispatchWorkItem { [weak self] in self?.saveFlight(trigger: "navigation") }
-        pendingNavigationFlight = work
+        fields.append(("notAtRest", .str(notAtRest.joined(separator: "; "))))
+        emit("canvasMiss", fields)
+        guard pendingCanvasFlight == nil else { return }
+        let work = DispatchWorkItem { [weak self] in self?.saveFlight(trigger: "canvas") }
+        pendingCanvasFlight = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
-    }
-
-    func canvasNavigationSnapshot(edge: String, touch: Int?, container: UIView, writes: Int,
-                                  pan: UIGestureRecognizer?, pinch: UIGestureRecognizer?, rotation: UIGestureRecognizer?,
-                                  delivery: [CanvasNavigationGesture.Delivery]) {
-        let transform = container.transform
-        var fields: [(String, JSONValue)] = [
-            ("edge", .str(edge)), ("touch", touch.map(JSONValue.int) ?? .null),
-            ("canvas", .str(Self.shortObject(ObjectIdentifier(container)))),
-            ("scale", .num(hypot(transform.a, transform.b))), ("rot", .num(atan2(transform.b, transform.a))),
-            ("cx", .num(container.center.x)), ("cy", .num(container.center.y)), ("writes", .int(writes))
-        ]
-        for (kind, recognizer) in zip(CanvasNavigationGesture.allCases, [pan, pinch, rotation]) {
-            let key = kind.name + "."
-            if let recognizer {
-                fields += [
-                    (key + "obj", .str(Self.shortObject(ObjectIdentifier(recognizer)))),
-                    (key + "view", recognizer.view.map { .str(Self.shortObject(ObjectIdentifier($0))) } ?? .null),
-                    (key + "enabled", .bool(recognizer.isEnabled)),
-                    (key + "state", .str(Self.stateName(recognizer.state))),
-                    (key + "touches", .int(recognizer.numberOfTouches))
-                ]
-            } else {
-                fields.append((key + "obj", .null))
-            }
-            let count = delivery[kind.rawValue]
-            fields += [
-                (key + "allowed", .int(count.allowed)), (key + "refused", .int(count.refused)),
-                (key + "began", .int(count.began)), (key + "changed", .int(count.changed)),
-                (key + "underTwo", .int(count.underTwo)), (key + "ended", .int(count.ended)),
-                (key + "cancelled", .int(count.cancelled)), (key + "noHost", .int(count.noHost)),
-                (key + "writes", .int(count.writes))
-            ]
-        }
-        emit("canvasNavigation", fields)
-    }
-
-    /// The canvas found recognizers UIKit had stranded and replaced them
-    /// (`CanvasView.Coordinator.replaceStrandedRecognizers`) — the freeze, repaired as it happened.
-    /// The ring holds how it came about, so it is saved.
-    /// `notAtRest` is what `WindowEventTap.unquietRecognizers` found under the window just before the
-    /// replacement took the old ones away.
-    func canvasRecognizersReplaced(_ names: [String], notAtRest: [String]) {
-        emit("note", [("text", .str("stranded recognizers replaced: \(names.joined(separator: ","))"))])
-        emit("note", [("text", .str("not at rest when they were found: \(notAtRest.joined(separator: "; "))"))])
-        saveFlight(trigger: "stranded")
     }
 
     // MARK: - Start / stop
@@ -407,8 +337,7 @@ final class ActionRecorder: ObservableObject {
         ensureTap()
         tap?.recordsInFull = true
 
-        writer.append(Self.headerLine(canvasSize: canvasSize, projectName: projectName, tap: tapReport, url: url,
-                                      freezesCaught: AppSettings.standard.canvasRepairCount))
+        writer.append(Self.headerLine(canvasSize: canvasSize, projectName: projectName, tap: tapReport, url: url))
         writtenEvents = 1
 
         // **The recording explains itself now, and that is a defect this closed rather than a
@@ -590,38 +519,20 @@ final class ActionRecorder: ObservableObject {
     /// no `.ended`/`.failed`/`.cancelled` after it. `source` says how we noticed (see
     /// `WindowEventTap.sweepRecognizerStates`), because the three routes have different blind spots
     /// and knowing which one caught a transition tells you whether the ordering is exact.
-    ///
-    /// `touches` is what UIKit says the recognizer is still tracking, for the ones
-    /// `WindowEventTap.followsTouchCount` follows; a line whose `from` and `to` are the same state is
-    /// the count moving on its own.
     func recognizer(_ name: String, object: ObjectIdentifier, from: UIGestureRecognizer.State, to: UIGestureRecognizer.State,
-                    source: String, touches: Int? = nil) {
-        emit("recognizer", Self.recognizerFields(name: name, object: object, from: from, to: to, source: source, touches: touches))
+                    source: String) {
+        emit("recognizer", Self.recognizerFields(name: name, object: object, from: from, to: to, source: source))
     }
 
     static func recognizerFields(name: String, object: ObjectIdentifier, from: UIGestureRecognizer.State,
-                                 to: UIGestureRecognizer.State, source: String, touches: Int?) -> [(String, JSONValue)] {
-        var fields: [(String, JSONValue)] = [
+                                 to: UIGestureRecognizer.State, source: String) -> [(String, JSONValue)] {
+        [
             ("name", .str(name)),
             ("obj", .str(shortObject(object))),
             ("from", .str(stateName(from))),
             ("to", .str(stateName(to))),
             ("src", .str(source))
         ]
-        if let touches { fields.append(("touches", .int(touches))) }
-        return fields
-    }
-
-    /// The answer `CanvasView.Coordinator.gestureRecognizer(_:shouldRequireFailureOf:)` gave, and
-    /// which recognizer it named. A `true` here is the edge that can deadlock the transform gestures,
-    /// so it is recorded on every call rather than only when it changes — the interesting case is a
-    /// `true` pointing at a recognizer that the `recognizer` lines show never terminating.
-    func failureRequirement(asker: String, other: String, answer: Bool) {
-        emit("requireFailure", [
-            ("asker", .str(asker)),
-            ("other", .str(other)),
-            ("answer", .bool(answer))
-        ])
     }
 
     /// Recording only — see `ifRecordingInFull`.
@@ -699,18 +610,9 @@ final class ActionRecorder: ObservableObject {
         return fields
     }
 
-    /// Reports a transition for a recognizer whose source we own — today only
-    /// `StrokeGestureRecognizer`, which assigns `state` directly and so can say *exactly* when it
-    /// changed, ahead of both the action message and the post-event sweep. Routed through the tap so
-    /// the registry's idea of "last state" stays in step and the sweep doesn't repeat it.
-    func recognizerTransition(_ recognizer: UIGestureRecognizer, to newState: UIGestureRecognizer.State, source: String) {
-        tap?.noteTransition(recognizer, to: newState, source: source)
-    }
-
-    /// The name a recognizer is known by in the file. Used by the `requireFailure` hook, which names
-    /// two recognizers rather than logging one's state.
+    /// The name a recognizer is known by in the file.
     func nameFor(_ recognizer: UIGestureRecognizer) -> String {
-        tap?.displayName(for: recognizer) ?? String(describing: type(of: recognizer))
+        WindowEventTap.name(of: recognizer)
     }
 
     /// A free-text marker, for the refusals and outcomes nothing else names.
@@ -826,10 +728,8 @@ final class ActionRecorder: ObservableObject {
 
     /// The first line of a file. `flight` is present only on a flight dump — its trigger, how many
     /// events and how many seconds the ring held — and its absence is what says a file is a recording.
-    /// `freezesCaught` is `CanvasRepairCount` at the moment the file is made — for the flight a repair
-    /// saves, with that repair in it — so two flights from two builds can be set side by side.
     static func headerLine(canvasSize: CGSize?, projectName: String, tap: WindowEventTap.InstallReport?,
-                           url: URL, freezesCaught: Int, flight: [(String, JSONValue)] = []) -> String {
+                           url: URL, flight: [(String, JSONValue)] = []) -> String {
         var fields: [(String, JSONValue)] = [
             ("schema", .int(1)),
             ("app", .str(AppVersion.versionString)),
@@ -847,7 +747,6 @@ final class ActionRecorder: ObservableObject {
             ("startedAt", .str(ISO8601DateFormatter().string(from: Date()))),
             ("mode", .str(flight.isEmpty ? "recording" : "flight"))
         ] + flight
-        fields.append(("canvasFreezesCaught", .int(freezesCaught)))
         if let canvasSize {
             fields.append(("canvasW", .num(canvasSize.width)))
             fields.append(("canvasH", .num(canvasSize.height)))
