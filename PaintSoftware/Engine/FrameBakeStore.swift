@@ -370,7 +370,8 @@ nonisolated final class FrameBakeStore {
     }
 
     func read(_ key: FrameBakeKey) -> ReadResult {
-        PlaybackTrace.span(.storeDecode) { Self.decode(readSnapshot(key)) }
+        FrameStepCensus.decodeStarted(onMain: Thread.isMainThread)
+        return PlaybackTrace.span(.storeDecode) { Self.decode(readSnapshot(key)) }
     }
 
     static func decode(_ snapshot: ReadSnapshot) -> ReadResult {

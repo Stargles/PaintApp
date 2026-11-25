@@ -3088,7 +3088,10 @@ final class CanvasManager: ObservableObject {
     /// reaching it.
     func goToFrame(_ frame: Int) {
         let target = max(0, frame)
-        if target != currentFrame { noteFrameStep() }
+        if target != currentFrame {
+            if !isPlaying { FrameStepCensus.stepped(to: target) }
+            noteFrameStep()
+        }
         currentFrame = target
     }
 

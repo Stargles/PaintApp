@@ -1415,6 +1415,7 @@ struct CanvasView: UIViewRepresentable {
                 // while it is hidden — the host hides the pill from XCUITest like every descendant.
                 + " readout:\(handleAssist.readout?.text ?? "none")"
                 + " readoutbox:\(rotationReadoutBox())"
+                + " step:\(FrameStepCensus.field)"
                 // **The open lasso's size** (TODO (184)): how many points the Freehand lasso holds, or
                 // `none` — the host hides the overlay's layers from XCUITest like every descendant.
                 + " lasso:\(canvasManager.openLasso.map { String($0.points.count) } ?? "none")"
@@ -1631,6 +1632,8 @@ struct CanvasView: UIViewRepresentable {
         /// (the active leaf, and the content of a layer the bake key folds into the tree), so a
         /// `SandwichKey` that has not moved is a `FrameBakeKey` that has not moved.
         private var sandwichFullKey: SandwichKey?
+        /// The frame `sandwichFull` depicts — the M1 probe's (`FrameStepCensus`).
+        private var sandwichFullFrame: Int?
 
         /// The rebuilds of the live picture, one in flight at a time — see `requestSandwichRebuild`.
         private let sandwichRebuilds = LatestWins(queue: Coordinator.sandwichQueue)
@@ -2809,6 +2812,7 @@ struct CanvasView: UIViewRepresentable {
                 if sandwichFull == nil, let left = frameOfTheLastPass, left != canvasManager.currentFrame,
                    let previous = baker.image(atFrame: left) {
                     sandwichFull = UIImage(cgImage: previous, scale: 1, orientation: .up)
+                    sandwichFullFrame = left
                 }
                 return
             }
@@ -2816,6 +2820,7 @@ struct CanvasView: UIViewRepresentable {
                 UIImage(cgImage: image, scale: 1, orientation: .up)
             }
             sandwichFullKey = key
+            sandwichFullFrame = canvasManager.currentFrame
         }
 
         // MARK: The baked frame on screen
@@ -2830,6 +2835,8 @@ struct CanvasView: UIViewRepresentable {
         private var bakedFrameView: WindowSurfaceView?
         /// The picture `bakedFrameView` is showing or drawing; nil while it is down.
         private var bakedFramePicture: UIImage?
+        /// The frame `bakedFramePicture` depicts — the M1 probe's (`FrameStepCensus`).
+        private var bakedFramePictureFrame: Int?
         /// The window the picture was last asked for at, so a moved canvas asks again.
         private var bakedFrameWindow: BakedFrameWindow?
         /// The playhead's frame at the end of the last `updateSandwich` — the frame a step is leaving.
@@ -2870,6 +2877,9 @@ struct CanvasView: UIViewRepresentable {
             }
             let window = currentBakedFrameWindow()
             guard picture !== bakedFramePicture || window != bakedFrameWindow else { return }
+            if picture !== bakedFramePicture {
+                bakedFramePictureFrame = picture === sandwichFull ? sandwichFullFrame : canvasManager.currentFrame
+            }
             bakedFramePicture = picture
             bakedFrameWindow = window
             guard let view = bakedFrameView else { return }
@@ -2911,6 +2921,7 @@ struct CanvasView: UIViewRepresentable {
                 return geometry.window
             }, canPresent: { [weak self] in self?.bakedFramePicture === picture }, finished: { [weak self] shown in
                 guard shown else { return }
+                if let frame = self?.bakedFramePictureFrame { FrameStepCensus.shown(frame: frame) }
                 self?.publishCanvasState()
             })
         }
