@@ -194,7 +194,7 @@ nonisolated final class DecodedFrameRing {
     /// **What the ring's frames are worth to the one budget.** While the animation plays they are
     /// the next frames on screen (`.current`, which only an R1 answer may evict); stopped, they are
     /// kept in case (`.cache`), so a bake of a frame nobody has seen yet can take their room — the
-    /// ring refills ahead of the playhead when play starts (`FrameBaker.fillRingAhead`).
+    /// ring refills ahead of the playhead when play starts (`FrameBaker.topUpRing`).
     var priority: MemoryBudget.Priority {
         get { lock.lock(); defer { lock.unlock() }; return budgetPriority }
         set {

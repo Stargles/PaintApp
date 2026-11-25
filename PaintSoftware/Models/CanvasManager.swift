@@ -3524,7 +3524,7 @@ final class CanvasManager: ObservableObject {
     /// reason: §2.6 forbids a budget only one OS can compute. 96 MiB is eleven frames at the owner's
     /// 2048×1024 and five at 2048², against a `ringLookahead` of 24 — so the ring is expected to be
     /// the binding constraint on the lookahead rather than the other way round, which is what
-    /// `FrameBaker.fillRingAhead`'s walk is written to cope with.
+    /// `FrameBaker.topUpRing`'s walk is written to cope with.
     ///
     /// **Decoded bytes, which is the only budget that means anything here**, and `DecodedFrameRing`
     /// already sums exactly that (`DecodedFrame.byteCount` is the decompressed BGRA). Stage 4e
@@ -3540,7 +3540,7 @@ final class CanvasManager: ObservableObject {
     ///
     /// A frame flip's working set is exactly two decoded frames: the one on screen and the one the
     /// scheduler is fetching. A ring that holds **one** cannot serve it and costs more than no ring
-    /// at all — the tick's own miss inserts and evicts what `fillRingAhead` just placed, so the
+    /// at all — the tick's own miss inserts and evicts what the ring walk (`FrameBaker.topUpRing`) just placed, so the
     /// ahead-decode and the display fight over one slot forever. MEASURED on a two-frame document,
     /// 4096², iPad 9, Release: **1 ring hit against 83 misses**, one `storeDecode` on the display
     /// thread *and* one off it per flip, and RENDER.md §3.5's *"play never decodes on the display

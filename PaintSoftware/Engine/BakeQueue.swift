@@ -193,7 +193,7 @@ struct BakeQueue {
     /// does) and snaps to the far side on the other (frame 11 wraps to 5). That is what playback
     /// does today, and matching it is the whole point of this function.
     ///
-    /// Internal rather than private so `FrameBaker.fillRingAhead` walks the ring's lookahead with
+    /// Internal rather than private so `FrameBaker.ringTargets` walks the ring's lookahead with
     /// this same rule — the frames the ring holds are the frames band 2 bakes, in the order play
     /// will ask for them, wrap included.
     static func step(from frame: Int, low: Int, high: Int,

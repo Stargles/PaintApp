@@ -104,7 +104,12 @@ final class PlaycheckGateUITests: PaintUITestCase {
         let stepStarted = Date()
         back.tap()
         XCTAssertTrue(settled(3), "a step back shows frame 4 whole: \(framesShown(app, canvas, x: 0.8))")
-        print(String(format: "PLAYCHECK timing: one step to a whole frame in %.2f s", Date().timeIntervalSince(stepStarted)))
+        // The app's own clock (`step:`, `FrameStepCensus`): tap to the whole frame on screen. The screen
+        // probe's figure beside it is bounded below by the predicate's polling (about a second) and the
+        // screenshots, so it times the probe more than the step (SCHEDULER_DESIGN.md §0).
+        let census = readField(app, "step:").split(separator: ",")
+        print(String(format: "PLAYCHECK timing: one step to a whole frame in %@ ms (app clock); screen probe %.2f s",
+                     census.count == 4 ? String(census[2]) : "?", Date().timeIntervalSince(stepStarted)))
         forward.tap()
         phase(app, "4 slow steps")
 

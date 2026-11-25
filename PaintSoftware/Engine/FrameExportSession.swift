@@ -66,7 +66,7 @@ nonisolated final class FrameExportFile: Sendable, Equatable, Identifiable {
 // Two more things fall out of that rather than being built. `FrameBakeStore`'s eviction is *"the
 // files farthest from the playhead go first"* and reads the same local `playhead` the loop hands
 // down, so a long export evicts behind itself instead of evicting the frames it is about to reach.
-// And `fillRingAhead` warms the decoded ring ahead of the focus. **Nothing about the interactive
+// And `topUpRing` warms the decoded ring around the focus. **Nothing about the interactive
 // path changed**: the focus is nil unless an export is live, and the artist is not drawing while one
 // is.
 //
