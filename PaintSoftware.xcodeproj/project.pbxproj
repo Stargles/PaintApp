@@ -571,6 +571,7 @@
 		11E1D249BCFC438A51CEAEC3 /* PaintSoftwareUITests/FlightRecorderLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C545E79ABFBE13BE7006F17B /* PaintSoftwareUITests/FlightRecorderLogicTests.swift */; };
 		159091AE940B388FEAA2D077 /* PaintSoftware/Debug/FlightRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F320308DB08FAA6B869C70F /* PaintSoftware/Debug/FlightRecorder.swift */; };
 		D03507556CB8BF99F4221544 /* PaintSoftware/Engine/FrameBakeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 924A8CAFD7AFF42DA5FBEC00 /* PaintSoftware/Engine/FrameBakeStore.swift */; };
+		CF256CF62FAF03EE942D7B6D /* PaintSoftware/Engine/KeptBakes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 007014361AA7A556B51E31D7 /* PaintSoftware/Engine/KeptBakes.swift */; };
 		993BF36E7D0642C76CD6AA08 /* PaintSoftware/Platform/AppleDisk.swift in Sources */ = {isa = PBXBuildFile; fileRef = 683611676A9B4C41CF7011C4 /* PaintSoftware/Platform/AppleDisk.swift */; };
 		63CB9651A2E5D244D30C7F0B /* PaintSoftware/Engine/BakeDiskLimit.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90C82FBDF47B8F1D45B1FA9 /* PaintSoftware/Engine/BakeDiskLimit.swift */; };
 		82E3265B7DB89F98BF071A05 /* PaintSoftware/Engine/BakeFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4503FEC675B779A4246D5B6D /* PaintSoftware/Engine/BakeFile.swift */; };
@@ -1281,6 +1282,7 @@
 		C545E79ABFBE13BE7006F17B /* PaintSoftwareUITests/FlightRecorderLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftwareUITests/FlightRecorderLogicTests.swift; sourceTree = "<group>"; };
 		2F320308DB08FAA6B869C70F /* PaintSoftware/Debug/FlightRecorder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Debug/FlightRecorder.swift; sourceTree = "<group>"; };
 		924A8CAFD7AFF42DA5FBEC00 /* PaintSoftware/Engine/FrameBakeStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameBakeStore.swift; sourceTree = "<group>"; };
+		007014361AA7A556B51E31D7 /* PaintSoftware/Engine/KeptBakes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/KeptBakes.swift; sourceTree = "<group>"; };
 		683611676A9B4C41CF7011C4 /* PaintSoftware/Platform/AppleDisk.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Platform/AppleDisk.swift; sourceTree = "<group>"; };
 		F90C82FBDF47B8F1D45B1FA9 /* PaintSoftware/Engine/BakeDiskLimit.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BakeDiskLimit.swift; sourceTree = "<group>"; };
 		4503FEC675B779A4246D5B6D /* PaintSoftware/Engine/BakeFile.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/BakeFile.swift; sourceTree = "<group>"; };
@@ -1964,6 +1966,7 @@
 				CCD8032FA736F4A401092170 /* PaintSoftware/Debug/DiagnosticPayloadSink.swift */,
 				EAF02DD69718350FAC9BE8F7 /* PaintSoftware/Debug/UncleanExit.swift */,
 				924A8CAFD7AFF42DA5FBEC00 /* PaintSoftware/Engine/FrameBakeStore.swift */,
+				007014361AA7A556B51E31D7 /* PaintSoftware/Engine/KeptBakes.swift */,
 				683611676A9B4C41CF7011C4 /* PaintSoftware/Platform/AppleDisk.swift */,
 				F90C82FBDF47B8F1D45B1FA9 /* PaintSoftware/Engine/BakeDiskLimit.swift */,
 				4503FEC675B779A4246D5B6D /* PaintSoftware/Engine/BakeFile.swift */,
@@ -2679,6 +2682,7 @@
 				62E3C86DA23E260164E3ADF5 /* PaintSoftware/Debug/DiagnosticPayloadSink.swift in Sources */,
 				AE7D7593592302B368AC97E8 /* PaintSoftwareUITests/UncleanExitLogicTests.swift in Sources */,
 				D03507556CB8BF99F4221544 /* PaintSoftware/Engine/FrameBakeStore.swift in Sources */,
+				CF256CF62FAF03EE942D7B6D /* PaintSoftware/Engine/KeptBakes.swift in Sources */,
 				993BF36E7D0642C76CD6AA08 /* PaintSoftware/Platform/AppleDisk.swift in Sources */,
 				63CB9651A2E5D244D30C7F0B /* PaintSoftware/Engine/BakeDiskLimit.swift in Sources */,
 				82E3265B7DB89F98BF071A05 /* PaintSoftware/Engine/BakeFile.swift in Sources */,
