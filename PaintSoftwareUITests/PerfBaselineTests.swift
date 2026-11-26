@@ -5396,22 +5396,16 @@ final class PerfBaselineTests: XCTestCase {
         return got == total ? Data(bytes) : nil
     }
 
-    /// The header `FrameBakeStore` writes, read back by hand. Parsing it here rather than reaching
-    /// into the store is what lets the decode be *split* — `loadDecoded` does the read and the
-    /// decompress in one call, `makeImage()` finishes the job, and which of the three dominates is the
-    /// finding. It was the finding: the `CGImage` build was the largest of them until RENDER stage 4c
-    /// deleted the two copies inside it, and a total would have hidden that in both directions.
-    private static func bakeHeader(_ file: Data) -> (flags: UInt16, width: Int, height: Int,
-                                                     bytesPerRow: Int, rawBytes: Int, payloadBytes: Int)? {
-        guard file.count >= FrameBakeStore.headerBytes else { return nil }
-        func byte(_ offset: Int) -> Int { Int(file[file.startIndex + offset]) }
-        func u16(_ offset: Int) -> UInt16 { UInt16(byte(offset)) | (UInt16(byte(offset + 1)) << 8) }
-        func u32(_ offset: Int) -> Int {
-            var value = 0
-            for i in 0..<4 { value |= byte(offset + i) << (8 * i) }
-            return value
+    /// What one raw LZ4 block of `bytes` stores in: its encoded size, or the bytes themselves when the
+    /// encoder does not shrink them (the store's raw branch).
+    private static func lz4Size(_ bytes: [UInt8]) -> Int {
+        var out = [UInt8](repeating: 0, count: bytes.count)
+        let written = bytes.withUnsafeBufferPointer { source in
+            out.withUnsafeMutableBufferPointer { destination in
+                LZ4Block.encode(UnsafeRawBufferPointer(source), into: UnsafeMutableRawBufferPointer(destination))
+            }
         }
-        return (u16(6), u32(8), u32(12), u32(16), u32(20), u32(24))
+        return written > 0 && written < bytes.count ? written : bytes.count
     }
 
     /// Any 32 bytes that differ per fixture. The store only needs a well-formed digest here; what a
@@ -5456,32 +5450,28 @@ final class PerfBaselineTests: XCTestCase {
 
                     // --- Encode, split into what `store` actually does ---
                     let convert = repeatedTiming(reps) { _ = FrameBakeStore.bgraBytes(image) }
-                    let compress = repeatedTiming(reps) { _ = FrameBakeStore.compress(bgra.bytes) }
+                    let encodeTiles = repeatedTiming(reps) {
+                        _ = BakeFile.encode(bgra: bgra.bytes, width: bgra.width, height: bgra.height, digest: key.digest)
+                    }
                     let wholeStore = repeatedTiming(reps) { _ = store.store(image, for: key) }
 
                     let url = store.url(for: key)
                     let fileBytes = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
                     guard fileBytes > 0, let file = try? Data(contentsOf: url),
-                          let header = Self.bakeHeader(file) else {
+                          let header = BakeFile.Header.parse(file),
+                          let directory = BakeFile.Directory(header: header, data: file.subdata(
+                            in: FrameBakeStore.headerBytes..<header.prefixBytes)) else {
                         return XCTFail("\(label): the store must have written a readable file")
                     }
-                    let compressed = header.flags & FrameBakeStore.flagCompressed != 0
-                    let payloadRange = FrameBakeStore.headerBytes..<(FrameBakeStore.headerBytes + header.payloadBytes)
-                    let payload = file.subdata(in: payloadRange)
+                    let compressed = directory.entries.prefix(header.tileCount(of: .full))
+                        .contains { $0 & FrameBakeStore.rawTileBit == 0 }
+                    let halfBytes = directory.payload(of: .half).count
 
                     // --- Decode, split the same way ---
                     let warmRead = repeatedTiming(reps) { _ = try? Data(contentsOf: url) }
                     let coldRead = repeatedTiming(reps) { _ = Self.uncachedRead(url) }
-                    let decompress = compressed
-                        ? repeatedTiming(reps) { _ = FrameBakeStore.decompress(payload, to: header.rawBytes) }
-                        : (best: 0.0, median: 0.0)
-                    let decodedBytes = compressed
-                        ? (FrameBakeStore.decompress(payload, to: header.rawBytes) ?? Data())
-                        : payload
-                    let frame = DecodedFrame(width: header.width, height: header.height,
-                                             bytesPerRow: header.bytesPerRow, pixels: decodedBytes)
-                    let buildImage = repeatedTiming(reps) { _ = frame.makeImage() }
                     let wholeLoad = repeatedTiming(reps) { _ = store.loadDecoded(key) }
+                    let halfLoad = repeatedTiming(reps) { _ = store.loadDecoded(key, level: .half) }
                     // What the display path actually costs: the frame off disk **and** the image
                     // handed to the layer. Stage 4c split those two so the ring can hold the first
                     // without paying the second, which is why they are timed apart as well as together.
@@ -5491,17 +5481,17 @@ final class PerfBaselineTests: XCTestCase {
                     report("bake store — \(label)", [
                         ("rawBytes", "\(rawBytes)"),
                         ("fileBytes", "\(fileBytes)"),
+                        ("halfLevelBytes", "\(halfBytes)"),
                         ("ratio", String(format: "%.2fx", ratio)),
                         ("branch", compressed ? "lz4" : "raw"),
                         ("encodeWhole", milliseconds(wholeStore.median)),
                         ("encodeConvertToBGRA", milliseconds(convert.median)),
-                        ("encodeLZ4", milliseconds(compress.median)),
-                        ("decodeWhole", milliseconds(wholeLoad.median)),
-                        ("decodeWholeBest", milliseconds(wholeLoad.best)),
+                        ("encodeTilesAndHalve", milliseconds(encodeTiles.median)),
+                        ("decodeFullLevel", milliseconds(wholeLoad.median)),
+                        ("decodeFullLevelBest", milliseconds(wholeLoad.best)),
+                        ("decodeHalfLevel", milliseconds(halfLoad.median)),
                         ("decodeWarmFileRead", milliseconds(warmRead.median)),
                         ("decodeColdFileRead", milliseconds(coldRead.median)),
-                        ("decodeLZ4", milliseconds(decompress.median)),
-                        ("decodeBuildCGImage", milliseconds(buildImage.median)),
                         ("decodeToDisplayableImage", milliseconds(wholeToImage.median)),
                         ("budget24fps", milliseconds(Self.playbackFrameBudget)),
                         ("fitsIn24fps", wholeToImage.median < Self.playbackFrameBudget ? "yes" : "NO"),
@@ -5582,11 +5572,11 @@ final class PerfBaselineTests: XCTestCase {
                     let raw = bgra.bytes
                     let rowStride = bgra.width * 4
 
-                    let plain = FrameBakeStore.compress(raw)?.count ?? raw.count
+                    let plain = Self.lz4Size(raw)
                     let up = Self.rowFiltered(raw, bytesPerRow: rowStride, back: rowStride)
                     let sub = Self.rowFiltered(raw, bytesPerRow: rowStride, back: 4)
-                    let upBytes = FrameBakeStore.compress(up)?.count ?? up.count
-                    let subBytes = FrameBakeStore.compress(sub)?.count ?? sub.count
+                    let upBytes = Self.lz4Size(up)
+                    let subBytes = Self.lz4Size(sub)
 
                     // **One sample each, unlike everywhere else in this file, and deliberately.**
                     // These two are for scale only — the verdict below is the byte counts, which are

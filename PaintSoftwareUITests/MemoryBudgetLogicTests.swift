@@ -851,14 +851,17 @@ final class MemoryBudgetLogicTests: XCTestCase {
         withExtendedLifetime(manager) {}
     }
 
-    /// **The bake queue's own trap, the same way.** `FrameBakeStore.decompress` held a decoded frame
-    /// in `Data(count:)`, which is a `fatalError` when `malloc` answers nil — the owner's iPad logged
+    /// **The bake queue's own trap, the same way.** The decoder held a decoded frame in
+    /// `Data(count:)`, which is a `fatalError` when `malloc` answers nil — the owner's iPad logged
     /// it under `loadDecoded` on 2026-09-08. A frame the host will not give the bytes for is a miss.
     func testAFrameTheHostRefusesTheBytesForIsAMissNotATrap() {
         let signalsBefore = MemoryPressure.signalsDelivered
-        // More than any host will hand out, and a size `malloc` refuses rather than kills for.
-        let refused = FrameBakeStore.decompress(Data([1, 2, 3, 4]), to: Int.max / 4)
-        XCTAssertNil(refused, "a refused allocation is a nil frame")
+        // A header claiming 14 GB of pixels: more than any host will hand out, and a size the budget
+        // refuses before `malloc` is asked.
+        let header = BakeFile.Header(fullWidth: 60_000, fullHeight: 60_000, digest: Data(repeating: 0, count: 32))
+        let directory = BakeFile.Directory(header: header, entries: [])
+        XCTAssertThrowsError(try FrameBakeStore.decodeLevel(directory, level: .full, payload: Data()),
+                             "a refused allocation is a miss, not a frame")
         XCTAssertEqual(MemoryPressure.signalsDelivered, signalsBefore + 1, "…and the seam was told")
     }
 
@@ -1455,19 +1458,17 @@ final class MemoryBudgetLogicTests: XCTestCase {
         XCTAssertEqual(MemoryBudget.shared.inFlightBytes, before, "and charges nothing")
     }
 
-    /// No cache above its share: the ring holds two frames only inside a quarter of the budget, and
+    /// No cache above its share: the ring is a flat quarter of the budget whatever the canvas — and
+    /// at the owner's 5000² that quarter holds eight half-size frames, where it held two full ones — and
     /// source pixels are held to the budget itself.
     func testNoCacheIsSizedAboveItsShareOfTheOneBudget() {
         let budget = 888 * Self.mib
-        let frame5000 = 5000 * 5000 * 4, frame6000 = 6000 * 6000 * 4
-        XCTAssertEqual(CanvasManager.frameRingByteBudget(forFrameBytes: frame5000, sharedBudgetBytes: budget), 2 * frame5000,
-                       "two of the owner's frames fit the ring's quarter")
-        XCTAssertEqual(CanvasManager.frameRingByteBudget(forFrameBytes: frame6000, sharedBudgetBytes: budget), 0,
-                       "two 6000² frames are over the ring's share, and one frame is no ring")
-        for frameBytes in [1 << 20, frame5000, frame6000] {
-            XCTAssertLessThanOrEqual(CanvasManager.frameRingByteBudget(forFrameBytes: frameBytes, sharedBudgetBytes: budget),
-                                     max(budget / CanvasManager.frameRingShareDivisor, CanvasManager.minimumFrameRingByteBudget))
-        }
+        let half5000 = 2500 * 2500 * 4
+        XCTAssertEqual(CanvasManager.frameRingByteBudget(sharedBudgetBytes: budget), budget / 4, "a quarter of the one budget")
+        XCTAssertGreaterThanOrEqual(CanvasManager.frameRingByteBudget(sharedBudgetBytes: budget) / half5000, 6,
+                                    "the owner's scene keeps at least six frames resident at fit zoom")
+        XCTAssertEqual(CanvasManager.frameRingByteBudget(sharedBudgetBytes: 64 * Self.mib),
+                       CanvasManager.minimumFrameRingByteBudget, "and never below the floor")
         XCTAssertEqual(RasterResidency.shared.budgetBytes, MemoryBudget.deviceTotalBytes,
                        "source pixels hold up to the one budget, never a number of their own")
     }

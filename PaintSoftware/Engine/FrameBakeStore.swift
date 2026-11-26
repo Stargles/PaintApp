@@ -449,7 +449,7 @@ nonisolated final class FrameBakeStore {
     /// long as the pixels live — the ring, the screen or a playback tick may hold them after the ring
     /// lets go. `DecodedFrame` rather than `CGImage`: `makeImage()` wraps the same `Data` in a
     /// `CGDataProvider` and copies nothing.
-    private static func decodeLevel(_ directory: BakeFile.Directory, level: BakeLevel, payload: Data) throws -> DecodedFrame {
+    static func decodeLevel(_ directory: BakeFile.Directory, level: BakeLevel, payload: Data) throws -> DecodedFrame {
         let size = directory.header.size(of: level)
         guard let count = pixelByteCount(width: size.width, height: size.height, bytesPerRow: size.width * 4) else {
             throw ReadFailure.invalid

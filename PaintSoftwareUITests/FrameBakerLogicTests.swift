@@ -45,7 +45,7 @@ final class FrameBakerLogicTests: XCTestCase {
     // MARK: - Fixtures
 
     private func makeBaker(_ manager: CanvasManager,
-                           ceiling: Int = FrameBakeStore.defaultByteCeiling,
+                           ceiling: Int = 512 * 1024 * 1024,
                            ringBytes: Int = 32 * 1024 * 1024) -> FrameBaker {
         FrameBaker(manager: manager,
                    store: FrameBakeStore(root: root, byteCeiling: ceiling),
@@ -244,7 +244,7 @@ final class FrameBakerLogicTests: XCTestCase {
         drain(baker)
         let expected = try drawnBytes(baker)
         baker.ring.removeAll()
-        XCTAssertGreaterThan(baker.store.evict(toFree: baker.store.byteCeiling, playhead: 0,
+        XCTAssertGreaterThan(baker.store.evict(toFree: baker.store.ceiling, playhead: 0,
                                              frames: baker.framesByDigest), 0)
         XCTAssertFalse(baker.isBaked(atFrame: 0), "Eviction must not leave the timeline claiming ready.")
         try assertPlaybackRecovery(baker, manager: manager, expected: expected)
@@ -1242,7 +1242,7 @@ final class FrameBakerLogicTests: XCTestCase {
     /// **A ring that holds two frames plays a three-frame loop from memory on every flip** — the
     /// owner's 2026-09-16 playback recording, reduced to its arithmetic.
     ///
-    /// Recording #4 is a 3-frame scene at 4096², where `CanvasManager.frameRingByteBudget` holds
+    /// Recording #4 is a 3-frame scene at 4096², where the ring is sized by the test to hold
     /// exactly two frames, and it reads `ringHit:6 ringMiss:10`, `storeDecode … n=20 main=10`: half
     /// the flips decoded on the display thread. The top-up walked out to distance 2 and inserted
     /// that frame LRU-first, which evicted the frame at distance 1 — the one the next flip needed —
@@ -1318,6 +1318,99 @@ final class FrameBakerLogicTests: XCTestCase {
         XCTAssertNil(baker.picture(atFrame: 2)?.image, "At rest a miss is a miss too: the display thread decodes nothing.")
         XCTAssertNotNil(awaitImage(baker, atFrame: 2), "The answer read lands the frame the step landed on.")
         XCTAssertTrue(baker.ring.contains(stepped.fileName), "And rings it on the way past.")
+    }
+
+    // MARK: - The two levels (SCHEDULER_DESIGN.md §6, S2)
+
+    private func frameSize(_ manager: CanvasManager) -> (width: Int, height: Int) {
+        let composited = manager.liveCompositeSize(of: manager.renderTree(atFrame: 0), canvasSize: CanvasFixture.canvasSize)
+        return (Int(composited.width), Int(composited.height))
+    }
+
+    /// **A canvas at fit zoom is served the half-size frame**: the top-up decodes the half level into the
+    /// ring (under its own name, beside the full one's), and the picture the canvas is handed is half the
+    /// width and height, which is a quarter of the bytes to decode, hold and draw.
+    func testAHalfLevelBakerRingsAndServesTheHalfSizeFrame() throws {
+        let manager = perFrameDocument(frames: 3)
+        let baker = makeBaker(manager)
+        baker.displayLevel = .half
+        baker.noteDocumentChanged()
+        drain(baker)
+        let key = try XCTUnwrap(baker.keyByFrame[0])
+        XCTAssertTrue(baker.ring.contains(key.fileName + BakeLevel.half.ringSuffix), "the half level is what the ring holds")
+        XCTAssertFalse(baker.ring.contains(key.fileName), "and the full one is not decoded at all")
+        let picture = try XCTUnwrap(baker.picture(atFrame: 0))
+        let full = frameSize(manager)
+        XCTAssertEqual(picture.level, .half)
+        XCTAssertEqual([picture.image.width, picture.image.height], [(full.width + 1) / 2, (full.height + 1) / 2])
+    }
+
+    /// **A canvas that needs the full level is never handed the half one**: zoomed in, a half-size picture
+    /// magnified is the soft frame the artist would see for as long as the full level took. A miss keeps
+    /// the picture the canvas has, and the answer read brings the full one.
+    func testAFullLevelIsNeverAnsweredByTheHalfOne() throws {
+        let manager = perFrameDocument(frames: 3)
+        let baker = makeBaker(manager)
+        baker.displayLevel = .half
+        baker.noteDocumentChanged()
+        drain(baker)
+        XCTAssertNotNil(baker.picture(atFrame: 0), "premise: the half level is resident")
+
+        baker.displayLevel = .full
+        XCTAssertNil(baker.picture(atFrame: 0)?.image, "the half level does not stand in for the full one")
+        let arrived = try XCTUnwrap(awaitImage(baker, atFrame: 0))
+        let full = frameSize(manager)
+        XCTAssertEqual([arrived.width, arrived.height], [full.width, full.height])
+        XCTAssertEqual(baker.picture(atFrame: 0)?.level, .full)
+    }
+
+    /// **A full frame already in memory answers a half-level request**: sharper, never less, and no read.
+    func testAHalfRequestIsAnsweredByAResidentFullFrame() throws {
+        let manager = perFrameDocument(frames: 3)
+        let baker = makeBaker(manager)
+        baker.noteDocumentChanged()
+        drain(baker)
+        baker.displayLevel = .half
+        // Settle the walk the level change started before looking, so a half decode cannot muddy it.
+        let picture = try XCTUnwrap(baker.picture(atFrame: 0))
+        XCTAssertEqual(picture.level, .full, "the full frame in the ring is served for a half request")
+    }
+
+    // MARK: - The disk limit
+
+    private struct FixedDisk: DiskSpace {
+        let free: Int
+        func freeBytes(at url: URL) -> Int? { free }
+    }
+
+    /// **The store's ceiling comes from the machine**: `min(4 GiB, 10% of free)` and 2 GiB left over,
+    /// read when the store opens and again when a write fails.
+    func testTheStoresCeilingIsReadFromTheDisk() {
+        let gib = 1024 * 1024 * 1024
+        let saved = BakeDiskLimit.disk
+        defer { BakeDiskLimit.disk = saved }
+        BakeDiskLimit.disk = FixedDisk(free: 20 * gib)
+        XCTAssertEqual(FrameBakeStore(root: root).ceiling, 2 * gib, "10% of 20 GiB")
+        BakeDiskLimit.disk = FixedDisk(free: 100 * gib)
+        let big = root.appendingPathComponent("big", isDirectory: true)
+        XCTAssertEqual(FrameBakeStore(root: big).ceiling, 4 * gib, "capped at 4 GiB")
+        BakeDiskLimit.disk = FixedDisk(free: gib)
+        let full = root.appendingPathComponent("full", isDirectory: true)
+        XCTAssertEqual(FrameBakeStore(root: full).ceiling, 0, "under the 2 GiB reserve nothing is written")
+        XCTAssertEqual(FrameBakeStore(root: full, byteCeiling: 77).ceiling, 77, "a test's own ceiling stands")
+    }
+
+    /// **A write the limit refuses is a bake failure, not a crash — and the limit is read again after it.**
+    func testAFullDiskRefusesTheWriteAndTheLimitIsReadAgain() throws {
+        let gib = 1024 * 1024 * 1024
+        let saved = BakeDiskLimit.disk
+        defer { BakeDiskLimit.disk = saved }
+        BakeDiskLimit.disk = FixedDisk(free: gib)
+        let store = FrameBakeStore(root: root)
+        guard case .failure(.exceedsCeiling(_, let ceiling)) = store.store(pixels: ([UInt8](repeating: 9, count: 64), 4, 4),
+                                                                           for: FrameBakeKey(rawDigest: Data(repeating: 3, count: 32)))
+        else { return XCTFail("a disk under the reserve refuses every bake") }
+        XCTAssertEqual(ceiling, 0)
     }
 
     // MARK: - Bookkeeping

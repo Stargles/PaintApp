@@ -37,7 +37,7 @@ final class FrameBakeStoreLogicTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    private func store(ceiling: Int = FrameBakeStore.defaultByteCeiling) -> FrameBakeStore {
+    private func store(ceiling: Int = 512 * 1024 * 1024) -> FrameBakeStore {
         FrameBakeStore(root: root, byteCeiling: ceiling)
     }
 
@@ -117,53 +117,57 @@ final class FrameBakeStoreLogicTests: XCTestCase {
                        "RGBA read back independently — this is the assertion a channel swap fails.")
     }
 
-    /// The file's own shape: the header is 64 bytes, it starts `PBK1`, and it carries the key it was
-    /// written for.
-    func testTheHeaderIsSixtyFourBytesAndNamesItsKey() {
+    /// The file's own shape: the header is 64 bytes, it starts `PBK2`, it names both levels' sizes, and
+    /// it carries the key it was written for.
+    func testTheHeaderIsSixtyFourBytesAndNamesItsKeyAndBothLevels() throws {
         let key = syntheticKey(0x11)
         let store = store()
-        XCTAssertEqual(store.store(flatColourImage(64), for: key).isSuccess, true)
-        guard let file = try? Data(contentsOf: store.url(for: key)) else { return XCTFail("No file.") }
+        XCTAssertEqual(store.store(flatColourImage(65), for: key).isSuccess, true)
+        let file = try Data(contentsOf: store.url(for: key))
 
         XCTAssertGreaterThan(file.count, FrameBakeStore.headerBytes)
         XCTAssertEqual(Array(file.prefix(4)), FrameBakeStore.magic)
         XCTAssertEqual(file.subdata(in: 32..<64), key.digest, "The digest is the freshness guarantee.")
         XCTAssertEqual(Array(file.subdata(in: 28..<32)), [0, 0, 0, 0], "The reserved word must be zero.")
+        let header = try XCTUnwrap(BakeFile.Header.parse(file))
+        XCTAssertEqual([header.fullWidth, header.fullHeight, header.halfWidth, header.halfHeight], [65, 65, 33, 33],
+                       "an odd edge keeps its last half column")
     }
 
     // MARK: - The raw fallback
 
-    /// **An encoder must never make a file bigger than the pixels.** Noise does not compress, so the
-    /// flag bit comes back clear and the payload is the raw bytes verbatim.
-    func testIncompressibleContentIsStoredRawWithTheFlagClear() {
+    /// **An encoder must never make a file bigger than the pixels.** Noise does not compress, so every
+    /// tile comes back with the raw bit set and the payload is the raw bytes verbatim, for both levels.
+    func testIncompressibleContentIsStoredRawTileForTile() throws {
         let image = noiseImage(256)
         let key = syntheticKey(0x22)
         let store = store()
         guard case .success(let size) = store.store(image, for: key) else { return XCTFail("Write failed.") }
 
-        guard let file = try? Data(contentsOf: store.url(for: key)) else { return XCTFail("No file.") }
-        let flags = UInt16(file[6]) | (UInt16(file[7]) << 8)
-        XCTAssertEqual(flags & FrameBakeStore.flagCompressed, 0,
-                       "Noise does not compress, so the payload must be stored raw.")
-
-        let rawPixels = 256 * 256 * 4
-        XCTAssertEqual(size, FrameBakeStore.headerBytes + rawPixels,
-                       "A raw file is exactly the pixels plus one header — never more.")
+        let file = try Data(contentsOf: store.url(for: key))
+        let header = try XCTUnwrap(BakeFile.Header.parse(file))
+        let directory = try XCTUnwrap(BakeFile.Directory(
+            header: header, data: file.subdata(in: FrameBakeStore.headerBytes..<header.prefixBytes)))
+        XCTAssertTrue(directory.entries.allSatisfy { $0 & FrameBakeStore.rawTileBit != 0 },
+                      "Noise does not compress, so every tile must be stored raw.")
+        XCTAssertEqual(size, header.prefixBytes + 256 * 256 * 4 + 128 * 128 * 4,
+                       "A raw file is the two levels' pixels plus the header and directory — never more.")
         XCTAssertEqual(store.loadDecoded(key)?.makeImage().flatMap { bgra($0) }, bgra(image),
                        "The raw branch must round-trip too, not only the compressed one.")
     }
 
     /// The flat-colour case takes the other branch, which is the branch the whole format choice
     /// rests on.
-    func testFlatColourIsStoredCompressed() {
+    func testFlatColourIsStoredCompressed() throws {
         let key = syntheticKey(0x23)
         let store = store()
         XCTAssertEqual(store.store(flatColourImage(), for: key).isSuccess, true)
-        guard let file = try? Data(contentsOf: store.url(for: key)) else { return XCTFail("No file.") }
-        let flags = UInt16(file[6]) | (UInt16(file[7]) << 8)
-        XCTAssertEqual(flags & FrameBakeStore.flagCompressed, FrameBakeStore.flagCompressed)
-        XCTAssertLessThan(file.count, 512 * 512 * 4,
-                          "Flat colour is runs, and runs are what LZ4 is for.")
+        let file = try Data(contentsOf: store.url(for: key))
+        let header = try XCTUnwrap(BakeFile.Header.parse(file))
+        let directory = try XCTUnwrap(BakeFile.Directory(
+            header: header, data: file.subdata(in: FrameBakeStore.headerBytes..<header.prefixBytes)))
+        XCTAssertTrue(directory.entries.allSatisfy { $0 & FrameBakeStore.rawTileBit == 0 }, "every tile is LZ4")
+        XCTAssertLessThan(file.count, 512 * 512 * 4, "Flat colour is runs, and runs are what LZ4 is for.")
     }
 
     // MARK: - The ratios §3.5 asked to be measured rather than expected
@@ -174,17 +178,129 @@ final class FrameBakeStoreLogicTests: XCTestCase {
     /// The device measurement on the owner's own document is still owed.
     func testTheCompressionRatiosAreMeasuredAndPrinted() {
         func ratio(_ image: CGImage, _ label: String) -> Double {
-            guard let pixels = FrameBakeStore.bgraBytes(image) else { XCTFail("Unreadable."); return 0 }
+            guard let pixels = FrameBakeStore.bgraBytes(image),
+                  let file = BakeFile.encode(bgra: pixels.bytes, width: pixels.width, height: pixels.height,
+                                             digest: Data(repeating: 1, count: 32)) else { XCTFail("Unreadable."); return 0 }
             let raw = pixels.bytes.count
-            let stored = FrameBakeStore.compress(pixels.bytes)?.count ?? raw
-            let ratio = Double(raw) / Double(stored)
-            print("BAKE-RATIO \(label): \(raw) B raw → \(stored) B stored, ratio \(String(format: "%.2f", ratio))x")
+            let ratio = Double(raw) / Double(file.count)
+            print("BAKE-RATIO \(label): \(raw) B raw → \(file.count) B stored (both levels), ratio \(String(format: "%.2f", ratio))x")
             return ratio
         }
         let flat = ratio(flatColourImage(), "flat colour 512²")
         let noise = ratio(noiseImage(), "noise 512²")
         XCTAssertGreaterThan(flat, 2, "Flat colour must at least halve, or the format choice is wrong.")
-        XCTAssertLessThan(noise, 1.05, "Noise must not compress; that is what the raw fallback is for.")
+        XCTAssertLessThan(noise, 0.85, "Noise does not compress, and the half level is a quarter on top: 1 / 1.25 = 0.8.")
+    }
+
+    /// **The disk limit is `min(4 GiB, 10% of free)` with 2 GiB always left**, as a pure function of what
+    /// the volume has: nothing under the reserve, the reserve binding just over it, the tenth in the
+    /// middle, the cap at the top.
+    func testTheDiskLimitFormula() {
+        let gib = 1024 * 1024 * 1024
+        XCTAssertEqual(BakeDiskLimit.bytes(capacity: 2 * gib), 0, "at the reserve there is nothing to give")
+        XCTAssertEqual(BakeDiskLimit.bytes(capacity: gib), 0)
+        XCTAssertEqual(BakeDiskLimit.bytes(capacity: 2 * gib + gib / 10), gib / 10, "just over it, the reserve binds")
+        XCTAssertEqual(BakeDiskLimit.bytes(capacity: 3 * gib), 3 * gib / 10, "a tenth in the middle")
+        XCTAssertEqual(BakeDiskLimit.bytes(capacity: 20 * gib), 2 * gib)
+        XCTAssertEqual(BakeDiskLimit.bytes(capacity: 400 * gib), 4 * gib, "and never more than 4 GiB")
+    }
+
+    // MARK: - Levels and tiles
+
+    /// A frame that spans several tiles in both directions, with an edge tile smaller than the rest.
+    private func gradient(width: Int, height: Int) -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                let i = (y * width + x) * 4
+                bytes[i] = UInt8(truncatingIfNeeded: x * 7 + y)
+                bytes[i + 1] = UInt8(truncatingIfNeeded: y * 5)
+                bytes[i + 2] = UInt8(truncatingIfNeeded: x ^ y)
+                bytes[i + 3] = 255
+            }
+        }
+        return bytes
+    }
+
+    private func decodedLevel(_ store: FrameBakeStore, _ key: FrameBakeKey, _ level: BakeLevel) throws -> DecodedFrame {
+        try XCTUnwrap(store.loadDecoded(key, level: level))
+    }
+
+    /// **The full level is the frame, byte for byte, across tile boundaries** — 1100×700 is 3×2 tiles with
+    /// a 76-wide and a 188-tall edge, so every seam in the scatter is crossed.
+    func testTheFullLevelRoundTripsAcrossTileSeams() throws {
+        let (width, height) = (1100, 700)
+        let pixels = gradient(width: width, height: height)
+        let key = syntheticKey(0x41)
+        let store = store()
+        XCTAssertTrue(store.store(pixels: (pixels, width, height), for: key).isSuccess)
+        let full = try decodedLevel(store, key, .full)
+        XCTAssertEqual([full.width, full.height], [width, height])
+        XCTAssertEqual(Array(full.pixels), pixels)
+    }
+
+    /// **The half level is the 2×2 mean of the full one, to the byte** — computed here independently of
+    /// the encoder's tile loop, on a size whose half is an odd number of pixels (so the last half column
+    /// averages two pixels, not four) and which crosses a half-level tile seam (1100 / 2 = 550 > 512).
+    func testTheHalfLevelIsTheBoxMeanOfTheFullLevel() throws {
+        let (width, height) = (1101, 701)
+        let pixels = gradient(width: width, height: height)
+        let key = syntheticKey(0x42)
+        let store = store()
+        XCTAssertTrue(store.store(pixels: (pixels, width, height), for: key).isSuccess)
+        let half = try decodedLevel(store, key, .half)
+        XCTAssertEqual([half.width, half.height], [551, 351])
+        var wrong = 0
+        for y in 0..<half.height {
+            for x in 0..<half.width {
+                for channel in 0..<4 {
+                    var sum = 0, count = 0
+                    for dy in 0..<2 where y * 2 + dy < height {
+                        for dx in 0..<2 where x * 2 + dx < width {
+                            sum += Int(pixels[((y * 2 + dy) * width + x * 2 + dx) * 4 + channel]); count += 1
+                        }
+                    }
+                    let expected = UInt8((sum + count / 2) / count)
+                    if half.pixels[(y * half.width + x) * 4 + channel] != expected { wrong += 1 }
+                }
+            }
+        }
+        XCTAssertEqual(wrong, 0, "every half pixel is the rounded mean of the pixels under it")
+    }
+
+    /// **A step at fit zoom reads the half level and nothing of the full one**: the bytes the read brings
+    /// in are the half level's tiles, a quarter of the full level's, and the decoded frame is a quarter
+    /// the size. This is the "25 MiB, not 95" of SCHEDULER_DESIGN.md §6 S2, in the units a fast test sees.
+    func testReadingTheHalfLevelTouchesAQuarterOfTheBytes() throws {
+        let (width, height) = (2048, 1024)
+        let key = syntheticKey(0x43)
+        let store = store()
+        XCTAssertTrue(store.store(pixels: (noiseBytes(width * height * 4), width, height), for: key).isSuccess)
+        let half = store.readSnapshot(key, level: .half), full = store.readSnapshot(key, level: .full)
+        XCTAssertEqual(full.payloadBytes, width * height * 4, "premise: noise is stored raw, so the level is its pixels")
+        XCTAssertEqual(half.payloadBytes, width * height, "the half level is a quarter of the full level's bytes")
+        let decoded = try XCTUnwrap(FrameBakeStore.decode(half).frame)
+        XCTAssertEqual(decoded.byteCount, width * height, "and decodes to a quarter of the memory")
+    }
+
+    private func noiseBytes(_ count: Int) -> [UInt8] {
+        var state: UInt64 = 0x2545F4914F6CDD1D
+        return (0..<count).map { _ in
+            state ^= state << 13; state ^= state >> 7; state ^= state << 17
+            return UInt8(truncatingIfNeeded: state >> 24)
+        }
+    }
+
+    /// **A file damaged in the half level only is still rejected whole** — the directory is checked
+    /// against the file's length, so a truncation anywhere is a miss for both levels.
+    func testATruncationInTheHalfLevelRejectsBothLevels() throws {
+        let key = syntheticKey(0x44)
+        let store = store()
+        XCTAssertTrue(store.store(flatColourImage(700), for: key).isSuccess)
+        let file = try Data(contentsOf: store.url(for: key))
+        try file.dropLast(5).write(to: store.url(for: key))
+        XCTAssertNil(store.loadDecoded(key, level: .full))
+        XCTAssertFalse(store.contains(key), "a rejected file is dropped from the inventory")
     }
 
     // MARK: - Rejection is a miss, never a picture
@@ -226,8 +342,8 @@ final class FrameBakeStoreLogicTests: XCTestCase {
         }
         XCTAssertEqual(narrow.totalBytes, each, "A facade opened before the write sees the same authoritative bytes.")
         XCTAssertTrue(narrow.contains(first))
-        XCTAssertLessThanOrEqual(3 * each, narrow.byteCeiling)
-        XCTAssertGreaterThan(4 * each, narrow.byteCeiling, "Premise: the fourth write requires the narrow cap to evict.")
+        XCTAssertLessThanOrEqual(3 * each, narrow.ceiling)
+        XCTAssertGreaterThan(4 * each, narrow.ceiling, "Premise: the fourth write requires the narrow cap to evict.")
         for seed in UInt8(42)...43 {
             XCTAssertTrue(generous.store(image, for: syntheticKey(seed)).isSuccess)
         }
@@ -235,7 +351,7 @@ final class FrameBakeStoreLogicTests: XCTestCase {
         XCTAssertTrue(narrow.store(image, for: newest).isSuccess)
         XCTAssertEqual(generous.totalBytes, 3 * each)
         XCTAssertEqual(narrow.totalBytes, generous.totalBytes)
-        XCTAssertLessThanOrEqual(generous.totalBytes, narrow.byteCeiling)
+        XCTAssertLessThanOrEqual(generous.totalBytes, narrow.ceiling)
         let refused = FrameBakeStore(root: root, byteCeiling: each - 1)
         XCTAssertEqual(refused.totalBytes, generous.totalBytes,
                        "A lower requested cap does not invent a smaller private usage total.")
@@ -339,7 +455,9 @@ final class FrameBakeStoreLogicTests: XCTestCase {
         let key = syntheticKey(0x35), store = store()
         XCTAssertEqual(store.store(flatColourImage(128), for: key).isSuccess, true)
         corrupt(store, key) { file in
-            for i in FrameBakeStore.headerBytes..<file.count { file[i] = 0xFF }
+            // Past the directory: the header, the tile lengths and the file's size all still agree.
+            let payloadStart = BakeFile.Header.parse(file)!.prefixBytes
+            for i in payloadStart..<file.count { file[i] = 0xFF }
         }
         XCTAssertNil(store.loadDecoded(key))
     }
@@ -425,7 +543,7 @@ final class FrameBakeStoreLogicTests: XCTestCase {
                 XCTAssertTrue(bounded.contains(incoming))
                 XCTAssertEqual(bounded.totalBytes, 2 * each)
                 XCTAssertEqual(measuring.totalBytes, 2 * each)
-                XCTAssertLessThanOrEqual(bounded.totalBytes, bounded.byteCeiling)
+                XCTAssertLessThanOrEqual(bounded.totalBytes, bounded.ceiling)
                 let retained = try XCTUnwrap(bounded.loadDecoded(near)?.makeImage())
                 XCTAssertEqual(CanvasFixture.rgbaBytes(retained), CanvasFixture.rgbaBytes(image),
                                "Near drawing survives \(byteCount)-byte truncation, explicit eviction \(explicit).")
@@ -462,7 +580,7 @@ final class FrameBakeStoreLogicTests: XCTestCase {
         XCTAssertTrue(bounded.contains(retained))
         XCTAssertEqual(bounded.totalBytes, each)
         XCTAssertEqual(measuring.totalBytes, each)
-        XCTAssertLessThanOrEqual(bounded.totalBytes, bounded.byteCeiling)
+        XCTAssertLessThanOrEqual(bounded.totalBytes, bounded.ceiling)
         let surviving = try XCTUnwrap(bounded.loadDecoded(retained)?.makeImage())
         XCTAssertEqual(CanvasFixture.rgbaBytes(surviving), CanvasFixture.rgbaBytes(image))
     }
@@ -489,7 +607,7 @@ final class FrameBakeStoreLogicTests: XCTestCase {
         XCTAssertFalse(store.contains(far), "The frame 40 away is the one that goes.")
         XCTAssertTrue(store.contains(near))
         XCTAssertTrue(store.contains(mid))
-        XCTAssertLessThanOrEqual(store.totalBytes, store.byteCeiling)
+        XCTAssertLessThanOrEqual(store.totalBytes, store.ceiling)
     }
 
     /// A file no live frame names is unreachable from this document, so it goes before anything that
