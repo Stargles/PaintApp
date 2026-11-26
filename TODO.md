@@ -31,16 +31,17 @@ Every status report to the owner lists this queue with each item's state, not on
 4. **Open lasso acts as closed for every action** (Nov 17 ruling) — merged Nov 21; reaches the iPad
    with (1). Owner to check: draw an open C, then Copy, To New Layer, Clear.
 5. **Scheduler build, S1–S9 (docs/SCHEDULER_DESIGN.md, merged Nov 25; owner rulings §7 pending).**
-   **S1 built on `tmp/nov25-s1`, awaiting merge**: scheduler core, frame reads as R1 (not held by the touch,
-   never on main), the ring holds the frames either side of a stopped playhead, one presenter that swaps
-   whole picture sets. MEASURED (iPad 9 sim, app clock): tap → whole frame **324–347 ms → 39–94 ms** at
-   5000², **18–27 ms** on the owner's 2048×1024 shape; cause confirmed — the decode began 267 ms after every
-   step (the touch's 250 ms settle). Owner to check on the iPad after install: step and scrub a baked scene.
-   **S3a built on `tmp/nov25-s3a`, awaiting merge**: the R1 producers (layer pictures, scratch, canvas edits, Liquify,
-   fill, shape/text previews) run on the scheduler; seven queues and `Pacing` deleted (Undo storm: 21 → 18 draws, so
-   Pacing no longer earns its place). Gate: playcheck green; R1 `late` 37 (36 whole-layer renders — S3b's job).
-   Owner question: a second tap during a still-rendering fill — hold it until the fill lands, or ignore it (design §6)?
-   Then S2 bake format + zoom-out edges, S3b Undo, S4 memory manager (= (9)),
+   **S1 merged, installed (`fe69a7c0`)**: scheduler core, frame reads as R1, one presenter swapping whole
+   picture sets. MEASURED (iPad 9 sim, app clock): tap → whole frame **324–347 ms → 39–94 ms** at 5000²,
+   **18–27 ms** on 2048×1024. Owner to check on the iPad: step and scrub a baked scene.
+   **S3a merged (`ee72796b`), staged**: R1 producers on the scheduler; seven queues and `Pacing` deleted.
+   Gate green (app peak 1,108 MiB); R1 `late` 37 (whole-layer renders — S3b's job).
+   **Owner ruling Nov 26: a second Fill tap while the first is still drawing is QUEUED** (no pause, lands after the
+   first; never dropped). Today's `waitForFillWork()` on main goes — S3b.
+   **S2 built on `tmp/nov25-s2`, NOT merged — playcheck RED** (app peak 1,169–1,172 at "4 undos" vs 1,165; pre-undo
+   phases +20–35 MiB over main, window draws ~2× main, cause unisolated). Root-causing before merge.
+   Kept bakes live beside the scene in `<Projects>/.bakes.nosync/<id>/` (never shared/backed up) — owner to confirm.
+   Then S3b Undo, S4 memory manager (= (9)),
    S5 three layer pictures, S6 bake throughput, S7 rest, S8 stream, S9 device gate.
    **Owner rulings Nov 25 (design §7):** Q1 — stepping onto a never-drawn frame keeps the previous frame
    until the new one is whole (no soft-first). Q2 — a **Settings option "keep baked frames between launches",
@@ -88,7 +89,7 @@ Every status report to the owner lists this queue with each item's state, not on
    888 MiB measured; unedited layers as two merged pictures); measure the stream before touching it.
 10. Audit follow-through, streaming on the real link, smaller asks below.
 
-## Current — iPad build `c15ad799` installed 2026-11-25, owner check pending (items below name older builds)
+## Current — iPad build `fe69a7c0` installed 2026-11-26 (`ee72796b` staged), owner check pending (items below name older builds)
 
 - [ ] **Owner's check of `2891caad` FAILED (Nov 20, ~22:45, Test1).** Installed build confirmed `2891caad`
   (latest main: includes the window surfaces `d72eb69f` and the To Cross fix `bd52b37f`).
