@@ -178,9 +178,11 @@ final class SchedulerLogicTests: XCTestCase {
         ask(waiting, "stale", ran: { ran.append($0) }, landed: { landed.append($0) })
         waiting.cancel()
         XCTAssertFalse(waiting.isBusy, "a cancelled lane is not waiting for a landing that will never come")
+        settle()
+        XCTAssertEqual(ran, ["blocker"], "the cancelled job never started, though nothing replaced it")
         ask(waiting, "fresh", ran: { ran.append($0) }, landed: { landed.append($0) })
         settle()
-        XCTAssertEqual(ran, ["blocker", "fresh"], "the cancelled job never started")
+        XCTAssertEqual(ran, ["blocker", "fresh"])
         XCTAssertEqual(landed, ["blocker", "fresh"])
     }
 
