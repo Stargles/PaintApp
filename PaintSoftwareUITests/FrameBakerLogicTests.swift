@@ -317,7 +317,7 @@ final class FrameBakerLogicTests: XCTestCase {
         XCTAssertEqual(baker.bakedCount, 0)
         XCTAssertEqual(notifications, 0, "Closed UI consumers must receive no late bake/idle callbacks.")
         XCTAssertNil(baker.exportFocus)
-        XCTAssertNil(baker.image(for: key, atFrame: 0))
+        XCTAssertNil(baker.picture(for: key, atFrame: 0))
         let completed = try XCTUnwrap(baker.store.loadDecoded(key))
         let offset = (5 * completed.width + 5) * 4
         XCTAssertEqual(Array(completed.pixels[offset..<(offset + 4)]), [0, 0, 255, 255],
