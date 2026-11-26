@@ -1,4 +1,5 @@
 import XCTest
+import Accelerate
 import UIKit
 import SwiftUI
 
@@ -271,6 +272,44 @@ final class FrameBakeStoreLogicTests: XCTestCase {
         let flat = [UInt8](repeating: 90, count: 33 * 17 * 4)
         XCTAssertTrue(store.store(pixels: (flat, 33, 17), for: syntheticKey(0x45)).isSuccess)
         XCTAssertTrue(try decodedLevel(store, syntheticKey(0x45), .half).pixels.allSatisfy { $0 == 90 }, "flat colour is exact")
+    }
+
+    /// **The half level is resampled a tile at a time and comes out as the whole-frame resample would**:
+    /// `vImageScale` over the whole frame needs an intermediate as big as 48 MiB at 5000² (nothing asks
+    /// the budget for it), so the encoder scales each tile from its source rows and columns plus a
+    /// margin. A textured frame — every pixel different, so a tile that met its own border without the
+    /// margin shows a seam — is compared against one `vImageScale` of the whole frame, across the
+    /// half level's tile seams in both directions.
+    func testTheHalfLevelAcrossTileSeamsEqualsTheWholeFrameResample() throws {
+        let (width, height) = (1204, 1100)
+        var frame = [UInt8](repeating: 0, count: width * height * 4)
+        var state: UInt32 = 0x9E3779B9
+        for i in stride(from: 0, to: frame.count, by: 4) {
+            state = state &* 1664525 &+ 1013904223
+            let alpha = UInt8(truncatingIfNeeded: 128 + (state >> 24) / 3)
+            for channel in 1...3 { frame[i + channel] = UInt8(truncatingIfNeeded: (state >> (8 * UInt32(channel - 1))) & 0xFF) % (alpha &+ 1) }
+            frame[i] = alpha
+        }
+        let key = syntheticKey(0x4B)
+        let store = store()
+        XCTAssertTrue(store.store(pixels: (frame, width, height), for: key).isSuccess)
+        let half = try decodedLevel(store, key, .half)
+
+        var whole = [UInt8](repeating: 0, count: (width / 2) * (height / 2) * 4)
+        let status: vImage_Error = frame.withUnsafeMutableBytes { source in
+            whole.withUnsafeMutableBytes { destination in
+                var from = vImage_Buffer(data: source.baseAddress, height: vImagePixelCount(height),
+                                         width: vImagePixelCount(width), rowBytes: width * 4)
+                var to = vImage_Buffer(data: destination.baseAddress, height: vImagePixelCount(height / 2),
+                                       width: vImagePixelCount(width / 2), rowBytes: width * 2)
+                return vImageScale_ARGB8888(&from, &to, nil, vImage_Flags(kvImageHighQualityResampling))
+            }
+        }
+        XCTAssertEqual(status, vImage_Error(kvImageNoError))
+        XCTAssertEqual([half.width, half.height], [width / 2, height / 2])
+        var worst = 0
+        for (index, byte) in whole.enumerated() { worst = max(worst, abs(Int(half.pixels[index]) - Int(byte))) }
+        XCTAssertLessThanOrEqual(worst, 1, "tile by tile equals the whole frame at once, seams included")
     }
 
     /// **A step at fit zoom reads the half level and nothing of the full one**: the bytes the read brings

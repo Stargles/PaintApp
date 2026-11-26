@@ -153,10 +153,12 @@ nonisolated enum BakeFile {
 
     // MARK: - Encoding
 
-    /// The whole file for one frame, or nil for a degenerate size. `bgra` is the frame as the store
-    /// writes it (`FrameBakeStore.bgraBytes`): tightly packed, premultiplied, alpha first. Peak
-    /// memory beyond the input is the output, one tile's two buffers and the half level's pixels (a
-    /// quarter of the input).
+    /// The whole file for one frame, or nil for a degenerate size or a resample that failed. `bgra` is
+    /// the frame as the store writes it (`FrameBakeStore.bgraBytes`): tightly packed, premultiplied,
+    /// alpha first. **Peak memory beyond the input is the output and a few tiles' buffers — nothing
+    /// proportional to the canvas**: the half level is resampled one tile at a time (`halfTile`), because
+    /// `vImageScale` needs an intermediate of source height × destination width × 4 bytes (47.7 MiB at
+    /// 5000², MEASURED with `kvImageGetTempBufferSize`) that no budget is asked about.
     static func encode(bgra: [UInt8], width: Int, height: Int, digest: Data) -> Data? {
         guard width > 0, height > 0, width <= maxSide, height <= maxSide,
               bgra.count == width * height * 4, digest.count == 32 else { return nil }
@@ -167,21 +169,26 @@ nonisolated enum BakeFile {
         let side = FrameBakeStore.tileSide
         var tile = [UInt8](repeating: 0, count: side * side * 4)
         var packed = [UInt8](repeating: 0, count: side * side * 4)
-        guard let half = halved(bgra, width: width, height: height,
-                                to: (header.halfWidth, header.halfHeight)) else { return nil }
+        var scratch = [UInt8](repeating: 0, count: (side + 2 * halfMargin) * (side + 2 * halfMargin) * 4)
+        var failed = false
 
         bgra.withUnsafeBufferPointer { full in
-          half.withUnsafeBufferPointer { halfPixels in
             for level in BakeLevel.allCases {
-                let source = level == .full ? full : halfPixels
-                let stride = header.size(of: level).width * 4
                 for index in 0..<header.tileCount(of: level) {
                     let rect = header.tileRect(index, of: level)
                     let count = rect.width * rect.height * 4
                     tile.withUnsafeMutableBufferPointer { destination in
-                        copyRows(from: source, stride: stride, x: rect.x, y: rect.y,
-                                 width: rect.width, height: rect.height, to: destination)
+                        switch level {
+                        case .full:
+                            copyRows(from: full, stride: width * 4, x: rect.x, y: rect.y,
+                                     width: rect.width, height: rect.height, to: destination)
+                        case .half:
+                            failed = failed || !halfTile(of: full, width: width, height: height, rect: rect,
+                                                         halfSize: (header.halfWidth, header.halfHeight),
+                                                         scratch: &scratch, into: destination)
+                        }
                     }
+                    if failed { return }
                     let written = tile.withUnsafeBufferPointer { raw in
                         packed.withUnsafeMutableBufferPointer { out in
                             LZ4Block.encode(UnsafeRawBufferPointer(start: raw.baseAddress, count: count),
@@ -199,8 +206,8 @@ nonisolated enum BakeFile {
                     }
                 }
             }
-          }
         }
+        guard !failed else { return nil }
         var file = header.encoded()
         file.reserveCapacity(header.prefixBytes + payload.count)
         for entry in entries { file.appendLE(entry) }
@@ -216,23 +223,44 @@ nonisolated enum BakeFile {
         }
     }
 
-    /// The frame at half the width and height, premultiplied BGRA, tightly packed — `vImageScale`'s
-    /// high-quality resample (Lanczos), at the speed of Accelerate in every build configuration. A
-    /// hand-written box filter was exact and took 3.5 s a 4096² frame in a Debug build, where the
-    /// playcheck gate and every test run. Premultiplied pixels scale per channel without an
-    /// unpremultiply round trip; an odd edge is resampled like any other.
-    private static func halved(_ bgra: [UInt8], width: Int, height: Int, to half: (width: Int, height: Int)) -> [UInt8]? {
-        var out = [UInt8](repeating: 0, count: half.width * half.height * 4)
-        let status: vImage_Error = bgra.withUnsafeBytes { source in
-            out.withUnsafeMutableBytes { destination in
-                var from = vImage_Buffer(data: UnsafeMutableRawPointer(mutating: source.baseAddress),
-                                         height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: width * 4)
-                var to = vImage_Buffer(data: destination.baseAddress, height: vImagePixelCount(half.height),
-                                       width: vImagePixelCount(half.width), rowBytes: half.width * 4)
-                return vImageScale_ARGB8888(&from, &to, nil, vImage_Flags(kvImageHighQualityResampling))
+    /// Half-level pixels resampled beyond a tile on each side, so a tile's edge is made from the same
+    /// neighbours the whole frame's resample would use: `vImageScale`'s Lanczos kernel reaches 3
+    /// destination pixels at most, and a tile that met its own border without them would show a seam.
+    static let halfMargin = 8
+
+    /// One tile of the half level — the frame at half the width and height, premultiplied BGRA —
+    /// resampled from the source rows and columns it covers plus `halfMargin` each side (clamped to
+    /// the frame), at the speed of Accelerate in every build configuration (a hand-written box filter
+    /// was exact and took 3.5 s a 4096² frame in a Debug build, where the playcheck gate and every test
+    /// run). The scale is exactly 2:1 except at an odd last row or column, which keeps its own pixels
+    /// like any other edge. `scratch` holds the margin-wide result; `vImageScale`'s own intermediate is
+    /// that region's height × width × 4 bytes, about 2 MiB.
+    private static func halfTile(of bgra: UnsafeBufferPointer<UInt8>, width: Int, height: Int,
+                                 rect: (x: Int, y: Int, width: Int, height: Int),
+                                 halfSize half: (width: Int, height: Int),
+                                 scratch: inout [UInt8], into destination: UnsafeMutableBufferPointer<UInt8>) -> Bool {
+        guard let source = bgra.baseAddress, let out = destination.baseAddress else { return false }
+        let dx0 = max(0, rect.x - halfMargin), dx1 = min(half.width, rect.x + rect.width + halfMargin)
+        let dy0 = max(0, rect.y - halfMargin), dy1 = min(half.height, rect.y + rect.height + halfMargin)
+        let sx0 = 2 * dx0, sx1 = min(width, 2 * dx1), sy0 = 2 * dy0, sy1 = min(height, 2 * dy1)
+        let dw = dx1 - dx0, dh = dy1 - dy0
+        guard dw > 0, dh > 0, sx1 > sx0, sy1 > sy0, scratch.count >= dw * dh * 4 else { return false }
+        let status: vImage_Error = scratch.withUnsafeMutableBytes { region in
+            var from = vImage_Buffer(data: UnsafeMutableRawPointer(mutating: source + (sy0 * width + sx0) * 4),
+                                     height: vImagePixelCount(sy1 - sy0), width: vImagePixelCount(sx1 - sx0),
+                                     rowBytes: width * 4)
+            var to = vImage_Buffer(data: region.baseAddress, height: vImagePixelCount(dh),
+                                   width: vImagePixelCount(dw), rowBytes: dw * 4)
+            return vImageScale_ARGB8888(&from, &to, nil, vImage_Flags(kvImageHighQualityResampling))
+        }
+        guard status == kvImageNoError else { return false }
+        scratch.withUnsafeBytes { region in
+            for row in 0..<rect.height {
+                memcpy(out + row * rect.width * 4,
+                       region.baseAddress! + ((rect.y - dy0 + row) * dw + (rect.x - dx0)) * 4, rect.width * 4)
             }
         }
-        return status == kvImageNoError ? out : nil
+        return true
     }
 
     // MARK: - Decoding
