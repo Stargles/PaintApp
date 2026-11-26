@@ -39,6 +39,7 @@ final class ZoomEdgesUITests: PaintUITestCase {
         // The reduced whole picture is made once the frame has been still for 0.3 s; the slowed draw
         // of the window surface itself is long over by the time a pinch is made.
         Thread.sleep(forTimeInterval: 6)
+        print("ZOOMEDGES picture at fit: \(readField(app, "picture:"))")
         let fit = paperFraction(app, canvas)
         XCTAssertTrue(framesShown(app, canvas).allSatisfy { $0 == "0" }, "PREMISE: the frame's ink shows at fit")
         XCTAssertGreaterThan(fit.fraction, 0.95, "PREMISE: at fit the visible paper is all paper: \(fit.grey)")

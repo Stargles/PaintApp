@@ -1901,6 +1901,7 @@ struct CanvasView: UIViewRepresentable {
                 }
                 landHeldFrame(key: nil, pictureIsCurrent: true)
                 paperIsNowPaintedBy(false)
+                updateDisengagedUnderPicture(belowView)
                 // Before the early return below, which is reached on every pass once the canvas has
                 // settled onto Core Animation's path: a live mask installed while the sandwich was
                 // engaged has to come off when it disengages, and a stroke that began while it was
@@ -2925,6 +2926,62 @@ struct CanvasView: UIViewRepresentable {
             underPicture = UIImage(cgImage: reduced, scale: 1, orientation: .up)
             underPictureKey = key
             applySandwichPresentationNow()
+        }
+
+        /// The frame as the baker holds it, reduced, and the baker's key it was made for: the picture
+        /// under the layer hosts while they draw the canvas themselves (the ordinary scene — no blend
+        /// mode, mask or grade — is on that path at rest).
+        private var disengagedUnder: (key: FrameBakeKey, image: UIImage)?
+        private var disengagedUnderWork: (item: DispatchWorkItem, key: FrameBakeKey)?
+
+        /// **The whole-frame picture under the window surfaces when the hosts draw the canvas** — the
+        /// owner's pinch out on his scene: every host draws through a window surface that holds the
+        /// screen as of its last draw, so what a pinch out reveals has nothing in it until each redraw
+        /// lands. This is the baked frame, reduced, in `belowView` under all of them. It is shown only
+        /// while it is exactly what the hosts draw — the baker's key for the frame has not moved and no
+        /// stroke is live — because the hosts are transparent and an eraser, an undo or an edit would
+        /// otherwise show the old ink through the gap.
+        private func updateDisengagedUnderPicture(_ belowView: UIImageView) {
+            func hide() {
+                if belowView.image != nil { belowView.image = nil }
+                if !belowView.isHidden { belowView.isHidden = true }
+            }
+            let baker = canvasManager.frameBaker
+            guard !isSandwichStrokeLive, !canvasManager.strokeIsLive, !canvasManager.framesAreFlipping,
+                  let key = baker.currentKey(atFrame: canvasManager.currentFrame) else { return hide() }
+            if let held = disengagedUnder, held.key == key {
+                if belowView.layer.magnificationFilter != .linear { belowView.layer.magnificationFilter = .linear }
+                if belowView.image !== held.image { belowView.image = held.image }
+                if belowView.isHidden { belowView.isHidden = false }
+                return
+            }
+            hide()
+            if let pending = disengagedUnderWork {
+                if pending.key == key { return }
+                pending.item.cancel()
+                disengagedUnderWork = nil
+            }
+            let frame = canvasManager.currentFrame
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, let baker = self.canvasManager.frameBaker as FrameBaker?,
+                      baker.currentKey(atFrame: self.canvasManager.currentFrame) == key,
+                      let resident = baker.residentPicture(atFrame: frame) else {
+                    self?.disengagedUnderWork = nil
+                    return
+                }
+                let image = resident.image
+                Coordinator.bakedFrameQueue.async {
+                    let reduced = Coordinator.reduced(image, toLongestSide: Coordinator.underPictureSide)
+                    DispatchQueue.main.async {
+                        self.disengagedUnderWork = nil
+                        guard let reduced else { return }
+                        self.disengagedUnder = (key, UIImage(cgImage: reduced, scale: 1, orientation: .up))
+                        self.applySandwichPresentationNow()
+                    }
+                }
+            }
+            disengagedUnderWork = (work, key)
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.underPictureSettle, execute: work)
         }
 
         private func dropUnderPicture() {
