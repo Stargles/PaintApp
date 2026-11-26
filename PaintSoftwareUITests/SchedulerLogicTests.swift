@@ -250,6 +250,34 @@ final class SchedulerLogicTests: XCTestCase {
         XCTAssertEqual(seen, [0, 1, 2, 3], "all four ran, one at a time, in the order asked, before the wait returned")
     }
 
+    /// A job of the group still waiting for a slot keeps the wait going — not only a running one.
+    func testWaitingUntilAGroupIsIdleAlsoWaitsForAJobNotYetStarted() {
+        let real = Scheduler(executor: AppleExecutor(), machine: VirtualExecutor.Machine(fastCores: 2, efficientCores: 4))
+        let slots = LanePolicy.capacity(of: .answer, touchHeld: false, answersRunning: 0,
+                                        machine: VirtualExecutor.Machine(fastCores: 2, efficientCores: 4))
+        let release = DispatchSemaphore(value: 0)
+        for index in 0..<slots {
+            real.submit(Job(key: JobKey("hog", index), jobClass: .answer, name: "hog",
+                            work: { _ in release.wait(); return 0 }, land: { _ in }))
+        }
+        let lock = NSLock()
+        var ran = false, returned = false
+        real.submit(Job(key: JobKey("fill"), jobClass: .answer, name: "fill", group: "lane",
+                        work: { _ in lock.lock(); ran = true; lock.unlock(); return 0 }, land: { _ in }))
+        let waiter = expectation(description: "the wait returned")
+        DispatchQueue.global().async {
+            real.waitUntilIdle(group: "lane")
+            lock.lock(); returned = true; let didRun = ran; lock.unlock()
+            XCTAssertTrue(didRun, "the wait returned before the waiting job ran")
+            waiter.fulfill()
+        }
+        Thread.sleep(forTimeInterval: 0.15)
+        lock.lock(); let early = returned; lock.unlock()
+        XCTAssertFalse(early, "every slot is held, so the group's job has not started and the wait must not return")
+        for _ in 0..<slots { release.signal() }
+        wait(for: [waiter], timeout: 5)
+    }
+
     // MARK: - Lanes by machine (rule 6)
 
     func testLanesFollowTheMachine() {
