@@ -40,6 +40,7 @@ final class ZoomEdgesUITests: PaintUITestCase {
         // of the window surface itself is long over by the time a pinch is made.
         Thread.sleep(forTimeInterval: 6)
         let fit = paperFraction(app, canvas)
+        XCTAssertTrue(framesShown(app, canvas).allSatisfy { $0 == "0" }, "PREMISE: the frame's ink shows at fit")
         XCTAssertGreaterThan(fit.fraction, 0.95, "PREMISE: at fit the visible paper is all paper: \(fit.grey)")
 
         try pinchAboveTheDock(app, canvas, scale: 3)
@@ -52,5 +53,13 @@ final class ZoomEdgesUITests: PaintUITestCase {
         print("ZOOMEDGES xform zoomed \(zoomed) -> out \(readField(app, "xform:")); paper fraction \(revealed.fraction); grey \(revealed.grey.prefix(6))")
         XCTAssertGreaterThan(revealed.fraction, 0.95,
                              "every canvas pixel the pinch out revealed shows the frame, not the margin: \(revealed.grey)")
+        // Paper is white whether or not the frame is drawn there, so the probe that matters reads the
+        // frame's own ink: every visible layer's stroke, at two columns, in the first frame after the pinch.
+        for x in [0.5, 0.8] {
+            let shown = framesShown(app, canvas, x: x)
+            XCTAssertFalse(shown.isEmpty, "PREMISE: layer rows are above the dock")
+            XCTAssertTrue(shown.allSatisfy { $0 == "0" },
+                          "the revealed canvas shows the frame's ink at column \(x) before the window redraw lands: \(shown)")
+        }
     }
 }
