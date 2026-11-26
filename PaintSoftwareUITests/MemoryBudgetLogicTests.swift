@@ -1458,13 +1458,13 @@ final class MemoryBudgetLogicTests: XCTestCase {
         XCTAssertEqual(MemoryBudget.shared.inFlightBytes, before, "and charges nothing")
     }
 
-    /// No cache above its share: the ring is a flat fifth of the budget whatever the canvas — and
-    /// at the owner's 5000² that fifth holds seven half-size frames, where it held two full ones — and
+    /// No cache above its share: the ring is a flat sixth of the budget whatever the canvas — and
+    /// at the owner's 5000² that sixth holds six half-size frames, where it held two full ones — and
     /// source pixels are held to the budget itself.
     func testNoCacheIsSizedAboveItsShareOfTheOneBudget() {
         let budget = 888 * Self.mib
         let half5000 = 2500 * 2500 * 4
-        XCTAssertEqual(CanvasManager.frameRingByteBudget(sharedBudgetBytes: budget), budget / 5, "a fifth of the one budget")
+        XCTAssertEqual(CanvasManager.frameRingByteBudget(sharedBudgetBytes: budget), budget / 6, "a sixth of the one budget")
         XCTAssertGreaterThanOrEqual(CanvasManager.frameRingByteBudget(sharedBudgetBytes: budget) / half5000, 6,
                                     "the owner's scene keeps at least six frames resident at fit zoom")
         XCTAssertEqual(CanvasManager.frameRingByteBudget(sharedBudgetBytes: 64 * Self.mib),
