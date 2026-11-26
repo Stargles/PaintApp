@@ -1,4 +1,5 @@
 import Foundation
+import Accelerate
 
 /// **Which size of a baked frame** — SCHEDULER_DESIGN.md §3, "Tiers": every bake file holds the frame
 /// twice, whole and at half the width and height, so a step at fit zoom decodes a quarter of the bytes
@@ -154,9 +155,8 @@ nonisolated enum BakeFile {
 
     /// The whole file for one frame, or nil for a degenerate size. `bgra` is the frame as the store
     /// writes it (`FrameBakeStore.bgraBytes`): tightly packed, premultiplied, alpha first. Peak
-    /// memory beyond the input is the output and one tile's two buffers: the half level is filtered
-    /// tile by tile from the full pixels and never held whole.
-    @_optimize(speed)
+    /// memory beyond the input is the output, one tile's two buffers and the half level's pixels (a
+    /// quarter of the input).
     static func encode(bgra: [UInt8], width: Int, height: Int, digest: Data) -> Data? {
         guard width > 0, height > 0, width <= maxSide, height <= maxSide,
               bgra.count == width * height * 4, digest.count == 32 else { return nil }
@@ -167,21 +167,20 @@ nonisolated enum BakeFile {
         let side = FrameBakeStore.tileSide
         var tile = [UInt8](repeating: 0, count: side * side * 4)
         var packed = [UInt8](repeating: 0, count: side * side * 4)
+        guard let half = halved(bgra, width: width, height: height,
+                                to: (header.halfWidth, header.halfHeight)) else { return nil }
 
-        bgra.withUnsafeBufferPointer { source in
+        bgra.withUnsafeBufferPointer { full in
+          half.withUnsafeBufferPointer { halfPixels in
             for level in BakeLevel.allCases {
+                let source = level == .full ? full : halfPixels
+                let stride = header.size(of: level).width * 4
                 for index in 0..<header.tileCount(of: level) {
                     let rect = header.tileRect(index, of: level)
                     let count = rect.width * rect.height * 4
                     tile.withUnsafeMutableBufferPointer { destination in
-                        switch level {
-                        case .full:
-                            copyRows(from: source, stride: width * 4, x: rect.x, y: rect.y,
-                                     width: rect.width, height: rect.height, to: destination)
-                        case .half:
-                            halve(from: source, fullWidth: width, fullHeight: height,
-                                  x: rect.x, y: rect.y, width: rect.width, height: rect.height, to: destination)
-                        }
+                        copyRows(from: source, stride: stride, x: rect.x, y: rect.y,
+                                 width: rect.width, height: rect.height, to: destination)
                     }
                     let written = tile.withUnsafeBufferPointer { raw in
                         packed.withUnsafeMutableBufferPointer { out in
@@ -200,6 +199,7 @@ nonisolated enum BakeFile {
                     }
                 }
             }
+          }
         }
         var file = header.encoded()
         file.reserveCapacity(header.prefixBytes + payload.count)
@@ -208,7 +208,6 @@ nonisolated enum BakeFile {
         return file
     }
 
-    @_optimize(speed)
     private static func copyRows(from source: UnsafeBufferPointer<UInt8>, stride: Int, x: Int, y: Int,
                                  width: Int, height: Int, to destination: UnsafeMutableBufferPointer<UInt8>) {
         guard let src = source.baseAddress, let dst = destination.baseAddress else { return }
@@ -217,36 +216,23 @@ nonisolated enum BakeFile {
         }
     }
 
-    /// One tile of the half level: each half pixel is the mean of the (up to four) full pixels under
-    /// it, per channel. The pixels are premultiplied, so the mean of premultiplied values is the
-    /// premultiplied mean — no unpremultiply round trip. An odd edge averages the pixels it has.
-    @_optimize(speed)
-    private static func halve(from source: UnsafeBufferPointer<UInt8>, fullWidth: Int, fullHeight: Int,
-                              x: Int, y: Int, width: Int, height: Int,
-                              to destination: UnsafeMutableBufferPointer<UInt8>) {
-        guard let src = source.baseAddress, let dst = destination.baseAddress else { return }
-        for row in 0..<height {
-            let fy = (y + row) * 2
-            let rows = min(2, fullHeight - fy)
-            for column in 0..<width {
-                let fx = (x + column) * 2
-                let columns = min(2, fullWidth - fx)
-                let count = rows * columns
-                var sums: (Int, Int, Int, Int) = (0, 0, 0, 0)
-                for dy in 0..<rows {
-                    for dx in 0..<columns {
-                        let p = src + ((fy + dy) * fullWidth + fx + dx) * 4
-                        sums.0 += Int(p[0]); sums.1 += Int(p[1]); sums.2 += Int(p[2]); sums.3 += Int(p[3])
-                    }
-                }
-                let out = dst + (row * width + column) * 4
-                let half = count / 2
-                out[0] = UInt8((sums.0 + half) / count)
-                out[1] = UInt8((sums.1 + half) / count)
-                out[2] = UInt8((sums.2 + half) / count)
-                out[3] = UInt8((sums.3 + half) / count)
+    /// The frame at half the width and height, premultiplied BGRA, tightly packed — `vImageScale`'s
+    /// high-quality resample (Lanczos), at the speed of Accelerate in every build configuration. A
+    /// hand-written box filter was exact and took 3.5 s a 4096² frame in a Debug build, where the
+    /// playcheck gate and every test run. Premultiplied pixels scale per channel without an
+    /// unpremultiply round trip; an odd edge is resampled like any other.
+    private static func halved(_ bgra: [UInt8], width: Int, height: Int, to half: (width: Int, height: Int)) -> [UInt8]? {
+        var out = [UInt8](repeating: 0, count: half.width * half.height * 4)
+        let status: vImage_Error = bgra.withUnsafeBytes { source in
+            out.withUnsafeMutableBytes { destination in
+                var from = vImage_Buffer(data: UnsafeMutableRawPointer(mutating: source.baseAddress),
+                                         height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: width * 4)
+                var to = vImage_Buffer(data: destination.baseAddress, height: vImagePixelCount(half.height),
+                                       width: vImagePixelCount(half.width), rowBytes: half.width * 4)
+                return vImageScale_ARGB8888(&from, &to, nil, vImage_Flags(kvImageHighQualityResampling))
             }
         }
+        return status == kvImageNoError ? out : nil
     }
 
     // MARK: - Decoding
@@ -254,7 +240,6 @@ nonisolated enum BakeFile {
     /// Decodes `level` into `destination`, tightly packed (`width * 4` a row). `payload` is exactly
     /// `directory.payload(of: level)` — the level's bytes and no others. False on any tile that does
     /// not decode to its size.
-    @_optimize(speed)
     static func decode(level: BakeLevel, directory: Directory, payload: Data,
                        into destination: UnsafeMutableRawBufferPointer) -> Bool {
         let header = directory.header
@@ -290,7 +275,6 @@ nonisolated enum BakeFile {
         return true
     }
 
-    @_optimize(speed)
     private static func scatter(_ tile: UnsafeRawBufferPointer, rect: (x: Int, y: Int, width: Int, height: Int),
                                 stride: Int, to base: UnsafeMutableRawPointer) {
         guard let src = tile.baseAddress else { return }

@@ -292,9 +292,10 @@ nonisolated final class FrameBakeStore {
                playhead: Int = 0,
                frames: [String: Set<Int>] = [:]) -> Result<Int, WriteFailure> {
         guard key.digest.count == 32 else { return .failure(.malformedKey) }
-        // The file's bytes are at most the frame's own (a tile LZ4 does not shrink goes down raw),
-        // admitted for the encode; the half level is filtered a tile at a time and never held whole.
-        guard let encoding = MemoryBudget.shared.admit(pixels.bytes.count) else { return .failure(.notAdmitted) }
+        // The file's bytes are at most the frame's own (a tile LZ4 does not shrink goes down raw) and
+        // the half level's pixels are held while it is cut into tiles: both admitted for the encode.
+        guard let encoding = MemoryBudget.shared.admit(pixels.bytes.count + pixels.bytes.count / 4 + 4096)
+        else { return .failure(.notAdmitted) }
         defer { encoding.release() }
         guard let file = BakeFile.encode(bgra: pixels.bytes, width: pixels.width, height: pixels.height,
                                          digest: key.digest) else { return .failure(.unreadableImage) }

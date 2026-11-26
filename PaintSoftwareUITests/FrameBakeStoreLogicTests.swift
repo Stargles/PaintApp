@@ -239,33 +239,38 @@ final class FrameBakeStoreLogicTests: XCTestCase {
         XCTAssertEqual(Array(full.pixels), pixels)
     }
 
-    /// **The half level is the 2×2 mean of the full one, to the byte** — computed here independently of
-    /// the encoder's tile loop, on a size whose half is an odd number of pixels (so the last half column
-    /// averages two pixels, not four) and which crosses a half-level tile seam (1100 / 2 = 550 > 512).
-    func testTheHalfLevelIsTheBoxMeanOfTheFullLevel() throws {
+    /// **The half level is the frame at half size**, across a half-level tile seam (1101 / 2 = 551 > 512)
+    /// and with an odd edge: a smooth, non-wrapping ramp comes back as the same ramp at half the sampling,
+    /// within the resampler's few levels, and flat colour comes back exactly.
+    func testTheHalfLevelIsTheFrameAtHalfSize() throws {
         let (width, height) = (1101, 701)
-        let pixels = gradient(width: width, height: height)
+        var ramp = [UInt8](repeating: 255, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                let i = (y * width + x) * 4
+                ramp[i] = UInt8(x * 255 / width); ramp[i + 1] = UInt8(y * 255 / height)
+                ramp[i + 2] = UInt8((x + y) * 255 / (width + height)); ramp[i + 3] = 255
+            }
+        }
         let key = syntheticKey(0x42)
         let store = store()
-        XCTAssertTrue(store.store(pixels: (pixels, width, height), for: key).isSuccess)
+        XCTAssertTrue(store.store(pixels: (ramp, width, height), for: key).isSuccess)
         let half = try decodedLevel(store, key, .half)
         XCTAssertEqual([half.width, half.height], [551, 351])
-        var wrong = 0
-        for y in 0..<half.height {
-            for x in 0..<half.width {
+        var worst = 0
+        for y in 4..<(half.height - 4) {
+            for x in 4..<(half.width - 4) {
                 for channel in 0..<4 {
-                    var sum = 0, count = 0
-                    for dy in 0..<2 where y * 2 + dy < height {
-                        for dx in 0..<2 where x * 2 + dx < width {
-                            sum += Int(pixels[((y * 2 + dy) * width + x * 2 + dx) * 4 + channel]); count += 1
-                        }
-                    }
-                    let expected = UInt8((sum + count / 2) / count)
-                    if half.pixels[(y * half.width + x) * 4 + channel] != expected { wrong += 1 }
+                    let expected = Int(ramp[((y * 2) * width + x * 2) * 4 + channel])
+                    worst = max(worst, abs(Int(half.pixels[(y * half.width + x) * 4 + channel]) - expected))
                 }
             }
         }
-        XCTAssertEqual(wrong, 0, "every half pixel is the rounded mean of the pixels under it")
+        XCTAssertLessThanOrEqual(worst, 3, "the half level samples the same ramp")
+
+        let flat = [UInt8](repeating: 90, count: 33 * 17 * 4)
+        XCTAssertTrue(store.store(pixels: (flat, 33, 17), for: syntheticKey(0x45)).isSuccess)
+        XCTAssertTrue(try decodedLevel(store, syntheticKey(0x45), .half).pixels.allSatisfy { $0 == 90 }, "flat colour is exact")
     }
 
     /// **A step at fit zoom reads the half level and nothing of the full one**: the bytes the read brings
