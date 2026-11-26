@@ -10,11 +10,16 @@ From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
 
 ## Resume here — November 21, 2026
 
-0. **Running (Nov 25).** `c15ad799` (one memory budget + the canvas-freeze fix) is on the iPad, gate green,
-   owner's check pending. In flight: `tmp/nov25-sched` — Opus design page `docs/SCHEDULER_DESIGN.md`
-   (stage 2 + memory manager, TODO queue (5) and (9)); root reviews it before any code. `~/PaintWork/rel.sh`
-   = gate + sign + stage for a `PaintApp-rel` worktree at main. He will AirDrop Test1 later; make the gate
-   run on it. Root stays high level (AGENTS.md).
+0. **Running (Nov 26).** iPad has `c15ad799` (budget + freeze fix); `fe69a7c0` (S1: frame steps instant,
+   whole-frame presenter) is gated green and STAGED in `resign_state` — installs itself when the app is closed.
+   In flight, ONE worker at a time (pacing; two in parallel hit the 5-hour limit): **S3a** on
+   `tmp/nov25-s3a` (R1 queues onto the scheduler; was mutation-testing, resumed). **S2** on `tmp/nov25-s2`
+   is paused mid-build (bake format v2 + zoom-out edges + "keep baked frames" setting, default off, stored in
+   the scene folder) — resume it with SendMessage after S3a reports, or a fresh Sonnet from its NOTES.md.
+   Then S3b, S4–S9 (docs/SCHEDULER_DESIGN.md §6). Release script: `~/PaintWork/rel.sh` (needs worktree
+   `~/PaintWork/PaintApp-rel` on `tmp/rel` at main; gates, signs, stages, cleans up). Owner checks pending:
+   Play on Test1, open lasso, freezes, brushstroke flicker. Test1 AirDrop still to come. Root stays high
+   level (AGENTS.md); an idle >1 h session re-reads its whole context, so avoid long idle workers.
 1. **Nov 21 plan, in order (owner: "fix everything and do it right"; TODO.md top item).** Installed:
    `8545ac57` (= `2891caad` code), profile to Nov 28 — the owner's check of it FAILED: Play still takes
    the iPad down, steps ~400 ms and staggered, bake bars slow, version label never changes. **No device
