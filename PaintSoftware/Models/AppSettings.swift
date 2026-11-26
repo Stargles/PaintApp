@@ -42,6 +42,7 @@ nonisolated struct AppSettings: @unchecked Sendable {
     enum Key {
         static let pencilOnlyDrawing = "paintapp.pencilOnlyDrawing"
         static let renderResolution = "paintapp.renderResolution"
+        static let keepBakedFrames = "paintapp.keepBakedFrames"
         static let lastStreamHost = "streamScreen.lastHost"
         static let lastStreamPort = "streamScreen.lastPort"
         static let projectsFolderBookmark = "PaintApp.projectLocation.bookmark"
@@ -78,6 +79,15 @@ nonisolated struct AppSettings: @unchecked Sendable {
             return resolution
         }
         nonmutating set { defaults.set(newValue.rawValue, forKey: Key.renderResolution) }
+    }
+
+    /// **Keep baked frames between launches** — whether a scene's baked frames outlive the launch
+    /// (`KeptBakes`). Off until chosen: the bake is a cache the app empties at every launch, and a
+    /// kept one costs the artist disk they did not ask to spend. About the artist's storage, not any
+    /// one drawing, so it is here and not in a manifest.
+    var keepBakedFrames: Bool {
+        get { defaults.bool(forKey: Key.keepBakedFrames) }
+        nonmutating set { defaults.set(newValue, forKey: Key.keepBakedFrames) }
     }
 
     /// The app signature (version + build + binary date) seen at the previous launch — bookkeeping
@@ -171,8 +181,8 @@ nonisolated struct AppSettings: @unchecked Sendable {
     func forgetIfRequested(arguments: [String] = ProcessInfo.processInfo.arguments) {
         #if targetEnvironment(simulator)
         if arguments.contains("-resetEditorPreferences") || arguments.contains("-resetGallery") {
-            for key in [Key.pencilOnlyDrawing, Key.renderResolution, Key.lastStreamHost, Key.lastStreamPort,
-                        Key.galleryFolder] {
+            for key in [Key.pencilOnlyDrawing, Key.renderResolution, Key.keepBakedFrames, Key.lastStreamHost,
+                        Key.lastStreamPort, Key.galleryFolder] {
                 defaults.removeObject(forKey: key)
             }
         }
@@ -191,8 +201,8 @@ nonisolated struct AppSettings: @unchecked Sendable {
     }
 }
 
-/// **Carries the two app-wide values that live on a `CanvasManager`** — Fingers Can Paint and Render
-/// Resolution — between it and `AppSettings`: hands them to each document as it enters the editor and
+/// **Carries the three app-wide values that live on a `CanvasManager`** — Fingers Can Paint, Render
+/// Resolution and Keep Baked Frames — between it and `AppSettings`: hands them to each document as it enters the editor and
 /// saves every change the artist makes to them, as it is made. `ContentView` holds one.
 ///
 /// The model itself touches no store, so a logic test that flips one leaves nothing behind for the next
@@ -211,12 +221,16 @@ final class AppSettingsKeeper {
         changes.removeAll()
         manager.pencilOnlyDrawing = settings.pencilOnlyDrawing
         manager.renderResolution = settings.renderResolution
+        manager.keepsBakedFrames = settings.keepBakedFrames
         let settings = self.settings
         manager.$pencilOnlyDrawing.dropFirst().removeDuplicates()
             .sink { settings.pencilOnlyDrawing = $0 }
             .store(in: &changes)
         manager.$renderResolution.dropFirst().removeDuplicates()
             .sink { settings.renderResolution = $0 }
+            .store(in: &changes)
+        manager.$keepsBakedFrames.dropFirst().removeDuplicates()
+            .sink { settings.keepBakedFrames = $0 }
             .store(in: &changes)
     }
 }

@@ -1333,6 +1333,17 @@ final class CanvasManager: ObservableObject {
         didSet { recordSwitch("pencilOnlyDrawing", from: oldValue, to: pencilOnlyDrawing) }
     }
 
+    /// Whether a save keeps this scene's baked frames for the next launch (`KeptBakes`). App-wide
+    /// (`AppSettings`), handed to each document by `AppSettingsKeeper`; off on a manager nothing has
+    /// handed it to.
+    @Published var keepsBakedFrames = false
+
+    /// The token of the package this document was opened from (`KeptBakes.token`), until the first baker
+    /// of the session takes it: the one moment the document is known to be what the package holds, so
+    /// the only moment a kept bake may stand for a frame. Nil for a new scene, and for every baker
+    /// after the first.
+    var packageBakeToken: String?
+
     /// How large the live canvas's composites are rendered — see `RenderResolution`, which carries
     /// what it does and does not reach. App-wide (`AppSettings`), handed to each document by
     /// `AppSettingsKeeper`; `.full` on a manager nothing has handed it to.
@@ -3538,11 +3549,39 @@ final class CanvasManager: ObservableObject {
 
     @MainActor
     private func makeFrameBaker() -> FrameBaker {
-        FrameBaker(manager: self,
-                   store: FrameBakeStore(root: FrameBakeStore.defaultRoot(projectID: projectID,
-                                                                          renderResolution: renderResolution)),
-                   ring: DecodedFrameRing(byteBudget: Self.frameRingByteBudget(),
-                                          priority: .cache, charged: false))
+        let baker = FrameBaker(manager: self,
+                               store: FrameBakeStore(root: FrameBakeStore.defaultRoot(projectID: projectID,
+                                                                                      renderResolution: renderResolution)),
+                               ring: DecodedFrameRing(byteBudget: Self.frameRingByteBudget(),
+                                                      priority: .cache, charged: false))
+        // The first baker of a session may adopt the frames kept for the package the document was
+        // opened from; taken whether or not it does, so no later baker can.
+        if let token = packageBakeToken {
+            packageBakeToken = nil
+            if keepsBakedFrames { baker.adopt(root: keptBakeRoot, token: token) }
+        }
+        isFrameBakerMade = true
+        return baker
+    }
+
+    /// Where this scene's kept frames live (`KeptBakes`).
+    private var keptBakeRoot: URL {
+        KeptBakes.root(projectsDirectory: ProjectBackupManager.projectsDirectory, projectID: projectID,
+                       renderResolution: renderResolution)
+    }
+
+    private var isFrameBakerMade = false
+
+    /// **What a save keeps of the bake**, taken with the scene frozen: the frames the baker holds clean
+    /// and the files that depict them, where to put them and how many bytes they may take — nil when
+    /// the artist has not asked for kept frames or no baker has run. Reads, never creates, the baker.
+    @MainActor
+    func keptBakeSnapshot() -> KeptBakeSnapshot? {
+        guard keepsBakedFrames, isFrameBakerMade, !frameBaker.isClosed else { return nil }
+        let root = keptBakeRoot
+        guard let capacity = BakeDiskLimit.capacity(at: root, held: 0) else { return nil }
+        return KeptBakeSnapshot(frames: frameBaker.cleanFramesOnDisk(), playhead: currentFrame, root: root,
+                                limit: BakeDiskLimit.bytes(capacity: capacity))
     }
 
     /// **`FrameBaker.close()`'s real caller.** `ContentView.returnToGallery` calls this on the way

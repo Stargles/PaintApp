@@ -196,3 +196,11 @@ nonisolated enum KeptBakes {
         try? url.setResourceValues(values)
     }
 }
+
+/// What a save hands `KeptBakes.promote`: frozen on the main actor with the scene, used on the save queue.
+struct KeptBakeSnapshot {
+    let frames: [(frame: Int, source: URL)]
+    let playhead: Int
+    let root: URL
+    let limit: Int
+}
