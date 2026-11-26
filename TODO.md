@@ -38,15 +38,17 @@ Every status report to the owner lists this queue with each item's state, not on
    Gate green (app peak 1,108 MiB); R1 `late` 37 (whole-layer renders — S3b's job).
    **Owner ruling Nov 26: a second Fill tap while the first is still drawing is QUEUED** (no pause, lands after the
    first; never dropped). Today's `waitForFillWork()` on main goes — S3b.
-   **S2 built on `tmp/nov25-s2`, NOT merged — playcheck RED** (app peak 1,169–1,172 at "4 undos" vs 1,165; pre-undo
-   phases +20–35 MiB over main, window draws ~2× main, cause unisolated). Root-causing before merge.
-   **Owner ruling Nov 26: kept bakes go INSIDE the scene package** (travel with it; shares, backups and duplicates
-   grow by the bakes — accepted). S2 built them beside the scene in `<Projects>/.bakes.nosync/<id>/`; move them in.
+   **S2 built on `tmp/nov25-s2`, NOT merged — playcheck RED by 6–10 MiB** (app peak 1,170–1,176 at "4 undos" vs 1,165;
+   main 1,113–1,145). MEASURED: it is the half display level — forcing `.full` brings the peak back to 1,140; not the
+   ring, the under-picture, vImage's intermediate (fixed anyway), CG interpolation or the allocator. Window draws are
+   not a regression: playback now delivers ~24 flips/s (295 in 12 s) where main dropped to ~11/s.
+   **Owner ruling Nov 26, built: kept bakes live INSIDE the scene package** (`<package>/bakes/`; shares, backups and
+   duplicates grow by them — accepted); `.bakes.nosync` is gone.
    Then S3b Undo, S4 memory manager (= (9)),
    S5 three layer pictures, S6 bake throughput, S7 rest, S8 stream, S9 device gate.
    **Owner rulings Nov 25 (design §7):** Q1 — stepping onto a never-drawn frame keeps the previous frame
    until the new one is whole (no soft-first). Q2 — a **Settings option "keep baked frames between launches",
-   default OFF**; when on, the bakes are stored **in the scene's own folder** (travel with the canvas), inside
+   default OFF**; when on, the bakes are kept inside the scene's package, inside
    the disk limit; when off, as today (emptied at launch). Built in S2.
    Earlier text of this item, kept for its measurements: **Frame steps instant and unstaggered + bake speed** — scheduler stage 2, after (1). MEASURED with
    stage 3 (iPad 9 simulator, playcheck, end to end through a screen probe that reads to

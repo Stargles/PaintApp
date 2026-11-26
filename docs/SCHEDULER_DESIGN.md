@@ -1,6 +1,6 @@
 # SCHEDULER_DESIGN — the scheduler and the memory manager, one page
 
-Status: **S1 and S3a built (2026-11-25) — see "S1 as built" and "S3a as built" under §6; S2, S3b–S9 designed, not built.** [SCHEDULER.md](SCHEDULER.md) is the rules;
+Status: **S1, S2 and S3a built (2026-11-25/26) — see "as built" under §6; S3b–S9 designed, not built.** [SCHEDULER.md](SCHEDULER.md) is the rules;
 this page is what gets built, in what order, and how each step is proved. It answers TODO.md queue items
 5, 6 and 9 (a)–(f). Figures are labelled MEASURED (with where), CODE (read off the source) or ESTIMATE.
 The iPad 9 is the **minimum machine** (A13: 2 fast + 4 efficient cores, 3 GB, app limit 1,850 MiB); its
@@ -392,12 +392,63 @@ the first fill's first render exists, because `beginCanvasEdit` must read a canv
 `fillQueue.sync {}` renamed, not removed: removing it makes the edit chokepoint asynchronous (owner ruling: a tap
 during a still-rendering fill is either held until the fill lands, or ignored).
 
+### S2 as built (2026-11-26)
+
+**Bake file v2** (`Engine/BakeFile.swift`, `FrameBakeStore`): `PBK2`, one file per key holding the frame **twice** —
+full and half width and height — each in 512² LZ4 tiles behind a tile directory, so a level is one contiguous byte
+range and a step at fit zoom reads and decodes only the half level: **23.8 MiB decoded at 5000², not 95**
+(`ReadSnapshot.payloadBytes` is the bytes off disk). The half level is a `vImageScale` resample (a hand-written box
+filter was exact and cost 3.5 s a 4096² frame in a Debug build; vImage is 133 ms there, MEASURED, whole encode).
+**No repair and no v1 reader:** a bake file is a cache, a file this build cannot read is a miss and is baked again,
+and the launch dump removes what an earlier build left. `formatVersion` 2 is in the key, so v1 files are never asked
+for. Parallel tile decode is not built — one serial decode of the half level is 5.9 ms at 4096² (MEASURED, Debug); `tiles`
+arrives with S6.
+
+**Levels through the baker and the canvas:** `FrameBaker.displayLevel` (`.half` while one half-level pixel is at least
+one screen pixel, with a 1.0 / 1.25 hysteresis; set on every pass by `CanvasView.updateBakeLevel`) steers reads, the
+ring's top-up and a bake's own ring fill; the ring names a frame's two sizes apart. A canvas that wants `.half` is
+served a resident `.full`; one that wants `.full` is never served `.half` (it keeps the picture it has until the full
+one is read). **Deleted:** `frameRingByteBudget`'s ~4900² cliff, `frameRingShareDivisor` and `decodedFrameBytes`
+(the ring is a flat sixth of the one budget, 148 MiB on the iPad 9: six half frames at 5000² where it held two
+full ones, and none at all above ~4900²), `FrameBakeStore.defaultByteCeiling` (the ceiling is the disk limit), the v1
+header, `compress`/`decompress` and their tests.
+
+**Disk limit** (`BakeDiskLimit`, `DiskSpace` seam, `Platform/AppleDisk.swift`): `min(4 GiB, 10% of free + held)`,
+2 GiB always left free (below that, 0: no bake is written and the canvas draws from its layers), read when a store
+opens and again when a write fails. It is per store; the kept folder is trimmed to it at launch. One shared number
+across bakes, spill and undo waits for S4.
+
+**Edges:** a 1024-px-longest-side whole-frame picture sits in `belowView` under the window surfaces and is shown only
+while it is exactly what the canvas draws (the baker's key for the frame has not moved, no stroke is live, no
+playback), made 0.3 s after a frame settles. Two paths: at rest on the bake (`showUnderPicture`) and, **which is the
+owner's ordinary scene**, while the layer hosts draw the canvas (`updateDisengagedUnderPicture` — the design assumed
+the bake was always the picture on screen; a scene with no blend mode, mask or grade never engages it). MEASURED
+(`ZoomEdgesUITests`, 5000², window draw slowed to 2.5 s, screenshot the instant the pinch out ends): without the picture
+the revealed canvas shows none of the frame's ink (all three layers read blank at both probe columns); with it, all
+three show it. Latency to a non-empty edge: one transaction (0 ms of waiting) against the window redraw (the
+iPad's ~0.3–0.6 s, seconds with the draw slowed). 1024 not 1620 because 1620 cost the playcheck's undo peak +50 MiB.
+
+**Q2, built — and its premise refuted.** The brief said the bakes go in the scene's own folder and are reused next
+launch. A bake key names pictures by `LayerContentVersion`'s `residencyID` (a `UUID()` per object) and per-open
+version counters, so **no key survives a launch**: a file kept under its key is never asked for again. What survives
+is the saved package. So a kept bake is filed by **frame number under a token of the package** (SHA-256 of
+`manifest.json`), `<Projects>/.bakes.nosync/<projectID>/<resolution>/<token>/<frame>.pbk` (`Engine/KeptBakes.swift`):
+a **save promotes** the frames the baker held clean when the scene was frozen (clonefile — no second copy on APFS) and
+deletes every other token; the **first baker after an open adopts** a kept file for a frame nothing has touched since
+(`FrameBaker.adopt`; every sweep path that dirties a frame drops it first — `testAFrameEditedAfterOpeningIsBakedNotAdopted`
+goes red without that). The working store stays in Caches and is emptied at launch as today. **Decisions:** never
+inside the package (a save rebuilds the package, a backup/trash/duplicate/share would carry the bakes — so a bake
+never bloats what the owner shares or backs up); beside it, dotted (no gallery folder), `.nosync` (no iCloud upload),
+excluded from backup; keyed by project ID, so rename and move-to-folder keep it, duplicate gets none, trash is swept at
+the next launch; off at launch empties the folder; on trims to the disk limit, least recently written first. Setting:
+`AppSettings.keepBakedFrames`, Settings "Keep Baked Frames", default off.
+
 ## 7. Owner rulings (Nov 25)
 
 - **Q1 — a never-drawn frame:** keep showing the previous frame until the new one is whole. No soft-first.
 - **Q2 — bakes between launches:** a Settings option to keep them, **default off**. When on, they are stored
   in the scene's own folder (they travel with the canvas), inside the disk limit; when off, emptied at launch
-  as today. S2 builds it.
+  as today. Built in S2 (see "S2 as built": a kept set filed beside the package, not in it).
 
 ## 8. Changes to SCHEDULER.md (same branch)
 
