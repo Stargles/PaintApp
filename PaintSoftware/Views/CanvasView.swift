@@ -2892,7 +2892,6 @@ struct CanvasView: UIViewRepresentable {
         private var underPictureWork: (item: DispatchWorkItem, key: SandwichKey)?
 
         private func showUnderPicture(of full: UIImage, in belowView: UIImageView) {
-            if true { belowView.image = nil; return } // MUTATION
             if let key = sandwichFullKey, key == underPictureKey, let under = underPicture {
                 if belowView.image !== under { belowView.image = under }
                 return
