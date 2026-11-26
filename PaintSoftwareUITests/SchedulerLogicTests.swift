@@ -278,6 +278,34 @@ final class SchedulerLogicTests: XCTestCase {
         wait(for: [waiter], timeout: 5)
     }
 
+    /// The canvas edits' preparation (`prepareCanvasUpdate`) is an R1 job: it locks the document on
+    /// main, prepares on a worker, and lands on main — never before the worker has run.
+    @MainActor
+    func testACanvasPreparationIsAnAnswerJobThatLandsOnMainAndUnlocksTheDocument() {
+        let manager = CanvasFixture.manager()
+        manager.canvasPreparations = LatestWins(scheduler: scheduler, key: JobKey("canvasPixels"), name: "canvas pixels")
+        var prepared = 0, landed = 0
+        XCTAssertTrue(manager.prepareCanvasUpdate { { prepared += 1; return { landed += 1 } } })
+        XCTAssertTrue(manager.isUpdatingCanvas, "the document is locked from the moment the edit is asked for")
+        XCTAssertEqual(executor.workers.count, 1)
+        XCTAssertEqual(prepared + landed, 0, "nothing is prepared or landed on the calling thread")
+        settle()
+        XCTAssertEqual([prepared, landed], [1, 1])
+        XCTAssertFalse(manager.isUpdatingCanvas, "the landing unlocks it")
+    }
+
+    /// A preparation cancelled before it lands (the document closing) never lands.
+    @MainActor
+    func testACancelledCanvasPreparationNeverLands() {
+        let manager = CanvasFixture.manager()
+        manager.canvasPreparations = LatestWins(scheduler: scheduler, key: JobKey("canvasPixels"), name: "canvas pixels")
+        var landed = 0
+        _ = manager.prepareCanvasUpdate { { { landed += 1 } } }
+        manager.canvasPreparations?.cancel()
+        settle()
+        XCTAssertEqual(landed, 0)
+    }
+
     // MARK: - Lanes by machine (rule 6)
 
     func testLanesFollowTheMachine() {
