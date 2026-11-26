@@ -23,7 +23,7 @@ final class KeptBakesLogicTests: XCTestCase {
     /// Writes a real bake file into a working store and answers its URL.
     private func bake(_ seed: UInt8, in store: FrameBakeStore, color: UInt8 = 200) -> URL {
         let pixels = [UInt8](repeating: color, count: 8 * 8 * 4)
-        XCTAssertTrue(store.store(pixels: (pixels, 8, 8), for: key(seed)).isSuccess)
+        if case .failure = store.store(pixels: (pixels, 8, 8), for: key(seed)) { XCTFail("the fixture bake must write") }
         return store.url(for: key(seed))
     }
 
