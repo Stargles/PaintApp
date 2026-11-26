@@ -417,6 +417,9 @@ enum ProjectStore {
         /// is working and a tile-sized composite of every visible layer is the one part of this
         /// snapshot that was not a handful of pointer reads.
         let thumbnailRecipe: FrameRecipe?
+        /// The baked frames this save keeps for the next launch (`KeptBakes`), frozen with the scene;
+        /// nil unless the artist asked for kept frames.
+        let keptBakes: KeptBakeSnapshot?
 
         /// The box the gallery tile fits into — the composite's size hint *and* the renderer's
         /// target, deliberately one constant so the two cannot drift apart. Named rather than
@@ -529,6 +532,7 @@ enum ProjectStore {
             thumbnailRecipe = canvasManager.makeFrameRecipe(atFrame: canvasManager.currentFrame,
                                                             includeBackground: true,
                                                             sizing: .fitting(Self.thumbnailBounds))
+            keptBakes = canvasManager.keptBakeSnapshot()
         }
 
         /// The gallery tile, resolved from `thumbnailRecipe` — pure, and called on `saveQueue`.
@@ -1135,6 +1139,11 @@ enum ProjectStore {
         // is the one that just appeared under the new name.
         if destination == .liveProject {
             ProjectBackupManager.refreshLatestSnapshot(projectURL: landed, projectID: snapshot.projectID)
+        }
+        // The frames the baker held clean when the scene was frozen depict exactly the package just
+        // landed: kept under its token for the next open (a version slot changes no live package).
+        if destination == .liveProject, let kept = snapshot.keptBakes, let token = KeptBakes.token(ofPackageAt: landed) {
+            KeptBakes.promote(kept.frames, playhead: kept.playhead, root: kept.root, token: token, limit: kept.limit)
         }
         ProjectBackupManager.pruneBackups(forProjectID: snapshot.projectID)
         return landed
@@ -2276,6 +2285,7 @@ enum ProjectStore {
         manager.projectID = manifest.id
         manager.projectName = manifest.name
         manager.projectURL = url
+        manager.packageBakeToken = KeptBakes.token(ofPackageAt: url)
         manager.canvasSize = CGSize(width: manifest.canvasWidth, height: manifest.canvasHeight)
         // No resize on load: the buffers were saved at the full padded canvasSize; padding only drives
         // the paper inset that reveals the grey margin.

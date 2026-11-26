@@ -431,6 +431,37 @@ final class FrameBaker {
         return store.contains(key)
     }
 
+    // MARK: - Kept frames (KeptBakes)
+
+    /// The frames kept for the package this document was opened from, that nothing has touched since:
+    /// set once by `adopt`, only ever shrunk. A frame in it is baked by cloning its kept file, not by
+    /// compositing. Every way a frame can change (`syncDirty`, `markEverythingDirty`, `recover`) takes
+    /// it out first, so a kept picture is never put up for a frame that is no longer what was saved.
+    private var adoptable: (root: URL, token: String, frames: Set<Int>)?
+
+    /// Offers the frames kept under `token` to the loop. Called by the first baker after a package
+    /// opens, before its first sweep (`CanvasManager.makeFrameBaker`).
+    func adopt(root: URL, token: String) {
+        let frames = KeptBakes.frames(in: root, token: token)
+        adoptable = frames.isEmpty ? nil : (root, token, frames)
+    }
+
+    /// Frames adopted from kept files, for tests.
+    private(set) var adoptedCount = 0
+
+    private func dropAdoptable(_ span: Range<Int>) {
+        adoptable?.frames.subtract(span)
+    }
+
+    /// **What a save keeps**: the frames this baker holds clean right now and the working file that
+    /// depicts each. The sweep runs first, so an edit no pass has seen yet is not counted clean.
+    func cleanFramesOnDisk() -> [(frame: Int, source: URL)] {
+        syncDirty()
+        return keyByFrame.compactMap { frame, key in
+            !bakeQueue.isPending(frame) && store.contains(key) ? (frame, store.url(for: key)) : nil
+        }
+    }
+
     // MARK: - Dirty marking (RENDER §3.6)
 
     /// **The signal, and the only one.** Something in the document may have changed: work out what
@@ -449,6 +480,7 @@ final class FrameBaker {
     func markEverythingDirty() {
         if let manager { bakeQueue.frameCount = manager.contentEndFrame }
         bakeQueue.markAllDirty()
+        adoptable = nil
         kick()
     }
 
@@ -552,6 +584,7 @@ final class FrameBaker {
                                       direction: direction)
         let level = displayLevel
         let frames = framesByDigest
+        let adopting = adoptable.flatMap { $0.frames.contains(frame) ? ($0.root, $0.token) : nil }
 
         return { [weak self, store] in
           // Step 2 runs as R3 (SCHEDULER.md): every canvas-sized allocation in it — the leaves'
@@ -571,6 +604,9 @@ final class FrameBaker {
                 // A hold reuses its content-addressed file. A decode already needed for the ring
                 // rejects an unreadable file before this decision; distant frames need only stat.
                 outcome = .alreadyOnDisk
+            } else if let adopting, store.adopt(frame: frame, from: adopting, as: key) {
+                // The frame is what the saved package holds and a kept picture of it exists.
+                outcome = .adopted
             } else if !MemoryBudget.shared.waitForRoom(2 * frameBytes) {
                 // R3 waits before it starts, holding nothing; still no room is a retry, not a failure.
                 outcome = .deferred
@@ -774,6 +810,8 @@ final class FrameBaker {
     private enum Outcome {
         case baked
         case alreadyOnDisk
+        /// Made from a kept file (`KeptBakes.adopt`) — no composite.
+        case adopted
         case writeFailed(FrameBakeStore.WriteFailure)
         case compositeFailed
         /// The one budget had no room for it (SCHEDULER.md rule 5): still dirty, tried again shortly.
@@ -781,7 +819,7 @@ final class FrameBaker {
 
         var isOnDisk: Bool {
             switch self {
-            case .baked, .alreadyOnDisk: return true
+            case .baked, .alreadyOnDisk, .adopted: return true
             case .writeFailed, .compositeFailed, .deferred: return false
             }
         }
@@ -797,6 +835,7 @@ final class FrameBaker {
     /// a scheduling hint (§3.3) and this one has been spent; the next edit to reach that frame
     /// re-raises it, and the *key* still says truthfully that there is no file.
     private func finish(frame: Int, key: FrameBakeKey, outcome: Outcome) {
+        adoptable?.frames.remove(frame)
         // **The document can move while a composite is in flight, and clearing the bit regardless
         // would discard the edit that moved it.** `kick` mints the key on the main actor and then
         // hops to `workQueue`, so an edit landing in between is an edit this bake did not see. It
@@ -829,6 +868,9 @@ final class FrameBaker {
         case .alreadyOnDisk:
             dedupedCount += 1
             record(frame: frame, key: key)
+        case .adopted:
+            adoptedCount += 1
+            record(frame: frame, key: key)
         case .writeFailed(let failure):
             failedCount += 1
             lastWriteFailure = failure
@@ -860,6 +902,7 @@ final class FrameBaker {
         for frame in frames {
             forget(frame: frame)
             bakeQueue.markDirty(frame: frame)
+            adoptable?.frames.remove(frame)
         }
         ringWalk = nil
         kick()
@@ -956,6 +999,7 @@ final class FrameBaker {
 
         guard structure == previousStructure else {
             bakeQueue.markAllDirty()
+            adoptable = nil
             return
         }
 
@@ -970,6 +1014,7 @@ final class FrameBaker {
                 guard let old = unseen.removeValue(forKey: stamp.id) else {
                     // A cel that did not exist last time.
                     bakeQueue.markDirty(stamp.span)
+                    dropAdoptable(stamp.span)
                     touchedACel = true
                     continue
                 }
@@ -977,18 +1022,24 @@ final class FrameBaker {
                 // Both spans: where it was, and where it is now.
                 bakeQueue.markDirty(old.span)
                 bakeQueue.markDirty(stamp.span)
+                dropAdoptable(old.span)
+                dropAdoptable(stamp.span)
                 touchedACel = true
             }
             for old in unseen.values {
                 // A cel that is gone. The frames it covered show something else now.
                 bakeQueue.markDirty(old.span)
+                dropAdoptable(old.span)
                 touchedACel = true
             }
         }
 
         guard touchedACel else { return }
         for layer in cels {
-            for stamp in layer where stamp.isDerived { bakeQueue.markDirty(stamp.span) }
+            for stamp in layer where stamp.isDerived {
+                bakeQueue.markDirty(stamp.span)
+                dropAdoptable(stamp.span)
+            }
         }
     }
 

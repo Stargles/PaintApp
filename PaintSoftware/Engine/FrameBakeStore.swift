@@ -326,6 +326,17 @@ nonisolated final class FrameBakeStore {
         return .success(size)
     }
 
+    /// Makes `key`'s file out of the kept file for `frame` (`KeptBakes.adopt`). False when there is none
+    /// that this build can read.
+    func adopt(frame: Int, from kept: (root: URL, token: String), as key: FrameBakeKey) -> Bool {
+        guard key.digest.count == 32 else { return false }
+        owner.io.lock(); defer { owner.io.unlock() }
+        guard let size = KeptBakes.adopt(frame: frame, root: kept.root, token: kept.token,
+                                         into: url(for: key), digest: key.digest) else { return false }
+        owner.record(.bake(key), size: size)
+        return true
+    }
+
     // MARK: - Reading
 
     /// The frame this key names, or nil.

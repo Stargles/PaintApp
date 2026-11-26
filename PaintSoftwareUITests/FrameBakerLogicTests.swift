@@ -1376,6 +1376,63 @@ final class FrameBakerLogicTests: XCTestCase {
         XCTAssertEqual(picture.level, .full, "the full frame in the ring is served for a half request")
     }
 
+    // MARK: - Kept frames
+
+    private func secondSessionBaker(_ manager: CanvasManager) -> FrameBaker {
+        FrameBaker(manager: manager, store: FrameBakeStore(root: root.appendingPathComponent("second"), byteCeiling: 512 * 1024 * 1024),
+                   ring: DecodedFrameRing(byteBudget: 32 * 1024 * 1024))
+    }
+
+    /// **A frame the saved package depicts is made from its kept file, with no composite** — and the
+    /// picture is the one that was kept.
+    func testKeptFramesAreAdoptedInsteadOfBaked() throws {
+        let manager = perFrameDocument(frames: 3)
+        let first = makeBaker(manager)
+        first.noteDocumentChanged()
+        drain(first)
+        let before = try (0..<3).map { try XCTUnwrap(FrameBakeStore.bgraBytes(try XCTUnwrap(awaitImage(first, atFrame: $0))), "frame \($0)").bytes }
+        let kept = root.appendingPathComponent("kept")
+        XCTAssertEqual(KeptBakes.promote(first.cleanFramesOnDisk(), playhead: 0, root: kept, token: "t", limit: .max / 2), 3)
+
+        let second = secondSessionBaker(manager)
+        second.adopt(root: kept, token: "t")
+        second.noteDocumentChanged()
+        drain(second)
+        XCTAssertEqual(second.adoptedCount, 3, "all three come from kept files")
+        XCTAssertEqual(second.bakedCount, 0, "and nothing was composited")
+        for frame in 0..<3 {
+            let image = try XCTUnwrap(awaitImage(second, atFrame: frame))
+            XCTAssertEqual(FrameBakeStore.bgraBytes(image)?.bytes, before[frame], "frame \(frame) is the kept picture")
+        }
+    }
+
+    /// **A frame edited since the package opened is baked, never adopted** — the stale kept picture of it
+    /// is exactly what must never reach the screen.
+    func testAFrameEditedAfterOpeningIsBakedNotAdopted() throws {
+        let manager = perFrameDocument(frames: 3)
+        let first = makeBaker(manager)
+        first.noteDocumentChanged()
+        drain(first)
+        let kept = root.appendingPathComponent("kept")
+        KeptBakes.promote(first.cleanFramesOnDisk(), playhead: 0, root: kept, token: "t", limit: .max / 2)
+
+        let second = secondSessionBaker(manager)
+        second.adopt(root: kept, token: "t")
+        second.isSuspended = true
+        second.noteDocumentChanged()     // the first sweep: the document as opened
+        CanvasFixture.setBakedContent(manager, layerIndex: 0, frame: 1,
+                                      CanvasFixture.solidImage(.blue, rect: CGRect(x: 0, y: 0, width: 10, height: 10)))
+        second.noteDocumentChanged()     // the sweep that sees the edit
+        second.isSuspended = false
+        drain(second)
+        XCTAssertEqual(second.adoptedCount, 2, "the two untouched frames are adopted")
+        XCTAssertEqual(second.bakedCount, 1, "the edited one is composited")
+        let image = try XCTUnwrap(awaitImage(second, atFrame: 1))
+        let pixels = try XCTUnwrap(FrameBakeStore.bgraBytes(image))
+        let offset = (5 * pixels.width + 5) * 4
+        XCTAssertEqual(Array(pixels.bytes[offset..<(offset + 4)]), [255, 0, 0, 255], "the new content (blue, BGRA), not the kept red")
+    }
+
     // MARK: - The disk limit
 
     private struct FixedDisk: DiskSpace {

@@ -51,6 +51,7 @@ struct SettingsMenu: View {
 
             pencilOnlyToggle
             renderResolutionControl
+            keepBakedFramesToggle
 
             Rectangle()
                 .fill(Color.white.opacity(0.15))
@@ -207,6 +208,30 @@ struct SettingsMenu: View {
         .padding(.horizontal)
         .padding(.vertical, 8)
         .accessibilityIdentifier("settings.fingersCanPaintToggle")
+    }
+
+    /// **Keep baked frames between launches** (`KeptBakes`): off by default, because a kept bake takes
+    /// disk the artist did not ask to spend.
+    private var keepBakedFramesToggle: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: $canvasManager.keepsBakedFrames) {
+                HStack {
+                    Image(systemName: "externaldrive").frame(width: 24)
+                    Text("Keep Baked Frames")
+                }
+                .foregroundColor(.white)
+            }
+            .tint(.blue)
+            .accessibilityIdentifier("settings.keepBakedFramesToggle")
+            Text("Saves each scene's baked frames so playback is ready the next time you open it. "
+                 + "They use disk space, are never part of a scene you share or back up, and are "
+                 + "removed when you turn this off or move a scene to the trash.")
+                .font(.caption)
+                .foregroundColor(.gray)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
     }
 
     /// How large the live canvas's composites are rendered (see `RenderResolution`). Persists across

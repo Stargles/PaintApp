@@ -31,6 +31,16 @@ struct PaintApp: App {
         // container while the artist's real library sat untouched in Files.
         ProjectLocation.resolveOnLaunch()
         AppSettings.standard.forgetIfRequested()
+        // Kept frames (`KeptBakes`): with the option off the folder is emptied, as the bake always was;
+        // with it on, the frames of projects that no longer exist go and the rest is trimmed to the
+        // disk limit. Off the main thread — it walks the library.
+        let keeping = AppSettings.standard.keepBakedFrames
+        DispatchQueue.global(qos: .utility).async {
+            let projects = ProjectBackupManager.projectsDirectory
+            KeptBakes.launchPass(projectsDirectory: projects, keeping: keeping,
+                                 liveProjectIDs: { Set(ProjectBackupManager.allProjectPackages().compactMap(ProjectBackupManager.manifestID(at:))) },
+                                 limit: BakeDiskLimit.capacity(at: projects, held: 0).map(BakeDiskLimit.bytes(capacity:)) ?? 0)
+        }
         // Did the last run die in the artist's hands? Off main; a yes saves the crash report and raises
         // the fading notice. MetricKit's crash and hang diagnostics land in the same folder.
         UncleanExitWatch.checkLaunch { _ in ActionRecorder.shared.announceCrashReport() }
