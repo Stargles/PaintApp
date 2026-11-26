@@ -1,7 +1,7 @@
 # SCHEDULER — real-time rules for every piece of work in PaintApp
 
 Status: **rules ruled; stage 3 (one budget) merged 2026-11-21** (`Engine/MemoryBudget.swift`); **the build is
-designed in [SCHEDULER_DESIGN.md](SCHEDULER_DESIGN.md) (2026-11-25)**; **S1 built 2026-11-25** — the core in
+designed in [SCHEDULER_DESIGN.md](SCHEDULER_DESIGN.md) (2026-11-25)**; **S1 and S3a built 2026-11-25** — the core in
 `Engine/Scheduling/`, frame reads as R1, rule 10's presenter (`CanvasPresenter`) — scheduler and memory manager as one page, its
 §6 is the build order. The owner delegated the rules: *"I'll let you pick
 out the rules for this because if I explicitly define it I might miss something critical. Basically, all

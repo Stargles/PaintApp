@@ -36,7 +36,11 @@ Every status report to the owner lists this queue with each item's state, not on
    whole picture sets. MEASURED (iPad 9 sim, app clock): tap → whole frame **324–347 ms → 39–94 ms** at
    5000², **18–27 ms** on the owner's 2048×1024 shape; cause confirmed — the decode began 267 ms after every
    step (the touch's 250 ms settle). Owner to check on the iPad after install: step and scrub a baked scene.
-   Then S2 bake format + zoom-out edges, S3a/b R1 onto the scheduler + Undo, S4 memory manager (= (9)),
+   **S3a built on `tmp/nov25-s3a`, awaiting merge**: the R1 producers (layer pictures, scratch, canvas edits, Liquify,
+   fill, shape/text previews) run on the scheduler; seven queues and `Pacing` deleted (Undo storm: 21 → 18 draws, so
+   Pacing no longer earns its place). Gate: playcheck green; R1 `late` 37 (36 whole-layer renders — S3b's job).
+   Owner question: a second tap during a still-rendering fill — hold it until the fill lands, or ignore it (design §6)?
+   Then S2 bake format + zoom-out edges, S3b Undo, S4 memory manager (= (9)),
    S5 three layer pictures, S6 bake throughput, S7 rest, S8 stream, S9 device gate.
    **Owner rulings Nov 25 (design §7):** Q1 — stepping onto a never-drawn frame keeps the previous frame
    until the new one is whole (no soft-first). Q2 — a **Settings option "keep baked frames between launches",

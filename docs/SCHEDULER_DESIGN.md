@@ -1,6 +1,6 @@
 # SCHEDULER_DESIGN — the scheduler and the memory manager, one page
 
-Status: **S1 built (2026-11-25, `tmp/nov25-s1`) — see "S1 as built" under §6; S2–S9 designed, not built.** [SCHEDULER.md](SCHEDULER.md) is the rules;
+Status: **S1 and S3a built (2026-11-25) — see "S1 as built" and "S3a as built" under §6; S2, S3b–S9 designed, not built.** [SCHEDULER.md](SCHEDULER.md) is the rules;
 this page is what gets built, in what order, and how each step is proved. It answers TODO.md queue items
 5, 6 and 9 (a)–(f). Figures are labelled MEASURED (with where), CODE (read off the source) or ESTIMATE.
 The iPad 9 is the **minimum machine** (A13: 2 fast + 4 efficient cores, 3 GB, app limit 1,850 MiB); its
@@ -356,6 +356,41 @@ bake hold; a stroke releases at once. Deleted: `InteractionGate`, `coverTheHosts
 `image(for:)`, `fillRingAhead` behind the bake. `frameStepSettleSeconds` stays, at **0.15 s** (was 0.5): it now
 only spares a burst renders nobody sees. Not replaced in S1: the held frame of a slider hold (TODO (179)),
 `ShapeOverlayView`'s own `presentFirst`.
+
+### S3a as built (2026-11-25)
+
+**What moved onto the scheduler** (all R1, `.userInitiated`): the layer picture (`StrokeCanvasView.vectorRenders`) and
+the held-edit and derivation surfaces' draws, `StrokeScratch`'s window picture, `prepareCanvasUpdate`, Liquify's
+picture, the fill lane (`CanvasManager.fillWork`; the gesture's renders are a latest-wins lane of it), and the shape
+and text previews. **Deleted:** `DeferredVectorRender.queue`, `StrokeScratch.renderQueue`, the `canvasPixels` and
+`liquify` queues, `fillQueue`, `ShapeOverlayView.previewQueue`, `TextOverlayView.glyphQueue` (seven, not six), and
+`DeferredVectorRender.Pacing` with its host timer. The seam lint's allowlist shrank by five files (18 → 13).
+
+**Added to the core, each with its first user:** `Job.group` (jobs of one group run one at a time, in order — what a
+shared serial queue gave: the fill session's state, two canvas-sized pictures never held at once; S4's admission by
+bytes replaces it); `LatestWins(scheduler:key:…)` — §2's `request(key:mint:)`, kept as `LatestWins` because the
+producers not yet moved (FrameBaker, sandwich, onion: S2/S7) still use its queue init; `Scheduler.waitUntilIdle(group:)`;
+`Stats.lateByName`. **Not added:** `promote` — nothing in S3a asks for it.
+
+**Deviation from §2: the R1 lane is a pool, not one job.** `LanePolicy` gives R1 `max(1, P−1) + ⌈E/2⌉` slots (3 on the
+iPad 9), one per untiled job. One slot would have queued a live eraser's picture behind an Undo's 500 ms layer render,
+which separate queues never did; the slots become tile counts in S6.
+
+**Pacing, measured then deleted.** Undo storm (`RapidUndoSurfaceUITests`, 20 undos, 5000² × 5 layers, same simulator):
+whole-cel rasterizes **21 → 18**, window draws **21 → 18**, the playcheck's `backboardd` peak **171 → 103 MiB** over the
+run (limit 450; 44 MiB at the undo phase both times). Pacing's reason (a server copy per landing) is gone — the
+census's `handed` reads 0 even before — and the latest-wins lane already bounds landings to one per render.
+
+**Gate (iPad 9 sim, before → after):** playcheck GREEN both; app peak 1,116 → 1,126 MiB (limit 1,165), step to a whole
+frame 106 → 47 ms, scene bake 20.1 → 1.1 s (bake phase is S1/S2's, noise here). **R1 `late` is 37, not 0:** 36 are
+`layer picture` (a whole-cel render at 5000² is 350–640 ms; only S3b's in-place repair and cancellable walks bring it
+under 100 ms), 1 `frame read`; stroke, eraser, fill, Liquify, text and shape answers are 0. The trace now prints
+`r1late` by name and `draws:` (window pictures presented) beside the memory phases.
+
+**The one wait left on main:** `commitInteractiveFill` still waits (`waitForFillWork`) when a second edit arrives before
+the first fill's first render exists, because `beginCanvasEdit` must read a canvas the fill is already part of. It is
+`fillQueue.sync {}` renamed, not removed: removing it makes the edit chokepoint asynchronous (owner ruling: a tap
+during a still-rendering fill is either held until the fill lands, or ignored).
 
 ## 7. Owner rulings (Nov 25)
 
