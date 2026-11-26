@@ -32,6 +32,13 @@ final class Scheduler: @unchecked Sendable {
         /// The last answer to land: its name, and how long it waited and ran, in ms.
         var lastAnswer: (name: String, waitedMs: Int, ranMs: Int)?
 
+        /// `name=count,…` of the late answers, or `none` — a trace field (spaces become underscores).
+        var lateField: String {
+            let parts = lateByName.sorted { $0.key < $1.key }
+                .map { "\($0.key.replacingOccurrences(of: " ", with: "_"))=\($0.value)" }
+            return parts.isEmpty ? "none" : parts.joined(separator: ",")
+        }
+
         static func == (a: Stats, b: Stats) -> Bool {
             a.started == b.started && a.landed == b.landed && a.cancelled == b.cancelled
                 && a.lateAnswers == b.lateAnswers && a.lateByName == b.lateByName && a.lastAnswer?.name == b.lastAnswer?.name

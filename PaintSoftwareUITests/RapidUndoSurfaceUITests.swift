@@ -44,6 +44,7 @@ final class RapidUndoSurfaceUITests: PaintUITestCase {
 
         // Twenty strokes as fast as the harness can draw them, on the top layer, below the marks.
         let before = Int(readField(app, "rasterizes:")) ?? -1
+        let drawsBefore = Int(readField(app, "draws:")) ?? -1
         let handedBefore = census(app).handed
         var drawn: [CGVector] = []
         for stroke in 0..<20 {
@@ -54,6 +55,7 @@ final class RapidUndoSurfaceUITests: PaintUITestCase {
         XCTAssertTrue(waitUntil(canvas, drawn.last!, isInk), "PREMISE: the last quick stroke is drawn")
         attachScreenshot(canvas, "2-twenty-quick-strokes")
         let afterStrokes = Int(readField(app, "rasterizes:")) ?? -1
+        let drawsAfterStrokes = Int(readField(app, "draws:")) ?? -1
         let censusAfterStrokes = readField(app, "census:")
 
         // Twenty undos as fast as the harness can tap.
@@ -70,8 +72,9 @@ final class RapidUndoSurfaceUITests: PaintUITestCase {
         }
         attachScreenshot(canvas, "3-after-twenty-quick-undos")
         let afterUndos = Int(readField(app, "rasterizes:")) ?? -1
+        let drawsEnd = Int(readField(app, "draws:")) ?? -1
         let end = census(app)
-        print("RAPID-UNDO rasterizes before=\(before) afterStrokes=\(afterStrokes) afterUndos=\(afterUndos) census strokes=\(censusAfterStrokes) end=\(readField(app, "census:")) frame=\(String(describing: readFrameLabel(app)))")
+        print("RAPID-UNDO rasterizes before=\(before) afterStrokes=\(afterStrokes) afterUndos=\(afterUndos) census strokes=\(censusAfterStrokes) end=\(readField(app, "census:")) frame=\(String(describing: readFrameLabel(app))) windowDraws strokes=\(drawsAfterStrokes - drawsBefore) undos=\(drawsEnd - drawsAfterStrokes) r1late=\(readField(app, "r1late:")) by=\(readField(app, "r1lateBy:"))")
 
         // What the render server was handed. Unpaced, the twenty undos alone handed it a picture
         // per undo and the simulator's `backboardd` climbed to 2.3 GB; the iPad's dies at 1,850 MiB.

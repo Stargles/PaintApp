@@ -1233,7 +1233,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         if scratch != nil { gestureBaseRenders += 1 }
         vectorRenders.request { [weak self] in
             guard let self, self.vectorCanvas === canvas else { return nil }
-            return {
+            return { [weak self] in
                 // **Zero on every ordinary launch** — `-uiTestSlowVectorRenderMillis` and nothing else,
                 // simulator only. See `UITestSeeds.slowVectorRenderDelay` for why the defect this file's
                 // `unlandedInk` closes needs a seam to be reachable from a test at all.
@@ -1246,7 +1246,7 @@ final class StrokeCanvasView: CanvasPlaneView {
                 let image = PlaybackTrace.span(.vectorRasterize) {
                     canvas.render(quality: .full, requiring: requirement)
                 }
-                return {
+                return { [weak self] in
                     PlaybackTrace.span(.renderLanded) {
                         self?.finishVectorRender(image, of: canvas, at: revision, covering: coverage,
                                                  streamHadWindow: streamHasWindow)

@@ -98,10 +98,8 @@ final class SchedulerLogicTests: XCTestCase {
         scheduler.submit(job(JobKey("frame"), .answer, work: { _ in 1 }, land: { landed.append($0) }))
         XCTAssertEqual(executor.workers.count, 1)
         scheduler.submit(job(JobKey("frame"), .answer, work: { _ in 2 }, land: { landed.append($0) }))
-        XCTAssertEqual(executor.workers.count, 1, "one answer at a time: the newer waits for a slot")
+        XCTAssertEqual(executor.workers.count, 2, "the cancelled one is still running and the newer has a slot of its own")
         executor.runWorker()
-        executor.drainMain()
-        XCTAssertEqual(executor.workers.count, 1, "the slot freed starts the newer")
         executor.runWorker()
         executor.drainMain()
         XCTAssertEqual(landed, [2], "the older's landing is dropped: a stale frame never reaches the screen")
@@ -133,6 +131,121 @@ final class SchedulerLogicTests: XCTestCase {
         executor.drainMain()
         XCTAssertEqual(reached, 3)
         XCTAssertTrue(token.isCancelled)
+    }
+
+    // MARK: - R1 producers on the scheduler (S3a): LatestWins' lane and the serial group
+
+    /// A latest-wins lane of `group` whose work appends its name to `ran` and whose landing to `landed`.
+    @MainActor
+    private func lane(_ name: String, group: AnyHashable? = nil) -> LatestWins {
+        LatestWins(scheduler: scheduler, key: JobKey(name), name: name, group: group)
+    }
+
+    @MainActor
+    private func ask(_ lane: LatestWins, _ name: String, ran: @escaping (String) -> Void,
+                     landed: @escaping (String) -> Void) {
+        lane.request { { ran(name); return { landed(name) } } }
+    }
+
+    private func settle() {
+        while !executor.workers.isEmpty { executor.runWorker(); executor.drainMain() }
+        executor.drainMain()
+    }
+
+    /// Latest wins on the scheduler: one job in flight per lane, the newest waiting request is the
+    /// one made next, and the last request always lands.
+    @MainActor
+    func testALaneRunsOneJobAndTheNewestWaitingRequestIsTheOnlyOneMadeAfterIt() {
+        let lane = lane("liquify")
+        var ran: [String] = [], landed: [String] = []
+        ask(lane, "first", ran: { ran.append($0) }, landed: { landed.append($0) })
+        for index in 0..<5 { ask(lane, "request \(index)", ran: { ran.append($0) }, landed: { landed.append($0) }) }
+        XCTAssertEqual(executor.workers.count, 1, "one job in flight, whatever was asked meanwhile")
+        settle()
+        XCTAssertEqual(landed, ["first", "request 4"], "the newest waiting request is the one made, and it lands unprompted")
+        XCTAssertEqual(ran, ["first", "request 4"])
+        XCTAssertFalse(lane.isBusy)
+    }
+
+    /// Cancelling a lane drops a job still waiting for a worker — it never starts — and the lane is
+    /// free for the next request at once.
+    @MainActor
+    func testCancellingALaneStopsAJobStillWaitingForAWorkerAndFreesTheLane() {
+        let blocker = lane("blocker", group: "shared")
+        let waiting = lane("waiting", group: "shared")
+        var ran: [String] = [], landed: [String] = []
+        ask(blocker, "blocker", ran: { ran.append($0) }, landed: { landed.append($0) })
+        ask(waiting, "stale", ran: { ran.append($0) }, landed: { landed.append($0) })
+        waiting.cancel()
+        XCTAssertFalse(waiting.isBusy, "a cancelled lane is not waiting for a landing that will never come")
+        ask(waiting, "fresh", ran: { ran.append($0) }, landed: { landed.append($0) })
+        settle()
+        XCTAssertEqual(ran, ["blocker", "fresh"], "the cancelled job never started")
+        XCTAssertEqual(landed, ["blocker", "fresh"])
+    }
+
+    /// A running job's landing is dropped by `cancel`, and the lane takes the next request at once.
+    @MainActor
+    func testCancellingARunningJobDropsItsLandingAndTheNextRequestStillLands() {
+        let lane = lane("scratch")
+        var landed: [String] = []
+        ask(lane, "old", ran: { _ in }, landed: { landed.append($0) })
+        lane.cancel()
+        ask(lane, "new", ran: { _ in }, landed: { landed.append($0) })
+        settle()
+        XCTAssertEqual(landed, ["new"], "the cancelled job's picture never reaches the screen")
+    }
+
+    /// Lanes of one group take turns, in the order asked, whatever the cores — the shared serial queue
+    /// they replace; lanes of different groups run beside each other.
+    @MainActor
+    func testLanesOfOneGroupTakeTurnsAndOthersRunBesideThem() {
+        let first = lane("a", group: "render"), second = lane("b", group: "render"), other = lane("c", group: "preview")
+        var order: [String] = []
+        ask(first, "a", ran: { order.append("ran \($0)") }, landed: { _ in })
+        ask(second, "b", ran: { order.append("ran \($0)") }, landed: { _ in })
+        ask(other, "c", ran: { order.append("ran \($0)") }, landed: { _ in })
+        XCTAssertEqual(executor.workers.count, 2, "a and c start; b waits for a's group")
+        executor.runWorker(0)
+        XCTAssertEqual(executor.workers.count, 2, "a finishing starts b (c is still running)")
+        settle()
+        XCTAssertEqual(order, ["ran a", "ran c", "ran b"])
+    }
+
+    /// The R1 lanes are never held by the touch that asked for them — a stroke's picture is the answer.
+    @MainActor
+    func testALaneRunsUnderATouch() {
+        scheduler.touches(2)
+        var landed = 0
+        let shape = lane("shape")
+        ask(shape, "preview", ran: { _ in }, landed: { _ in landed += 1 })
+        XCTAssertEqual(executor.workers.count, 1, "the lane's job started under the touch")
+        settle()
+        XCTAssertEqual(landed, 1)
+    }
+
+    /// An answer past 100 ms is counted late under its own name, and still lands.
+    func testALateAnswerIsCountedByName() {
+        scheduler.submit(job(JobKey("layer render"), .answer))
+        executor.advance(0.4)
+        executor.runWorker()
+        executor.drainMain()
+        XCTAssertEqual(scheduler.stats.lateByName, ["layer render": 1])
+    }
+
+    /// `waitUntilIdle` returns once every job of the group has run — and only then.
+    func testWaitingUntilAGroupIsIdleReturnsAfterItsJobsRan() {
+        let real = Scheduler(executor: AppleExecutor(), machine: VirtualExecutor.Machine(fastCores: 2, efficientCores: 4))
+        let lock = NSLock()
+        var ran: [Int] = []
+        for index in 0..<4 {
+            real.submit(Job(key: JobKey("fill", index), jobClass: .answer, name: "fill", group: "lane",
+                            work: { _ in Thread.sleep(forTimeInterval: 0.02); lock.lock(); ran.append(index); lock.unlock(); return 0 },
+                            land: { _ in }))
+        }
+        real.waitUntilIdle(group: "lane")
+        lock.lock(); let seen = ran; lock.unlock()
+        XCTAssertEqual(seen, [0, 1, 2, 3], "all four ran, one at a time, in the order asked, before the wait returned")
     }
 
     // MARK: - Lanes by machine (rule 6)

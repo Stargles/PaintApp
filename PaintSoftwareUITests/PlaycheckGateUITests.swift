@@ -44,6 +44,7 @@ final class PlaycheckGateUITests: PaintUITestCase {
         let line = String(format: "%@: backboardd=%.0f peak=%.0f app=%.0f peak=%.0f MiB", name,
                           sample.backboarddMiB, sample.backboarddPeakMiB, sample.appMiB, sample.appPeakMiB)
             + " census=\(readField(app, "census:")) by=\(readField(app, "handedBy:")) budget=\(readField(app, "budget:"))"
+            + " draws=\(readField(app, "draws:")) r1late=\(readField(app, "r1late:")) r1lateBy=\(readField(app, "r1lateBy:"))"
         phases.append(line)
         print("PLAYCHECK " + line)
         XCTAssertEqual(app.state, .runningForeground, "the app left the foreground during \(name)")

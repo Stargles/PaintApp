@@ -1420,7 +1420,9 @@ struct CanvasView: UIViewRepresentable {
                 // **How many whole sets the presenter has put up** (SCHEDULER.md rule 10), and the
                 // scheduler's late answers (rule 8) — both monotonic.
                 + " presented:\(presenter.setsPresented)"
+                + " draws:\(WindowSurfaceView.presentedTotal)"
                 + " r1late:\(Scheduler.shared.stats.lateAnswers)"
+                + " r1lateBy:\(Scheduler.shared.stats.lateField)"
                 // **The open lasso's size** (TODO (184)): how many points the Freehand lasso holds, or
                 // `none` — the host hides the overlay's layers from XCUITest like every descendant.
                 + " lasso:\(canvasManager.openLasso.map { String($0.points.count) } ?? "none")"

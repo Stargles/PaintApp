@@ -138,6 +138,9 @@ final class WindowSurfaceView: UIView {
 
     /// How many frames have been presented — for tests, which spin the run loop until it moves.
     private(set) var presentedCount = 0
+    /// Every view's presents, process-wide, main thread only — `draws:` on `canvas.host`, what an Undo
+    /// storm's pictures cost the render server is read off this.
+    nonisolated(unsafe) static var presentedTotal = 0
     /// The window the surfaces are sized to, in canvas points; `.null` before the first present.
     private(set) var surfaceWindow = CGRect.null
     /// The window whose pixels reached the front, including an older front during a resize.
@@ -303,6 +306,7 @@ final class WindowSurfaceView: UIView {
                     self.isHidden = false
                     self.back = 1 - self.back
                     self.presentedCount += 1
+                    Self.presentedTotal += 1
                     finished?(true)
                 }
                 guard let presenter = self.presenter, presenter.isHolding, isCurrent() else { return swap() }

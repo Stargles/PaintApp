@@ -70,7 +70,7 @@ final class LatestWins {
     /// Jobs of `jobClass` named `name` on `scheduler`, under `key`. Instances sharing a `group` take
     /// turns, as instances sharing a serial queue do; the default is a group of the instance's own.
     init(scheduler: Scheduler, key: JobKey, jobClass: JobClass = .answer, name: String, group: AnyHashable? = nil) {
-        lane = .scheduler(scheduler, key: key, jobClass: jobClass, name: name, group: group ?? key)
+        lane = .scheduler(scheduler, key: key, jobClass: jobClass, name: name, group: group ?? AnyHashable(key))
     }
 
     /// Whether a job is in flight or a request is waiting for one — the question a caller asks before
