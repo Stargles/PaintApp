@@ -40,7 +40,8 @@ Every status report to the owner lists this queue with each item's state, not on
    first; never dropped). Today's `waitForFillWork()` on main goes — S3b.
    **S2 built on `tmp/nov25-s2`, NOT merged — playcheck RED** (app peak 1,169–1,172 at "4 undos" vs 1,165; pre-undo
    phases +20–35 MiB over main, window draws ~2× main, cause unisolated). Root-causing before merge.
-   Kept bakes live beside the scene in `<Projects>/.bakes.nosync/<id>/` (never shared/backed up) — owner to confirm.
+   **Owner ruling Nov 26: kept bakes go INSIDE the scene package** (travel with it; shares, backups and duplicates
+   grow by the bakes — accepted). S2 built them beside the scene in `<Projects>/.bakes.nosync/<id>/`; move them in.
    Then S3b Undo, S4 memory manager (= (9)),
    S5 three layer pictures, S6 bake throughput, S7 rest, S8 stream, S9 device gate.
    **Owner rulings Nov 25 (design §7):** Q1 — stepping onto a never-drawn frame keeps the previous frame
