@@ -1869,6 +1869,8 @@ struct CanvasView: UIViewRepresentable {
             defer { reconcileStreamDisplay() }
             defer { settlePresentation() }
             defer { frameOfTheLastPass = canvasManager.currentFrame }
+            // The size the window needs is known from the first pass, not only once the canvas moves.
+            updateBakeLevel()
             // **A step holds every layer's new picture for the set** (rule 10): the hosts were just
             // handed the new frame's cels, and what each draws waits — the frame left stays whole on
             // screen (owner Q1) — until the whole new frame is up, from the bake or from all of them.
