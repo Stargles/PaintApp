@@ -578,6 +578,7 @@
 		057907A57C18B12F87D5C280 /* PaintSoftware/Engine/FrameBaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A233D4C1984B6E4C5A647F44 /* PaintSoftware/Engine/FrameBaker.swift */; };
 		04D45228B568045D27D9876A /* FrameBakeKeyLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ED6628CDA095F19E3706F1B /* FrameBakeKeyLogicTests.swift */; };
 		DEDD07AB03769DB26412A980 /* FrameBakeStoreLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8B087F472D49C2E12E6EFEB /* FrameBakeStoreLogicTests.swift */; };
+		588C6D24F7705D050A9C8397 /* KeepBakedFramesUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E546501746C17C5ABC6678B /* KeepBakedFramesUITests.swift */; };
 		68254A51E35467B93E426587 /* KeptBakesLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC092C99F264CEE0E3038FD6 /* KeptBakesLogicTests.swift */; };
 		CDE18C812B9E55041DCD4299 /* ZoomEdgesUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 783C23680131645EE6BC32D2 /* ZoomEdgesUITests.swift */; };
 		14D62219BD6C5D17FBAAD904 /* FrameExportLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB2887B873408CD4A7D9A818 /* FrameExportLogicTests.swift */; };
@@ -1290,6 +1291,7 @@
 		A233D4C1984B6E4C5A647F44 /* PaintSoftware/Engine/FrameBaker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaintSoftware/Engine/FrameBaker.swift; sourceTree = "<group>"; };
 		1ED6628CDA095F19E3706F1B /* FrameBakeKeyLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameBakeKeyLogicTests.swift; sourceTree = "<group>"; };
 		D8B087F472D49C2E12E6EFEB /* FrameBakeStoreLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameBakeStoreLogicTests.swift; sourceTree = "<group>"; };
+		9E546501746C17C5ABC6678B /* KeepBakedFramesUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeepBakedFramesUITests.swift; sourceTree = "<group>"; };
 		EC092C99F264CEE0E3038FD6 /* KeptBakesLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeptBakesLogicTests.swift; sourceTree = "<group>"; };
 		783C23680131645EE6BC32D2 /* ZoomEdgesUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ZoomEdgesUITests.swift; sourceTree = "<group>"; };
 		DB2887B873408CD4A7D9A818 /* FrameExportLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FrameExportLogicTests.swift; sourceTree = "<group>"; };
@@ -1708,6 +1710,7 @@
 				98FF1F362304A853093BCCC3 /* ChunkedCompositeMetalLogicTests.swift */,
 				1ED6628CDA095F19E3706F1B /* FrameBakeKeyLogicTests.swift */,
 				D8B087F472D49C2E12E6EFEB /* FrameBakeStoreLogicTests.swift */,
+				9E546501746C17C5ABC6678B /* KeepBakedFramesUITests.swift */,
 				EC092C99F264CEE0E3038FD6 /* KeptBakesLogicTests.swift */,
 				783C23680131645EE6BC32D2 /* ZoomEdgesUITests.swift */,
 				DB2887B873408CD4A7D9A818 /* FrameExportLogicTests.swift */,
@@ -2692,6 +2695,7 @@
 				057907A57C18B12F87D5C280 /* PaintSoftware/Engine/FrameBaker.swift in Sources */,
 				04D45228B568045D27D9876A /* FrameBakeKeyLogicTests.swift in Sources */,
 				DEDD07AB03769DB26412A980 /* FrameBakeStoreLogicTests.swift in Sources */,
+				588C6D24F7705D050A9C8397 /* KeepBakedFramesUITests.swift in Sources */,
 				68254A51E35467B93E426587 /* KeptBakesLogicTests.swift in Sources */,
 				CDE18C812B9E55041DCD4299 /* ZoomEdgesUITests.swift in Sources */,
 				14D62219BD6C5D17FBAAD904 /* FrameExportLogicTests.swift in Sources */,
