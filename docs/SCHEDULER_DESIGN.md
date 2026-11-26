@@ -280,7 +280,7 @@ Budgets are for the minimum machine; every line is a named span, and the counts 
 - **Pen down during 3–6**: `promote(.answer)` on the cut; ink as in §3.1.
 - **Playing** uses the same path: reads are R1 one frame ahead of the clock; predictions fill a second ahead.
 - **Edges**: the half-size `whole` is drawn in a canvas-placed layer under the window surfaces (24 MiB of pixels, one
-  reduced IOSurface handed to the server: ≤ 1620² ≈ 10 MiB). Pan and zoom move it in the same
+  reduced IOSurface handed to the server: ≤ 1024² = 4 MiB). Pan and zoom move it in the same
   transaction as the canvas, so revealed areas are never blank.
 
 ## 5. Bake throughput

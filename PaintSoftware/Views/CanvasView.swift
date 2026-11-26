@@ -2873,10 +2873,11 @@ struct CanvasView: UIViewRepresentable {
 
         // MARK: The whole frame under the window
 
-        /// The longest side of the picture under the window surface: 1620 px is the iPad 9's window
-        /// at 2×, so a canvas that fits the screen is shown here at about its own resolution, and the
-        /// render server is handed one picture of at most 10 MiB however big the canvas is.
-        private static let underPictureSide = 1620
+        /// The longest side of the picture under the window surface: 1024 px, a soft stand-in for the
+        /// few hundred milliseconds before the surface is redrawn, and one picture of at most 4 MiB for
+        /// the render server and the app however big the canvas is (1620 — the iPad 9's window at 2× —
+        /// cost the playcheck +50 MiB at its undo peak, which the gate has 31 MiB of room for).
+        private static let underPictureSide = 1024
         /// How long a frame stays on screen before its reduced picture is made: a burst of steps
         /// makes one, and playback none (a picture per flip is what filled the render server).
         private static let underPictureSettle: TimeInterval = 0.3

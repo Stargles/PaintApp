@@ -156,6 +156,7 @@ nonisolated enum BakeFile {
     /// writes it (`FrameBakeStore.bgraBytes`): tightly packed, premultiplied, alpha first. Peak
     /// memory beyond the input is the output and one tile's two buffers: the half level is filtered
     /// tile by tile from the full pixels and never held whole.
+    @_optimize(speed)
     static func encode(bgra: [UInt8], width: Int, height: Int, digest: Data) -> Data? {
         guard width > 0, height > 0, width <= maxSide, height <= maxSide,
               bgra.count == width * height * 4, digest.count == 32 else { return nil }
@@ -205,6 +206,7 @@ nonisolated enum BakeFile {
         return file
     }
 
+    @_optimize(speed)
     private static func copyRows(from source: UnsafeBufferPointer<UInt8>, stride: Int, x: Int, y: Int,
                                  width: Int, height: Int, to destination: UnsafeMutableBufferPointer<UInt8>) {
         guard let src = source.baseAddress, let dst = destination.baseAddress else { return }
@@ -216,6 +218,7 @@ nonisolated enum BakeFile {
     /// One tile of the half level: each half pixel is the mean of the (up to four) full pixels under
     /// it, per channel. The pixels are premultiplied, so the mean of premultiplied values is the
     /// premultiplied mean — no unpremultiply round trip. An odd edge averages the pixels it has.
+    @_optimize(speed)
     private static func halve(from source: UnsafeBufferPointer<UInt8>, fullWidth: Int, fullHeight: Int,
                               x: Int, y: Int, width: Int, height: Int,
                               to destination: UnsafeMutableBufferPointer<UInt8>) {
@@ -249,6 +252,7 @@ nonisolated enum BakeFile {
     /// Decodes `level` into `destination`, tightly packed (`width * 4` a row). `payload` is exactly
     /// `directory.payload(of: level)` — the level's bytes and no others. False on any tile that does
     /// not decode to its size.
+    @_optimize(speed)
     static func decode(level: BakeLevel, directory: Directory, payload: Data,
                        into destination: UnsafeMutableRawBufferPointer) -> Bool {
         let header = directory.header
@@ -284,6 +288,7 @@ nonisolated enum BakeFile {
         return true
     }
 
+    @_optimize(speed)
     private static func scatter(_ tile: UnsafeRawBufferPointer, rect: (x: Int, y: Int, width: Int, height: Int),
                                 stride: Int, to base: UnsafeMutableRawPointer) {
         guard let src = tile.baseAddress else { return }
