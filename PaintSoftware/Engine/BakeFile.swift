@@ -189,11 +189,13 @@ nonisolated enum BakeFile {
                                             into: UnsafeMutableRawBufferPointer(start: out.baseAddress, count: count))
                         }
                     }
+                    // `Data.append(_:count:)` is one memcpy; appending an array slice is a byte loop that
+                    // costs seconds a frame in a Debug build.
                     if written > 0, written < count {
-                        payload.append(contentsOf: packed[0..<written])
+                        packed.withUnsafeBufferPointer { payload.append($0.baseAddress!, count: written) }
                         entries.append(UInt32(written))
                     } else {
-                        payload.append(contentsOf: tile[0..<count])
+                        tile.withUnsafeBufferPointer { payload.append($0.baseAddress!, count: count) }
                         entries.append(UInt32(count) | FrameBakeStore.rawTileBit)
                     }
                 }
