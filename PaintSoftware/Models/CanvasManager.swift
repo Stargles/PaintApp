@@ -3533,8 +3533,9 @@ final class CanvasManager: ObservableObject {
     /// full ones at the owner's 2048×1024.
     static let minimumFrameRingByteBudget = 96 * 1024 * 1024
 
-    /// **The decoded ring's budget: a flat share of the one budget, whatever the canvas** — a quarter
-    /// (222 MiB on the iPad 9's 888), and no more than that and no less than the floor above.
+    /// **The decoded ring's budget: a flat share of the one budget, whatever the canvas** — a fifth
+    /// (177 MiB on the iPad 9's 888: the two full frames the old rule held at 5000² were 190, and the
+    /// playcheck's undo peak has 31 MiB of room), and no more than that and no less than the floor above.
     ///
     /// It used to be a function of the frame's size with a cliff: two full frames or none, and none
     /// from ~4900², where playback decoded on the display thread. Bake files now hold a half-size
@@ -3544,7 +3545,7 @@ final class CanvasManager: ObservableObject {
     /// canvas is zoomed to decides which level it holds (`FrameBaker.displayLevel`); SCHEDULER_DESIGN.md
     /// §3's manager replaces this share when it lands.
     static func frameRingByteBudget(sharedBudgetBytes: Int = MemoryBudget.deviceTotalBytes) -> Int {
-        max(minimumFrameRingByteBudget, sharedBudgetBytes / 4)
+        max(minimumFrameRingByteBudget, sharedBudgetBytes / 5)
     }
 
     @MainActor
