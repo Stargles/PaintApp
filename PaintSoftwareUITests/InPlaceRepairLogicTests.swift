@@ -65,7 +65,7 @@ final class InPlaceRepairLogicTests: XCTestCase {
     /// revision, written over the new mark's ink only — not a canvas-sized copy — and the pixels are a
     /// full walk's.
     ///
-    /// Mutation that reddens it: `inPlaceShare` 0 — every append makes a new picture again.
+    /// Mutation that reddens it: an `inPlaceShare` no repair fits under — every append makes a new picture again.
     func testAStrokeLandingRepairsThePictureInPlaceOverItsInkOnly() throws {
         let canvas = Self.drawn(20)
         let before = try XCTUnwrap(LayerPicture.of(canvas.render()))
