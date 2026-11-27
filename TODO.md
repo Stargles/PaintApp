@@ -63,6 +63,10 @@ Every status report to the owner lists this queue with each item's state, not on
 7. **Re-check against `main`, then fix what remains:** stroke briefly disappears, stroke latency and
    pan hitches, rapid-edit whole-iPad failures, Liquify shown while held, Move-exit gap,
    the red `SelectionEditUITests` swatch test.
+   **Stroke-lift flicker still there on `ee72796b` (owner, Nov 26: *"placing down a stroke still causes a brief
+   flicker in the layer sometimes"*).** Recording pulled to `~/PaintWork/nov26-flicker/recording-20261126-212718.jsonl`.
+   Next after the S2 fix: a worker reads it, root-causes the flicker on `main` (check S5's three layer pictures and
+   rule 10, "the screen never mixes pictures", before building anything new), fixes it there.
 8. **Canvas freezes** — merged Nov 25 (`71f4fd6e`): one touch recognizer of our own replaces UIKit's pan /
    pinch / rotation / tap web and the repair; all 43 flights replay clean. On the iPad since
    Nov 25 (`c15ad799`); owner to confirm with fast three-finger redos and palm-down pans. Seven UI tests red on old
