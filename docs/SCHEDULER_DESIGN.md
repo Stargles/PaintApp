@@ -506,7 +506,9 @@ drawing fill) and the press is spent; a Redo then has nothing to redo. Found by 
 the press fell through to the step before the fill — four Undos took back the eraser, the cut, the To Cross erase and
 one setup step, and the fill landed on top after them.
 
-**Gate (iPad 9 sim, 5000² × 5 layers, main `ac97b9a1` → S3b):** GATE_NUMBERS
+**Gate (iPad 9 sim, 5000² × 5 layers, main `ac97b9a1` → S3b):** playcheck GREEN. **Undo phase peak 1,126 → 1,014 MiB** — no longer
+the run's peak; it equals the step phases' (S3b's gate asked ≤ the other phases' + 20; main was +126). R1 `late` **30 → 28**
+(`layer_picture` 29 → 27, `fill` 1 → 1); step to a whole frame 70 → 84 ms (noise, untouched path). PLAYCHECK_RUNS
 
 **The brief's premise, refuted:** R1 `late` was not whole-cel renders an edit's repair could have avoided. They are
 `layer picture` renders of cels that are not memoized — the scene entering (5), and every frame step whose hosts
