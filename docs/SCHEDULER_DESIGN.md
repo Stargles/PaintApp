@@ -428,6 +428,19 @@ the revealed canvas shows none of the frame's ink (all three layers read blank a
 three show it. Latency to a non-empty edge: one transaction (0 ms of waiting) against the window redraw (the
 iPad's ~0.3–0.6 s, seconds with the draw slowed). 1024 not 1620 because 1620 cost the playcheck's undo peak +50 MiB.
 
+**The playcheck's undo peak, and why the half level showed it.** MEASURED (a sampler inside the app reading
+`phys_footprint` every 0.5 ms beside what the budget held; iPad 9 simulator, two runs each): at the undo peak the
+footprint stood **296–304 MiB above what the budget held at that instant on main, on S2, and on S2 held at the full
+level** — nothing S2 adds is outside the budget. What differs is the budget's own fill: 842 held on main and 838–842 at
+the full level, 866–886 at the half level, because the ring's half frames (24 MiB each) fill the budget's slack to the
+ceiling where a 95 MiB full frame left ~45 MiB of it. The gate's arithmetic (888 + what the budget cannot see ≤ 1,165)
+had assumed 252 uncounted; it was 296 on main too, which passed only on that slack. The onion skin's ghost and cut
+(48 MiB at 5000², drawn by `UIGraphicsImageRenderer`) were part of the uncounted share; they are drawn into admitted
+buffers now (`PixelOps.drawImage`, R2 lane, a refusal asked again after `TouchFlag.settle`), and the budget yields ring
+cache to them. **Encode**: a bake file is written a tile at a time into a staging file and renamed (`BakeFile.Sink`),
+so the encode is admitted for its working tiles (~5 MiB) rather than the 1.25 frames a raw file can reach; real files
+at 5000² are ~1 MiB.
+
 **Q2, built — and its premise refuted.** The brief said the bakes go in the scene's own folder and are reused next
 launch. A bake key names pictures by `LayerContentVersion`'s `residencyID` (a `UUID()` per object) and per-open
 version counters, so **no key survives a launch**: a file kept under its key is never asked for again. What survives

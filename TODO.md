@@ -38,10 +38,10 @@ Every status report to the owner lists this queue with each item's state, not on
    Gate green (app peak 1,108 MiB); R1 `late` 37 (whole-layer renders — S3b's job).
    **Owner ruling Nov 26: a second Fill tap while the first is still drawing is QUEUED** (no pause, lands after the
    first; never dropped). Today's `waitForFillWork()` on main goes — S3b.
-   **S2 built on `tmp/nov25-s2`, NOT merged — playcheck RED by 6–10 MiB** (app peak 1,170–1,176 at "4 undos" vs 1,165;
-   main 1,113–1,145). MEASURED: it is the half display level — forcing `.full` brings the peak back to 1,140; not the
-   ring, the under-picture, vImage's intermediate (fixed anyway), CG interpolation or the allocator. Window draws are
-   not a regression: playback now delivers ~24 flips/s (295 in 12 s) where main dropped to ~11/s.
+   **S2 built on `tmp/nov25-s2`, NOT merged — gate GREEN since the onion skin joined the budget.** The red was not
+   the half level's own memory: at the undo peak the app sits ~300 MiB above what the budget holds on main and S2 alike
+   (MEASURED); the half frames merely fill the budget's slack that main's 95 MiB frames left. The onion ghost (48 MiB)
+   is counted now; bake encode streams to disk. Window draws are not a regression: playback ~24 flips/s (main ~11/s).
    **Owner ruling Nov 26, built: kept bakes live INSIDE the scene package** (`<package>/bakes/`; shares, backups and
    duplicates grow by them — accepted); `.bakes.nosync` is gone.
    Then S3b Undo, S4 memory manager (= (9)),

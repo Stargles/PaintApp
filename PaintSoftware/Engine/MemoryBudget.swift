@@ -65,9 +65,11 @@ nonisolated final class MemoryBudget: @unchecked Sendable {
     ///   **858 MiB** the bake can never start and the scene never bakes.
     /// - **from above**: the gate allows the whole app 0.63 of the limit (`CanvasManager
     ///   .gradedWorkingSetBudgetFraction`, 1,165 MiB), and what this budget is not asked about —
-    ///   UIKit, Metal, the window surfaces, the model, a stroke's scratch — measured at most 252 MiB
-    ///   above the budget's own peak (footprint peak 1,139 against 887). Above **913 MiB** the gate
-    ///   has no margin.
+    ///   UIKit, Metal, the window surfaces, the model, a stroke's scratch — read at the gate's peak
+    ///   (the undo) as the footprint less what the budget held **at that instant**: 296 MiB on main
+    ///   and S2 alike while the onion skin's pictures were drawn outside the budget, about 258 since
+    ///   (2026-11-27; the first reading, 252, set the two peaks side by side, which were not taken at
+    ///   one instant). Above **907 MiB** the gate has no margin.
     /// 0.48 of the limit is **888 MiB**, inside both. A heavier scene moves the first bound, not the
     /// number: more or larger layers than fit refuse their pictures through the notices, and the
     /// bake waits — which is the budget doing its job rather than the app being killed.
