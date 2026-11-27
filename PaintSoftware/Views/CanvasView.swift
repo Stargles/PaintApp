@@ -1424,6 +1424,8 @@ struct CanvasView: UIViewRepresentable {
                 + " draws:\(WindowSurfaceView.presentedTotal)"
                 + " r1late:\(Scheduler.shared.stats.lateAnswers)"
                 + " r1lateBy:\(Scheduler.shared.stats.lateField)"
+                // **Fill taps queued behind a fill still drawing** (owner ruling, Nov 26) — monotonic.
+                + " fillsQueued:\(canvasManager.fillsQueued)"
                 // **The open lasso's size** (TODO (184)): how many points the Freehand lasso holds, or
                 // `none` — the host hides the overlay's layers from XCUITest like every descendant.
                 + " lasso:\(canvasManager.openLasso.map { String($0.points.count) } ?? "none")"

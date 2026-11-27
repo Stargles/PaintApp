@@ -23,6 +23,7 @@ struct PaintApp: App {
         // first document's baker exists, which reads it at every mint.
         UITestSeeds.applyBakeDelayIfRequested()
         UITestSeeds.applyWindowDrawDelayIfRequested()
+        UITestSeeds.applyFillDelayIfRequested()
         UITestSeeds.applyStallFloorIfRequested()
         // TODO (36): resolve the artist's chosen projects folder **before** anything reads
         // `ProjectBackupManager.documentsDirectory`. Synchronous and on the main thread on purpose —

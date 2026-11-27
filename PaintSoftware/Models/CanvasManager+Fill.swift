@@ -255,6 +255,7 @@ extension CanvasManager {
     private func queueFillIfTheLiveOneIsDrawing(_ gesture: QueuedFill.Gesture, color: UIColor) -> Bool {
         guard !queuedFills.isEmpty || (fillGestureActive && !fillHasProduced) else { return false }
         queuedFills.append(QueuedFill(gesture: gesture, color: color, project: projectID))
+        fillsQueued += 1
         fillCommitsOnLanding = true
         return true
     }
@@ -1126,6 +1127,7 @@ extension CanvasManager {
     /// breaks it"*: it renders the new seed against the old session, it overwrites the bytes the new
     /// gesture's commit bakes, and its picture installs itself as the new gesture's preview.
     private func renderFill(_ key: FillKey, for context: FillGestureContext) -> FillRenderOutcome? {
+        if Self.fillRenderDelay > 0 { Thread.sleep(forTimeInterval: Self.fillRenderDelay) }
         guard isCurrentFillGeneration(context.generation), fillSession != nil, var window = fillWindow
         else { return nil }
         var session = fillSession

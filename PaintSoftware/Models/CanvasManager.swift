@@ -4059,6 +4059,11 @@ final class CanvasManager: ObservableObject {
     /// The live fill is to be baked the moment its first picture lands: an edit asked for it before
     /// there was anything to bake (`prepareInteractiveFill`), or a tap is queued behind it. Main thread.
     var fillCommitsOnLanding = false
+    /// Fill taps ever queued behind a fill still drawing — monotonic, a test's view of the queue.
+    var fillsQueued = 0
+    /// **How long every fill render waits before it runs** — zero on every ordinary launch, set only
+    /// by `UITestSeeds.applyFillDelayIfRequested` (`-uiTestSlowFillMillis`, simulator only).
+    nonisolated(unsafe) static var fillRenderDelay: TimeInterval = 0
 
     /// Records the artist's own answer for whether a layer bounds the fill (§6.6) — written by the
     /// row's drop button, which is the only control that sets it.

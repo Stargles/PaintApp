@@ -122,6 +122,23 @@ enum UITestSeeds {
         MainThreadStallSampler.interval = 0.002
     }
 
+    /// **Makes a fill's render take as long as it does on a heavy scene** — `-uiTestSlowFillMillis <n>`,
+    /// armed from `PaintApp.init` into `CanvasManager.fillRenderDelay`. A second tap made while the first
+    /// fill is still drawing is queued (owner ruling, Nov 26); a bucket render here is a few milliseconds,
+    /// under the gap XCUITest leaves between two taps, so without this no test could tap inside that
+    /// window. The sleep is in the fill lane's render job and nowhere else.
+    ///
+    /// Simulator-only, on `slowVectorRenderDelay`'s rule and for its reason.
+    static func applyFillDelayIfRequested() {
+        guard ProjectBackupManager.isSimulator
+        else { return }
+        let args = ProcessInfo.processInfo.arguments
+        guard let flag = args.firstIndex(of: "-uiTestSlowFillMillis"),
+              args.index(after: flag) < args.endIndex,
+              let millis = Int(args[args.index(after: flag)]), millis > 0 else { return }
+        CanvasManager.fillRenderDelay = TimeInterval(millis) / 1000
+    }
+
     static func applyWindowDrawDelayIfRequested() {
         guard ProjectBackupManager.isSimulator
         else { return }
