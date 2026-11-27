@@ -286,28 +286,54 @@ nonisolated final class FrameBakeStore {
     }
 
     /// `store(_:)` from pixels already converted — what the bake calls, having let the composite go
-    /// first, so its peak is two frames (the BGRA copy and LZ4's output) rather than three.
+    /// first, so its peak is the BGRA copy and the encode's working tiles.
+    ///
+    /// **The file is written to disk a tile at a time** (`BakeFile.encode(…into:)`) into a staging file
+    /// on the store's volume, and renamed over the key's name once it fits — so the encode is admitted
+    /// for what it holds, `BakeFile.workingBytes` (about 4 MiB), never for the file: a file can be as
+    /// large as both levels raw (1.25 frames), and an in-memory encode had to be admitted for that
+    /// whatever the frame compressed to (about 1 MiB at the owner's 5000²).
     func store(pixels: (bytes: [UInt8], width: Int, height: Int),
                for key: FrameBakeKey,
                playhead: Int = 0,
                frames: [String: Set<Int>] = [:]) -> Result<Int, WriteFailure> {
         guard key.digest.count == 32 else { return .failure(.malformedKey) }
-        // The file's bytes are at most the frame's own (a tile LZ4 does not shrink goes down raw) and
-        // the half level's pixels are held while it is cut into tiles: both admitted for the encode.
-        guard let encoding = MemoryBudget.shared.admit(pixels.bytes.count + pixels.bytes.count / 4 + 4096)
+        guard let encoding = MemoryBudget.shared.admit(BakeFile.workingBytes(width: pixels.width, height: pixels.height))
         else { return .failure(.notAdmitted) }
         defer { encoding.release() }
-        guard let file = BakeFile.encode(bgra: pixels.bytes, width: pixels.width, height: pixels.height,
-                                         digest: key.digest) else { return .failure(.unreadableImage) }
 
-        let size = file.count
+        let fm = FileManager.default
+        let destination = url(for: key)
+        var stagingFolder: URL?
+        defer { if let stagingFolder { try? fm.removeItem(at: stagingFolder) } }
+        let size: Int
+        let staging: URL
+        do {
+            try fm.createDirectory(at: root, withIntermediateDirectories: true)
+            // Outside the store's folder, whose every unnamed file is junk to evict, and on its volume.
+            let folder = try fm.url(for: .itemReplacementDirectory, in: .userDomainMask,
+                                    appropriateFor: destination, create: true)
+            stagingFolder = folder
+            staging = folder.appendingPathComponent(destination.lastPathComponent, isDirectory: false)
+            guard fm.createFile(atPath: staging.path, contents: nil) else { throw CocoaError(.fileWriteUnknown) }
+            let handle = try FileHandle(forWritingTo: staging)
+            defer { try? handle.close() }
+            var sink = FileSink(handle: handle)
+            size = try BakeFile.encode(bgra: pixels.bytes, width: pixels.width, height: pixels.height,
+                                       digest: key.digest, into: &sink)
+        } catch is BakeFile.Unencodable {
+            return .failure(.unreadableImage)
+        } catch {
+            if explicitCeiling == nil { owner.refreshCapacity() }
+            return .failure(.couldNotWrite)
+        }
+
         guard size <= ceiling else {
             return .failure(.exceedsCeiling(needed: size, ceiling: ceiling))
         }
 
         owner.io.lock()
         defer { owner.io.unlock() }
-        let destination = url(for: key)
         let existing = owner.entry(.bake(key))?.size ?? 0
         let delta = size - existing
         evictLocked(toFree: delta, playhead: playhead, frames: frames, keeping: key)
@@ -315,16 +341,30 @@ nonisolated final class FrameBakeStore {
             if explicitCeiling == nil { owner.refreshCapacity() }
             return .failure(.couldNotWrite)
         }
-
-        do {
-            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            try file.write(to: destination, options: .atomic)
-        } catch {
+        // `rename` replaces the key's file in one step, so a reader sees the old file or the new one.
+        guard rename(staging.path, destination.path) == 0 else {
             if explicitCeiling == nil { owner.refreshCapacity() }
             return .failure(.couldNotWrite)
         }
         owner.record(.bake(key), size: size)
         return .success(size)
+    }
+
+    /// The staging file an encode writes into: appended at the end, the directory written in place.
+    private struct FileSink: BakeFile.Sink {
+        let handle: FileHandle
+
+        mutating func append(_ bytes: UnsafeRawBufferPointer) throws {
+            guard let base = bytes.baseAddress, bytes.count > 0 else { return }
+            try handle.write(contentsOf: Data(bytesNoCopy: UnsafeMutableRawPointer(mutating: base),
+                                              count: bytes.count, deallocator: .none))
+        }
+
+        mutating func overwrite(at offset: Int, with bytes: Data) throws {
+            try handle.seek(toOffset: UInt64(offset))
+            try handle.write(contentsOf: bytes)
+            try handle.seekToEnd()
+        }
     }
 
     /// Makes `key`'s file out of the kept file for `frame` (`KeptBakes.adopt`). False when there is none

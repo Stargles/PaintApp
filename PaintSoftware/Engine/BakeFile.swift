@@ -153,66 +153,110 @@ nonisolated enum BakeFile {
 
     // MARK: - Encoding
 
-    /// The whole file for one frame, or nil for a degenerate size or a resample that failed. `bgra` is
-    /// the frame as the store writes it (`FrameBakeStore.bgraBytes`): tightly packed, premultiplied,
-    /// alpha first. **Peak memory beyond the input is the output and a few tiles' buffers — nothing
-    /// proportional to the canvas**: the half level is resampled one tile at a time (`halfTile`), because
-    /// `vImageScale` needs an intermediate of source height × destination width × 4 bytes (47.7 MiB at
-    /// 5000², MEASURED with `kvImageGetTempBufferSize`) that no budget is asked about.
+    /// **Where an encoded file goes**: written front to back, then the tile directory — known only once
+    /// every tile is packed — written over the placeholder it left. The store's sink is the file itself,
+    /// so the frame is never held a second time in memory; `Data` is the sink for tests.
+    protocol Sink {
+        mutating func append(_ bytes: UnsafeRawBufferPointer) throws
+        mutating func overwrite(at offset: Int, with bytes: Data) throws
+    }
+
+    /// The input could not be encoded: a degenerate size, a malformed digest or a resample that failed.
+    struct Unencodable: Error {}
+
+    /// **What an encode holds beyond its input**, the figure the store admits for it: one tile and its
+    /// packed copy, the half level's margin-wide region, `vImageScale`'s own working buffer for that
+    /// region, and the directory. Nothing proportional to the canvas but the directory (4 bytes a tile),
+    /// because the file goes to its sink a tile at a time.
+    static func workingBytes(width: Int, height: Int) -> Int {
+        let side = FrameBakeStore.tileSide, region = side + 2 * halfMargin
+        return 2 * side * side * 4 + region * region * 4 + halfScaleTempBytes
+            + Header(fullWidth: width, fullHeight: height, digest: Data(count: 32)).prefixBytes
+    }
+
+    /// `vImageScale`'s working buffer for the largest region a half tile resamples (its source twice the
+    /// region's side), asked of vImage rather than assumed; the encode hands vImage a buffer this size
+    /// so it allocates none of its own.
+    static let halfScaleTempBytes: Int = {
+        let region = FrameBakeStore.tileSide + 2 * halfMargin
+        var from = vImage_Buffer(data: nil, height: vImagePixelCount(2 * region), width: vImagePixelCount(2 * region),
+                                 rowBytes: 2 * region * 4)
+        var to = vImage_Buffer(data: nil, height: vImagePixelCount(region), width: vImagePixelCount(region),
+                               rowBytes: region * 4)
+        let size = vImageScale_ARGB8888(&from, &to, nil,
+                                        vImage_Flags(kvImageHighQualityResampling | kvImageGetTempBufferSize))
+        return max(0, size)
+    }()
+
+    /// The whole file for one frame, in memory — `encode(…into:)` with `Data` as the sink. Nil for an
+    /// input that cannot be encoded.
     static func encode(bgra: [UInt8], width: Int, height: Int, digest: Data) -> Data? {
+        var file = Data()
+        guard (try? encode(bgra: bgra, width: width, height: height, digest: digest, into: &file)) != nil else { return nil }
+        return file
+    }
+
+    /// **Writes one frame's file to `sink` and answers its length.** `bgra` is the frame as the store
+    /// writes it (`FrameBakeStore.bgraBytes`): tightly packed, premultiplied, alpha first. Each tile —
+    /// the full level's, then the half level's, resampled a tile at a time (`halfTile`) — is packed and
+    /// handed to the sink before the next is made, so **the memory beyond the input is
+    /// `workingBytes`** whatever the frame holds: the file is never in memory whole.
+    @discardableResult
+    static func encode(bgra: [UInt8], width: Int, height: Int, digest: Data, into sink: inout some Sink) throws -> Int {
         guard width > 0, height > 0, width <= maxSide, height <= maxSide,
-              bgra.count == width * height * 4, digest.count == 32 else { return nil }
+              bgra.count == width * height * 4, digest.count == 32 else { throw Unencodable() }
         let header = Header(fullWidth: width, fullHeight: height, digest: digest)
         var entries: [UInt32] = []
         entries.reserveCapacity(header.tileCount(of: .full) + header.tileCount(of: .half))
-        var payload = Data()
+        let prefix = header.encoded() + Data(count: header.directoryBytes)
+        try prefix.withUnsafeBytes { try sink.append($0) }
+        var length = prefix.count
         let side = FrameBakeStore.tileSide
         var tile = [UInt8](repeating: 0, count: side * side * 4)
         var packed = [UInt8](repeating: 0, count: side * side * 4)
         var scratch = [UInt8](repeating: 0, count: (side + 2 * halfMargin) * (side + 2 * halfMargin) * 4)
-        var failed = false
+        var scaleTemp = [UInt8](repeating: 0, count: max(1, halfScaleTempBytes))
 
-        bgra.withUnsafeBufferPointer { full in
+        try bgra.withUnsafeBufferPointer { full in
             for level in BakeLevel.allCases {
                 for index in 0..<header.tileCount(of: level) {
                     let rect = header.tileRect(index, of: level)
                     let count = rect.width * rect.height * 4
-                    tile.withUnsafeMutableBufferPointer { destination in
+                    let made = tile.withUnsafeMutableBufferPointer { destination -> Bool in
                         switch level {
                         case .full:
                             copyRows(from: full, stride: width * 4, x: rect.x, y: rect.y,
                                      width: rect.width, height: rect.height, to: destination)
+                            return true
                         case .half:
-                            failed = failed || !halfTile(of: full, width: width, height: height, rect: rect,
-                                                         halfSize: (header.halfWidth, header.halfHeight),
-                                                         scratch: &scratch, into: destination)
+                            return halfTile(of: full, width: width, height: height, rect: rect,
+                                            halfSize: (header.halfWidth, header.halfHeight),
+                                            scratch: &scratch, temp: &scaleTemp, into: destination)
                         }
                     }
-                    if failed { return }
+                    guard made else { throw Unencodable() }
                     let written = tile.withUnsafeBufferPointer { raw in
                         packed.withUnsafeMutableBufferPointer { out in
                             LZ4Block.encode(UnsafeRawBufferPointer(start: raw.baseAddress, count: count),
                                             into: UnsafeMutableRawBufferPointer(start: out.baseAddress, count: count))
                         }
                     }
-                    // `Data.append(_:count:)` is one memcpy; appending an array slice is a byte loop that
-                    // costs seconds a frame in a Debug build.
                     if written > 0, written < count {
-                        packed.withUnsafeBufferPointer { payload.append($0.baseAddress!, count: written) }
+                        try packed.withUnsafeBytes { try sink.append(UnsafeRawBufferPointer(rebasing: $0[0..<written])) }
                         entries.append(UInt32(written))
+                        length += written
                     } else {
-                        tile.withUnsafeBufferPointer { payload.append($0.baseAddress!, count: count) }
+                        try tile.withUnsafeBytes { try sink.append(UnsafeRawBufferPointer(rebasing: $0[0..<count])) }
                         entries.append(UInt32(count) | FrameBakeStore.rawTileBit)
+                        length += count
                     }
                 }
             }
         }
-        guard !failed else { return nil }
-        var file = header.encoded()
-        file.reserveCapacity(header.prefixBytes + payload.count)
-        for entry in entries { file.appendLE(entry) }
-        file.append(payload)
-        return file
+        var directory = Data(capacity: header.directoryBytes)
+        for entry in entries { directory.appendLE(entry) }
+        try sink.overwrite(at: FrameBakeStore.headerBytes, with: directory)
+        return length
     }
 
     private static func copyRows(from source: UnsafeBufferPointer<UInt8>, stride: Int, x: Int, y: Int,
@@ -233,26 +277,27 @@ nonisolated enum BakeFile {
     /// the frame), at the speed of Accelerate in every build configuration (a hand-written box filter
     /// was exact and took 3.5 s a 4096² frame in a Debug build, where the playcheck gate and every test
     /// run). The scale is exactly 2:1 except at an odd last row or column, which keeps its own pixels
-    /// like any other edge. `scratch` holds the margin-wide result; `vImageScale`'s own intermediate is
-    /// that region's height × width × 4 bytes, about 2 MiB.
+    /// like any other edge. `scratch` holds the margin-wide result and `temp` is `vImageScale`'s working
+    /// buffer (`halfScaleTempBytes`), so the resample allocates nothing of its own.
     private static func halfTile(of bgra: UnsafeBufferPointer<UInt8>, width: Int, height: Int,
                                  rect: (x: Int, y: Int, width: Int, height: Int),
                                  halfSize half: (width: Int, height: Int),
-                                 scratch: inout [UInt8], into destination: UnsafeMutableBufferPointer<UInt8>) -> Bool {
+                                 scratch: inout [UInt8], temp: inout [UInt8],
+                                 into destination: UnsafeMutableBufferPointer<UInt8>) -> Bool {
         guard let source = bgra.baseAddress, let out = destination.baseAddress else { return false }
         let dx0 = max(0, rect.x - halfMargin), dx1 = min(half.width, rect.x + rect.width + halfMargin)
         let dy0 = max(0, rect.y - halfMargin), dy1 = min(half.height, rect.y + rect.height + halfMargin)
         let sx0 = 2 * dx0, sx1 = min(width, 2 * dx1), sy0 = 2 * dy0, sy1 = min(height, 2 * dy1)
         let dw = dx1 - dx0, dh = dy1 - dy0
         guard dw > 0, dh > 0, sx1 > sx0, sy1 > sy0, scratch.count >= dw * dh * 4 else { return false }
-        let status: vImage_Error = scratch.withUnsafeMutableBytes { region in
+        let status: vImage_Error = scratch.withUnsafeMutableBytes { region in temp.withUnsafeMutableBytes { work in
             var from = vImage_Buffer(data: UnsafeMutableRawPointer(mutating: source + (sy0 * width + sx0) * 4),
                                      height: vImagePixelCount(sy1 - sy0), width: vImagePixelCount(sx1 - sx0),
                                      rowBytes: width * 4)
             var to = vImage_Buffer(data: region.baseAddress, height: vImagePixelCount(dh),
                                    width: vImagePixelCount(dw), rowBytes: dw * 4)
-            return vImageScale_ARGB8888(&from, &to, nil, vImage_Flags(kvImageHighQualityResampling))
-        }
+            return vImageScale_ARGB8888(&from, &to, work.baseAddress, vImage_Flags(kvImageHighQualityResampling))
+        } }
         guard status == kvImageNoError else { return false }
         scratch.withUnsafeBytes { region in
             for row in 0..<rect.height {
@@ -327,5 +372,15 @@ extension Data {
             value |= T(self[startIndex + offset + i]) << (8 * i)
         }
         return value
+    }
+}
+
+extension Data: BakeFile.Sink {
+    nonisolated mutating func append(_ bytes: UnsafeRawBufferPointer) throws {
+        append(contentsOf: bytes)
+    }
+
+    nonisolated mutating func overwrite(at offset: Int, with bytes: Data) throws {
+        replaceSubrange(startIndex + offset..<startIndex + offset + bytes.count, with: bytes)
     }
 }

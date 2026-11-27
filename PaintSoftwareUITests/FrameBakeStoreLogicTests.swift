@@ -157,6 +157,36 @@ final class FrameBakeStoreLogicTests: XCTestCase {
                        "The raw branch must round-trip too, not only the compressed one.")
     }
 
+    /// **The encode is admitted for its working tiles, never for the file**: the store writes the file a
+    /// tile at a time, so a budget with room for `BakeFile.workingBytes` and nothing like the 1.25 frames
+    /// a raw file can reach still stores the frame — incompressible noise, the largest file there is —
+    /// and the file on disk is byte for byte what the in-memory encode makes.
+    func testAStoreIsAdmittedForTheEncodesWorkingTilesNotForTheFile() throws {
+        let side = 2048
+        let image = noiseImage(side)
+        let pixels = try XCTUnwrap(FrameBakeStore.bgraBytes(image))
+        let working = BakeFile.workingBytes(width: side, height: side)
+        XCTAssertLessThan(working, side * side * 4 / 2, "PREMISE: the working tiles are well below a raw file's 1.25 frames")
+        XCTAssertLessThan(BakeFile.workingBytes(width: 5000, height: 5000), 8 << 20,
+                          "at the owner's 5000² the encode holds a few tiles, not the 119 MiB a raw file can reach")
+        XCTAssertGreaterThan(BakeFile.halfScaleTempBytes, 0, "vImage names a working buffer for the half tile's resample")
+        let key = syntheticKey(0x2B)
+        let store = store()
+        MemoryBudget.shared.leaveRoom(for: working)
+        defer { MemoryBudget.shared.totalBytes = MemoryBudget.deviceTotalBytes }
+        guard case .success(let size) = store.store(pixels: pixels, for: key) else {
+            return XCTFail("a budget with room for the working tiles alone must store the frame")
+        }
+        MemoryBudget.shared.totalBytes = MemoryBudget.deviceTotalBytes
+        let file = try Data(contentsOf: store.url(for: key))
+        XCTAssertEqual(file.count, size)
+        XCTAssertEqual(file, BakeFile.encode(bgra: pixels.bytes, width: side, height: side, digest: key.digest),
+                       "the file written a tile at a time is the in-memory encode's bytes")
+        XCTAssertEqual(store.loadDecoded(key)?.makeImage().flatMap { bgra($0) }, pixels.bytes)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), [key.fileName + ".pbk"],
+                       "the store's folder holds the frame's file and nothing the write staged")
+    }
+
     /// The flat-colour case takes the other branch, which is the branch the whole format choice
     /// rests on.
     func testFlatColourIsStoredCompressed() throws {
