@@ -61,22 +61,24 @@ final class InkContinuityUITests: PaintUITestCase {
         // The stroke's base lands, the bake follows, and the reduced picture goes under the hosts.
         Thread.sleep(forTimeInterval: 8)
         func lineGrey() -> Double {
-            guard let pixels = ScreenshotPixels(XCUIScreen.main.screenshot().image) else { return 255 }
+            guard let pixels = ScreenshotPixels(canvas.screenshot().image) else { return 255 }
             var sum = 0.0
             let samples = 15
             for i in 0..<samples {
                 let x = visible.minX + visible.width * (0.35 + 0.3 * Double(i) / Double(samples - 1))
-                guard let px = pixels.pixel(at: CGPoint(x: x, y: visible.minY + visible.height * 0.4)) else { return 255 }
+                let px = pixels.pixel(normalizedX: x, normalizedY: visible.minY + visible.height * 0.4)
                 sum += (Double(px.r) + Double(px.g) + Double(px.b)) / 3
             }
             return sum / Double(samples)
         }
         let before = lineGrey()
         XCTAssertLessThan(before, 235, "PREMISE: the translucent stroke is on screen")
+        // Half-opaque black on white reads ~128 once; twice reads ~64.
+        XCTAssertGreaterThan(before, 100, "the stroke is drawn twice at rest, before any pan: \(before)")
         try panAboveTheDock(app, canvas, stagger: 0, delta: CGVector(dx: 60, dy: 0))
         // The fingers have just lifted; the hosts' redraw is 2.5 s away.
         let after = lineGrey()
-        XCTAssertGreaterThan(after, before - 12, "the stroke was drawn twice under the pan: \(before) -> \(after)")
+        XCTAssertGreaterThan(after, 100, "the stroke was drawn twice under the pan: \(before) -> \(after)")
     }
 
     private func strokesFromRest(composited: Bool, extraArguments: [String]) throws {
