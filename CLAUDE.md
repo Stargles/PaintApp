@@ -16,8 +16,9 @@ Finish and merge (build/test first, or say you couldn't):
 
 ```bash
 git fetch origin && git rebase origin/main
-cd ../PaintApp && git merge --ff-only tmp/<id> && git push origin main
-git worktree remove ../PaintApp-<id> && git branch -d tmp/<id>
+M=/Users/juliapark/Desktop/Kevin.P/PaintSoftware   # the main worktree; never merge from your own
+git -C "$M" merge --ff-only tmp/<id> && git -C "$M" push origin main
+git -C "$M" worktree remove ~/PaintWork/PaintApp-<id> && git -C "$M" branch -d tmp/<id>
 ```
 If `--ff-only` fails, rebase again — don't force-push, don't merge-commit. Append one line to
 [SESSION_LOG.md](SESSION_LOG.md): `Session N — YYYY-MM-DD: <what changed>`, and drop the oldest so only
