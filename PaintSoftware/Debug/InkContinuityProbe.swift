@@ -10,8 +10,8 @@ import UIKit
 ///
 /// The pixel is the middle of the stroke's own path, read just before the lift is processed — what the
 /// pen laid down and the screen was showing. From the lift to `settleSeconds` after it, a sample that
-/// has lost that ink is a committed state with the stroke missing: a dip. (A stroke whose middle was
-/// not dark at the lift says nothing and is not counted.)
+/// has lost that ink, or shows it twice, is a committed state with the stroke wrong: a dip. (A stroke
+/// whose middle was bare paper at the lift says nothing and is not counted.)
 ///
 /// Armed by `-uiTestInkProbe` on the simulator only, and published on `canvas.host` as
 /// `ink:<strokes watched>,<dips>` plus the series of the first dip.
@@ -21,6 +21,10 @@ enum InkContinuityProbe {
     /// How long after the lift a stroke is still watched: past the longest pen-up render the staged
     /// tests ask for (`-uiTestSlowVectorRenderMillis`) and the bake that follows it.
     static let settleSeconds: CFTimeInterval = 3
+
+    /// How far the stroke's grey may move between the lift and the end: a dip is ink gone, a rise is
+    /// ink drawn twice — a translucent stroke shows both.
+    static let tolerance = 24
 
     static let isOn = ProjectBackupManager.isSimulator
         && ProcessInfo.processInfo.arguments.contains("-uiTestInkProbe")
@@ -32,6 +36,8 @@ enum InkContinuityProbe {
         var path: [CGPoint] = []
         weak var window: UIWindow?
         var point: CGPoint?
+        /// What the middle of the stroke read at the lift.
+        var baseline = 0
         /// A point of bare paper well clear of the stroke, white at the lift: it must stay white.
         var paper: CGPoint?
         var lifted: CFTimeInterval = 0
@@ -61,7 +67,9 @@ enum InkContinuityProbe {
     static func strokeLifting() {
         guard isOn, var current = run, current.point == nil, let window = current.window else { return }
         let point = current.path[current.path.count / 2]
-        guard pixel(at: point, in: window) < 100 else { run = nil; return }
+        let baseline = pixel(at: point, in: window)
+        guard baseline < 200 else { run = nil; return }
+        current.baseline = baseline
         current.point = point
         let clear = CGPoint(x: point.x, y: point.y + 140)
         if pixel(at: clear, in: window) > 240 { current.paper = clear }
@@ -88,7 +96,7 @@ enum InkContinuityProbe {
         guard var current = run, let point = current.point, let window = current.window else { return }
         let gray = pixel(at: point, in: window)
         current.series.append((Int((CACurrentMediaTime() - current.lifted) * 1000), gray))
-        if gray > 180 { current.dipped = true }
+        if abs(gray - current.baseline) > Self.tolerance { current.dipped = true }
         if let paper = current.paper, pixel(at: paper, in: window) < 200 { current.dipped = true }
         run = current
         settleIfDue()

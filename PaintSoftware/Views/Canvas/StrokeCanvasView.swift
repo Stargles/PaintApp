@@ -1654,12 +1654,20 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// `base` names the picture that took the ink over, for the recorder's handoff line.
     private var installedInkRevision = -1
 
+    /// **Takes the covered pictures off the screen in the turn the base that contains them reaches it** —
+    /// the model retires them *and the view that draws them goes with it*, so Core Animation commits the
+    /// new base and the removal of the ink together. Retiring the model alone left `heldInkView` up
+    /// until some later pass rebuilt it (the thumbnail's, a few hundred ms on), and for that long the
+    /// stroke was drawn twice: twice as dark for a translucent brush, then snapping back — the flicker
+    /// the owner saw on a lift (`InkContinuityUITests`).
     private func retireUnlandedInk(coveredByRevision revision: Int?, base: String) {
         if let revision { installedInkRevision = max(installedInkRevision, revision) }
         guard let revision, !unlandedInk.isEmpty else { return }
         let before = unlandedInk.pictures.count
         unlandedInk.retire(upTo: revision)
-        if unlandedInk.pictures.count != before { noteInk("retired", revision: revision, detail: base) }
+        guard unlandedInk.pictures.count != before else { return }
+        noteInk("retired", revision: revision, detail: base)
+        showOverlays(scratch)
     }
 
     /// Drops every held picture — `UnlandedInk.removeAll`'s four cases — and says which one.

@@ -10,25 +10,39 @@ import XCTest
 final class InkContinuityUITests: PaintUITestCase {
 
     func testNoCommittedFrameLacksTheStrokeWhenTheBakeTakesOver() throws {
-        try strokesFromRest(extraArguments: [])
+        try strokesFromRest(composited: true, extraArguments: [])
     }
 
     /// The iPad's pace: a 300 ms pen-up render and a 40 ms window draw.
     func testNoCommittedFrameLacksTheStrokeAtTheIPadsPace() throws {
-        try strokesFromRest(extraArguments: ["-uiTestSlowVectorRenderMillis", "300", "-uiTestSlowWindowDrawMillis", "40"])
+        try strokesFromRest(composited: true,
+                            extraArguments: ["-uiTestSlowVectorRenderMillis", "300", "-uiTestSlowWindowDrawMillis", "40"])
     }
 
-    private func strokesFromRest(extraArguments: [String]) throws {
+    /// A document no compositor draws: each layer's own host is the whole picture, and the stroke's
+    /// base lands in it with nothing between.
+    func testNoCommittedFrameLacksTheStrokeOnTheFlatRowOfHosts() throws {
+        try strokesFromRest(composited: false, extraArguments: ["-uiTestSlowVectorRenderMillis", "150"])
+    }
+
+    private func strokesFromRest(composited: Bool, extraArguments: [String]) throws {
         let app = XCUIApplication()
         app.launchArguments += ["-uiTestInkProbe"] + extraArguments
         XCTAssertTrue(launchIntoEditor(app))
         let canvas = app.otherElements["canvas.host"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 5))
         addVectorLayer(app)
-        setBlendMode(app, layerIndex: 0, to: "multiply")
-        XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "Setup: a blending layer puts the canvas on the baked frame"))
-        openBrushLibrary(app)
-        setBrushSize(app, normalized: 0.1)
+        if composited {
+            setBlendMode(app, layerIndex: 0, to: "multiply")
+            XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 30, "Setup: a blending layer puts the canvas on the baked frame"))
+        }
+        // A translucent stroke, so ink drawn twice reads darker as plainly as ink gone reads lighter.
+        openBrushEditor(app)
+        let size = app.sliders["brushPanel.sizeSlider"], opacity = app.sliders["brushPanel.opacitySlider"]
+        XCTAssertTrue(size.waitForExistence(timeout: 5))
+        size.adjust(toNormalizedSliderPosition: 0.1)
+        opacity.adjust(toNormalizedSliderPosition: 0.5)
+        closeBrushEditor(app)
         app.buttons["toolbar.brushButton"].tap()
 
         let visible = visiblePaperRect(app, in: canvas)
@@ -36,7 +50,11 @@ final class InkContinuityUITests: PaintUITestCase {
         for i in 0..<strokes {
             let y = 0.12 + Double(i) * 0.1
             drawLine(on: canvas, from: onHost(visible, 0.2, y), to: onHost(visible, 0.8, y))
-            XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 40, "stroke \(i) never came back to the baked frame"))
+            if composited {
+                XCTAssertTrue(waitForSandwichState(app, "rest", timeout: 40, "stroke \(i) never came back to the baked frame"))
+            } else {
+                Thread.sleep(forTimeInterval: 1.5)
+            }
         }
         let counts = readField(app, "ink:").split(separator: ",").compactMap { Int($0) }
         let state = canvas.label
