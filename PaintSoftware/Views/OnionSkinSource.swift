@@ -62,7 +62,9 @@ struct OnionSkinFrame {
     private static func compositeNow(_ frames: [OnionSkinFrame], size: CGSize?) -> UIImage? {
         guard let size, size.width > 0, size.height > 0, !frames.isEmpty else { return nil }
         let bounds = CGRect(origin: .zero, size: size)
-        return UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat()).image { ctx in
+        // Into an admitted buffer (`PixelOps.drawImage`): the one budget counts the ghost for as long
+        // as it is up, and no renderer copy is made of it when it is taken.
+        return PixelOps.drawImage(size: size) { cg in
             for frame in frames {
                 // A skin at zero opacity is not merely invisible, it is a full canvas-sized draw
                 // that produces nothing. Dropped here rather than at every call site so no caller
@@ -72,16 +74,17 @@ struct OnionSkinFrame {
                     frame.image.draw(in: bounds, blendMode: .normal, alpha: frame.opacity)
                     continue
                 }
-                ctx.cgContext.saveGState()
-                ctx.cgContext.setAlpha(frame.opacity)
-                ctx.cgContext.beginTransparencyLayer(auxiliaryInfo: nil)
+                cg.saveGState()
+                cg.setAlpha(frame.opacity)
+                cg.beginTransparencyLayer(auxiliaryInfo: nil)
                 frame.image.draw(in: bounds)
                 tint.setFill()
-                ctx.cgContext.setBlendMode(.sourceIn)
-                ctx.cgContext.fill(bounds)
-                ctx.cgContext.endTransparencyLayer()
-                ctx.cgContext.restoreGState()
+                cg.setBlendMode(.sourceIn)
+                cg.fill(bounds)
+                cg.endTransparencyLayer()
+                cg.restoreGState()
             }
+            return true
         }
     }
 }
@@ -143,8 +146,8 @@ enum OnionSkinClip {
         guard let ink, size.width > 0, size.height > 0 else { return layerMask }
 
         let bounds = CGRect(origin: .zero, size: size)
-        let combined = UIGraphicsImageRenderer(size: size, format: PixelOps.transparentFormat())
-            .image { ctx in
+        // Admitted and copy-free for the ghost's reason (`OnionSkinFrame.compositeNow`).
+        let combined = PixelOps.drawImage(size: size) { cg in
                 // Everything is shown to begin with — either §6.4's coverage, or a fully opaque
                 // field when nothing clips this layer. White because `makeMaskImage` is white
                 // premultiplied by coverage and a mask that reads correctly by luminance as well as
@@ -153,7 +156,7 @@ enum OnionSkinClip {
                     UIImage(cgImage: layerMask).draw(in: bounds)
                 } else {
                     UIColor.white.setFill()
-                    ctx.cgContext.fill(bounds)
+                    cg.fill(bounds)
                 }
                 // …and then the artist's own ink is taken back out of it, at `opacity` rather than
                 // unconditionally at full strength. `.destinationOut` is dst x (1 - src alpha), and
@@ -162,8 +165,9 @@ enum OnionSkinClip {
                 // dst x 0, which is "the inverse of the current drawing layer as an alpha mask,
                 // proportional to how much of it is actually there."
                 ink.draw(in: bounds, blendMode: .destinationOut, alpha: opacity)
+                return true
             }
-        return combined.cgImage
+        return combined?.cgImage
     }
 }
 

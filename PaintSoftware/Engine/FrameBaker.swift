@@ -594,7 +594,7 @@ final class FrameBaker {
             // Step 2, off the main actor. Every value read here was frozen at mint time.
             let key = FrameBakeKey(recipe: recipe, renderResolution: resolution)
             // Two frames is the step's peak: the picture and one leaf, then the picture and its BGRA
-            // copy, then that copy and LZ4's output — each pair let go before the next is made.
+            // copy, then that copy and the encode's few tiles — each pair let go before the next is made.
             let frameBytes = CompositorBudget.textureBytes(for: recipe.canvasSize)
             var refusedPartWay = false
             let cached = wantsRing ? store.read(key, level: level) : nil

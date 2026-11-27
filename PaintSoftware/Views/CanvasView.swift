@@ -4470,10 +4470,15 @@ struct CanvasView: UIViewRepresentable {
                                          inkOpacity: CGFloat) {
             onionRebuilds.request {
                 return {
-                    let inkImage = ink?.render()
-                    let composite = ink == nil || inkImage != nil ? OnionSkinFrame.composite(frames, size: size) : nil
-                    let clip = composite.flatMap { _ in
-                        OnionSkinClip.mask(layerMask: mask, subtracting: inkImage, size: size, opacity: inkOpacity)
+                    // R2 (SCHEDULER.md): the ghost's pictures ask the one budget in the `.soon` lane, which
+                    // evicts only what is kept in case — a refusal draws nothing and the next pass asks again.
+                    let (composite, clip) = MemoryBudget.withLane(.soon) { () -> (UIImage?, CGImage?) in
+                        let inkImage = ink?.render()
+                        let composite = ink == nil || inkImage != nil ? OnionSkinFrame.composite(frames, size: size) : nil
+                        let clip = composite.flatMap { _ in
+                            OnionSkinClip.mask(layerMask: mask, subtracting: inkImage, size: size, opacity: inkOpacity)
+                        }
+                        return (composite, clip)
                     }
                     return { [weak self] in
                         PlaybackTrace.span(.renderLanded) {
@@ -4491,13 +4496,32 @@ struct CanvasView: UIViewRepresentable {
         private func finishOnionRebuild(key: OnionSkinRenderKey, composite: UIImage?,
                                         clip: CGImage?) {
             guard key == onionRequestedKey else { return }
-            guard let composite else { onionRequestedKey = nil; return }
+            guard let composite else {
+                // Refused by the one budget — the ghost is R2 and yields to the answers holding it. The
+                // picture up stays, and the ghost is asked for again once they have had their turn.
+                onionRequestedKey = nil
+                askForOnionSkinAgain()
+                return
+            }
             onionSkinComposite = composite
             onionSkinClipImage = clip
             // `showsOnionSkin` rather than `isOnionSkinEnabled`, and the difference is a real race
             // rather than tidiness: a rebuild in flight when the artist presses play would otherwise
             // put its ghost on screen *after* `blank()` had taken the last one off.
             if let view = onionSkinView, canvasManager.showsOnionSkin { applyOnionSkin(to: view) }
+        }
+
+        /// One deferred `updateOnionSkin` however many rebuilds the budget refuses meanwhile.
+        private var onionRetryArmed = false
+
+        private func askForOnionSkinAgain() {
+            guard !onionRetryArmed else { return }
+            onionRetryArmed = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + TouchFlag.settle) { [weak self] in
+                guard let self else { return }
+                self.onionRetryArmed = false
+                self.updateOnionSkin()
+            }
         }
 
         // MARK: - Smart-shape detection (hold-to-detect: accumulate stroke points, fire after ~1s idle)

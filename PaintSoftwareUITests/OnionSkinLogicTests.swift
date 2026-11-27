@@ -1164,6 +1164,32 @@ final class OnionSkinLogicTests: XCTestCase {
         XCTAssertTrue(hasVisibleContent(composite))
     }
 
+    /// **The ghost and its cut are pictures the one budget counts** (SCHEDULER.md rule 5): each is
+    /// charged for as long as it lives, and a budget with no room for one draws nothing rather than
+    /// make it outside the count — the R2 refusal `CanvasView` asks again after. Before this they were
+    /// drawn by `UIGraphicsImageRenderer`, uncounted, with a second copy made as each was taken: 48 MiB
+    /// the budget could not see on the owner's 5000² scene, at the install gate's undo peak.
+    func testTheGhostAndItsCutAreChargedToTheOneBudget() throws {
+        let size = CGSize(width: 256, height: 256), bytes = 256 * 256 * 4
+        let frames = [OnionSkinFrame(image: CanvasFixture.solidImage(.red, rect: CGRect(x: 0, y: 0, width: 64, height: 64)),
+                                     opacity: 0.3, tint: .blue)]
+        let ink = CanvasFixture.solidImage(.black, rect: CGRect(x: 0, y: 0, width: 32, height: 64))
+        defer { MemoryBudget.shared.totalBytes = MemoryBudget.deviceTotalBytes }
+        MemoryBudget.shared.leaveRoom(for: 4 * bytes)
+        let before = MemoryBudget.shared.heldBytes
+        autoreleasepool {
+            let ghost = OnionSkinFrame.composite(frames, size: size)
+            let cut = OnionSkinClip.mask(layerMask: nil, subtracting: ink, size: size)
+            XCTAssertNotNil(ghost); XCTAssertNotNil(cut)
+            XCTAssertEqual(MemoryBudget.shared.heldBytes - before, 2 * bytes, "the ghost and its cut are held while they live")
+        }
+        XCTAssertEqual(MemoryBudget.shared.heldBytes, before, "and given back when they go")
+
+        MemoryBudget.shared.leaveRoom(for: bytes - 1)
+        XCTAssertNil(OnionSkinFrame.composite(frames, size: size), "no room is no ghost, not an uncounted one")
+        XCTAssertNil(OnionSkinClip.mask(layerMask: nil, subtracting: ink, size: size), "nor an uncounted cut")
+    }
+
     // MARK: - Placement: the clip that IS "Behind" (TODO (40))
 
     /// Alpha per pixel, row-major from the top-left — the channel `CALayer.mask` reads and the only
