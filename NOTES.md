@@ -37,6 +37,12 @@ UDID in ~/PaintWork/nov27-s3b-evidence/udid (delete it when done). Evidence: ~/P
 - Non-fill edits made while a fill has not rendered yet: fill is baked when it lands (lands above that edit).
 - Kept pixels are often evicted under the playcheck's full budget (patches=0 seen in logs); cache, so correct.
 
+## QueuedFillUITests (fixed)
+Root cause: harness-visible app defect. Queueing a tap changes no @Published value, so no SwiftUI pass ran and
+the canvas.host label (fillsQueued:) stayed stale. Fix: objectWillChange.send() in queueFillIfTheLiveOneIsDrawing.
+Passes alone on erased device (0->1, second tap 0.57 s). FillLiveAdjust: only the 2 known reds. Debug fast tier
+green: 5794 passed + 4 skipped = 5798, 0 failed. Screenshots viewed: boxes empty, both red, one Undo leaves first.
+
 ## Next steps (exact)
 1. Fill-in fast tier: rerun Debug (expect 5798) and Release via scratch-free command in CLAUDE.md, reconcile.
 2. tools/playcheck.sh <udid> two more times (need 3 GREEN); record undo peak + r1late; fill PLAYCHECK_RUNS etc.
