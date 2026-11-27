@@ -1,6 +1,6 @@
 # SCHEDULER_DESIGN — the scheduler and the memory manager, one page
 
-Status: **S1, S2 and S3a built (2026-11-25/26) — see "as built" under §6; S3b–S9 designed, not built.** [SCHEDULER.md](SCHEDULER.md) is the rules;
+Status: **S1, S2, S3a and S3b built (2026-11-25/27) — see "as built" under §6; S4–S9 designed, not built.** [SCHEDULER.md](SCHEDULER.md) is the rules;
 this page is what gets built, in what order, and how each step is proved. It answers TODO.md queue items
 5, 6 and 9 (a)–(f). Figures are labelled MEASURED (with where), CODE (read off the source) or ESTIMATE.
 The iPad 9 is the **minimum machine** (A13: 2 fast + 4 efficient cores, 3 GB, app limit 1,850 MiB); its
@@ -16,7 +16,7 @@ figures are floors and fixtures, never constants. "Picture" = canvas-sized bitma
 | Late edges on zoom-out | `CanvasPictureView`/`BakedFrameWindow` hold only the window's pixels; nothing lies under them. |
 | Bake: seconds a frame | (1) 2-frame wait for room while the hosts' renders hold theirs; (2) a bake **refused part-way throws its walks away** (`.deferred`); (3) walks of the same cel repeat per frame because leaf memos are `.cache` and go first; (4) one frame at a time, three leaves at a time, whatever the cores. |
 | Frames far from the playhead are orange again | `FrameBakeStore.defaultByteCeiling` is 512 MiB; Test1's files are ~25 MB, so **about 20 frames fit**. A real scene can never be fully baked. And the bake folder is emptied at every launch (RENDER.md §2.11), because the key is built from in-memory counters. |
-| An Undo can wait on a bake | `VectorCanvas.rasterizeLock` is held through a whole walk; R1's repair of a cel queues behind R3's walk of it (up to 640 ms). |
+| An Undo can wait on a bake | `VectorCanvas.rasterizeLock` was held through a whole walk; R1's repair of a cel queued behind R3's walk of it (up to 640 ms). **Fixed in S3b**: an answer pre-empts the walk in flight. |
 
 ## 1. Map — every heavy producer today
 
@@ -388,8 +388,8 @@ frame 106 → 47 ms, scene bake 20.1 → 1.1 s (bake phase is S1/S2's, noise her
 under 100 ms), 1 `frame read`; stroke, eraser, fill, Liquify, text and shape answers are 0. The trace now prints
 `r1late` by name and `draws:` (window pictures presented) beside the memory phases.
 
-**The one wait left on main:** `commitInteractiveFill` still waits (`waitForFillWork`) when a second edit arrives before
-the first fill's first render exists, because `beginCanvasEdit` must read a canvas the fill is already part of. It is
+**The one wait left on main (removed in S3b, see below):** `commitInteractiveFill` still waited (`waitForFillWork`) when a second edit arrived before
+the first fill's first render existed, because `beginCanvasEdit` must read a canvas the fill is already part of. It is
 `fillQueue.sync {}` renamed, not removed: removing it makes the edit chokepoint asynchronous (owner ruling: a tap
 during a still-rendering fill is either held until the fill lands, or ignored).
 
@@ -461,6 +461,47 @@ strips `bakes/` from every package (a scene holds none — decided to include pa
 limit, least recently written package first. Setting: `AppSettings.keepBakedFrames`, Settings "Keep Baked Frames",
 default off. The earlier `<Projects>/.bakes.nosync/<projectID>/` placement is deleted with no reader or sweeper: a
 folder an earlier build left there is orphaned disk, not read.
+
+### S3b as built (2026-11-27)
+
+**A layer's picture is repaired in place** (`Engine/LayerPicture.swift`). A native `.full` vector picture is a
+`LayerPicture`: one admitted buffer that every reader reaches through a direct-access `CGDataProvider` whose byte
+pointer counts a reader in and out, so a write (`exclusively`) waits for the draws in flight and no draw spans one.
+Each revision is a new `UIImage` wrapper over the same bytes (tagged, `LayerPicture.of`), so identity checks see a new
+picture and a reader that must know asks `isCurrent`. A stroke landing, an eraser cut or a lift walks **only its
+damage** into a damage-sized `PixelPatch` (`VectorCanvas.appendInPlace` / `repairInPlace`, the clip and escape-widening
+rules of TODO (41) unchanged), and `commitInPlace` copies it in — with the picture held, the canvas `lock` taken only
+for the bookkeeping. A canvas that moved on during the walk keeps its bases true (a region base widens by the written
+rectangle, an append base moves its prefix past the drawn tail); one whose memo *is* this picture at another list (an
+Undo of the append being drawn) gets the write rolled back from the replaced pixels. Damage over a quarter of the
+picture (`inPlaceShare`) still makes a new picture over a copy of the base: it would hold more beside the picture than
+the copy it saves. **Deleted:** the canvas-sized copy per landed edit and per Undo for everything under that share.
+
+**Undo from kept pixels.** The pixels a write replaces are kept with the transition they undo (`KeptPixels`: restores
+list → over list, by array storage identity, with the restored list's measured footprints), admitted by `MemoryBudget`
+(each patch holds its grant; the canvas's patches are one `.cache` entry the budget evicts) and held to one picture's
+bytes and 16 patches a canvas. `restoreElements` spots a list a patch restores and the next render copies it back — no
+walk (`keptRestores`) — keeping the pixels it replaces for the Redo. A mismatch or an eviction falls back to the repair
+walk. Raster Undo is unchanged (its steps already hold rasters, not renders).
+
+**No lock across a walk; walks stop when cancelled.** `rasterizeLock` is deleted. One native walk runs per canvas
+(`walkInFlight`): a second request **joins** it, a higher class **pre-empts** it (cancels it at its next element and
+walks itself; the pre-empted caller then joins), and a waiter that outranks the rest goes first. The class is the job's
+(`JobContext.current`, a task-local the scheduler binds for each job) or the memory lane's outside a job (the bake's
+worker). `drawLocalContent` checks for cancellation before every element and every stroke of a paint run, so a host's
+render of a frame the artist stepped off (`vectorRenders.cancel()`) stops instead of running to the end.
+
+**The screen never shows a repair before its landing**: `CanvasPictureView` draws a layer picture under its fence and
+only at the revision it was handed; a draw that finds it repaired since presents nothing, and the new wrapper draws next.
+
+**Fill taps are queued, not waited for (owner ruling, Nov 26).** `waitForFillWork` and `awaitFillRenderIfNothingProduced`
+are gone from the app: a fill tap (bucket or lasso) made while the live fill has not rendered yet goes into
+`queuedFills` with the colour it was made in, and when that fill's render comes back it is baked and the next tap begins
+(`landQueuedFills`) — in order, never dropped, main never parked. Any other edit in that window asks for the fill to
+be baked when it lands instead of waiting (`fillCommitsOnLanding`). `Scheduler.waitUntilIdle` now serves tests only
+(`CanvasManager.waitForFillWork` lives in the test target).
+
+**Not built here:** the Move lift's `renderIsolated` still runs on main (§6 S3b row) — see TODO (5).
 
 ## 7. Owner rulings (Nov 25)
 

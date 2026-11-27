@@ -30,14 +30,19 @@ Numbers are stable; a gap is a finished item.
    **S3a merged (`ee72796b`), staged**: R1 producers on the scheduler; seven queues and `Pacing` deleted.
    Gate green (app peak 1,108 MiB); R1 `late` 37 (whole-layer renders — S3b's job).
    **Owner ruling Nov 26: a second Fill tap while the first is still drawing is QUEUED** (no pause, lands after the
-   first; never dropped). Today's `waitForFillWork()` on main goes — S3b.
+   first; never dropped). **Built in S3b** (`queuedFills`): no wait is left on the main thread.
+   **S3b built on `tmp/nov27-s3b`, NOT merged** (design §6 "S3b as built"): layer pictures repaired in place
+   (`LayerPicture`), Undo/Redo copied back from kept pixels (budgeted, evictable), walks cancellable, `rasterizeLock`
+   gone (a request joins the walk in flight, an answer pre-empts a bake's). An Undo while a fill is still drawing
+   takes that fill back. S3B_NUMBERS
+   Not built: the Move lift's `renderIsolated` still runs on main (left for S5's presentation work, which owns the float).
    **S2 built on `tmp/nov25-s2`, NOT merged — gate GREEN since the onion skin joined the budget.** The red was not
    the half level's own memory: at the undo peak the app sits ~300 MiB above what the budget holds on main and S2 alike
    (MEASURED); the half frames merely fill the budget's slack that main's 95 MiB frames left. The onion ghost (48 MiB)
    is counted now; bake encode streams to disk. Window draws are not a regression: playback ~24 flips/s (main ~11/s).
    **Owner ruling Nov 26, built: kept bakes live INSIDE the scene package** (`<package>/bakes/`; shares, backups and
    duplicates grow by them — accepted); `.bakes.nosync` is gone.
-   Then S3b Undo, S4 memory manager (= (9)),
+   Then S4 memory manager (= (9)),
    S5 three layer pictures, S6 bake throughput, S7 rest, S8 stream, S9 device gate.
    **Owner rulings Nov 25 (design §7):** Q1 — stepping onto a never-drawn frame keeps the previous frame
    until the new one is whole (no soft-first). Q2 — a **Settings option "keep baked frames between launches",
