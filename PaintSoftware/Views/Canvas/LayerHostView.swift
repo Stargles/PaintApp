@@ -86,6 +86,17 @@ final class LayerHostView: CanvasPlaneView {
         strokeView.windowMoved()
     }
 
+    /// Whether both of the host's pictures on screen were drawn for the window as it is now.
+    var showsCurrentWindow: Bool { bakedImageView.showsCurrentWindow && strokeView.showsCurrentWindow }
+
+    /// Runs when a draw of either picture reaches the screen.
+    var onWindowShown: (() -> Void)? {
+        didSet {
+            bakedImageView.onShown = onWindowShown
+            strokeView.onWindowShown = onWindowShown
+        }
+    }
+
     @discardableResult
     func showFill(_ render: CanvasManager.FillRenderResult?, clip: CGPath?) -> Bool {
         fillPlane.showFill(render, clip: clip)

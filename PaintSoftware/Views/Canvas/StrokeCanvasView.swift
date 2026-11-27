@@ -439,6 +439,15 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// A pan, zoom or turn of the canvas: the base draws what the window now shows of it.
     func windowMoved() { imageView.windowMoved() }
 
+    /// Whether the base on screen was drawn for the window as it is now (`CanvasPictureView`).
+    var showsCurrentWindow: Bool { imageView.showsCurrentWindow }
+
+    /// Runs when a draw of the base reaches the screen.
+    var onWindowShown: (() -> Void)? {
+        get { imageView.onShown }
+        set { imageView.onShown = newValue }
+    }
+
     /// Called on the main thread after any off-main render of this view's canvas has been settled
     /// (shown, superseded or refused), so `CanvasView` can re-ask whether the frame is complete.
     var onRenderSettled: (() -> Void)?

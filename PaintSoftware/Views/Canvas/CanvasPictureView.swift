@@ -36,6 +36,16 @@ final class CanvasPictureView: UIView {
     }
     /// Whether the picture asked for last is on screen, or drawn and waiting for its set.
     var hasPictureReady: Bool { isShowingImage || (presenter?.hasCurrentPicture(surface) ?? false) }
+    /// Runs on the main thread each time a draw of this view reaches the screen.
+    var onShown: (() -> Void)?
+    /// **Whether what is on screen was drawn for the window as it is now** — true for a view with
+    /// nothing to draw. False while a pan, zoom or turn's redraw is owed, or the first picture is: the
+    /// part of the window the surface was not drawn for is bare until it lands.
+    var showsCurrentWindow: Bool {
+        guard image != nil else { return true }
+        guard isShowingImage, let shown = surface.presentedWindow, let now = currentWindow()?.window else { return false }
+        return shown == now
+    }
     /// The onion skin's ghost is magnified bilinear; a layer's ink stays crisp (`LayerHostView.init`).
     var smoothWhenMagnified = false
 
@@ -115,6 +125,7 @@ final class CanvasPictureView: UIView {
             let due = Array(self.landings.prefix(owed))
             self.landings.removeFirst(min(owed, self.landings.count))
             due.forEach { $0() }
+            self.onShown?()
         })
     }
 

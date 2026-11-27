@@ -960,6 +960,7 @@ struct CanvasView: UIViewRepresentable {
                     }
                 }
                 host.strokeView.presenter = presenter
+                host.onWindowShown = { [weak self] in self?.refreshDisengagedUnderPicture() }
                 host.strokeView.onRenderSettled = { [weak self] in self?.settlePresentation() }
                 host.strokeView.onBaseHoleChanged = { [weak host] hole in
                     host?.setBackingReplacementHole(hole)
@@ -2955,6 +2956,10 @@ struct CanvasView: UIViewRepresentable {
             guard !isSandwichStrokeLive, !canvasManager.strokeIsLive, !canvasManager.framesAreFlipping,
                   let key = baker.currentKey(atFrame: canvasManager.currentFrame) else { return hide() }
             if let held = disengagedUnder, held.key == key {
+                // **Only for a window the hosts have not drawn yet.** The hosts are transparent over it, so
+                // where they have drawn, translucent ink would be there twice — darker from the moment
+                // the picture appeared a beat after a lift, and lighter again at the next touch.
+                guard !hostsShowTheWindow else { return hide() }
                 if belowView.layer.magnificationFilter != .linear { belowView.layer.magnificationFilter = .linear }
                 if belowView.image !== held.image { belowView.image = held.image }
                 if belowView.isHidden { belowView.isHidden = false }
@@ -2987,6 +2992,18 @@ struct CanvasView: UIViewRepresentable {
             }
             disengagedUnderWork = (work, key)
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.underPictureSettle, execute: work)
+        }
+
+        /// Whether every host that draws has its pictures drawn for the window as it is now.
+        private var hostsShowTheWindow: Bool {
+            layerHosts.values.allSatisfy { $0.isBlanked || $0.isHidden || $0.showsCurrentWindow }
+        }
+
+        /// The under picture's answer, asked again when a host's draw lands or the window moves —
+        /// neither of which is a pass.
+        private func refreshDisengagedUnderPicture() {
+            guard sandwichPresentation == .disengaged, let belowView = sandwichBelowView else { return }
+            updateDisengagedUnderPicture(belowView)
         }
 
         private func dropUnderPicture() {
@@ -3138,6 +3155,7 @@ struct CanvasView: UIViewRepresentable {
         private func redrawWindowPicturesForTheView() {
             updateBakeLevel()
             for host in layerHosts.values { host.windowMoved() }
+            refreshDisengagedUnderPicture()
             onionSkinView?.windowMoved()
             guard let picture = bakedFramePicture else { return }
             showBakedFrame(picture)
