@@ -94,6 +94,9 @@ Every status report to the owner lists this queue with each item's state, not on
    count and not the Mac's; (e) proof: the gate with a trace — zero
    R1 waits on disk, zero spill/load work on main, hit rates per feature. Start with layer pictures (~500 of
    888 MiB measured; unedited layers as two merged pictures); measure the stream before touching it.
+   (f) **Close the uncounted ~300 MiB (MEASURED Nov 26, S2 fix):** at the undo peak the app sits ~296–304 MiB above
+   what `MemoryBudget` holds, **on main too**; the gate's 277 MiB margin over the 888 budget only passes on slack.
+   S4 makes that memory asked-for (an R1 reserve, R2 pictures R1 can evict) instead of re-ruling the 0.48 fraction.
 10. Audit follow-through, streaming on the real link, smaller asks below.
 11. **Liquify lags and 100% only smudges (owner, Nov 26, on `ee72796b`).** *"liquify needs to be real time. It seems to
     lag alot. Also when power is set to 100% (default) it should be powerful enough to completely grab the original
