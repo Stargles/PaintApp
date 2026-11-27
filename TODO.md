@@ -90,7 +90,7 @@ Every status report to the owner lists this queue with each item's state, not on
    888 MiB measured; unedited layers as two merged pictures); measure the stream before touching it.
 10. Audit follow-through, streaming on the real link, smaller asks below.
 
-## Current — iPad build `fe69a7c0` installed 2026-11-26 (`ee72796b` staged), owner check pending (items below name older builds)
+## Current — iPad build `ee72796b` installed 2026-11-26, owner check pending (items below name older builds)
 
 - [ ] **Owner's check of `2891caad` FAILED (Nov 20, ~22:45, Test1).** Installed build confirmed `2891caad`
   (latest main: includes the window surfaces `d72eb69f` and the To Cross fix `bd52b37f`).
@@ -279,6 +279,12 @@ Every status report to the owner lists this queue with each item's state, not on
   with the accepted base picture. Change the renderer only if that comparison supports it.
 
 ## Open reports and asks
+
+- [ ] **The installer waits forever on an app the owner closed (owner, Nov 26: *"its literally not open and hasent
+  been for a long while"*).** `resign.sh` refuses while `devicectl device info processes` lists PaintSoftware, but iOS
+  keeps a left app SUSPENDED in that list, so a staged build sat from 18:36 to 20:30. Installed `ee72796b` by hand on
+  his word. Fix at the root: wait only while the app is in the foreground (or prove the app saves on backgrounding so a
+  suspended app loses nothing), not on any listed process; test in `test-resign.sh`, pin with `install.sh`.
 
 - [ ] **The auto-resigner broke again — "PaintApp is no longer available" (owner, Nov 20; ~10th time).**
   Owner: *"Fix it well and fix it once. Remember the iPad might be locked, or the Mac might be off … When
