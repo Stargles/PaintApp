@@ -1769,6 +1769,16 @@ nonisolated final class VectorCanvas {
     /// which nothing holds across a walk and which is never taken under `lock`.
     private let walkGate = NSCondition()
     private var walkInFlight: (token: CancelToken, jobClass: JobClass)?
+    /// Callers waiting for the turn, by class.
+    private var walkWaiters: [JobClass: Int] = [:]
+    /// Walks a higher class cancelled to walk itself — the count "R1 waits behind R3: 0" is read off.
+    /// Guarded by `walkGate`.
+    private(set) var walksPreempted = 0
+    /// Whether a native walk is in flight — a test's view of the turn.
+    var hasWalkInFlight: Bool {
+        walkGate.lock(); defer { walkGate.unlock() }
+        return walkInFlight != nil
+    }
 
     /// The one z-ordered display list, drawn back to front. See `VectorElement` for why not three
     /// parallel arrays, and `renderLocalContent()` for how it is walked.
@@ -2132,6 +2142,11 @@ nonisolated final class VectorCanvas {
     /// in-place repair replaces mean something afterwards: they are the picture of *this* list
     /// (`KeptPixels.restores`). Compared by storage identity (`sameStorage`), never by content.
     private var pictureList: [VectorElement]?
+    /// **The measured footprints of `pictureList`'s elements** — `paintedBounds` as it stood for that
+    /// list. A kept patch carries the ones of the list it restores, so a copy-back puts the promises back
+    /// with the pixels (`KeptPixels.footprints`): without them the next edit of that list could not be
+    /// bounded and would walk the cel whole.
+    private var pictureFootprints: [UUID: CGRect] = [:]
 
     /// **The pixels in-place repairs replaced, newest last** — SCHEDULER_DESIGN.md §3.1, "Undo". Each
     /// turns a picture of `over` into a picture of `restores` by being copied back, so the Undo of the
@@ -2154,6 +2169,8 @@ nonisolated final class VectorCanvas {
         let patch: PixelPatch
         let restores: [VectorElement]
         let over: [VectorElement]
+        /// The measured footprints of `restores`' elements, as they stood while it was the picture.
+        let footprints: [UUID: CGRect]
     }
 
     /// Whether two lists are one storage — the same list, not merely equal ones.
@@ -3469,6 +3486,7 @@ nonisolated final class VectorCanvas {
         // The picture is gone; the kept patches stay, because they are true of any picture of their
         // lists — the next walk draws the same pixels.
         pictureList = nil
+        pictureFootprints = [:]
         pendingKept = nil
         // The measured footprints are a few dozen bytes an element and are what makes the *next*
         // region edit cheap, so eviction keeps them: they are not pixels, and they stay true —
@@ -6668,7 +6686,10 @@ nonisolated final class VectorCanvas {
         switch plan.quality {
         case .full:
             cachedImage = image
-            pictureList = plan.suppressed.isEmpty ? plan.elements : nil
+            if plan.resolution >= 1 {
+                pictureList = plan.suppressed.isEmpty ? plan.elements : nil
+                pictureFootprints = plan.known.merging(result.measured) { _, new in new }
+            }
             // The base shares the memo's image; a suppressed list cannot seed ordinary appends.
             if plan.suppressed.isEmpty {
                 incrementalBase = (image, plan.elementCount)
@@ -6729,6 +6750,7 @@ nonisolated final class VectorCanvas {
             picture.write(patch)
             lock.lock()
             defer { lock.unlock() }
+            let shownFootprints = pictureFootprints
             guard let image = acceptInPlaceLocked(result, plan: plan, picture: picture, patch: patch) else {
                 picture.write(replaced)
                 return
@@ -6736,7 +6758,8 @@ nonisolated final class VectorCanvas {
             answer = image
             if case .patch(_, let used) = plan.work { keptPixels.removeAll { $0.patch === used.patch } }
             if let shown = plan.shownList, plan.suppressed.isEmpty {
-                keptBytes = keepLocked(KeptPixels(patch: replaced, restores: shown, over: plan.elements),
+                keptBytes = keepLocked(KeptPixels(patch: replaced, restores: shown, over: plan.elements,
+                                                  footprints: shownFootprints),
                                        pictureBytes: picture.byteCount)
             }
         }
@@ -6745,7 +6768,9 @@ nonisolated final class VectorCanvas {
         // Something held the bytes past `writeWait`: a new picture, the base with the patch over it.
         guard let base = plan.work.base, let copy = LayerPicture.draw(size: plan.size, { _ in
             base.draw(at: .zero)
-            UIImage(cgImage: patch.cgImage, scale: picture.scale, orientation: .up).draw(in: patch.canvasRect)
+            // Copied, not composited: a patch's transparent pixels are ink taken away.
+            UIImage(cgImage: patch.cgImage, scale: picture.scale, orientation: .up)
+                .draw(in: patch.canvasRect, blendMode: .copy, alpha: 1)
             return true
         }) else {
             MemoryPressure.signal(.allocationRefused)
@@ -6764,12 +6789,22 @@ nonisolated final class VectorCanvas {
                                      patch: PixelPatch) -> UIImage? {
         let current = version == plan.version && _elements.count == plan.elementCount
             && _suppressedElementIDs == plan.suppressed
+        countWalkLocked(result, plan)
         if !current, Self.wraps(cachedImage, picture) { return nil }
         let image = picture.revise()
-        countWalkLocked(result, plan)
         pictureList = plan.suppressed.isEmpty ? plan.elements : nil
+        // A copy-back brings the restored list's promises with its pixels; a walk brings what it measured.
+        if case .patch(_, let used) = plan.work {
+            pictureFootprints = used.footprints
+        } else {
+            pictureFootprints = plan.known.merging(result.measured) { _, new in new }
+        }
         if current {
-            for (id, rect) in result.measured { paintedBounds[id] = rect }
+            if case .patch(_, let used) = plan.work {
+                paintedBounds = used.footprints
+            } else {
+                for (id, rect) in result.measured { paintedBounds[id] = rect }
+            }
             cachedImage = image
             if plan.suppressed.isEmpty {
                 incrementalBase = (image, plan.elementCount)
@@ -6934,8 +6969,14 @@ nonisolated final class VectorCanvas {
     private func enterWalk(as jobClass: JobClass, stopped: () -> Bool) -> CancelToken? {
         walkGate.lock()
         defer { walkGate.unlock() }
-        while let walk = walkInFlight {
-            if jobClass < walk.jobClass { walk.token.cancel() }
+        walkWaiters[jobClass, default: 0] += 1
+        defer { walkWaiters[jobClass, default: 1] -= 1 }
+        // A waiter that outranks this one goes first, or the walk it cancelled would take the turn back.
+        while walkInFlight != nil || walkWaiters.contains(where: { $0.key < jobClass && $0.value > 0 }) {
+            if let walk = walkInFlight, jobClass < walk.jobClass, !walk.token.isCancelled {
+                walk.token.cancel()
+                walksPreempted += 1
+            }
             if stopped() { return nil }
             walkGate.wait(until: Date().addingTimeInterval(0.02))
         }

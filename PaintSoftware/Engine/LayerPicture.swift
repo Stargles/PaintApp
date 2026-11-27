@@ -15,6 +15,10 @@ import UIKit
 ///   direct-access provider whose `getBytePointer` counts a reader in and whose `releaseBytePointer`
 ///   counts it out, so every CoreGraphics draw of it — a host's window draw, a composite, a bake —
 ///   runs between two writes, never across one.
+///   One reader holds on: `CGDataProviderCopyData` (`cgImage.dataProvider?.data`) does not copy a
+///   direct provider's bytes but retains the pointer for the life of the `CFData` it answers, so a
+///   reader that keeps that data keeps the picture's writes out — a write gives up after `writeWait`
+///   and the repair makes a new picture instead (`VectorCanvas.commitInPlace`).
 /// - **A write is exclusive and short.** `write` waits for the readers in flight to finish (new ones wait
 ///   behind it), and copies a damage-sized patch in: the walk that made the patch ran beforehand into a
 ///   buffer of its own, so a cancelled walk leaves the picture untouched.
@@ -159,6 +163,14 @@ nonisolated final class LayerPicture: @unchecked Sendable {
         readers -= 1
         if readers == 0 { access.broadcast() }
         access.unlock()
+    }
+
+    /// **Reads the pixels with the fence held**, for a reader that must know which revision it read —
+    /// `body` is handed it, and no write lands until `body` returns. Any thread.
+    func read<T>(_ body: (_ revision: Int) -> T) -> T {
+        beginRead()
+        defer { endRead() }
+        return body(revision)
     }
 
     /// Readers in flight — a test's view of the fence.

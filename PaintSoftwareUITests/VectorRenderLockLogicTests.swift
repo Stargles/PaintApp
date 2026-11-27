@@ -22,9 +22,12 @@ import CoreGraphics
 ///    That is the mechanism behind *"sometimes, brushstrokes that I layed down dissapear"* pointed the
 ///    other way, and it is the one way this change could draw something wrong rather than merely late.
 /// 2. **Two threads asking for one picture still stamp it once.** The old lock serialized rasterizes
-///    as a side effect; `rasterizeLock` does it on purpose. Without it a pen-up walks twice — the
-///    display path and the compositor's snapshot both — for twice the dabs and two canvas-sized
-///    buffers alive at once, which at 6000² is 288 MB on a 3 GB iPad.
+///    as a side effect; the walk turn (`walkInFlight`) does it on purpose: a second request joins the
+///    walk in flight. Without it a pen-up walks twice — the display path and the compositor's
+///    snapshot both — for twice the dabs and two writers of one picture.
+/// 3. **But an answer never waits behind later work's walk** (SCHEDULER_DESIGN.md §2): a request of a
+///    higher class cancels the walk in flight and walks itself, which a lock across the walk — the
+///    `rasterizeLock` this replaced — could not do.
 ///
 /// **On the race tests' operands, because the first draft of them had none.** Both sides of the
 /// picture assertion are produced by shipped code from one display list — the canvas's own memoized
@@ -47,13 +50,13 @@ import CoreGraphics
 ///   differing with worst 217/255. It took three fixtures to get there: at 256×192 the render was
 ///   superseded before it walked, at 768×576 it finished inside the head start, and both of those
 ///   passed. The window and the `race` operand are what they are because of those two greens.
-/// * **`rasterizeLock` deleted** → `testTwoThreadsAskingForOnePictureStampItOnce` red at
-///   `rasterizations` 2 against 1, and on the two threads holding different image objects.
+/// * **The walk turn's join deleted** (S3b; it was `rasterizeLock`) → `testTwoThreadsAskingForOnePictureStampItOnce`
+///   red at `rasterizations` 2 against 1, and on the two threads holding different image objects.
 /// * **The whole change reverted** (i.e. the lock held across the walk again) → `UndoContentionBench`
 ///   red, with the undo taking the render's entire remainder.
 ///
-/// The seam tolerance in `assertSamePixels` also comes from a mutation run: with `rasterizeLock`
-/// gone, the post-race render took the repair path and differed from the cold walk by 125 bytes at
+/// The seam tolerance in `assertSamePixels` also comes from a mutation run: with the lock that
+/// serialized walks gone, the post-race render took the repair path and differed from the cold walk by 125 bytes at
 /// worst 2/255 — PERFORMANCE.md §11.11's measured seam, not a defect, and a zero-tolerance compare
 /// would have called it one.
 final class VectorRenderLockLogicTests: XCTestCase {
@@ -96,6 +99,19 @@ final class VectorRenderLockLogicTests: XCTestCase {
 
     private static func elements(_ n: Int) -> [VectorElement] {
         (0..<n).map { .stroke(stroke($0)) }
+    }
+
+    /// **A stroke that takes a while to stamp** — the raced append. An append repairs the base in place
+    /// now and walks only the new mark, so the window an edit can land in is the mark's own walk: a
+    /// long, dense one, so the walk outlasts the head start.
+    private static func heavyStroke(_ index: Int) -> VectorStroke {
+        let samples = StrokeSamples((0..<2000).map { step -> VectorSample in
+            let t = CGFloat(step) / 1999
+            return VectorSample(x: 40 + t * 1500, y: 600 + sin(t * 40 * .pi) * 500, pressure: 0.5 + 0.5 * t)
+        }, channels: .pressureOnly)
+        return VectorStroke(brush: Brush(name: "Heavy", tip: .round, size: 40, dab: BrushDabSettings(spacing: 0.02)),
+                            color: CodableColor(red: 0.2, green: 0.5, blue: 0.1, alpha: 1),
+                            size: 40, opacity: 0.85, samples: samples, composite: .paint, seed: UInt64(index &+ 7))
     }
 
     // MARK: - Comparing two renders
@@ -214,7 +230,7 @@ final class VectorRenderLockLogicTests: XCTestCase {
         var racedRounds = 0
         for round in 0..<8 {
             // Forward edit: one more stroke, declared as an append exactly as `addStroke` does.
-            canvas.addStroke(Self.stroke(900 + round))
+            canvas.addStroke(Self.heavyStroke(900 + round))
             let after = canvas.elements.count
             // The undo, on this thread, exactly as `registerVectorUndo`'s closure spells it, run
             // under a background `render(quality:ifStillAtVersion:)` — the call
@@ -273,11 +289,11 @@ final class VectorRenderLockLogicTests: XCTestCase {
     // MARK: - 2. Two threads asking for one picture stamp it once
 
     /// **Deterministic whether or not the two calls actually overlap**, which is what makes it a
-    /// usable fast-tier test: if they overlap, `rasterizeLock` makes the second wait and find the
-    /// memo; if they do not, the second finds the memo anyway. Either way exactly one walk happens.
-    /// The mutation that reddens it is removing `rasterizeLock`, and *that* mutation only reds when
-    /// the two do overlap — so the barrier below is there to make the overlap likely rather than to
-    /// make the assertion true.
+    /// usable fast-tier test: if they overlap, the walk turn makes the second join the first and find
+    /// the memo; if they do not, the second finds the memo anyway. Either way exactly one walk happens.
+    /// The mutation that reddens it is removing the join, and *that* mutation only reds when the two
+    /// do overlap — so the barrier below is there to make the overlap likely rather than to make the
+    /// assertion true.
     func testTwoThreadsAskingForOnePictureStampItOnce() {
         let canvas = VectorCanvas(size: Self.canvasSize, elements: Self.elements(160))
         let version = canvas.version
@@ -299,13 +315,44 @@ final class VectorRenderLockLogicTests: XCTestCase {
 
         XCTAssertEqual(canvas.rasterizations, 1,
                        "two requests for one version stamped the cel \(canvas.rasterizations) times; "
-                       + "`rasterizeLock` exists so the second waits and reads the memo the first "
-                       + "installed, which is what keeps a pen-up to one canvas-sized buffer")
+                       + "the walk turn exists so the second joins and reads the memo the first "
+                       + "installed, which is what keeps a pen-up to one walk")
         XCTAssertNotNil(images[0], "the first render returned nothing")
         XCTAssertNotNil(images[1], "the second render returned nothing")
         XCTAssertTrue(images[0] === images[1],
                       "the two threads got different image objects, so the memo was not shared even "
                       + "though only one walk ran")
+    }
+
+    /// **An answer pre-empts a bake's walk of the same cel instead of waiting behind it** — the third
+    /// promise. A later (R3) caller starts a long walk; an answer (R1) arrives while it runs. The answer
+    /// must cancel it and walk itself (`walksPreempted`), and the bake's caller must then join that walk
+    /// and come back with its picture — one walk installed, one picture shared. Under the lock this
+    /// replaced the answer waited for the whole of the bake's walk (SCHEDULER_DESIGN.md §0, "An Undo can
+    /// wait on a bake").
+    ///
+    /// Mutation that reddens it: drop the cancel in `enterWalk` — `walksPreempted` stays 0.
+    func testAnAnswerPreemptsALaterWalkOfTheSameCel() throws {
+        let canvas = VectorCanvas(size: Self.canvasSize,
+                                  elements: Self.elements(160) + (0..<6).map { .stroke(Self.heavyStroke($0)) })
+        let version = canvas.version
+        let laterDone = DispatchSemaphore(value: 0)
+        var laterImage: UIImage?
+        DispatchQueue.global(qos: .utility).async {
+            laterImage = MemoryBudget.withLane(.later) { canvas.render(quality: .full, ifStillAtVersion: version) }
+            laterDone.signal()
+        }
+        let deadline = Date().addingTimeInterval(10)
+        while !canvas.hasWalkInFlight, Date() < deadline { Thread.sleep(forTimeInterval: 0.0002) }
+        XCTAssertTrue(canvas.hasWalkInFlight, "PREMISE: the later walk must be running when the answer arrives")
+        let answer = MemoryBudget.withLane(.answer) { canvas.render(quality: .full, ifStillAtVersion: version) }
+        XCTAssertEqual(laterDone.wait(timeout: .now() + 30), .success, "the later caller must come back")
+        XCTAssertEqual(canvas.walksPreempted, 1,
+                       "the answer did not cancel the later walk it found in flight — it waited behind it")
+        XCTAssertNotNil(answer, "the answer came back with no picture")
+        XCTAssertTrue(answer === laterImage,
+                      "the pre-empted caller did not join the answer's walk: it walked again or got nothing")
+        XCTAssertEqual(canvas.rasterizations, 1, "one walk is installed; the cancelled one stopped before it")
     }
 
     // MARK: - 3. The narrowed lock still answers the questions it was narrowed around

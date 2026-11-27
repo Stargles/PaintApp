@@ -226,6 +226,21 @@ final class UndoRepairLogicTests: XCTestCase {
                       + "is a base the caller under-declared, not a seam", file: file, line: line)
     }
 
+    /// **`image`'s pixels as they are now, in a bitmap of their own.** A canvas's native picture is a
+    /// `LayerPicture`, repaired in place by the next render, so a render held across an edit shows the
+    /// edit; a comparison of *before* against *after* holds this instead.
+    private func held(_ image: UIImage) throws -> UIImage {
+        let cg = try XCTUnwrap(image.cgImage)
+        // Copied: `dataProvider?.data` of a layer picture is its own bytes, retained, not a copy.
+        let bytes = Data([UInt8](try XCTUnwrap(cg.dataProvider?.data) as Data))
+        let provider = try XCTUnwrap(CGDataProvider(data: bytes as CFData))
+        let copy = try XCTUnwrap(CGImage(width: cg.width, height: cg.height, bitsPerComponent: cg.bitsPerComponent,
+                                         bitsPerPixel: cg.bitsPerPixel, bytesPerRow: cg.bytesPerRow, space: try XCTUnwrap(cg.colorSpace),
+                                         bitmapInfo: cg.bitmapInfo, provider: provider, decode: nil,
+                                         shouldInterpolate: cg.shouldInterpolate, intent: cg.renderingIntent))
+        return UIImage(cgImage: copy, scale: image.scale, orientation: image.imageOrientation)
+    }
+
     /// The full re-walk of `canvas`'s display list, guaranteed cold: a freshly constructed canvas has
     /// no memo, no base and no measured footprints, so it cannot take any fast path.
     private func fullReWalk(of canvas: VectorCanvas) throws -> (image: UIImage, dabs: Int) {
@@ -1329,6 +1344,8 @@ final class UndoRepairLogicTests: XCTestCase {
         let before = undone.elements
         undone.addStroke(Self.mark(50))
         _ = undone.render()
+        // What the restore declares, not what kept pixels would spare it.
+        undone.dropKeptPixels()
         undone.restoreElements(before, changedInk: CGRect(origin: .zero, size: Self.canvasSize))
         _ = undone.render()
         XCTAssertEqual(undone.regionRepairs, 1,
@@ -1341,6 +1358,8 @@ final class UndoRepairLogicTests: XCTestCase {
                                    size: 14, opacity: 1, mode: .cutPoints, seed: 0))
         _ = redone.render()
         let repairsAfterTheCut = redone.regionRepairs
+        // Without the cut's kept pixels, which would copy the parents back with no walk at all.
+        redone.dropKeptPixels()
         redone.restoreElements(intact, changedInk: CGRect(origin: .zero, size: Self.canvasSize))
         _ = redone.render()
         XCTAssertEqual(redone.regionRepairs, repairsAfterTheCut,
@@ -1719,7 +1738,7 @@ final class UndoRepairLogicTests: XCTestCase {
         XCTAssertEqual(canvas.suppressedElementIDs, float.parts[0].insideIDs,
                        "fixture: the lifted pieces are suppressed while the latch is armed")
         // The lift itself is `.everything` (the suppression changed). Settle it.
-        let settled = (try XCTUnwrap(canvas.render()))
+        let settled = try held(try XCTUnwrap(canvas.render()))
         let rasterizations = canvas.rasterizations
 
         var transform = float.frame.transform
@@ -1738,7 +1757,7 @@ final class UndoRepairLogicTests: XCTestCase {
         // Commit: un-suppressing is the one `.everything`, and the moved ink is drawn there.
         manager.commitVectorFloatIfNeeded()
         XCTAssertTrue(canvas.suppressedElementIDs.isEmpty, "the commit clears the suppression")
-        let committed = (try XCTUnwrap(canvas.render()))
+        let committed = try held(try XCTUnwrap(canvas.render()))
         let cold = VectorCanvas(size: canvas.size, elements: canvas.elements)
         if let d = diff(committed, (try XCTUnwrap(cold.render())), "committed nudge") {
             XCTAssertEqual(d.bytes, 0, "the committed picture is not the moved list's: \(d.summary)")
