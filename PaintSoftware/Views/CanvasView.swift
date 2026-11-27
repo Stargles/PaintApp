@@ -1890,6 +1890,7 @@ struct CanvasView: UIViewRepresentable {
                 updatePaper()
             }
 
+            if engaged, belowView.layer.mask != nil { belowView.layer.mask = nil }
             guard engaged else {
                 // **The hosts take over from the baked frame as one set**: while the bake is up, what
                 // they draw of the cels they were just handed waits beneath it, and the bake comes
@@ -2949,6 +2950,7 @@ struct CanvasView: UIViewRepresentable {
         /// otherwise show the old ink through the gap.
         private func updateDisengagedUnderPicture(_ belowView: UIImageView) {
             func hide() {
+                if belowView.layer.mask != nil { belowView.layer.mask = nil }
                 if belowView.image != nil { belowView.image = nil }
                 if !belowView.isHidden { belowView.isHidden = true }
             }
@@ -2956,10 +2958,10 @@ struct CanvasView: UIViewRepresentable {
             guard !isSandwichStrokeLive, !canvasManager.strokeIsLive, !canvasManager.framesAreFlipping,
                   let key = baker.currentKey(atFrame: canvasManager.currentFrame) else { return hide() }
             if let held = disengagedUnder, held.key == key {
-                // **Only for a window the hosts have not drawn yet.** The hosts are transparent over it, so
-                // where they have drawn, translucent ink would be there twice — darker from the moment
-                // the picture appeared a beat after a lift, and lighter again at the next touch.
-                guard !hostsShowTheWindow else { return hide() }
+                // **Only where no host has drawn.** The hosts are transparent over it, so under their
+                // ink translucent ink would be there twice — darker from the moment the picture appeared
+                // a beat after a lift, and lighter again at the next touch.
+                maskUnderPicture(belowView)
                 if belowView.layer.magnificationFilter != .linear { belowView.layer.magnificationFilter = .linear }
                 if belowView.image !== held.image { belowView.image = held.image }
                 if belowView.isHidden { belowView.isHidden = false }
@@ -2994,9 +2996,33 @@ struct CanvasView: UIViewRepresentable {
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.underPictureSettle, execute: work)
         }
 
-        /// Whether every host that draws has its pictures drawn for the window as it is now.
-        private var hostsShowTheWindow: Bool {
-            layerHosts.values.allSatisfy { $0.isBlanked || $0.isHidden || $0.showsCurrentWindow }
+        /// **Cuts the under picture to the part of the canvas no host has drawn**: the canvas rectangle
+        /// minus the quad each host's picture is on screen in, read off the layers as they are now (so a
+        /// pinch or pan has already carried them), which is a pinch out's revealed edge and a pan's
+        /// uncovered strip. One path, a few quads; no pixels.
+        private func maskUnderPicture(_ belowView: UIImageView) {
+            var drawn: CGPath = CGMutablePath()
+            for host in layerHosts.values where !host.isBlanked && !host.isHidden {
+                for source in host.drawnLayers {
+                    let b = source.bounds
+                    let quad = [CGPoint(x: b.minX, y: b.minY), CGPoint(x: b.maxX, y: b.minY),
+                                CGPoint(x: b.maxX, y: b.maxY), CGPoint(x: b.minX, y: b.maxY)]
+                        .map { belowView.layer.convert($0, from: source) }
+                    let path = CGMutablePath()
+                    path.addLines(between: quad)
+                    path.closeSubpath()
+                    drawn = drawn.union(path, using: .winding)
+                }
+            }
+            let open = CGPath(rect: belowView.bounds, transform: nil).subtracting(drawn, using: .winding)
+            let mask = belowView.layer.mask as? CAShapeLayer ?? CAShapeLayer()
+            mask.frame = belowView.bounds
+            mask.fillColor = UIColor.black.cgColor
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            mask.path = open
+            CATransaction.commit()
+            if belowView.layer.mask !== mask { belowView.layer.mask = mask }
         }
 
         /// The under picture's answer, asked again when a host's draw lands or the window moves —

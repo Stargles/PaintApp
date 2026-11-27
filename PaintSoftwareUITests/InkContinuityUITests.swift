@@ -25,7 +25,8 @@ final class InkContinuityUITests: PaintUITestCase {
         try strokesFromRest(composited: false, extraArguments: ["-uiTestSlowVectorRenderMillis", "150"])
     }
 
-    private func strokesFromRest(composited: Bool, extraArguments: [String]) throws {
+    /// A vector layer and a half-opaque thin brush, on the baked frame when `composited`.
+    private func launchWithTranslucentBrush(composited: Bool, extraArguments: [String]) -> (XCUIApplication, XCUIElement) {
         let app = XCUIApplication()
         app.launchArguments += ["-uiTestInkProbe"] + extraArguments
         XCTAssertTrue(launchIntoEditor(app))
@@ -45,6 +46,41 @@ final class InkContinuityUITests: PaintUITestCase {
         closeBrushEditor(app)
         app.buttons["toolbar.brushButton"].tap()
 
+        return (app, canvas)
+    }
+
+    /// **A pan does not draw ink twice.** The hosts' surfaces hold the screen as of their last draw
+    /// (slowed here to 2.5 s), so a pan carries them with the canvas and the under picture shows only in
+    /// the strip they do not cover. Shown under them as well, a translucent stroke is twice as dark
+    /// from the pan until their redraw lands.
+    func testAPanDoesNotDrawTranslucentInkTwiceWhereTheHostsAlreadyShowIt() throws {
+        let (app, canvas) = launchWithTranslucentBrush(composited: false,
+                                                       extraArguments: ["-uiTestSlowWindowDrawMillis", "2500"])
+        let visible = visiblePaperRect(app, in: canvas)
+        drawLine(on: canvas, from: onHost(visible, 0.1, 0.4), to: onHost(visible, 0.9, 0.4))
+        // The stroke's base lands, the bake follows, and the reduced picture goes under the hosts.
+        Thread.sleep(forTimeInterval: 8)
+        func lineGrey() -> Double {
+            guard let pixels = ScreenshotPixels(XCUIScreen.main.screenshot().image) else { return 255 }
+            var sum = 0.0
+            let samples = 15
+            for i in 0..<samples {
+                let x = visible.minX + visible.width * (0.35 + 0.3 * Double(i) / Double(samples - 1))
+                guard let px = pixels.pixel(at: CGPoint(x: x, y: visible.minY + visible.height * 0.4)) else { return 255 }
+                sum += (Double(px.r) + Double(px.g) + Double(px.b)) / 3
+            }
+            return sum / Double(samples)
+        }
+        let before = lineGrey()
+        XCTAssertLessThan(before, 235, "PREMISE: the translucent stroke is on screen")
+        try panAboveTheDock(app, canvas, stagger: 0, delta: CGVector(dx: 60, dy: 0))
+        // The fingers have just lifted; the hosts' redraw is 2.5 s away.
+        let after = lineGrey()
+        XCTAssertGreaterThan(after, before - 12, "the stroke was drawn twice under the pan: \(before) -> \(after)")
+    }
+
+    private func strokesFromRest(composited: Bool, extraArguments: [String]) throws {
+        let (app, canvas) = launchWithTranslucentBrush(composited: composited, extraArguments: extraArguments)
         let visible = visiblePaperRect(app, in: canvas)
         let strokes = 8
         for i in 0..<strokes {

@@ -38,13 +38,13 @@ final class CanvasPictureView: UIView {
     var hasPictureReady: Bool { isShowingImage || (presenter?.hasCurrentPicture(surface) ?? false) }
     /// Runs on the main thread each time a draw of this view reaches the screen.
     var onShown: (() -> Void)?
-    /// **Whether what is on screen was drawn for the window as it is now** — true for a view with
-    /// nothing to draw. False while a pan, zoom or turn's redraw is owed, or the first picture is: the
-    /// part of the window the surface was not drawn for is bare until it lands.
-    var showsCurrentWindow: Bool {
-        guard image != nil else { return true }
-        guard isShowingImage, let shown = surface.presentedWindow, let now = currentWindow()?.window else { return false }
-        return shown == now
+    /// **The layer whose pixels are on screen for this picture** — its bounds are the window the picture
+    /// was last drawn for, carried by whatever has moved the canvas since — or nil while nothing is
+    /// drawn (no picture, or the first one still in flight). `CanvasView` reads where ink is already
+    /// drawn from it (the under picture's mask).
+    var drawnLayer: CALayer? {
+        guard image != nil, !surface.isHidden, surface.layer.contents != nil else { return nil }
+        return surface.layer
     }
     /// The onion skin's ghost is magnified bilinear; a layer's ink stays crisp (`LayerHostView.init`).
     var smoothWhenMagnified = false

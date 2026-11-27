@@ -439,8 +439,8 @@ final class StrokeCanvasView: CanvasPlaneView {
     /// A pan, zoom or turn of the canvas: the base draws what the window now shows of it.
     func windowMoved() { imageView.windowMoved() }
 
-    /// Whether the base on screen was drawn for the window as it is now (`CanvasPictureView`).
-    var showsCurrentWindow: Bool { imageView.showsCurrentWindow }
+    /// The layer the base is on screen in, or nil (`CanvasPictureView.drawnLayer`).
+    var drawnLayer: CALayer? { imageView.drawnLayer }
 
     /// Runs when a draw of the base reaches the screen.
     var onWindowShown: (() -> Void)? {

@@ -86,8 +86,8 @@ final class LayerHostView: CanvasPlaneView {
         strokeView.windowMoved()
     }
 
-    /// Whether both of the host's pictures on screen were drawn for the window as it is now.
-    var showsCurrentWindow: Bool { bakedImageView.showsCurrentWindow && strokeView.showsCurrentWindow }
+    /// The layers this host's pictures are on screen in — where the host already draws its ink.
+    var drawnLayers: [CALayer] { [bakedImageView.drawnLayer, strokeView.drawnLayer].compactMap { $0 } }
 
     /// Runs when a draw of either picture reaches the screen.
     var onWindowShown: (() -> Void)? {
