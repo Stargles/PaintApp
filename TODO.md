@@ -89,6 +89,17 @@ Every status report to the owner lists this queue with each item's state, not on
    R1 waits on disk, zero spill/load work on main, hit rates per feature. Start with layer pictures (~500 of
    888 MiB measured; unedited layers as two merged pictures); measure the stream before touching it.
 10. Audit follow-through, streaming on the real link, smaller asks below.
+11. **Liquify lags and 100% only smudges (owner, Nov 26, on `ee72796b`).** *"liquify needs to be real time. It seems to
+    lag alot. Also when power is set to 100% (default) it should be powerful enough to completely grab the original
+    point under the pen, not just drag it like a smudge."* So: Liquify keeps up with the pen (SCHEDULER.md rules), and
+    at 100% the pixel under the pen at touch-down stays under the pen for the whole drag (a grab/translate, not a
+    decaying push); lower power blends toward today's smudge. Owner order: **after the scheduler (S2–S9)**.
+12. **Puppet warp tool (owner, Nov 26).** Make a selection → Edit menu → a Puppet Warp icon. Ruled Nov 26:
+    **raster and vector** (raster pixels bend like Liquify; vector strokes' points move, staying crisp and
+    editable); **pins: tap inside the selection to drop pins, drag one and the shape bends around it while the
+    others stay put, tap a pin to remove it, commit with a button, one undo step.** No rotate handle. Reuse the
+    ARAP solver (vector interpolation's lattice+ARAP) and Liquify's raster warp; build no second deformer. Owner
+    order: **after the scheduler**, beside (11).
 
 ## Current — iPad build `ee72796b` installed 2026-11-26, owner check pending (items below name older builds)
 
