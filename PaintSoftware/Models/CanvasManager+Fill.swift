@@ -256,6 +256,9 @@ extension CanvasManager {
         guard !queuedFills.isEmpty || (fillGestureActive && !fillHasProduced) else { return false }
         queuedFills.append(QueuedFill(gesture: gesture, color: color, project: projectID))
         fillsQueued += 1
+        // Queueing changes no @Published value, so no SwiftUI pass would run and the host's census label
+        // (`fillsQueued:`) would keep saying the tap was not taken until something else moved.
+        objectWillChange.send()
         fillCommitsOnLanding = true
         return true
     }
