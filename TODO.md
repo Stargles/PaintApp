@@ -34,7 +34,9 @@ Numbers are stable; a gap is a finished item.
    **S3b built on `tmp/nov27-s3b`, NOT merged** (design §6 "S3b as built"): layer pictures repaired in place
    (`LayerPicture`), Undo/Redo copied back from kept pixels (budgeted, evictable), walks cancellable, `rasterizeLock`
    gone (a request joins the walk in flight, an answer pre-empts a bake's). An Undo while a fill is still drawing
-   takes that fill back. S3B_NUMBERS
+   takes that fill back; a second Fill tap while one draws is queued and lands after it (QueuedFillUITests, cold start).
+   MEASURED (5000², 40 strokes): a stroke landing repaired in place 11.2 ms vs the whole-cel walk 470.3 ms; Undo copied
+   back 1.2 ms. Gate GREEN ×3, undo-phase peak 1,014 / 1,004 / 1,020 MiB (main 1,126).
    Not built: the Move lift's `renderIsolated` still runs on main (left for S5's presentation work, which owns the float).
    **S2 built on `tmp/nov25-s2`, NOT merged — gate GREEN since the onion skin joined the budget.** The red was not
    the half level's own memory: at the undo peak the app sits ~300 MiB above what the budget holds on main and S2 alike
@@ -59,7 +61,8 @@ Numbers are stable; a gap is a finished item.
    whole-canvas picture under the window so revealed edges show at once (soft) until the sharp redraw.
 6. **Undo latency / raster Undo budget** — rides on stage 3's one budget (merged). **S3b (`tmp/nov27-s3b`): Undo is no
    longer the playcheck's peak phase** — a vector Undo/Redo copies back the pixels its edit replaced (no walk, no second
-   picture), and those kept pixels are asked of `MemoryBudget` and evicted like any cache. UNDO_NUMBERS Left: raster
+   picture), and those kept pixels are asked of `MemoryBudget` and evicted like any cache. MEASURED: Undo copied back 1.2 ms at 5000²; undo-phase peak 1,004–1,020 MiB over
+   three gate runs (main 1,126). Left: raster
    Undo still holds whole rasters per step, and `UndoHistory`'s own 192 MiB cap is not yet an entry in the one budget (S4).
 7. **Re-check against `main`, then fix what remains:** stroke latency and pan hitches (open: live stamping
    `DabImageCache.stamp` on main, Core Animation converting every landed picture on main because

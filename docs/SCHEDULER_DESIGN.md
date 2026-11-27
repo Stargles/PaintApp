@@ -508,7 +508,10 @@ one setup step, and the fill landed on top after them.
 
 **Gate (iPad 9 sim, 5000² × 5 layers, main `ac97b9a1` → S3b):** playcheck GREEN. **Undo phase peak 1,126 → 1,014 MiB** — no longer
 the run's peak; it equals the step phases' (S3b's gate asked ≤ the other phases' + 20; main was +126). R1 `late` **30 → 28**
-(`layer_picture` 29 → 27, `fill` 1 → 1); step to a whole frame 70 → 84 ms (noise, untouched path). PLAYCHECK_RUNS
+(`layer_picture` 29 → 27, `fill` 1 → 1); step to a whole frame 70 → 84 ms (noise, untouched path). MEASURED over three GREEN runs: undo-phase peak 1,014 / 1,004 / 1,020 MiB, app peak
+≤ 1,035 MiB, R1 `late` 28 / 32 / 31 (all `layer_picture` but one `fill`) — S3b leaves late answers where they were: they are
+whole-cel renders of un-memoized cels on scene entry and frame steps, which S5 owns. `InPlaceRepairBench` (5000², 40
+strokes): whole-cel walk 470.3 ms, stroke landing repaired in place 11.2 ms, Undo copied back 1.2 ms.
 
 **The brief's premise, refuted:** R1 `late` was not whole-cel renders an edit's repair could have avoided. They are
 `layer picture` renders of cels that are not memoized — the scene entering (5), and every frame step whose hosts
