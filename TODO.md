@@ -105,7 +105,9 @@ Every status report to the owner lists this queue with each item's state, not on
     decaying push); lower power blends toward today's smudge. Owner order: **after the scheduler (S2–S9)**.
     Also (owner, Nov 26): *"liquify needs a visual indicator of how big the brush is when a stroke is being made.
     same circle thing as the eraser."* Reuse the eraser's size circle (same view, not a copy) while a Liquify stroke is live.
-12. **Puppet warp tool (owner, Nov 26).** Make a selection → Edit menu → a Puppet Warp icon. Ruled Nov 26:
+12. **Puppet warp — a Move mode (owner, Nov 26; Nov 27: *"make the queued puppet a move mode (like freeform or
+    distort)"*).** A mode of the Move tool beside Freeform and Distort, acting on the selection (or the cel); not an
+    Edit-menu icon. Ruled Nov 26:
     **raster and vector** (raster pixels bend like Liquify; vector strokes' points move, staying crisp and
     editable); **pins: tap inside the selection to drop pins, drag one and the shape bends around it while the
     others stay put, tap a pin to remove it, commit with a button, one undo step.** No rotate handle. Reuse the
