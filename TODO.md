@@ -71,7 +71,9 @@ Every status report to the owner lists this queue with each item's state, not on
    retired the model but left `heldInkView` up until some later pass, so for ~340 ms after the base landed the stroke
    was drawn twice and then snapped back (every lift; his Round Soft at pressure-driven flow); (2) on main since
    Nov 26 (`15327706`, not in his build) the flat row's under picture put a copy of the frame under the transparent
-   hosts for good a beat after each lift and took it away at the next touch. `InkContinuityProbe` +
+   hosts for good a beat after each lift and took it away at the next touch; it is now **masked to the part of the
+   canvas no host has drawn** (`maskUnderPicture`: the canvas minus each host picture's on-screen quad), so it still
+   fills a pinch out's or a pan's revealed edge and is never under ink a host shows. `InkContinuityProbe` +
    `InkContinuityUITests` read the committed layer tree after every main-thread turn and fail on both. Not S5: no
    presenter set was involved.
 8. **Canvas freezes** — merged Nov 25 (`71f4fd6e`): one touch recognizer of our own replaces UIKit's pan /

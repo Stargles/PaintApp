@@ -127,7 +127,7 @@ set; the screen keeps what it has. Nothing else may set contents, so "mixed" has
 per-host landings, `isAwaitingFirstPicture`, `coverTheHostsWithTheBakeWhileTheyRender`, the held frame,
 `frameStepSettleSeconds`, `presentFirst`'s draw on main. It is not the answer to the flicker when laying several
 strokes: that was ink drawn twice inside one host (a held picture left up after its base landed, and the flat row's
-under picture), found with `InkContinuityProbe` — TODO item 7.
+under picture, now masked to the part of the canvas no host has drawn, which S5 keeps), found with `InkContinuityProbe` — TODO item 7.
 
 ## 3. Memory manager — `MemoryBudget` grown, not replaced
 
