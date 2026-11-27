@@ -432,23 +432,28 @@ iPad's ~0.3–0.6 s, seconds with the draw slowed). 1024 not 1620 because 1620 c
 launch. A bake key names pictures by `LayerContentVersion`'s `residencyID` (a `UUID()` per object) and per-open
 version counters, so **no key survives a launch**: a file kept under its key is never asked for again. What survives
 is the saved package. So a kept bake is filed by **frame number under a token of the package** (SHA-256 of
-`manifest.json`), `<Projects>/.bakes.nosync/<projectID>/<resolution>/<token>/<frame>.pbk` (`Engine/KeptBakes.swift`):
-a **save promotes** the frames the baker held clean when the scene was frozen (clonefile — no second copy on APFS) and
-deletes every other token; the **first baker after an open adopts** a kept file for a frame nothing has touched since
-(`FrameBaker.adopt`; every sweep path that dirties a frame drops it first — `testAFrameEditedAfterOpeningIsBakedNotAdopted`
-goes red without that). The working store stays in Caches and is emptied at launch as today. **Decisions:** never
-inside the package (a save rebuilds the package, a backup/trash/duplicate/share would carry the bakes — so a bake
-never bloats what the owner shares or backs up); beside it, dotted (no gallery folder), `.nosync` (no iCloud upload),
-excluded from backup; keyed by project ID, so rename and move-to-folder keep it, duplicate gets none, trash is swept at
-the next launch; off at launch empties the folder; on trims to the disk limit, least recently written first. Setting:
-`AppSettings.keepBakedFrames`, Settings "Keep Baked Frames", default off.
+`manifest.json`), `<package>/bakes/<resolution>/<token>/<frame>.pbk` (`Engine/KeptBakes.swift`):
+a **save promotes** the frames the baker held clean when the scene was frozen into the *landed* package (clonefile — no
+second copy on APFS) and deletes every other token; the **first baker after an open adopts** a kept file for a frame
+nothing has touched since (`FrameBaker.adopt`; every sweep path that dirties a frame drops it first —
+`testAFrameEditedAfterOpeningIsBakedNotAdopted` goes red without that). The working store stays in Caches and is emptied
+at launch as today. **Where (owner ruling, 2026-11-26): inside the package**, so a share, AirDrop, backup, duplicate and
+trash move carry the bakes with no code of their own, and those grow by them (accepted). The token hashes the manifest
+alone, so bakes inside the package never change it; a save stages a package with no `bakes/` and promotes after it
+lands, so a package holds only the set for its newest manifest. A duplicate has a new manifest, so the set it was
+copied with is stale and the launch pass sweeps it. **Launch pass over every package in the library:** setting **off**
+strips `bakes/` from every package (a scene holds none — decided to include packages that arrived with bakes inside, so
+"off" means off everywhere); **on** removes every set but the manifest's own and trims the library's bakes to the disk
+limit, least recently written package first. Setting: `AppSettings.keepBakedFrames`, Settings "Keep Baked Frames",
+default off. The earlier `<Projects>/.bakes.nosync/<projectID>/` placement is deleted with no reader or sweeper: a
+folder an earlier build left there is orphaned disk, not read.
 
 ## 7. Owner rulings (Nov 25)
 
 - **Q1 — a never-drawn frame:** keep showing the previous frame until the new one is whole. No soft-first.
 - **Q2 — bakes between launches:** a Settings option to keep them, **default off**. When on, they are stored
   in the scene's own folder (they travel with the canvas), inside the disk limit; when off, emptied at launch
-  as today. Built in S2 (see "S2 as built": a kept set filed beside the package, not in it).
+  as today. Built in S2 (see "S2 as built": a kept set filed inside the package).
 
 ## 8. Changes to SCHEDULER.md (same branch)
 

@@ -224,8 +224,8 @@ struct SettingsMenu: View {
             .tint(.blue)
             .accessibilityIdentifier("settings.keepBakedFramesToggle")
             Text("Saves each scene's baked frames so playback is ready the next time you open it. "
-                 + "They use disk space, are never part of a scene you share or back up, and are "
-                 + "removed when you turn this off or move a scene to the trash.")
+                 + "They are kept inside each scene, so they use disk space and travel with it when you "
+                 + "share, duplicate or back it up, and they are removed when you turn this off.")
                 .font(.caption)
                 .foregroundColor(.gray)
                 .fixedSize(horizontal: false, vertical: true)

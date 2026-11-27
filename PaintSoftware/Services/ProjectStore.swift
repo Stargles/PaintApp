@@ -1143,7 +1143,9 @@ enum ProjectStore {
         // The frames the baker held clean when the scene was frozen depict exactly the package just
         // landed: kept under its token for the next open (a version slot changes no live package).
         if destination == .liveProject, let kept = snapshot.keptBakes, let token = KeptBakes.token(ofPackageAt: landed) {
-            KeptBakes.promote(kept.frames, playhead: kept.playhead, root: kept.root, token: token, limit: kept.limit)
+            KeptBakes.promote(kept.frames, playhead: kept.playhead,
+                              root: KeptBakes.root(package: landed, renderResolution: kept.renderResolution),
+                              token: token, limit: kept.limit)
         }
         ProjectBackupManager.pruneBackups(forProjectID: snapshot.projectID)
         return landed

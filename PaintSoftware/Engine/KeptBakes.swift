@@ -21,32 +21,28 @@ import CryptoKit
 /// - **An open adopts**: a kept file is cloned to the name the new session's key gives it and its header
 ///   digest is rewritten to match; from there it is an ordinary bake file in the working store.
 ///
-/// ## Where they live, and what they never do
+/// ## Where they live, and what follows the package
 ///
-/// `<Projects>/.bakes.nosync/<projectID>/<resolution>/` — in the same library as the packages (so they
-/// travel with it), **never inside a package**: a save rebuilds the package through a staging folder, a
-/// backup or a trash move clones or moves the whole package, and a package shared or exported from Files
-/// is the folder itself, so a bake inside would be copied into every one of them. The name is dotted, so
-/// the gallery lists no folder for it; `.nosync`, so iCloud Drive does not upload it; and it is excluded
-/// from backup. A duplicate gets a new project ID and so no bakes (they are rebuilt, not copied); a
-/// rename or a move between gallery folders keeps the ID and so keeps them; a trashed project's are
-/// swept at the next launch. The whole folder obeys the disk limit (`BakeDiskLimit`).
+/// `<package>/bakes/<resolution>/<token>/<frame>.pbk` — **inside the scene's own package** (owner
+/// ruling, 2026-11-26), so a share, an AirDrop, a backup, a duplicate and a trash move carry them
+/// without any code of their own, and the artist accepts that those grow by the bakes. A save rebuilds
+/// the package through a staging folder that has no `bakes/`, then promotes the new set into the landed
+/// package, so a package never holds more than the one set for its newest manifest. A copy of a package
+/// (a duplicate gets a new manifest, and so a new token) holds a set no manifest asks for: the launch
+/// pass sweeps it. The whole library obeys the disk limit (`BakeDiskLimit`).
+
 nonisolated enum KeptBakes {
 
-    static let folderName = ".bakes.nosync"
+    static let folderName = "bakes"
 
     /// A kept file's extension: the working store's own format, named by frame.
     private static let fileExtension = "pbk"
 
     // MARK: - Where
 
-    static func folder(in projectsDirectory: URL) -> URL {
-        projectsDirectory.appendingPathComponent(folderName, isDirectory: true)
-    }
-
-    static func root(projectsDirectory: URL, projectID: UUID, renderResolution: RenderResolution) -> URL {
-        folder(in: projectsDirectory)
-            .appendingPathComponent(projectID.uuidString, isDirectory: true)
+    /// Where the kept frames of `package` live, for one render resolution.
+    static func root(package: URL, renderResolution: RenderResolution) -> URL {
+        package.appendingPathComponent(folderName, isDirectory: true)
             .appendingPathComponent(renderResolution.rawValue, isDirectory: true)
     }
 
@@ -111,7 +107,6 @@ nonisolated enum KeptBakes {
         let final = root.appendingPathComponent(token, isDirectory: true)
         try? fm.removeItem(at: building)
         do { try fm.createDirectory(at: building, withIntermediateDirectories: true) } catch { return 0 }
-        excludeFromBackup(folder: root.deletingLastPathComponent().deletingLastPathComponent())
         var kept = 0, bytes = 0
         for (frame, source) in frames.sorted(by: { abs($0.frame - playhead) < abs($1.frame - playhead) }) {
             let size = (try? source.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
@@ -139,27 +134,35 @@ nonisolated enum KeptBakes {
 
     // MARK: - Launch
 
-    /// The launch pass. With the option off the whole folder goes (the bake is emptied at launch, as it
-    /// always was). With it on, a folder whose project has no package any more (trashed, or deleted)
-    /// goes, and the rest is trimmed to `limit` bytes, least recently written project first.
-    /// `liveProjectIDs` is read by the caller, which knows how to walk the library.
-    static func launchPass(projectsDirectory: URL, keeping: Bool, liveProjectIDs: () -> Set<UUID>, limit: Int) {
+    /// The launch pass over every package in the library. With the option **off** every package's
+    /// `bakes/` goes — the setting means a scene holds none, including ones it was given inside a
+    /// package it was sent or restored from. With it **on**, what no manifest asks for goes (a set for
+    /// an older save, a duplicate's copy, an abandoned build), and the rest is trimmed to `limit` bytes
+    /// in all, the least recently written package's first.
+    static func launchPass(packages: [URL], keeping: Bool, limit: Int) {
         let fm = FileManager.default
-        let folder = folder(in: projectsDirectory)
-        guard fm.fileExists(atPath: folder.path) else { return }
-        guard keeping else {
-            try? fm.removeItem(at: folder)
-            return
-        }
-        let live = liveProjectIDs()
         var survivors: [(url: URL, modified: Date, bytes: Int)] = []
-        for item in (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] {
-            guard let id = UUID(uuidString: item.lastPathComponent), live.contains(id) else {
-                try? fm.removeItem(at: item)
+        for package in packages {
+            let folder = package.appendingPathComponent(folderName, isDirectory: true)
+            guard fm.fileExists(atPath: folder.path) else { continue }
+            guard keeping else {
+                try? fm.removeItem(at: folder)
                 continue
             }
-            let modified = (try? item.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-            survivors.append((item, modified, directorySize(item)))
+            let token = token(ofPackageAt: package)
+            for resolution in (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [] {
+                for set in (try? fm.contentsOfDirectory(at: resolution, includingPropertiesForKeys: nil)) ?? []
+                where set.lastPathComponent != token {
+                    try? fm.removeItem(at: set)
+                }
+            }
+            let bytes = directorySize(folder)
+            guard bytes > 0 else {
+                try? fm.removeItem(at: folder)
+                continue
+            }
+            let modified = (try? folder.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            survivors.append((folder, modified, bytes))
         }
         var total = survivors.reduce(0) { $0 + $1.bytes }
         for oldest in survivors.sorted(by: { $0.modified < $1.modified }) where total > limit {
@@ -187,20 +190,12 @@ nonisolated enum KeptBakes {
         guard let walker = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey]) else { return 0 }
         return walker.compactMap { ($0 as? URL).flatMap { try? $0.resourceValues(forKeys: [.fileSizeKey]).fileSize } }.reduce(0, +)
     }
-
-    /// Bakes are a cache: nothing here is worth a backup's space.
-    private static func excludeFromBackup(folder: URL) {
-        var values = URLResourceValues()
-        values.isExcludedFromBackup = true
-        var url = folder
-        try? url.setResourceValues(values)
-    }
 }
 
 /// What a save hands `KeptBakes.promote`: frozen on the main actor with the scene, used on the save queue.
 struct KeptBakeSnapshot {
     let frames: [(frame: Int, source: URL)]
     let playhead: Int
-    let root: URL
+    let renderResolution: RenderResolution
     let limit: Int
 }

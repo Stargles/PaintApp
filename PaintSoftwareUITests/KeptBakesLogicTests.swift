@@ -82,33 +82,59 @@ final class KeptBakesLogicTests: XCTestCase {
         XCTAssertFalse(next.contains(key(1)))
     }
 
-    /// **The setting at launch**: off empties the folder, as the bake always was; on drops the frames of a
-    /// project that is gone and trims the rest to the limit, least recently written first.
-    func testTheLaunchPassEmptiesWhenOffAndSweepsAndTrimsWhenOn() throws {
-        let projects = base.appendingPathComponent("Projects", isDirectory: true)
-        let live = UUID(), gone = UUID(), older = UUID()
-        func seed(_ id: UUID, bytes: Int, modified: Date) throws {
-            let dir = KeptBakes.root(projectsDirectory: projects, projectID: id, renderResolution: .full)
-                .appendingPathComponent("t", isDirectory: true)
+    /// A package with a manifest and, optionally, a kept set for `token` in `bakes/full/<token>/`.
+    /// `keptFor: "current"` files the set under the manifest's own token.
+    private func package(_ name: String, manifest: String, keptFor kept: String? = nil, bytes: Int = 1000,
+                         modified: Date = Date()) throws -> URL {
+        let url = base.appendingPathComponent(name + ".paintproj", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        try Data(manifest.utf8).write(to: url.appendingPathComponent("manifest.json"))
+        if let kept {
+            let token = kept == "current" ? try XCTUnwrap(KeptBakes.token(ofPackageAt: url)) : kept
+            let dir = KeptBakes.root(package: url, renderResolution: .full).appendingPathComponent(token, isDirectory: true)
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try Data(count: bytes).write(to: dir.appendingPathComponent("0.pbk"))
-            let project = KeptBakes.folder(in: projects).appendingPathComponent(id.uuidString)
-            try FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: project.path)
+            try FileManager.default.setAttributes([.modificationDate: modified],
+                                                  ofItemAtPath: url.appendingPathComponent(KeptBakes.folderName).path)
         }
-        func exists(_ id: UUID) -> Bool {
-            FileManager.default.fileExists(atPath: KeptBakes.folder(in: projects).appendingPathComponent(id.uuidString).path)
+        return url
+    }
+
+    private func hasBakes(_ package: URL) -> Bool {
+        FileManager.default.fileExists(atPath: package.appendingPathComponent(KeptBakes.folderName).path)
+    }
+
+    /// **Kept frames live inside the package and never change its token**: the token hashes the manifest,
+    /// so a set promoted into the package is still the set that package's manifest asks for.
+    func testAKeptSetInsideThePackageLeavesItsTokenAlone() throws {
+        let pkg = try package("a", manifest: "one")
+        let token = try XCTUnwrap(KeptBakes.token(ofPackageAt: pkg))
+        let store = FrameBakeStore(root: base.appendingPathComponent("work"), byteCeiling: 1 << 24)
+        let files = [(frame: 0, source: bake(1, in: store))]
+        let root = KeptBakes.root(package: pkg, renderResolution: .full)
+        XCTAssertEqual(KeptBakes.promote(files, playhead: 0, root: root, token: token, limit: .max / 2), 1)
+        XCTAssertEqual(KeptBakes.token(ofPackageAt: pkg), token, "the bakes are not part of what the token names")
+        XCTAssertEqual(KeptBakes.frames(in: root, token: token), [0])
+        XCTAssertTrue(root.path.hasPrefix(pkg.path + "/"), "inside the package, so it follows the package")
+    }
+
+    /// **The setting at launch**: off strips every package's bakes (a scene holds none, including ones it
+    /// arrived with); on keeps only the set the manifest asks for — a duplicate's or an older save's goes —
+    /// and trims the rest to the limit, the least recently written package's first.
+    func testTheLaunchPassStripsWhenOffAndSweepsStaleSetsAndTrimsWhenOn() throws {
+        func make() throws -> (live: URL, stale: URL, older: URL) {
+            (try package("live", manifest: "m1", keptFor: "current"),
+             try package("stale", manifest: "m2", keptFor: "not-the-manifests"),
+             try package("older", manifest: "m3", keptFor: "current", modified: Date(timeIntervalSinceNow: -1000)))
         }
-        try seed(live, bytes: 1000, modified: Date())
-        try seed(gone, bytes: 1000, modified: Date())
-        try seed(older, bytes: 1000, modified: Date(timeIntervalSinceNow: -1000))
+        let (live, stale, older) = try make()
+        KeptBakes.launchPass(packages: [live, stale, older], keeping: true, limit: 1500)
+        XCTAssertTrue(hasBakes(live), "the newest package's current set stays")
+        XCTAssertFalse(hasBakes(stale), "a set no manifest asks for is swept")
+        XCTAssertFalse(hasBakes(older), "over the limit, the least recently written goes")
 
-        KeptBakes.launchPass(projectsDirectory: projects, keeping: true, liveProjectIDs: { [live, older] }, limit: 1500)
-        XCTAssertTrue(exists(live), "the newest live project stays")
-        XCTAssertFalse(exists(gone), "a trashed or deleted project's frames are swept")
-        XCTAssertFalse(exists(older), "over the limit, the least recently written goes")
-
-        KeptBakes.launchPass(projectsDirectory: projects, keeping: false, liveProjectIDs: { [live] }, limit: .max)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: KeptBakes.folder(in: projects).path), "off: emptied at launch")
+        KeptBakes.launchPass(packages: [live, stale, older], keeping: false, limit: .max)
+        XCTAssertFalse(hasBakes(live), "off: stripped from every package at launch")
     }
 
     func testTheSettingDefaultsOffAndPersists() {

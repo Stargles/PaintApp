@@ -3559,16 +3559,15 @@ final class CanvasManager: ObservableObject {
         // opened from; taken whether or not it does, so no later baker can.
         if let token = packageBakeToken {
             packageBakeToken = nil
-            if keepsBakedFrames { baker.adopt(root: keptBakeRoot, token: token) }
+            if keepsBakedFrames, let root = keptBakeRoot { baker.adopt(root: root, token: token) }
         }
         isFrameBakerMade = true
         return baker
     }
 
-    /// Where this scene's kept frames live (`KeptBakes`).
-    private var keptBakeRoot: URL {
-        KeptBakes.root(projectsDirectory: ProjectBackupManager.projectsDirectory, projectID: projectID,
-                       renderResolution: renderResolution)
+    /// Where this scene's kept frames live (`KeptBakes`): inside the package it was opened from.
+    private var keptBakeRoot: URL? {
+        projectURL.map { KeptBakes.root(package: $0, renderResolution: renderResolution) }
     }
 
     private var isFrameBakerMade = false
@@ -3579,10 +3578,9 @@ final class CanvasManager: ObservableObject {
     @MainActor
     func keptBakeSnapshot() -> KeptBakeSnapshot? {
         guard keepsBakedFrames, isFrameBakerMade, !frameBaker.isClosed else { return nil }
-        let root = keptBakeRoot
-        guard let capacity = BakeDiskLimit.capacity(at: root, held: 0) else { return nil }
-        return KeptBakeSnapshot(frames: frameBaker.cleanFramesOnDisk(), playhead: currentFrame, root: root,
-                                limit: BakeDiskLimit.bytes(capacity: capacity))
+        guard let package = projectURL, let capacity = BakeDiskLimit.capacity(at: package, held: 0) else { return nil }
+        return KeptBakeSnapshot(frames: frameBaker.cleanFramesOnDisk(), playhead: currentFrame,
+                                renderResolution: renderResolution, limit: BakeDiskLimit.bytes(capacity: capacity))
     }
 
     /// **`FrameBaker.close()`'s real caller.** `ContentView.returnToGallery` calls this on the way

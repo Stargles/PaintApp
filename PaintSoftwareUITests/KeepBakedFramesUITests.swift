@@ -1,7 +1,8 @@
 import XCTest
 
 /// **"Keep Baked Frames" in Settings** (SCHEDULER_DESIGN.md §7, owner ruling Q2): off on a first launch,
-/// on once chosen, and still on — or still off — after the app is quit and opened again.
+/// on once chosen, and still on — or still off — after the app is quit and opened again. (Where the
+/// frames are kept — inside each scene's package — is `KeptBakesLogicTests`' and has no screen.)
 final class KeepBakedFramesUITests: PaintUITestCase {
 
     private func toggle(_ app: XCUIApplication) -> XCUIElement {
