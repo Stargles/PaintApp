@@ -125,8 +125,9 @@ ready and all carry one `(frame, revisions, window)` stamp, one main turn swaps 
 `CATransaction` and retires covered live ink in the same turn. A part that fails or is superseded drops the whole
 set; the screen keeps what it has. Nothing else may set contents, so "mixed" has no code path. Replaces:
 per-host landings, `isAwaitingFirstPicture`, `coverTheHostsWithTheBakeWhileTheyRender`, the held frame,
-`frameStepSettleSeconds`, `presentFirst`'s draw on main. It is not a diagnosis of the flicker when laying several
-strokes — that is re-tested on the build (TODO item 7) — but it makes that class of flicker inexpressible.
+`frameStepSettleSeconds`, `presentFirst`'s draw on main. It is not the answer to the flicker when laying several
+strokes: that was ink drawn twice inside one host (a held picture left up after its base landed, and the flat row's
+under picture), found with `InkContinuityProbe` — TODO item 7.
 
 ## 3. Memory manager — `MemoryBudget` grown, not replaced
 
