@@ -1890,6 +1890,7 @@ final class StrokeCanvasView: CanvasPlaneView {
               prepared.settle() else { return }
         let timingCelsBefore = beginTimingTakeIfArmed(timing)
         prepared.begin()
+        InkContinuityProbe.strokeBegan(at: touch.location(in: nil), in: window)
         // BRUSH.md §4: the field exists from the first dab, so what the pen lays down and what the
         // stored stroke replays are drawn from the same randomness.
         strokeSeed = DabRandom.freshSeed()
@@ -1978,6 +1979,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         if liquifySession != nil { finishLiquifyGesture(touch); return }
         if guideStartTime != nil { endGuideStroke(touch); return }
         if consumedAsMotionGroupTap { consumedAsMotionGroupTap = false; return }
+        defer { InkContinuityProbe.strokeEnded() }
         if vectorCanvas != nil { endVectorStroke(touch); return }
         // Shape detected and reverted: skip stroke-end bookkeeping, just notify the coordinator.
         if shapeFollowingTouch {

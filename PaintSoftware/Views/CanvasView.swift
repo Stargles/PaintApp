@@ -1428,6 +1428,7 @@ struct CanvasView: UIViewRepresentable {
                 + " lasso:\(canvasManager.openLasso.map { String($0.points.count) } ?? "none")"
                 // **What the render server holds for this window** — `-uiTestContentsCensus` only.
                 + (LayerContentsCensus.shared.map { " " + $0.field } ?? "")
+                + (InkContinuityProbe.isOn ? " ink:" + InkContinuityProbe.field : "")
             // **Compared before it is written, because this now runs on every pass.** Building the
             // string is a handful of interpolations against a `renderTree` derivation and a
             // whole-tree `==` on the same line, so it is free; assigning an accessibility label is
@@ -1436,6 +1437,7 @@ struct CanvasView: UIViewRepresentable {
                 census.attach(to: hostView.window)
                 census.onChange = { [weak self] in self?.publishCanvasState() }
             }
+            if InkContinuityProbe.isOn { InkContinuityProbe.onChange = { [weak self] in self?.publishCanvasState() } }
             guard let hostView, state != lastPublishedCanvasState else { return }
             lastPublishedCanvasState = state
             hostView.accessibilityLabel = state

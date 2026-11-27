@@ -146,6 +146,38 @@ final class InteractionHitchUITests: PaintUITestCase {
                                     + report.joined(separator: "\n"))
     }
 
+    /// **A lifted stroke is on every committed frame between its first dab and the end** — the
+    /// app's own probe (`InkContinuityProbe`) reads one pixel of the window's layer tree after each
+    /// main-thread turn's commit, so a one-frame gap the screenshot test above cannot see is counted.
+    func testNoCommittedFrameBetweenLiftAndBaseLacksTheStroke() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-uiTestInkProbe"]
+        try strokesInQuickSuccession(app)
+    }
+
+    private func strokesInQuickSuccession(_ app: XCUIApplication) throws {
+        let canvas = openOwnersScene(brush: 5.0 / 199, app: app)
+        defer { XCUIDevice.shared.orientation = .portrait }
+        openBrushLibrary(app)
+        setBrushSize(app, normalized: 0.25)
+        app.buttons["toolbar.brushButton"].tap()
+        let pt = paperPoints(app, canvas)
+        let strokes = 10
+        for i in 0..<strokes {
+            let y = 0.04 + Double(i) * 0.09
+            try fingerStroke(through: (0...20).map { pt(0.30 + 0.4 * Double($0) / 20, y) }, interval: 1.0 / 60)
+            Thread.sleep(forTimeInterval: i % 2 == 0 ? 0.05 : 0.4)
+        }
+        Thread.sleep(forTimeInterval: 4)
+        let state = canvas.label
+        print("INKPROBE \(state)")
+        stopRecording(app)
+        let counts = readField(app, "ink:").split(separator: ",").compactMap { Int($0) }
+        XCTAssertEqual(counts.count, 2, "the probe did not publish: \(state)")
+        XCTAssertGreaterThanOrEqual(counts.first ?? 0, strokes, "the probe watched too few strokes: \(state)")
+        XCTAssertEqual(counts.last, 0, "a committed frame lacked a stroke between its lift and its base: \(state)")
+    }
+
     /// **A frame step never shows a mix of two frames** (owner, 2026-11-18: parts of the layer being
     /// drawn on showed over the other layers for up to a second). Two layers, two frames, a colour of
     /// its own on each layer of each frame: green and yellow on the bottom layer's frames A and B, red
