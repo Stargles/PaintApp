@@ -1749,27 +1749,26 @@ nonisolated final class VectorCanvas {
     /// synchronously *on the main thread*, blocked for as long as a background render happened to be
     /// running. MEASURED on the owner's iPad 9 at 6000×6000: an undo tap 110–220 ms after the finger
     /// left the glass, against 10–20 ms for taps that raced nothing. Every acquisition below is now
-    /// O(element count) at worst, and a render's pixels are drawn under `rasterizeLock` with this one
-    /// released — see `rasterize(quality:ifStillAtVersion:)`.
+    /// O(element count) at worst, and a render's pixels are drawn with this one released — see
+    /// `rasterize(quality:requestedResolution:requiring:)`.
     ///
     /// Non-reentrant: every private/`static` helper below is only called from a method already
     /// holding this lock. The stored-property accessors are the public seam that locks.
     private let lock = NSLock()
 
-    /// Serializes the *rasterizes*, which is the job `lock` used to be doing by accident.
+    /// **The native walk in flight, and who it is for** — what replaced a lock held across the walk
+    /// (SCHEDULER_DESIGN.md §2, "no lock across a walk").
     ///
-    /// Two threads want a vector cel's pixels at pen-up — `StrokeCanvasView.startVectorRender` and
-    /// the compositor's snapshot (`Frozen`) — and holding one lock across the walk made the second of
-    /// them wait and then find the memo, so the cel was stamped once. Take that away and both walk:
-    /// twice the dabs and two canvas-sized buffers alive at once, which at 6000² is 288 MB on a 3 GB
-    /// iPad. So the serialization stays; only its scope changes. A waiter here blocks a *render*,
-    /// never an edit, because nothing that mutates this canvas ever takes it.
-    ///
-    /// **Ordering: `rasterizeLock` then `lock`, never the reverse.** Only the three render entry
-    /// points take it, each at the top before any `lock`, and nothing taken under `lock` reaches back
-    /// for it. `VectorRenderCache.noteRendered` — which takes *other* canvases' locks when it evicts
-    /// — stays outside both, as it always has.
-    private let rasterizeLock = NSLock()
+    /// Two threads want a vector cel's pixels at pen-up — `StrokeCanvasView.startVectorRender` and the
+    /// compositor's snapshot (`Frozen`) — and they must not both walk it: twice the dabs, and two
+    /// writers of one picture. So one native walk runs at a time per canvas, and a second request
+    /// **joins** it: it waits for that walk, then finds the memo. But a lock across the walk also made
+    /// an answer (R1, an Undo's repair) wait behind a bake's walk of the same cel (R3) for up to 640 ms.
+    /// So a request of a **higher class pre-empts**: it cancels the walk in flight at its next
+    /// checkpoint and walks itself, and the pre-empted caller joins it in turn. Guarded by `walkGate`,
+    /// which nothing holds across a walk and which is never taken under `lock`.
+    private let walkGate = NSCondition()
+    private var walkInFlight: (token: CancelToken, jobClass: JobClass)?
 
     /// The one z-ordered display list, drawn back to front. See `VectorElement` for why not three
     /// parallel arrays, and `renderLocalContent()` for how it is walked.
@@ -2127,6 +2126,72 @@ nonisolated final class VectorCanvas {
     /// repaired against an unsuppressed list.
     private var regionBaseSuppression: Set<UUID>?
 
+    /// **The display list the native picture's pixels show**, by storage: `_elements` as it was when
+    /// the picture was last drawn or repaired in place, with nothing suppressed — nil when it was drawn
+    /// with something hidden. A picture is a function of its list, so this is what makes the pixels an
+    /// in-place repair replaces mean something afterwards: they are the picture of *this* list
+    /// (`KeptPixels.restores`). Compared by storage identity (`sameStorage`), never by content.
+    private var pictureList: [VectorElement]?
+
+    /// **The pixels in-place repairs replaced, newest last** — SCHEDULER_DESIGN.md §3.1, "Undo". Each
+    /// turns a picture of `over` into a picture of `restores` by being copied back, so the Undo of the
+    /// edit that replaced them (and that Undo's Redo, whose pixels the copy-back keeps in turn) costs a
+    /// rectangle's copy and no walk. **A cache, not the step**: the Undo itself is a list swap
+    /// (`restoreElements`), and a mismatch or an eviction falls back to the repair walk. Held to one
+    /// picture's bytes and `keptLimit` patches a canvas, admitted by the one budget (each patch holds
+    /// its grant) and evicted through `keptEntry` like any other cache.
+    private var keptPixels: [KeptPixels] = []
+    /// The patch the next native render copies back instead of walking — set by `restoreElements` when
+    /// the list it puts back is one a kept patch restores, cleared by any other invalidation.
+    private var pendingKept: KeptPixels?
+    /// The one budget's handle on `keptPixels` (uncharged: each patch holds its own grant).
+    private var keptEntry: MemoryBudget.Entry?
+    /// The most patches a canvas keeps — about an Undo storm's depth on one cel.
+    static let keptLimit = 16
+
+    /// One kept patch: the pixels that make a picture of `over` a picture of `restores`.
+    private struct KeptPixels {
+        let patch: PixelPatch
+        let restores: [VectorElement]
+        let over: [VectorElement]
+    }
+
+    /// Whether two lists are one storage — the same list, not merely equal ones.
+    private static func sameStorage(_ a: [VectorElement], _ b: [VectorElement]) -> Bool {
+        a.count == b.count && a.withUnsafeBufferPointer { x in b.withUnsafeBufferPointer { y in x.baseAddress == y.baseAddress } }
+    }
+
+    /// Whether `image` is a wrapper of `picture`.
+    private static func wraps(_ image: UIImage?, _ picture: LayerPicture) -> Bool {
+        LayerPicture.of(image)?.picture === picture
+    }
+
+    /// Drops every kept patch — the budget's eviction, and a test's.
+    func dropKeptPixels() {
+        lock.lock()
+        keptPixels = []
+        pendingKept = nil
+        lock.unlock()
+        keptEntry?.update(bytes: 0)
+    }
+
+    /// Bytes of kept patches — a test's and the budget's view.
+    var keptPixelBytes: Int {
+        lock.lock(); defer { lock.unlock() }
+        return keptPixels.reduce(0) { $0 + $1.patch.byteCount }
+    }
+
+    /// Keeps `kept`, newest last, inside the canvas's share. Caller holds `lock`; answers the bytes now
+    /// kept, for the budget's entry (updated outside the lock).
+    private func keepLocked(_ kept: KeptPixels, pictureBytes: Int) -> Int {
+        keptPixels.append(kept)
+        var total = keptPixels.reduce(0) { $0 + $1.patch.byteCount }
+        while keptPixels.count > Self.keptLimit || total > pictureBytes, !keptPixels.isEmpty {
+            total -= keptPixels.removeFirst().patch.byteCount
+        }
+        return total
+    }
+
     /// **The three above again, at one reduced resolution** — what `render(quality:resolution:)`
     /// memoizes and repairs, kept apart from the native trio because it is a different picture.
     ///
@@ -2271,6 +2336,9 @@ nonisolated final class VectorCanvas {
     /// Repairs that had to widen their rectangle by a measured escape and go round a second time.
     private(set) var regionRepairsWidened = 0
     private(set) var regionRepairsAbandoned = 0
+    /// **Renders that copied kept pixels back instead of walking** — an Undo or Redo served from
+    /// `keptPixels`. The S3b gate's "walks per Undo 0 while kept pixels hold", counted.
+    private(set) var keptRestores = 0
 
     /// The clip of the most recent region repair, or `.null` — the seam a test reads to say the
     /// bound actually bound rather than merely ran.
@@ -2602,9 +2670,13 @@ nonisolated final class VectorCanvas {
             // region fell through `repairClip`'s refusal to the same full walk — the trap
             // PERFORMANCE.md §11.11 records in the bench. `version` still moves, because consumers
             // key their own memos on it and re-reading a memo that is standing costs them nothing.
+            // The picture is a picture of the new list just as much: its pixels did not move.
+            if pictureList != nil, _suppressedElementIDs.isEmpty { pictureList = _elements }
             lastDamage = damage
             return
         }
+        // Any other change puts more than the kept patch's pixels in question.
+        pendingKept = nil
         if restoringAppendPrefix, let base = incrementalBase, base.prefixCount == _elements.count {
             // The held base already depicts the restored list. Make it current so the host can
             // replace the pending append's overlay without waiting for a new rasterize.
@@ -2908,6 +2980,11 @@ nonisolated final class VectorCanvas {
         let change = replacement(by: newValue, rewriting: rewritten)
         let damage = restoreDamage(to: newValue, departed: change.departed, rewrites: change.rewrites,
                                    changedInk: changedInk)
+        // **Undo from kept pixels**: the standing picture is a picture of the standing list, and a patch
+        // an in-place repair kept turns it into a picture of the list coming back — so the next render
+        // copies the patch in and walks nothing. Read before the swap, because it is the standing list
+        // the patch has to be over.
+        let kept = restoresAppendPrefix ? nil : keptPatchLocked(restoring: newValue)
         _elements = newValue
         // No `dropIncrementalBase()` here, though the `elements` setter has one: `restoreDamage`
         // returns only `.everything` or `.region` and `applyToIncrementalBase` drops the base for
@@ -2922,6 +2999,24 @@ nonisolated final class VectorCanvas {
         // than moved to `vacatedInk`: the id is still in the list, and the next walk measures it.
         forgetPaintedBounds(change.rewrites.lazy.map(\.new.id))
         invalidate(damage, restoringAppendPrefix: restoresAppendPrefix)
+        if let kept {
+            // The two pictures differ only inside the patch, so it is the whole of the repair whatever
+            // `restoreDamage` could prove: a claim as strong as a measured region, and cheaper.
+            regionBase = (kept.memo, kept.patch.patch.canvasRect)
+            regionBaseSuppression = nil
+            pendingKept = kept.patch
+        }
+    }
+
+    /// The kept patch that turns the standing picture into a picture of `newValue`, with that picture's
+    /// wrapper — nil unless the memo stands, shows the standing list with nothing hidden, and a patch
+    /// was kept over exactly that list for exactly this one. Caller must hold `lock`.
+    private func keptPatchLocked(restoring newValue: [VectorElement]) -> (patch: KeptPixels, memo: UIImage)? {
+        guard let memo = cachedImage, LayerPicture.of(memo) != nil, _suppressedElementIDs.isEmpty,
+              let shown = pictureList, Self.sameStorage(shown, _elements),
+              let patch = keptPixels.last(where: { Self.sameStorage($0.over, _elements) && Self.sameStorage($0.restores, newValue) })
+        else { return nil }
+        return (patch, memo)
     }
 
     /// **How a list that replaces the standing one differs from it by id** — what left, and the
@@ -3371,6 +3466,10 @@ nonisolated final class VectorCanvas {
         dropIncrementalBase()
         regionBase = nil
         reducedRender = nil
+        // The picture is gone; the kept patches stay, because they are true of any picture of their
+        // lists — the next walk draws the same pixels.
+        pictureList = nil
+        pendingKept = nil
         // The measured footprints are a few dozen bytes an element and are what makes the *next*
         // region edit cheap, so eviction keeps them: they are not pixels, and they stay true —
         // nothing about the display list changed here.
@@ -5857,6 +5956,12 @@ nonisolated final class VectorCanvas {
         /// `source`'s memo at `version`, when it had one. Present is the common case at rest and the
         /// end of the story — there is nothing left to rasterize.
         fileprivate let memoized: UIImage?
+        /// `memoized` while it is still these values' picture: a layer picture is repaired in place, so
+        /// the memo stands only while its revision does (`LayerPicture.isCurrent`).
+        fileprivate var standing: UIImage? {
+            guard let memoized, LayerPicture.isCurrent(memoized) else { return nil }
+            return memoized
+        }
 
         // The values themselves. Copy-on-write, so freezing them is a retain rather than a copy —
         // which is the reason `Cel`'s two *class* tiers are the problem and its arrays are not.
@@ -5898,7 +6003,7 @@ nonisolated final class VectorCanvas {
         /// built from the frozen values, which nothing else can reach and which is therefore the
         /// atomicity guarantee this whole type exists for.
         func render(quality: RenderQuality) -> UIImage? {
-            if let memoized { return memoized }
+            if let standing { return standing }
             if let shared = source?.render(quality: quality, ifStillAtVersion: version) { return shared }
             return detached().render(quality: quality)
         }
@@ -6002,7 +6107,7 @@ nonisolated final class VectorCanvas {
                     // A captured document memo is borrowed. Otherwise the existing detached
                     // renderer owns one request image; filling must not install native images
                     // into every selected live canvas while their scaled pictures are consumed.
-                    guard let image = snapshot.memoized ?? snapshot.detached().render(quality: .full),
+                    guard let image = snapshot.standing ?? snapshot.detached().render(quality: .full),
                           let pixels = image.cgImage,
                           image.scale == 1, image.imageOrientation == .up, image.size == snapshot.size,
                           pixels.width == Int(snapshot.size.width), pixels.height == Int(snapshot.size.height),
@@ -6171,6 +6276,11 @@ nonisolated final class VectorCanvas {
         /// `paintedBounds` at the instant of the read. The walk's skip test reads this and writes
         /// nothing, which is what makes two concurrent walks harmless to each other.
         let known: [UUID: CGRect]
+        /// `_elements` itself — the list the picture shows once this render lands (`pictureList`).
+        let elements: [VectorElement]
+        /// `pictureList` at the read: the list the base picture shows, which the pixels an in-place
+        /// repair replaces are a picture of (`KeptPixels.restores`).
+        let shownList: [VectorElement]?
         let work: Work
 
         /// The three shapes a walk comes in. The choosing used to be inline in one long method;
@@ -6189,14 +6299,29 @@ nonisolated final class VectorCanvas {
             /// The whole visible list, unclipped. The suppressed elements are skipped, not removed —
             /// see `suppressedElementIDs`.
             case full(visible: [VectorElement])
+            /// **No walk: pixels an earlier repair replaced, copied back** — an Undo or a Redo whose
+            /// list a kept patch restores (`restoreElements`, `keptPixels`).
+            case patch(base: UIImage, kept: KeptPixels)
+
+            /// The picture this work starts from, when it starts from one.
+            var base: UIImage? {
+                switch self {
+                case .append(let base, _), .repair(let base, _, _), .patch(let base, _): return base
+                case .full: return nil
+                }
+            }
         }
     }
 
     /// What one rasterize produced and learned. The picture is the caller's answer whether or not the
     /// install below accepts it; everything else is for the install to write back.
     private struct RenderResult {
-        /// The content walk's image, returned and memoized without another canvas-sized pass.
-        let image: UIImage
+        /// The content walk's image, returned and memoized without another canvas-sized pass — nil when
+        /// the walk repaired the base in place instead (`inPlace`).
+        var image: UIImage?
+        /// **A repair to copy into the base picture itself** — the damage, walked into a buffer of its
+        /// own (`commitInPlace`). Nil for a walk that made a new picture.
+        var inPlace: (picture: LayerPicture, patch: PixelPatch)?
         let measured: [UUID: CGRect]
         let dabCount: Int
         /// `.null` unless this was a repair, in which case it is the clip finally walked.
@@ -6253,7 +6378,11 @@ nonisolated final class VectorCanvas {
             return .memo(image)
         }
         let work: RenderPlan.Work
-        if let base = appendableBase(quality: quality, in: slot, native: native) {
+        if native, quality == .full, let kept = pendingKept, let base = regionBase,
+           base.region == kept.patch.canvasRect, _suppressedElementIDs.isEmpty,
+           let shown = pictureList, Self.sameStorage(shown, kept.over) {
+            work = .patch(base: base.image, kept: kept)
+        } else if let base = appendableBase(quality: quality, in: slot, native: native) {
             work = .append(base: base.image, tail: Array(_elements[base.prefixCount...]))
         } else if let base = repairableBase(quality: quality, in: slot, native: native) {
             work = .repair(base: base.image, region: base.region,
@@ -6263,13 +6392,22 @@ nonisolated final class VectorCanvas {
         }
         return .walk(RenderPlan(quality: quality, size: size, resolution: resolution,
                                 suppressed: _suppressedElementIDs, elementCount: _elements.count,
-                                version: version, known: paintedBounds, work: work))
+                                version: version, known: paintedBounds, elements: _elements,
+                                shownList: native ? pictureList : nil, work: work))
     }
 
     /// Step 2 of a render: **the pixels, with no lock held.** Pure — every input is a value or an
-    /// immutable `UIImage`, and everything it learns comes back in the return value.
-    /// Nil when the host refused a bitmap the walk needed — see `renderLocalContent`.
-    private static func walk(_ plan: RenderPlan) -> RenderResult? {
+    /// immutable `UIImage`, and everything it learns comes back in the return value; the one picture
+    /// it may read in place is its own base, which no other walk can be writing (`walkInFlight`).
+    /// Nil when the host refused a bitmap the walk needed — see `renderLocalContent` — or when
+    /// `cancelled` answered true at a checkpoint.
+    ///
+    /// **A native picture is repaired in place** (SCHEDULER_DESIGN.md §3.1): an append or a region
+    /// repair walks only its damage, into a damage-sized patch (`inPlace`), which `commitInPlace` then
+    /// copies into the base. Where the damage is more than `inPlaceShare` of the picture, or the base is
+    /// not a `LayerPicture`, the walk makes a new picture over a copy of the base, as every repair did
+    /// before — the rare edit the size of the canvas.
+    private static func walk(_ plan: RenderPlan, cancelled: @escaping () -> Bool) -> RenderResult? {
         let quality = plan.quality
         let content: LocalContent
         var repairedRegion = CGRect.null
@@ -6277,16 +6415,48 @@ nonisolated final class VectorCanvas {
         /// Every footprint this render measured, across however many walks it took — see the repair
         /// arm.
         var measured: [UUID: CGRect] = [:]
+        /// Native `.full` pictures are layer pictures, repaired in place from here on.
+        let asPicture = plan.resolution >= 1 && quality == .full
 
         let resolution = plan.resolution
         switch plan.work {
+        case .patch(let base, let kept):
+            guard let picture = inPlacePicture(base, plan) else {
+                return walk(RenderPlan(quality: quality, size: plan.size, resolution: resolution, suppressed: plan.suppressed,
+                                       elementCount: plan.elementCount, version: plan.version, known: plan.known,
+                                       elements: plan.elements, shownList: nil, work: .full(visible: plan.elements)),
+                            cancelled: cancelled)
+            }
+            return RenderResult(image: nil, inPlace: (picture, kept.patch), measured: [:], dabCount: 0,
+                                repairedRegion: kept.patch.canvasRect, repairs: 1, repairsWidened: 0, repairsAbandoned: 0)
         case .append(let base, let tail):
+            if let picture = inPlacePicture(base, plan) {
+                switch appendInPlace(tail, onto: picture, plan: plan, cancelled: cancelled) {
+                case .patch(let patch, let walked, _):
+                    return RenderResult(image: nil, inPlace: (picture, patch), measured: walked.measured,
+                                        dabCount: walked.dabCount, repairedRegion: .null,
+                                        repairs: 0, repairsWidened: 0, repairsAbandoned: 0)
+                case .stopped: return nil
+                case .declined: break
+                }
+            }
             guard let appended = renderLocalContent(size: plan.size, resolution: resolution, elements: tail,
-                                                    quality: quality, over: base, known: plan.known) else { return nil }
+                                                    quality: quality, over: base, known: plan.known,
+                                                    asPicture: asPicture, cancelled: cancelled) else { return nil }
             content = appended
             measured = content.measured
         case .repair(let base, let region, let visible):
             repairs = 1
+            if let picture = inPlacePicture(base, plan) {
+                switch repairInPlace(visible, onto: picture, region: region, plan: plan, cancelled: cancelled) {
+                case .patch(let patch, let walked, let wasWidened):
+                    return RenderResult(image: nil, inPlace: (picture, patch), measured: walked.measured,
+                                        dabCount: walked.dabCount, repairedRegion: patch.canvasRect,
+                                        repairs: 1, repairsWidened: wasWidened ? 1 : 0, repairsAbandoned: 0)
+                case .stopped: return nil
+                case .declined: break
+                }
+            }
             var clip = region
             // **Every walk's measurements, not just the last one's** — a footprint is true of the
             // stroke whichever walk took it, and a clipped walk measures a set the next one can
@@ -6294,7 +6464,8 @@ nonisolated final class VectorCanvas {
             // costs a redraw later rather than a wrong picture, but is not what this path did.
             guard var repaired = renderLocalContent(size: plan.size, resolution: resolution,
                                                     elements: visible, quality: quality,
-                                                    over: base, clippedTo: clip, known: plan.known) else { return nil }
+                                                    over: base, clippedTo: clip, known: plan.known,
+                                                    asPicture: asPicture, cancelled: cancelled) else { return nil }
             measured.merge(repaired.measured) { _, new in new }
             if !repaired.escaped.isNull, let wider = Self.repairClip(clip.union(repaired.escaped),
                                                                      in: plan.size,
@@ -6317,7 +6488,8 @@ nonisolated final class VectorCanvas {
                 guard let widenedRepair = renderLocalContent(size: plan.size, resolution: resolution,
                                                              elements: visible, quality: quality,
                                                              over: base, clippedTo: clip,
-                                                             known: plan.known.merging(measured) { _, new in new })
+                                                             known: plan.known.merging(measured) { _, new in new },
+                                                             asPicture: asPicture, cancelled: cancelled)
                 else { return nil }
                 repaired = widenedRepair
                 measured.merge(repaired.measured) { _, new in new }
@@ -6329,7 +6501,8 @@ nonisolated final class VectorCanvas {
                 // a site that under-declares costs a re-walk rather than an artifact.
                 guard let whole = renderLocalContent(size: plan.size, resolution: resolution,
                                                      elements: visible, quality: quality,
-                                                     known: plan.known.merging(measured) { _, new in new })
+                                                     known: plan.known.merging(measured) { _, new in new },
+                                                     asPicture: asPicture, cancelled: cancelled)
                 else { return nil }
                 content = whole
                 measured.merge(content.measured) { _, new in new }
@@ -6338,7 +6511,8 @@ nonisolated final class VectorCanvas {
             }
         case .full(let visible):
             guard let whole = renderLocalContent(size: plan.size, resolution: resolution,
-                                                 elements: visible, quality: quality, known: plan.known)
+                                                 elements: visible, quality: quality, known: plan.known,
+                                                 asPicture: asPicture, cancelled: cancelled)
             else { return nil }
             content = whole
             measured = content.measured
@@ -6347,6 +6521,118 @@ nonisolated final class VectorCanvas {
         return RenderResult(image: content.image, measured: measured,
                             dabCount: content.dabCount, repairedRegion: repairedRegion,
                             repairs: repairs, repairsWidened: widened, repairsAbandoned: abandoned)
+    }
+
+    /// **The most of a picture an in-place repair may cover: a quarter.** Above it the walk makes a new
+    /// picture over a copy of the base instead: an in-place repair holds its damage twice beside the
+    /// picture (the patch it walked, and the pixels it replaces), and past a quarter that costs more
+    /// memory than the copy it saves — and it is the edit the size of the canvas, which is rare.
+    static let inPlaceShare = 4
+
+    /// How long a write waits for the readers in flight before it makes a new picture instead — a
+    /// window draw is ≤ 20 ms on the minimum machine; anything holding the bytes longer is not one.
+    static let writeWait: TimeInterval = 0.1
+
+    /// The picture behind `base` when this plan may repair it in place: a native `.full` picture.
+    private static func inPlacePicture(_ base: UIImage, _ plan: RenderPlan) -> LayerPicture? {
+        guard plan.resolution >= 1, plan.quality == .full,
+              let picture = LayerPicture.of(base)?.picture else { return nil }
+        return picture
+    }
+
+    /// What an in-place walk came to.
+    private enum InPlaceWalk {
+        /// The damage, walked: copy it in (`commitInPlace`). `widened` when it went round twice.
+        case patch(PixelPatch, Walk, widened: Bool)
+        /// Cancelled or refused: the render stops.
+        case stopped
+        /// Not repairable in place (too large, unbounded, or escaped twice): the copying path runs.
+        case declined
+    }
+
+    /// **The appended tail drawn over the base's own pixels where it lands**, into a patch: the patch
+    /// starts as a copy of the base there (`copy(into:)` — this walk is the picture's one writer), and
+    /// the tail is drawn over it clipped to its ink. An element that paints outside the rectangle is
+    /// measured doing so and the rectangle widens once, as a repair's does.
+    private static func appendInPlace(_ tail: [VectorElement], onto picture: LayerPicture, plan: RenderPlan,
+                                      cancelled: @escaping () -> Bool) -> InPlaceWalk {
+        guard let ink = inkBounds(of: tail, known: plan.known),
+              var clip = repairClip(ink, in: plan.size, resolution: 1) else { return .declined }
+        for attempt in 0..<2 {
+            guard let rect = picture.pixelRect(of: clip), rect.byteCount * inPlaceShare <= picture.byteCount
+            else { return .declined }
+            guard let patch = PixelPatch(rect: rect, scale: picture.scale) else {
+                MemoryPressure.signal(.allocationRefused)
+                return .stopped
+            }
+            picture.copy(into: patch)
+            var walked: Walk?
+            _ = patch.draw { cg in
+                cg.clip(to: clip)
+                walked = drawLocalContent(into: cg, elements: tail, quality: .full, clippedTo: clip,
+                                          known: plan.known, cancelled: cancelled)
+                return true
+            }
+            guard let walked else { return .stopped }
+            if walked.escaped.isNull { return .patch(patch, walked, widened: attempt > 0) }
+            guard let wider = repairClip(clip.union(walked.escaped), in: plan.size, resolution: 1) else { return .declined }
+            clip = wider
+        }
+        return .declined
+    }
+
+    /// **The region repair into a patch of its own**: the patch starts transparent — the clip cleared,
+    /// as the copying repair clears it — and the visible list is walked into it from the bottom of the
+    /// stack, clipped to the region, skipping what its measured footprint keeps out. Widens once on a
+    /// measured escape; a second escape is the copying path's to resolve (it walks whole).
+    private static func repairInPlace(_ visible: [VectorElement], onto picture: LayerPicture, region: CGRect,
+                                      plan: RenderPlan, cancelled: @escaping () -> Bool) -> InPlaceWalk {
+        var clip = region
+        var known = plan.known
+        /// Every walk's measurements, the discarded first one's included — the copying arm's rule.
+        var measured: [UUID: CGRect] = [:]
+        for attempt in 0..<2 {
+            guard let rect = picture.pixelRect(of: clip), rect.byteCount * inPlaceShare <= picture.byteCount
+            else { return .declined }
+            guard let patch = PixelPatch(rect: rect, scale: picture.scale) else {
+                MemoryPressure.signal(.allocationRefused)
+                return .stopped
+            }
+            var walked: Walk?
+            _ = patch.draw { cg in
+                cg.clip(to: clip)
+                walked = drawLocalContent(into: cg, elements: visible, quality: .full, clippedTo: clip,
+                                          known: known, cancelled: cancelled)
+                return true
+            }
+            guard var walked else { return .stopped }
+            measured.merge(walked.measured) { _, new in new }
+            if walked.escaped.isNull {
+                walked.measured = measured
+                return .patch(patch, walked, widened: attempt > 0)
+            }
+            guard attempt == 0, let wider = repairClip(clip.union(walked.escaped), in: plan.size, resolution: 1)
+            else { return .declined }
+            clip = wider
+            known = known.merging(walked.measured) { _, new in new }
+        }
+        return .declined
+    }
+
+    /// **Where a tail of new elements will paint**, or nil when one of them cannot be bounded — a
+    /// stroke by its measured footprint or, unmeasured, its dab walk's geometry (`paintedBounds(of:)`,
+    /// the walk without the pixels); anything else by `derivedFootprint`, which proves containment.
+    private static func inkBounds(of tail: [VectorElement], known: [UUID: CGRect]) -> CGRect? {
+        var union = CGRect.null
+        for element in tail {
+            if case .stroke(let stroke) = element {
+                union = union.union(known[stroke.id] ?? paintedBounds(of: [element]))
+            } else {
+                guard let footprint = derivedFootprint(of: element, lowestResolution: 1) else { return nil }
+                union = union.union(footprint)
+            }
+        }
+        return union.isNull || union.isInfinite ? nil : union
     }
 
     /// Step 3 of a render: put the result in the caches — **only if the inputs the walk read are
@@ -6363,34 +6649,29 @@ nonisolated final class VectorCanvas {
     /// The statistics are recorded either way, because they are facts about a walk that happened.
     ///
     /// Caller must hold `lock`.
-    private func install(_ result: RenderResult, from plan: RenderPlan) {
+    private func install(_ result: RenderResult, image: UIImage, from plan: RenderPlan) {
         // Counted apart, because "this consumer never asked for a canvas-sized picture" is the
         // property `rasterizations` is now read for — see `reducedRasterizations`.
         guard plan.resolution >= 1 else {
             reducedRasterizations += 1
             lastRenderDabCount = result.dabCount
-            installReduced(result, from: plan)
+            installReduced(result, image: image, from: plan)
             // **The native caches are not touched, and that is the load-bearing half.** A reduced
             // picture is not what `cachedImage` promises, and an incremental base built from one
             // would silently serve a native render a picture at a twelfth of its resolution.
             return
         }
-        rasterizations += 1
-        Self.countRasterization()
-        regionRepairs += result.repairs
-        regionRepairsWidened += result.repairsWidened
-        regionRepairsAbandoned += result.repairsAbandoned
-        lastRenderDabCount = result.dabCount
-        if !result.repairedRegion.isNull { lastRepairedRegion = result.repairedRegion }
+        countWalkLocked(result, plan)
         guard version == plan.version, _elements.count == plan.elementCount,
               _suppressedElementIDs == plan.suppressed else { return }
         for (id, rect) in result.measured { paintedBounds[id] = rect }
         switch plan.quality {
         case .full:
-            cachedImage = result.image
+            cachedImage = image
+            pictureList = plan.suppressed.isEmpty ? plan.elements : nil
             // The base shares the memo's image; a suppressed list cannot seed ordinary appends.
             if plan.suppressed.isEmpty {
-                incrementalBase = (result.image, plan.elementCount)
+                incrementalBase = (image, plan.elementCount)
                 appendedSinceBase = 0
             } else {
                 dropIncrementalBase()
@@ -6399,8 +6680,131 @@ nonisolated final class VectorCanvas {
             // the *next* region edit adopts it there rather than keeping a second reference alive.
             regionBase = nil
         case .preview:
-            cachedPreviewImage = result.image
+            cachedPreviewImage = image
         }
+    }
+
+    /// The facts a native walk established, recorded whether or not its picture is installed. Caller
+    /// must hold `lock`.
+    private func countWalkLocked(_ result: RenderResult, _ plan: RenderPlan) {
+        rasterizations += 1
+        Self.countRasterization()
+        regionRepairs += result.repairs
+        regionRepairsWidened += result.repairsWidened
+        regionRepairsAbandoned += result.repairsAbandoned
+        if case .patch = plan.work { keptRestores += 1 }
+        lastRenderDabCount = result.dabCount
+        if !result.repairedRegion.isNull { lastRepairedRegion = result.repairedRegion }
+    }
+
+    /// **An in-place repair, copied in** — the third step of a render that repaired its base
+    /// (`RenderResult.inPlace`).
+    ///
+    /// With the picture to itself (`LayerPicture.exclusively`: the readers in flight finish first, new
+    /// ones wait), the pixels the patch replaces are kept, the patch is written, and — under `lock`,
+    /// for the bookkeeping alone — the write is accepted or rolled back:
+    ///
+    /// - **the canvas is still at the plan's version**: the picture is the memo, as any render's is;
+    /// - **it moved on meanwhile**: the picture still stands for what the bases say, because the write
+    ///   changed only the patch's rectangle — a region base widens by it, an append base moves its
+    ///   prefix past the tail it drew — and it is handed back as the plan's picture, an intermediate
+    ///   frame (`DeferredVectorRender.landing`);
+    /// - **it moved on to a memo of this very picture** (an Undo of the append being drawn, which takes
+    ///   the base as it stood): the picture is spoken for as it was, so the write is undone from the
+    ///   kept pixels and nil is answered.
+    ///
+    /// The kept pixels then go with the step: they make the picture of the new list a picture of the old
+    /// one again (`keptPixels`), so that list's Undo copies them back instead of walking. `lock` is held
+    /// for pointer swaps only; the copies are made with the picture held, never the canvas.
+    private func commitInPlace(_ result: RenderResult, plan: RenderPlan, picture: LayerPicture,
+                               patch: PixelPatch) -> UIImage? {
+        guard let replaced = PixelPatch(rect: patch.rect, scale: picture.scale) else {
+            MemoryPressure.signal(.allocationRefused)
+            return nil
+        }
+        var answer: UIImage?
+        var keptBytes: Int?
+        let wrote = picture.exclusively(timeout: Self.writeWait) {
+            picture.copy(into: replaced)
+            picture.write(patch)
+            lock.lock()
+            defer { lock.unlock() }
+            guard let image = acceptInPlaceLocked(result, plan: plan, picture: picture, patch: patch) else {
+                picture.write(replaced)
+                return
+            }
+            answer = image
+            if case .patch(_, let used) = plan.work { keptPixels.removeAll { $0.patch === used.patch } }
+            if let shown = plan.shownList, plan.suppressed.isEmpty {
+                keptBytes = keepLocked(KeptPixels(patch: replaced, restores: shown, over: plan.elements),
+                                       pictureBytes: picture.byteCount)
+            }
+        }
+        if let keptBytes { keptBudgetEntry().update(bytes: keptBytes) }
+        if wrote { return answer }
+        // Something held the bytes past `writeWait`: a new picture, the base with the patch over it.
+        guard let base = plan.work.base, let copy = LayerPicture.draw(size: plan.size, { _ in
+            base.draw(at: .zero)
+            UIImage(cgImage: patch.cgImage, scale: picture.scale, orientation: .up).draw(in: patch.canvasRect)
+            return true
+        }) else {
+            MemoryPressure.signal(.allocationRefused)
+            return nil
+        }
+        let image = copy.image
+        lock.lock()
+        install(result, image: image, from: plan)
+        lock.unlock()
+        return image
+    }
+
+    /// The bookkeeping of an in-place write — see `commitInPlace`. The picture's new wrapper, or nil to
+    /// roll the write back. Caller must hold `lock` and the picture (`exclusively`).
+    private func acceptInPlaceLocked(_ result: RenderResult, plan: RenderPlan, picture: LayerPicture,
+                                     patch: PixelPatch) -> UIImage? {
+        let current = version == plan.version && _elements.count == plan.elementCount
+            && _suppressedElementIDs == plan.suppressed
+        if !current, Self.wraps(cachedImage, picture) { return nil }
+        let image = picture.revise()
+        countWalkLocked(result, plan)
+        pictureList = plan.suppressed.isEmpty ? plan.elements : nil
+        if current {
+            for (id, rect) in result.measured { paintedBounds[id] = rect }
+            cachedImage = image
+            if plan.suppressed.isEmpty {
+                incrementalBase = (image, plan.elementCount)
+                appendedSinceBase = 0
+            } else {
+                dropIncrementalBase()
+            }
+            regionBase = nil
+            return image
+        }
+        if let base = regionBase, Self.wraps(base.image, picture) {
+            regionBase = (image, base.region.union(patch.canvasRect))
+        }
+        if let base = incrementalBase, Self.wraps(base.image, picture) {
+            if case .append(_, let tail) = plan.work, base.prefixCount + tail.count == plan.elementCount,
+               appendedSinceBase >= tail.count {
+                incrementalBase = (image, plan.elementCount)
+                appendedSinceBase -= tail.count
+            } else {
+                dropIncrementalBase()
+            }
+        }
+        return image
+    }
+
+    /// The budget's handle on this canvas's kept patches, made on first use.
+    private func keptBudgetEntry() -> MemoryBudget.Entry {
+        lock.lock()
+        defer { lock.unlock() }
+        if let keptEntry { return keptEntry }
+        let entry = MemoryBudget.shared.entry("vector undo pixels", priority: .cache, charged: false) { [weak self] in
+            self?.dropKeptPixels()
+        }
+        keptEntry = entry
+        return entry
     }
 
     /// `install`'s reduced half — the same three writes into `reducedRender` behind the same gate.
@@ -6414,7 +6818,7 @@ nonisolated final class VectorCanvas {
     /// `.full` and so is the onion skin. A `.preview` reduced walk therefore costs a full walk every
     /// time, which is honest rather than surprising: the slot holds one picture and giving it a
     /// second quality would double a cel's thumbnail memory for a caller that does not exist.
-    private func installReduced(_ result: RenderResult, from plan: RenderPlan) {
+    private func installReduced(_ result: RenderResult, image: UIImage, from plan: RenderPlan) {
         guard plan.quality == .full else { return }
         guard version == plan.version, _elements.count == plan.elementCount,
               _suppressedElementIDs == plan.suppressed else { return }
@@ -6426,11 +6830,11 @@ nonisolated final class VectorCanvas {
         for (id, rect) in result.measured { paintedBounds[id] = rect }
         var slot = reducedRender.flatMap { $0.resolution == plan.resolution ? $0 : nil }
             ?? ReducedRender(resolution: plan.resolution)
-        slot.image = result.image
+        slot.image = image
         if plan.suppressed.isEmpty {
             // One object, exactly as the native trio holds one — see `install`'s note on why the
             // base and the memo being the same image is what makes it free.
-            slot.incrementalBase = (result.image, plan.elementCount)
+            slot.incrementalBase = (image, plan.elementCount)
             slot.appendedSinceBase = 0
         } else {
             slot.incrementalBase = nil
@@ -6441,18 +6845,19 @@ nonisolated final class VectorCanvas {
     }
 
     /// Plan, walk and install — the whole of a render, with the pixels outside `lock`. Returns nil
-    /// only when `required` names a version the canvas has already left.
+    /// when `required` names a version the canvas has already left, when the bitmap was refused, or
+    /// when the job asking was cancelled (`JobContext.current`) — its walk stops at the next element.
     ///
-    /// `rasterizeLock` spans all three so that two threads asking for the same picture still share
-    /// one rasterize: the second waits, then finds the memo the first installed. That is the property
-    /// the old single lock had for free and the one thing this change could quietly have thrown away
-    /// — see `rasterizeLock`.
+    /// **One native walk at a time per canvas, and no lock across it** (`walkInFlight`): a request
+    /// meeting a walk in flight joins it — waits, then finds the memo it installed — unless it is of a
+    /// higher class, in which case it cancels that walk and walks itself; the cancelled caller then
+    /// joins it. So two threads asking for one picture still stamp it once, and an answer never waits
+    /// behind a bake's walk of the same cel. The caller's class is its job's, or its memory lane's
+    /// outside a job (the bake's worker).
     ///
-    /// Reduced-resolution work does not take the native rasterize lock, so a thumbnail or onion
-    /// request can proceed while a canvas-sized render walks. `planRender` and `installReduced`
-    /// read and update the matching reduced slot under `lock`; the pixel walk stays outside it.
-    /// Concurrent reduced requests may both prepare one picture before either installs. The
-    /// version, element-count and suppression checks still fence installation.
+    /// Reduced-resolution work takes no turn: `planRender` and `installReduced` read and update the
+    /// matching reduced slot under `lock`, its pictures are its own, and the version, element-count and
+    /// suppression checks still fence installation.
     private func rasterize(quality: RenderQuality, requestedResolution: CGFloat = 1,
                            requiring required: RenderRequirement? = nil) -> UIImage? {
         // **The one clamp: a request may only ask for *less*.** `RenderRequest.renderSize(fitting:within:)`'
@@ -6462,7 +6867,7 @@ nonisolated final class VectorCanvas {
         // disagreeing with another is not a slow picture but a wrong one: `walk` would fill a
         // four-times-native raster and `install` would memoize it as `cachedImage`.
         let resolution = min(requestedResolution, 1)
-        // A cheap look before the queue, so a superseded request still costs one `lock` acquisition
+        // A cheap look before the turn, so a superseded request still costs one `lock` acquisition
         // and no wait — the property `startVectorRender`'s doc comment depends on for a fast drag.
         // The plan below re-asks under the lock that matters; this is an optimisation, not the test.
         if let required {
@@ -6471,24 +6876,79 @@ nonisolated final class VectorCanvas {
             lock.unlock()
             if moved { return nil }
         }
-        let shares = resolution >= 1
-        if shares { rasterizeLock.lock() }
-        defer { if shares { rasterizeLock.unlock() } }
-        lock.lock()
-        let step = planRender(quality: quality, resolution: resolution, requiring: required)
-        lock.unlock()
-        switch step {
-        case .superseded: return nil
-        case .memo(let image): return image
-        case .walk(let plan):
-            // A refused bitmap installs nothing and answers nil — the next ask walks again, which is
-            // the right answer for a process that has just been told it is out of memory.
-            guard let result = Self.walk(plan) else { return nil }
+        let job = JobContext.current
+        let stopped: () -> Bool = { job?.token.isCancelled ?? false }
+        guard resolution >= 1 else {
             lock.lock()
-            install(result, from: plan)
+            let step = planRender(quality: quality, resolution: resolution, requiring: required)
             lock.unlock()
-            return result.image
+            switch step {
+            case .superseded: return nil
+            case .memo(let image): return image
+            case .walk(let plan):
+                guard let result = Self.walk(plan, cancelled: stopped), let image = result.image else { return nil }
+                lock.lock()
+                install(result, image: image, from: plan)
+                lock.unlock()
+                return image
+            }
         }
+        let jobClass = job?.jobClass ?? JobClass(rawValue: MemoryBudget.currentLane.rawValue) ?? .answer
+        while true {
+            guard let turn = enterWalk(as: jobClass, stopped: stopped) else { return nil }
+            lock.lock()
+            let step = planRender(quality: quality, resolution: resolution, requiring: required)
+            lock.unlock()
+            let answer: UIImage?
+            switch step {
+            case .superseded:
+                answer = nil
+            case .memo(let image):
+                answer = image
+            case .walk(let plan):
+                if let result = Self.walk(plan, cancelled: { turn.isCancelled || stopped() }) {
+                    if let repair = result.inPlace {
+                        answer = commitInPlace(result, plan: plan, picture: repair.picture, patch: repair.patch)
+                    } else if let image = result.image {
+                        lock.lock()
+                        install(result, image: image, from: plan)
+                        lock.unlock()
+                        answer = image
+                    } else {
+                        answer = nil
+                    }
+                } else {
+                    answer = nil
+                }
+            }
+            leaveWalk(turn)
+            // Pre-empted by a higher class: join the walk that took over, then find its memo.
+            if answer == nil, turn.isCancelled, !stopped() { continue }
+            return answer
+        }
+    }
+
+    /// **Takes this canvas's native walk turn** — see `rasterize`. Waits (never on main in practice: a
+    /// main-thread caller is answered from the memo) for the walk in flight, cancelling it first when
+    /// `jobClass` outranks it. Nil when the caller's own job is cancelled while it waits.
+    private func enterWalk(as jobClass: JobClass, stopped: () -> Bool) -> CancelToken? {
+        walkGate.lock()
+        defer { walkGate.unlock() }
+        while let walk = walkInFlight {
+            if jobClass < walk.jobClass { walk.token.cancel() }
+            if stopped() { return nil }
+            walkGate.wait(until: Date().addingTimeInterval(0.02))
+        }
+        let token = CancelToken()
+        walkInFlight = (token, jobClass)
+        return token
+    }
+
+    private func leaveWalk(_ token: CancelToken) {
+        walkGate.lock()
+        if walkInFlight?.token === token { walkInFlight = nil }
+        walkGate.broadcast()
+        walkGate.unlock()
     }
 
     /// Called with `lock` held, including when the render plan actually captures its inputs.
@@ -6695,10 +7155,7 @@ nonisolated final class VectorCanvas {
     /// pose itself or the latched piece would be drawn at the rest position while the hole it came out
     /// of is at the posed one.
     func renderIsolated(ids: Set<UUID>, posedBy: [UUID: PoseMap] = [:]) -> UIImage? {
-        // `rasterizeLock` then `lock`, the order every render path takes them in — this is the third
-        // canvas-sized walk on the class and it must not be under `lock` either.
-        rasterizeLock.lock()
-        defer { rasterizeLock.unlock() }
+        // A walk into a picture of its own, read under one `lock` acquisition and drawn outside it.
         lock.lock()
         var isolated = _elements.filter { ids.contains($0.id) }
         if !posedBy.isEmpty {
@@ -6783,8 +7240,6 @@ nonisolated final class VectorCanvas {
     @discardableResult
     func drawStreamWindow(id: UUID, into cg: CGContext, isolating ids: Set<UUID>? = nil,
                           posedBy: [UUID: PoseMap] = [:]) -> CGRect? {
-        rasterizeLock.lock()
-        defer { rasterizeLock.unlock() }
         lock.lock()
         let listed: [VectorElement]
         let known: [UUID: CGRect]
@@ -6982,7 +7437,9 @@ nonisolated final class VectorCanvas {
                                            elements: [VectorElement], quality: RenderQuality = .full,
                                            over base: UIImage? = nil,
                                            clippedTo clip: CGRect? = nil,
-                                           known knownBounds: [UUID: CGRect] = [:]) -> LocalContent? {
+                                           known knownBounds: [UUID: CGRect] = [:],
+                                           asPicture: Bool = false,
+                                           cancelled: @escaping () -> Bool = { false }) -> LocalContent? {
         // The filtered list can be empty when its only element is held by an editor.
         guard !elements.isEmpty || base != nil else {
             return LocalContent(image: Self.transparentPixel, escaped: .null, measured: [:],
@@ -6991,8 +7448,9 @@ nonisolated final class VectorCanvas {
         // Hoisted so the walk's findings can be read once the (synchronous) renderer closure below
         // has finished drawing — and nil afterwards exactly when it never ran.
         var walked: Walk?
-        // Into the buffer the picture wraps, admitted by the one budget — no second copy at the end.
-        let image = PixelOps.drawImage(size: size, scale: resolution) { cg in
+        // Into the buffer the picture wraps, admitted by the one budget — no second copy at the end. A
+        // native picture is a `LayerPicture`, so the next edit can repair it in place.
+        let draw: (CGContext) -> Bool = { cg in
             // 1:1 into a context of the same size, format and scale, over transparent black — so
             // every destination pixel is `0`, source-over leaves the source exactly as it was, and
             // this is a copy rather than a composite. `renderLocalContent` is the only place that
@@ -7010,11 +7468,14 @@ nonisolated final class VectorCanvas {
                 cg.clear(clip)
             }
             walked = drawLocalContent(into: cg, elements: elements, quality: quality,
-                                      clippedTo: clip, known: knownBounds)
+                                      clippedTo: clip, known: knownBounds, cancelled: cancelled)
             return walked != nil
         }
+        let image = asPicture ? LayerPicture.draw(size: size, scale: resolution, draw)?.image
+            : PixelOps.drawImage(size: size, scale: resolution, draw)
         guard let walked, let image, image.cgImage != nil else {
-            MemoryPressure.signal(.allocationRefused)
+            // A cancelled walk is not a refused bitmap: nothing to tell the caches.
+            if !cancelled() { MemoryPressure.signal(.allocationRefused) }
             return nil
         }
         return LocalContent(image: image, escaped: walked.escaped, measured: walked.measured,
@@ -7039,9 +7500,15 @@ nonisolated final class VectorCanvas {
     /// The context is expected to be a UIKit one — flipped, and current (`UIGraphicsPushContext`)
     /// — because the placed-picture arms draw with `UIImage.draw(in:)`. `UIGraphicsImageRenderer`
     /// gives that for free; a raw `CGContext` has to be set up that way first.
+    ///
+    /// **`cancelled` is the walk's checkpoint** (SCHEDULER.md rule 4): asked before each element, so a
+    /// render nobody wants any more — a frame the artist stepped off, a repair an Undo superseded, a
+    /// bake an answer pre-empted — stops within one element's dabs instead of running to the end. A
+    /// stopped walk answers nil, and what it drew is the caller's to throw away.
     private static func drawLocalContent(into cg: CGContext, elements: [VectorElement],
                                          quality: RenderQuality, clippedTo clip: CGRect?,
-                                         known knownBounds: [UUID: CGRect]) -> Walk? {
+                                         known knownBounds: [UUID: CGRect],
+                                         cancelled: () -> Bool = { false }) -> Walk? {
         WalkProbe.record()
         // One target — and so one `DabGradientCache` — for the whole walk: a per-run target would
         // throw away the cache's hit rate at every fill or eraser.
@@ -7072,6 +7539,7 @@ nonisolated final class VectorCanvas {
 
         var index = 0
         while index < elements.count {
+            if cancelled() { return nil }
             switch elements[index] {
             case .fill(let fill):
                 // Fills, images, video and text are always drawn: they carry no measured
@@ -7111,11 +7579,15 @@ nonisolated final class VectorCanvas {
                     end += 1
                 }
                 if needsIsolation { cg.beginTransparencyLayer(auxiliaryInfo: nil) }
+                var stopped = false
                 for i in index..<end {
+                    // A cel of nothing but paint strokes is one run: the checkpoint is per stroke.
+                    if cancelled() { stopped = true; break }
                     guard let stroke = Self.paintStroke(at: i, in: elements) else { continue }
                     drawStroke(stroke, isEraser: false)
                 }
                 if needsIsolation { cg.endTransparencyLayer() }
+                if stopped { return nil }
                 index = end
             }
         }

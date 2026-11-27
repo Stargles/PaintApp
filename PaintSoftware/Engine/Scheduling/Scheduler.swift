@@ -214,7 +214,7 @@ final class Scheduler: @unchecked Sendable {
     private func execute(_ pending: Pending) {
         let startedAt = executor.now
         let context = JobContext(token: pending.token, jobClass: pending.jobClass, scheduler: self)
-        let landing = pending.token.isCancelled ? nil : pending.perform(context)
+        let landing = pending.token.isCancelled ? nil : JobContext.$current.withValue(context) { pending.perform(context) }
         let ranFor = executor.now - startedAt
         lock.lock()
         running[pending.jobClass, default: 0] -= 1

@@ -67,6 +67,11 @@ struct Job<Result>: @unchecked Sendable {
 
 /// What a running job is handed.
 struct JobContext: Sendable {
+    /// **The job running on this thread**, for work deep in shared code that is not handed its
+    /// context — a layer's walk reads it to stop when the job is cancelled and to know whose walk it is
+    /// (`VectorCanvas.rasterize`). Nil outside a job: a caller of its own, such as the bake's worker.
+    @TaskLocal static var current: JobContext?
+
     let token: CancelToken
     let jobClass: JobClass
     fileprivate unowned(unsafe) let scheduler: Scheduler

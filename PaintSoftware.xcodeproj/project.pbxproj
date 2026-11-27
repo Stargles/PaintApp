@@ -346,6 +346,7 @@
 		DEC0DE6A0000000000000004 /* PaintSoftware/Engine/MaskResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE6A0000000000000003 /* PaintSoftware/Engine/MaskResolver.swift */; };
 		BE33F804344289D25420D722 /* PaintSoftware/Engine/VectorRenderCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6CA98B1E97D694DBB69E190 /* PaintSoftware/Engine/VectorRenderCache.swift */; };
 		2F3A2DAA824EB1016DC805B1 /* PaintSoftware/Engine/MemoryBudget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07AF1201E1FA34BC336FB3F8 /* PaintSoftware/Engine/MemoryBudget.swift */; };
+		793F4D62050903218CF3A075 /* PaintSoftware/Engine/LayerPicture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BC332834C331032FED9B71D /* PaintSoftware/Engine/LayerPicture.swift */; };
 		7B208B8817207BF5E271EA50 /* PaintSoftware/Engine/MemoryPressure.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CB274B3D4FCA967697DB46 /* PaintSoftware/Engine/MemoryPressure.swift */; };
 		DEC0DE6A0000000000000006 /* MaskParityLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE6A0000000000000005 /* MaskParityLogicTests.swift */; };
 		DEC0DE0000000000000000A3 /* PaintSoftware/Engine/Composite.metal in Sources */ = {isa = PBXBuildFile; fileRef = DEC0DE0000000000000000A2 /* PaintSoftware/Engine/Composite.metal */; };
@@ -1060,6 +1061,7 @@
 		DEC0DE6A0000000000000003 /* PaintSoftware/Engine/MaskResolver.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/MaskResolver.swift"; sourceTree = "<group>"; };
 		C6CA98B1E97D694DBB69E190 /* PaintSoftware/Engine/VectorRenderCache.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/VectorRenderCache.swift"; sourceTree = "<group>"; };
 		07AF1201E1FA34BC336FB3F8 /* PaintSoftware/Engine/MemoryBudget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/MemoryBudget.swift"; sourceTree = "<group>"; };
+		6BC332834C331032FED9B71D /* PaintSoftware/Engine/LayerPicture.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/LayerPicture.swift"; sourceTree = "<group>"; };
 		C1CB274B3D4FCA967697DB46 /* PaintSoftware/Engine/MemoryPressure.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "PaintSoftware/Engine/MemoryPressure.swift"; sourceTree = "<group>"; };
 		DEC0DE6A0000000000000005 /* MaskParityLogicTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MaskParityLogicTests.swift; sourceTree = "<group>"; };
 		DEC0DE0000000000000000A2 /* PaintSoftware/Engine/Composite.metal */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.metal; path = "PaintSoftware/Engine/Composite.metal"; sourceTree = "<group>"; };
@@ -2095,6 +2097,7 @@
 				DEC0DE6A0000000000000003 /* PaintSoftware/Engine/MaskResolver.swift */,
 				C6CA98B1E97D694DBB69E190 /* PaintSoftware/Engine/VectorRenderCache.swift */,
 				07AF1201E1FA34BC336FB3F8 /* PaintSoftware/Engine/MemoryBudget.swift */,
+				6BC332834C331032FED9B71D /* PaintSoftware/Engine/LayerPicture.swift */,
 				C1CB274B3D4FCA967697DB46 /* PaintSoftware/Engine/MemoryPressure.swift */,
 				DEC0DE000000000000000040 /* PaintSoftware/Models/LayerTransform.swift */,
 				07828B983579AB3070E88303 /* PaintSoftware/Views/Canvas/CanvasPlaneView.swift */,
@@ -2840,6 +2843,7 @@
 				DEC0DE6A0000000000000004 /* PaintSoftware/Engine/MaskResolver.swift in Sources */,
 				BE33F804344289D25420D722 /* PaintSoftware/Engine/VectorRenderCache.swift in Sources */,
 				2F3A2DAA824EB1016DC805B1 /* PaintSoftware/Engine/MemoryBudget.swift in Sources */,
+				793F4D62050903218CF3A075 /* PaintSoftware/Engine/LayerPicture.swift in Sources */,
 				7B208B8817207BF5E271EA50 /* PaintSoftware/Engine/MemoryPressure.swift in Sources */,
 				DEC0DE0000000000000000A3 /* PaintSoftware/Engine/Composite.metal in Sources */,
 				4643CE405936C50DE7251BEC /* PaintSoftware/Engine/Fill.metal in Sources */,
