@@ -11,6 +11,15 @@ extension MemoryBudget {
     }
 }
 
+extension CanvasManager {
+    /// **A test's wait for the fill lane**: holds the test's thread until the jobs already on it have
+    /// run (their landings may not have). The app never waits for it — a fill tap behind a fill still
+    /// drawing is queued instead (`queuedFills`, SCHEDULER.md rule 1) — so this lives with the tests.
+    func waitForFillWork() {
+        Scheduler.shared.waitUntilIdle(group: fillGroup)
+    }
+}
+
 /// Shared fixtures for the pure-logic `CanvasManager` characterization tests.
 ///
 /// These are **characterization** tests, not specification tests: they pin down what

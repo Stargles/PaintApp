@@ -116,9 +116,19 @@ final class CanvasPictureView: UIView {
         let canvasSize = bounds.size
         let smooth = smoothWhenMagnified, clip = clip
         let owed = landings.count
+        // A layer picture is repaired in place (`LayerPicture`): a draw of it reads it under its fence
+        // and only while it is still the revision this view was handed. A draw that finds it moved on
+        // presents nothing — the last picture stays up, and the new revision's own wrapper, already on
+        // its way to `show`, draws next. So the screen never shows a repair before its landing retires
+        // the ink drawn over the old picture (rule 10).
+        let layered = LayerPicture.of(picture)
         return WindowSurfaceView.Frame(window: geometry.window, placement: geometry.placement, draw: { cg in
-            geometry.draw(cgImage, canvasSize: canvasSize, backdrop: nil, smoothWhenMagnified: smooth, clip: clip, in: cg)
-            return geometry.window
+            let paint = { () -> CGRect in
+                geometry.draw(cgImage, canvasSize: canvasSize, backdrop: nil, smoothWhenMagnified: smooth, clip: clip, in: cg)
+                return geometry.window
+            }
+            guard let layered else { return paint() }
+            return layered.picture.read { $0 == layered.revision ? paint() : nil }
         }, canPresent: { [weak self] in self?.image === picture && self?.clip === clip }, finished: { [weak self] shown in
             guard shown, let self else { return }
             self.isShowingImage = true

@@ -197,13 +197,6 @@ extension CanvasManager {
                                     work: { _ in body() }, land: { _ in }))
     }
 
-    /// **The one place main waits on the scheduler.** Holds the calling thread until the fill lane is
-    /// empty: the jobs already on it have run (their landings may not have). Called by the commit
-    /// (`awaitFillRenderIfNothingProduced`), and by tests that need the work finished.
-    func waitForFillWork() {
-        Scheduler.shared.waitUntilIdle(group: fillGroup)
-    }
-
     /// Claims the next gesture generation, and gives the gesture renders of its own (`fillRenders`).
     /// Main thread only; the write is under `fillLock` so the queue's reads pair with it.
     ///
@@ -225,40 +218,82 @@ extension CanvasManager {
         return generation
     }
 
-    /// Waits until the fill lane has produced the live gesture's pixels, when it has produced none at
-    /// all yet. Called by `commitInteractiveFill` **before** `endFillGeneration`, because the moment
-    /// the generation is retired the worker discards its own result.
-    ///
-    /// **The commit is allowed to be late for the screen. It is not allowed to be late for the
-    /// document**, and that distinction is what the generation fix got half of. `fillRenderedRegion`
-    /// covers "rendered, hop to main not run yet"; it cannot cover *"not rendered yet"*, and that is
-    /// the wider of the two windows by orders of magnitude — it is the whole GPU pass, not one
-    /// runloop turn. A second gesture arriving inside it found no pixels anywhere and
-    /// `commitInteractiveFill` dropped the first fill in silence: no undo entry, nothing on the cel.
-    ///
-    /// **Waiting, rather than baking later, is forced by `beginCanvasEdit`'s contract.** Its entire
-    /// job is that the edit which follows reads a canvas the transient is already part of — the next
-    /// `begin*Fill` composites its wall reference two statements after this returns, and a deferred
-    /// bake would have it flood against content that is about to change, which is the reordering bug
-    /// that chokepoint exists to prevent. So the bake is synchronous or it is wrong.
-    ///
-    /// It costs nothing in the ordinary case: the lane is idle by then and the wait returns at once.
-    /// **It is the one rule-1 exception left on the fill path** — removing it means the edit chokepoint
-    /// itself becomes asynchronous (SCHEDULER_DESIGN.md §6, S3a as built). In the case it is for, it costs the remainder of a render the artist was
-    /// already waiting to see, once, and it is bounded by one — a gesture holds one render in flight,
-    /// and the next is minted on the main thread, which is the thread parked here.
-    ///
-    /// **Which is why the test for this cannot hold the fill lane with a semaphore signalled from the
-    /// main thread**: this would park on it and never return. `FillGestureRestartLogicTests` signals
-    /// its gate off a background queue for exactly that reason.
-    private func awaitFillRenderIfNothingProduced() {
-        guard fillLastRender == nil else { return }   // a published preview is already pixels
+    /// **Whether the live gesture's first render has come back** — its picture landed, or the fill lane
+    /// finished it and the landing has not run yet (`fillRenderedRegion`, published before the landing
+    /// so a second tap inside that window still finds it). An empty answer counts: a loop that enclosed
+    /// nothing has rendered, and has nothing to bake.
+    private var fillHasProduced: Bool {
+        guard fillLastRender == nil else { return true }
         fillLock.lock()
-        let produced = fillRenderedRegion != nil
-        fillLock.unlock()
-        guard !produced else { return }
-        waitForFillWork()
+        defer { fillLock.unlock() }
+        return fillAnsweredGeneration == fillGeneration
     }
+
+    /// A tap the fill tool could not begin yet — see `queuedFills`.
+    struct QueuedFill {
+        enum Gesture {
+            case bucket(at: CGPoint)
+            case lasso(path: CGPath)
+        }
+        let gesture: Gesture
+        /// The fill tool's colour when the tap was made.
+        let color: UIColor
+        /// The document it was made in: a tap never lands in another one.
+        let project: UUID
+    }
+
+    /// **Queues a fill tap behind the live fill when that fill has nothing to bake yet** — the owner's
+    /// ruling (Nov 26): *a second Fill tap while the first fill is still drawing is queued, lands right
+    /// after the first, never dropped.* True when it was queued. A tap behind queued taps queues too,
+    /// so they begin in the order they were made.
+    ///
+    /// This is what removed the last wait on the main thread (SCHEDULER.md rule 1): the tap used to
+    /// park main until the first fill's render existed, because `beginCanvasEdit` bakes the live fill
+    /// before the next edit reads the canvas, and there was nothing to bake. Now the tap waits instead
+    /// of the thread — the first fill is baked as its picture lands (`landQueuedFills`) and the queued
+    /// tap begins against a canvas the first fill is part of, exactly as it would have.
+    private func queueFillIfTheLiveOneIsDrawing(_ gesture: QueuedFill.Gesture, color: UIColor) -> Bool {
+        guard !queuedFills.isEmpty || (fillGestureActive && !fillHasProduced) else { return false }
+        queuedFills.append(QueuedFill(gesture: gesture, color: color, project: projectID))
+        fillCommitsOnLanding = true
+        return true
+    }
+
+    /// **The live fill's render has come back: bake it if that was asked for, then begin the next
+    /// queued tap** — in the main-thread turn after the landing, so the bake does not run inside the
+    /// render lane's own callback. A render that came back with nothing (it failed) leaves nothing to
+    /// bake, and its gesture is let go rather than holding the queue. A queued tap that cannot begin (its
+    /// layer is gone, the edit was refused) is passed over for the next; one that begins waits for its
+    /// own first picture.
+    func landQueuedFills() {
+        guard fillCommitsOnLanding else { return }
+        fillCommitsOnLanding = false
+        if fillGestureActive {
+            if fillHasProduced { commitInteractiveFill() } else { cancelInteractiveFill() }
+        }
+        while !queuedFills.isEmpty {
+            let next = queuedFills.removeFirst()
+            guard next.project == projectID else { continue }
+            switch next.gesture {
+            case .bucket(let point): startBucketFill(at: point, color: next.color)
+            case .lasso(let path): startLassoFill(path: path, color: next.color)
+            }
+            endInteractiveFill()
+            // Begun: the rest wait for its first picture.
+            if fillGestureActive {
+                fillCommitsOnLanding = !queuedFills.isEmpty
+                return
+            }
+        }
+    }
+
+    /// `landQueuedFills` in the next main-thread turn — out of the landing or the edit that asked.
+    private func scheduleQueuedFills() {
+        DispatchQueue.main.async { [weak self] in self?.landQueuedFills() }
+    }
+
+    /// The fill tool's colour, as a fill made now lands in.
+    private var fillColorNow: UIColor { brushColor.resolvedUIColor(opacity: toolProfiles.brush.opacity) }
 
     /// Ends the live gesture's claim on the fill lane: nothing in flight may publish onto the document
     /// after this — the render running finds itself retired on the queue, and its landing is dropped
@@ -300,6 +335,13 @@ extension CanvasManager {
     /// and the canvas extent is not in it.
     func beginInteractiveFill(at point: CGPoint) {
         guard !fillFingerDown else { return }
+        let color = fillColorNow
+        guard !queueFillIfTheLiveOneIsDrawing(.bucket(at: point), color: color) else { return }
+        startBucketFill(at: point, color: color)
+    }
+
+    /// `beginInteractiveFill`, once nothing is in front of it, in `color`.
+    private func startBucketFill(at point: CGPoint, color: UIColor) {
         // A fill is a canvas edit like any other: an earlier adjustable fill (or a pending shape)
         // bakes first, so this fill reads it as a real boundary/recolour target instead of flooding
         // against content that is about to change.
@@ -328,8 +370,8 @@ extension CanvasManager {
         fillFingerDown = true
         fillGestureIsLasso = false
         fillGestureSeed = (seedX, seedY)
-        fillGestureColor = Self.premultipliedComponents(brushColor.resolvedUIColor(opacity: toolProfiles.brush.opacity))
-        fillGestureFillColor = CodableColor(brushColor.resolvedUIColor(opacity: toolProfiles.brush.opacity))
+        fillGestureColor = Self.premultipliedComponents(color)
+        fillGestureFillColor = CodableColor(color)
         let layerID = layers[layerIndex].id
         let celID = layers[layerIndex].cels[celIndex].id
         fillGestureLayerID = layerID
@@ -643,7 +685,12 @@ extension CanvasManager {
         return { [weak self] in
             let outcome = self?.renderFill(key, for: context)
             return { [weak self] in
-                guard let self, let outcome else { return }
+                guard let self else { return }
+                guard let outcome else {
+                    // Nothing came back: a tap queued behind this fill must not wait on it for ever.
+                    if self.fillCommitsOnLanding { self.scheduleQueuedFills() }
+                    return
+                }
                 self.landFillRender(outcome, for: context)
             }
         }
@@ -713,7 +760,14 @@ extension CanvasManager {
     /// keeps that render, the adjustable draft and its live picture available for another attempt.
     func prepareInteractiveFill(staging: inout [UUID: Cel]) -> (() -> Void)? {
         guard fillGestureActive else { return {} }
-        awaitFillRenderIfNothingProduced()
+        // **Nothing to bake yet, and main never waits for it** (rule 1): the fill is baked the moment
+        // its first picture lands (`landQueuedFills`). The edit after it goes ahead now.
+        guard fillHasProduced else {
+            return { [weak self] in
+                self?.fillCommitsOnLanding = true
+                self?.fillFingerDown = false
+            }
+        }
         fillLock.lock()
         let queued = fillRenderedRegion?.generation == fillGeneration ? fillRenderedRegion : nil
         fillLock.unlock()
@@ -945,6 +999,13 @@ extension CanvasManager {
     /// near-miss without redrawing the loop.
     func beginInteractiveLassoFill(path drawnPath: CGPath) {
         guard !fillFingerDown else { return }
+        let color = fillColorNow
+        guard !queueFillIfTheLiveOneIsDrawing(.lasso(path: drawnPath), color: color) else { return }
+        startLassoFill(path: drawnPath, color: color)
+    }
+
+    /// `beginInteractiveLassoFill`, once nothing is in front of it, in `color`.
+    private func startLassoFill(path drawnPath: CGPath, color: UIColor) {
         guard beginCanvasEdit() else { return }
         guard let canvasSize else { return }
         guard layers.indices.contains(currentLayerIndex) else { return }
@@ -984,8 +1045,8 @@ extension CanvasManager {
         fillFingerDown = true
         fillGestureIsLasso = true
         fillGestureSeed = (0, 0)   // unused: a lasso session seeds from its mask
-        fillGestureColor = Self.premultipliedComponents(brushColor.resolvedUIColor(opacity: toolProfiles.brush.opacity))
-        fillGestureFillColor = CodableColor(brushColor.resolvedUIColor(opacity: toolProfiles.brush.opacity))
+        fillGestureColor = Self.premultipliedComponents(color)
+        fillGestureFillColor = CodableColor(color)
         let layerID = layers[layerIndex].id
         let celID = layers[layerIndex].cels[celIndex].id
         fillGestureLayerID = layerID
@@ -1034,6 +1095,8 @@ extension CanvasManager {
         fillGestureCelID = nil
         fillWork { [weak self] in self?.endFillSession() }
         refreshUndoRedoState()
+        // The taps queued behind it are fills of their own, and go ahead.
+        if fillCommitsOnLanding { scheduleQueuedFills() }
     }
 
     /// Discards the fill only if a finger is actively dragging it; an already-lifted adjustable fill
@@ -1128,7 +1191,10 @@ extension CanvasManager {
         }
         fillLock.lock()
         let stillCurrent = context.generation == fillGeneration
-        if stillCurrent { fillRenderedRegion = rendered }
+        if stillCurrent {
+            fillRenderedRegion = rendered
+            fillAnsweredGeneration = context.generation
+        }
         fillLock.unlock()
         // Retired while the GPU was busy: the result belongs to nobody. A retired render touches no
         // live-gesture state and builds no picture nobody will see — `lassoFillReportedEmpty` is a
@@ -1177,6 +1243,7 @@ extension CanvasManager {
             // published, and this runs on every render of every slider tick.
             if lassoFillDiagnostic != nil { lassoFillDiagnostic = nil }
         }
+        if fillCommitsOnLanding { scheduleQueuedFills() }
     }
 
     /// Builds LASSO_FILL.md §7's picture for a lasso session that has just come back empty: the

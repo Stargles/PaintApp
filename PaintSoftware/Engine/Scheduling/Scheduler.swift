@@ -116,9 +116,9 @@ final class Scheduler: @unchecked Sendable {
     }
 
     /// **Holds the calling thread until no job of `group` is waiting or running.** A job of the group
-    /// that is cancelled while waiting counts as gone. This is the one wait the scheduler offers, and
-    /// it is main-thread-hostile: it exists for the fill commit's contract (`beginCanvasEdit` must read a
-    /// canvas the pending fill is already part of) and for tests that need the work finished.
+    /// that is cancelled while waiting counts as gone. The one wait the scheduler offers, and never
+    /// for the main thread of the app (rule 1): it is for a test that needs a group's work finished
+    /// (`CanvasManager.waitForFillWork`, in the tests).
     func waitUntilIdle(group: AnyHashable) {
         lock.lock()
         while runningGroups.contains(group) || waiting.values.contains(where: { $0.contains { $0.group == group } }) {

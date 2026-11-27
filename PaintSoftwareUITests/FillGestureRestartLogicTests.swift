@@ -178,12 +178,12 @@ final class FillGestureRestartLogicTests: XCTestCase {
         XCTAssertEqual(manager.history.undoStack.count, before, "Nothing was recorded for the empty loop")
     }
 
-    /// **Three taps inside one turn of the main thread bake the first two.** The third tap's commit
-    /// waits on the fill lane for the second tap's render, so that render has to be *on* the queue the
-    /// moment the second tap begins — though the first tap's render has not landed, and still holds
-    /// the one job a gesture's renders may have in flight. Each gesture gets renders of its own
-    /// (`CanvasManager.fillRenders`) for exactly this: a request left waiting behind the first tap's
-    /// landing would be on no queue, and the third tap would find the second fill nowhere.
+    /// **Three taps inside one turn of the main thread bake the first two, in order.** The second tap
+    /// bakes the first (its render is done, its landing not run); the third arrives while the second
+    /// has not rendered at all, so it is queued (owner ruling, Nov 26) and begins once the second's
+    /// picture lands and bakes it. Each gesture gets renders of its own (`CanvasManager.fillRenders`)
+    /// so the second tap's render is on the fill lane the moment it begins, though the first tap's
+    /// landing still holds the one job a gesture's renders may have in flight.
     func testThreeTapsInOneTurnBakeTheFirstTwo() throws {
         let manager = sceneManager()
         let before = manager.history.undoStack.count
@@ -192,13 +192,18 @@ final class FillGestureRestartLogicTests: XCTestCase {
         manager.brushColor = Self.blue
         manager.beginInteractiveFill(at: Self.onThePaper)              // bakes the first
         manager.endInteractiveFill()
-        manager.beginInteractiveFill(at: Self.onTheSquare)             // bakes the second
+        XCTAssertEqual(manager.history.undoStack.count, before + 1, "The second tap baked the first")
+        manager.beginInteractiveFill(at: Self.onTheSquare)             // queued behind the second
+        manager.endInteractiveFill()
+        XCTAssertEqual(manager.queuedFills.count, 1, "The third tap waits for the second's picture, not the thread")
+        for _ in 0..<3 { manager.waitForFillWork(); settle() }
 
         XCTAssertEqual(manager.history.undoStack.count, before + 2, "The first two taps baked, one step each")
         XCTAssertGreaterThan(try bakedPixel(manager, Self.onTheSquare).r, 200, "The first is red on the square")
         let onPaper = try bakedPixel(manager, Self.onThePaper)
         XCTAssertGreaterThan(onPaper.b, 200, "…and the second blue on the paper, rather than dropped")
         XCTAssertEqual(onPaper.a, 255)
+        XCTAssertTrue(manager.fillGestureActive, "…and the third is the live fill")
     }
 
     // MARK: - (b)/(c) A superseded worker must not speak for the gesture that replaced it
@@ -292,55 +297,24 @@ final class FillGestureRestartLogicTests: XCTestCase {
         XCTAssertLessThan(onPaper.r, 60)
     }
 
-    // MARK: - (a) again, one window further back: the render that has not happened yet
+    // MARK: - (a) again, one window further back: the render that has not happened yet — queued
 
-    /// **The second window, and the one the owner is looking at on the lasso.** Everything above
-    /// forces *"rendered, hop to main not run"*, which is a single runloop turn wide. This forces
-    /// *"not rendered at all"*, which is the whole GPU pass — and against `commitInteractiveFill` as
-    /// it stood, the first loop was dropped in silence exactly as it was before the generation fix:
-    /// `fillLastRender` is nil because no hop has run, `fillRenderedRegion` is nil because no
-    /// worker has stored anything, so the commit had no pixels from either source and returned.
+    /// **The second window, and the owner's ruling for it (Nov 26): a second Fill tap while the first
+    /// fill is still drawing is queued — no pause, it lands right after the first, never dropped.**
+    /// Everything above forces *"rendered, hop to main not run"*, which is a single runloop turn wide.
+    /// This forces *"not rendered at all"*, which is the whole GPU pass: `fillLastRender` is nil because
+    /// no hop has run, `fillRenderedRegion` is nil because no worker has stored anything, so there is
+    /// nothing to bake. The commit used to *wait* on the main thread for the render (the last rule-1
+    /// wait on main, SCHEDULER.md); now the tap waits instead (`CanvasManager.queuedFills`).
     ///
-    /// **The owner, on device 2026-08-21: "that bug is present in the lasso... currently I havent
-    /// found the normal fill to do it though." The mechanism is shared and the exposure is not.**
-    /// `testATapWhoseFloodHasNotRunYetStillBakes` below drives the identical interleaving through
-    /// the bucket fill and fails identically without the fix, so nothing here is lasso-only. What is
-    /// lasso-only is how long the window stays open: a lasso session derives a ring mask and its
-    /// reference colours over the whole canvas on the CPU before it starts, then runs its walls, its
-    /// flood and gap closing's distance map and basins *once per reference colour*. A bucket tap does
-    /// one of each. The artist cannot out-run a
-    /// tap; drawing the next loop while the last one is still on the GPU is ordinary use.
+    /// **The gate is never signalled before the second tap returns, and that is the assertion that
+    /// main does not wait**: a main thread parked on the fill lane would park here for ever, behind a
+    /// gate only this thread opens. Then the gate opens, the first fill's picture lands and bakes it,
+    /// and the queued tap begins against a canvas the first fill is part of.
     ///
-    /// **The gate is signalled off a background queue, and that is not decoration.** The fix waits on
-    /// the fill lane from the main thread, so a gate signalled from the test body — which is the main
-    /// thread — would park there for ever. Signalling it from elsewhere keeps the interleaving just
-    /// as forced (gesture 1's worker provably has not run when gesture 2 begins) while leaving the
-    /// wait a wait rather than a deadlock.
-    func testASecondLassoBakesAFirstLoopThatHasNotRenderedYet() throws {
-        let manager = sceneManager()
-        let before = manager.history.undoStack.count
-
-        let gate = DispatchSemaphore(value: 0)
-        manager.fillWork { gate.wait() }
-        manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 30, y: 30, width: 32, height: 32)))
-        manager.endInteractiveFill()
-        XCTAssertNil(manager.fillRenderedRegion,
-                     "Fixture check: the first loop's worker is still queued — nothing rendered anywhere")
-
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) { gate.signal() }
-        manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 2, y: 2, width: 24, height: 24)))
-
-        XCTAssertEqual(manager.history.undoStack.count, before + 1,
-                       "The first loop baked as its own undo step rather than being dropped")
-        XCTAssertGreaterThan(try bakedPixel(manager, Self.onTheSquare).r, 200,
-                             "…and its pixels are in the cel: red over the square it enclosed")
-    }
-
-    /// The same interleaving on the bucket fill. It is here to say what the lasso test cannot: the
-    /// hole is in `commitInteractiveFill`, not on the lasso path, so the fix is one guard in one
-    /// place rather than a second mechanism that means the same thing. Both fail on the parent
-    /// commit; only the lasso one is reachable at the speeds an artist works at.
-    func testATapWhoseFloodHasNotRunYetStillBakes() throws {
+    /// Mutation that reddens it: `queueFillIfTheLiveOneIsDrawing` answering false — the second tap then
+    /// starts at once and retires the first gesture, which never bakes.
+    func testASecondTapWhileTheFirstIsDrawingIsQueuedAndLandsAfterIt() throws {
         let manager = sceneManager()
         let before = manager.history.undoStack.count
 
@@ -348,20 +322,64 @@ final class FillGestureRestartLogicTests: XCTestCase {
         manager.fillWork { gate.wait() }
         manager.beginInteractiveFill(at: Self.onTheSquare)
         manager.endInteractiveFill()
+        XCTAssertNil(manager.fillRenderedRegion, "Fixture check: the first tap's worker is still queued")
 
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) { gate.signal() }
         manager.brushColor = Self.blue
-        manager.beginInteractiveFill(at: Self.onThePaper)
+        manager.beginInteractiveFill(at: Self.onThePaper)   // returns: main did not wait on the gate
+        manager.endInteractiveFill()
+        XCTAssertEqual(manager.queuedFills.count, 1, "the second tap is queued behind the drawing fill")
+        XCTAssertEqual(manager.history.undoStack.count, before, "nothing baked yet: there was nothing to bake")
 
-        XCTAssertEqual(manager.history.undoStack.count, before + 1, "The first tap baked")
-        XCTAssertGreaterThan(try bakedPixel(manager, Self.onTheSquare).r, 200, "…where it was tapped")
+        gate.signal()
+        manager.waitForFillWork()
+        settle()
+        manager.waitForFillWork()
+        settle()
+
+        XCTAssertTrue(manager.queuedFills.isEmpty, "the queued tap began")
+        XCTAssertEqual(manager.history.undoStack.count, before + 1, "the first fill baked as its own step")
+        XCTAssertGreaterThan(try bakedPixel(manager, Self.onTheSquare).r, 200, "…red, where it was tapped")
+        XCTAssertTrue(manager.fillGestureActive, "the second fill is the live one now")
+        XCTAssertTrue(manager.commitInteractiveFill())
+        let onPaper = try bakedPixel(manager, Self.onThePaper)
+        XCTAssertGreaterThan(onPaper.b, 200, "the second fill landed after the first, in its own colour")
+        XCTAssertEqual(try bakedPixel(manager, Self.onTheSquare).r, 255,
+                       "…and read a canvas the first was part of: it did not flood over the red square")
     }
 
-    /// The counterweight, and the one that keeps the wait from being bought with §7.1: a loop that
-    /// enclosed nothing still records nothing, *including* when the gesture that commits it had to
-    /// wait for its render to exist. An empty result stores no bytes, so the new wait produces the
-    /// same nil the old code read by accident — for the right reason this time.
-    func testWaitingForAnUnrenderedLoopStillDoesNotBakeAnEmptyOne() {
+    /// **Three taps while the first is drawing land in the order they were made**, each in the colour
+    /// it was made in, each its own undo step, none dropped.
+    ///
+    /// Mutation that reddens it: `landQueuedFills` taking the newest tap first (`removeLast`).
+    func testTapsQueuedBehindADrawingFillLandInOrder() throws {
+        let manager = twoSquareScene()
+        let before = manager.history.undoStack.count
+        let gate = DispatchSemaphore(value: 0)
+        manager.fillWork { gate.wait() }
+        manager.brushColor = Self.red
+        manager.beginInteractiveFill(at: Self.onTheSquare)
+        manager.endInteractiveFill()
+        manager.brushColor = Self.blue
+        manager.beginInteractiveFill(at: Self.onSquare2)
+        manager.endInteractiveFill()
+        manager.brushColor = Self.red
+        manager.beginInteractiveFill(at: Self.onSquare2)   // over the blue the second tap lays
+        manager.endInteractiveFill()
+        XCTAssertEqual(manager.queuedFills.count, 2, "both later taps queued")
+        gate.signal()
+        for _ in 0..<4 { manager.waitForFillWork(); settle() }
+        XCTAssertTrue(manager.queuedFills.isEmpty, "every queued tap began")
+        XCTAssertTrue(manager.commitInteractiveFill())
+        XCTAssertEqual(manager.history.undoStack.count, before + 3, "three fills, three steps")
+        XCTAssertGreaterThan(try bakedPixel(manager, Self.onTheSquare).r, 200, "the first tap's square is red")
+        let second = try bakedPixel(manager, Self.onSquare2)
+        XCTAssertGreaterThan(second.r, 200, "the third tap, red, landed last — over the second's blue")
+        XCTAssertLessThan(second.b, 50, "…so the second, blue, landed before it")
+    }
+
+    /// The counterweight: a loop that enclosed nothing still records nothing (LASSO_FILL.md §7.1),
+    /// *including* when the tap queued behind it is what bakes it. An empty result stores no bytes.
+    func testAQueuedTapStillDoesNotBakeAnEmptyLoopBeforeIt() {
         let manager = CanvasFixture.manager(layerCount: 1)   // blank paper: nothing to enclose
         let before = manager.history.undoStack.count
 
@@ -369,11 +387,13 @@ final class FillGestureRestartLogicTests: XCTestCase {
         manager.fillWork { gate.wait() }
         manager.beginInteractiveLassoFill(path: rectangleLoop(CGRect(x: 8, y: 8, width: 24, height: 24)))
         manager.endInteractiveFill()
-
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) { gate.signal() }
         manager.beginInteractiveFill(at: Self.onThePaper)
+        manager.endInteractiveFill()
+        gate.signal()
+        for _ in 0..<2 { manager.waitForFillWork(); settle() }
 
         XCTAssertEqual(manager.history.undoStack.count, before, "Nothing was recorded for the empty loop")
+        XCTAssertTrue(manager.queuedFills.isEmpty, "the tap behind it began")
     }
 
     /// The lasso's own version of `testTheSecondFillRendersAgainstItsOwnSessionAndSeed` — a

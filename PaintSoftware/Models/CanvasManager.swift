@@ -3955,11 +3955,10 @@ final class CanvasManager: ObservableObject {
     /// landing. Made by `beginFillGeneration` and let go by `endFillGeneration`.
     ///
     /// **One per gesture, not one for the manager, because of the commit.** A gesture's first render
-    /// has to be on the fill lane the moment the gesture begins — `commitInteractiveFill` waits on the
-    /// queue for the render a second tap would otherwise drop (`awaitFillRenderIfNothingProduced`), and
-    /// a request standing behind the last gesture's job, not yet minted, is not on it. A new instance
-    /// is idle, so its first request is minted and enqueued at once, behind whatever the last gesture
-    /// left on the queue (`LatestWins`' clause 3).
+    /// has to be on the fill lane the moment the gesture begins — its landing is what bakes the fill
+    /// for a tap queued behind it (`landQueuedFills`), and a request standing behind the last gesture's
+    /// job, not yet minted, is not on it. A new instance is idle, so its first request is minted and
+    /// enqueued at once, behind whatever the last gesture left on the queue (`LatestWins`' clause 3).
     ///
     /// Reached through `MainActor.assumeIsolated`: `LatestWins` is main-actor, and `CanvasManager` is
     /// main-thread by convention rather than isolated — the test target compiles it without the app's
@@ -3985,6 +3984,10 @@ final class CanvasManager: ObservableObject {
     /// *before* the hop to main that installs it — so `commitInteractiveFill` can bake a fill whose
     /// pixels exist but have not reached the main thread yet. See `FillRenderResult`.
     var fillRenderedRegion: FillRenderResult?
+    /// The gesture the fill lane last finished a render for, empty or not — what tells "the first
+    /// picture exists, and may be empty" from "nothing has rendered yet" (`fillHasProduced`). Under
+    /// `fillLock`, with `fillRenderedRegion`.
+    var fillAnsweredGeneration: UInt64?
 
     /// Gesture context. `fillSession`/`fillWindow`/`fillGestureReferences`/`fillSeedColor`/
     /// `fillGestureLoopPath` are only touched on the fill lane; everything below is main-thread only.
@@ -4049,6 +4052,13 @@ final class CanvasManager: ObservableObject {
     // point at the same one (see `registerUndoableCelChange` for the same principle).
     var fillGestureLayerID: UUID?
     var fillGestureCelID: UUID?
+    /// **Fill taps waiting for the fill before them to land** (owner ruling, Nov 26): a tap made while
+    /// the live fill has not produced its first picture yet is queued, in order, and begins the moment
+    /// that fill is baked — never dropped, and the main thread never waits for it. Main thread only.
+    var queuedFills: [QueuedFill] = []
+    /// The live fill is to be baked the moment its first picture lands: an edit asked for it before
+    /// there was anything to bake (`prepareInteractiveFill`), or a tap is queued behind it. Main thread.
+    var fillCommitsOnLanding = false
 
     /// Records the artist's own answer for whether a layer bounds the fill (§6.6) — written by the
     /// row's drop button, which is the only control that sets it.
