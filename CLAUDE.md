@@ -4,8 +4,8 @@ deploy detail; it binds every agent, not only Claude Code.
 
 # Multi-Session Protocol
 
-Multiple sessions may work this repo concurrently, each in its own worktree. Never edit `main`
-directly. Assume the tree has moved — `git fetch` before trusting what you remember.
+Multiple sessions work this repo concurrently, each in its own worktree. Never edit `main` directly.
+Assume the tree has moved — `git fetch` before trusting what you remember.
 
 ```bash
 git fetch origin
@@ -20,8 +20,8 @@ cd ../PaintApp && git merge --ff-only tmp/<id> && git push origin main
 git worktree remove ../PaintApp-<id> && git branch -d tmp/<id>
 ```
 If `--ff-only` fails, rebase again — don't force-push, don't merge-commit. Append one line to
-[SESSION_LOG.md](SESSION_LOG.md): `Session N — YYYY-MM-DD: <what changed>`, and drop the oldest so
-only the last five remain — `git log` is the real history.
+[SESSION_LOG.md](SESSION_LOG.md): `Session N — YYYY-MM-DD: <what changed>`, and drop the oldest so only
+the last five remain.
 
 **Real time is a requirement (owner, 2026-11-17).** Every piece of work follows
 [docs/SCHEDULER.md](docs/SCHEDULER.md): main never waits and never does canvas-sized work, a touch
@@ -32,204 +32,68 @@ design target: read limits from the machine. See AGENTS.md's standing engineerin
 
 ## Build and test
 
-**Build from a worktree outside `~/Desktop` (2026-09-24).** After the macOS 26.5.2 update `actool`
-can no longer read the Desktop folder — *"currentDirectoryPath is unexpectedly nil … Operation not
-permitted"*, `BUILD FAILED` before a line compiles — while the same catalog builds from anywhere else.
-Until the owner grants Xcode access (System Settings → Privacy & Security → Files and Folders or Full
-Disk Access), make worktrees under `~/PaintWork/PaintApp-<id>` instead of `../PaintApp-<id>`; merges
-still run from the main worktree, which needs no build. Bash tool calls that run `xcodebuild` also need
-the sandbox disabled.
+**Build from a worktree outside `~/Desktop`.** `actool` cannot read the Desktop folder on macOS 26.5.2
+(*"currentDirectoryPath is unexpectedly nil … Operation not permitted"*, `BUILD FAILED` before a line
+compiles). Until the owner grants Xcode access (Privacy & Security → Files and Folders / Full Disk
+Access), make worktrees under `~/PaintWork/PaintApp-<id>`; merges still run from the main worktree, which
+needs no build. Bash tool calls that run `xcodebuild` need the sandbox disabled.
 
-Xcode lives at `/Applications/Xcode.app`; `xcodebuild`/`xcrun` are on PATH. Metal shaders need the
-toolchain once: `xcodebuild -downloadComponent MetalToolchain`.
+Xcode is at `/Applications/Xcode.app`; `xcodebuild`/`xcrun` are on PATH. Metal shaders need the toolchain
+once: `xcodebuild -downloadComponent MetalToolchain`.
 
-**Keep storage lean — delete, do not archive (owner, 2026-11-17).** The owner wants low storage and
-a clean workspace. When a task merges, delete its worktree, branch, simulator and any evidence,
-xcresults, logs and device builds it no longer needs; no archive bundles or "preservation" copies —
-`git log` and origin are the history. Keep only what an open TODO item cites, and the one installed
-device build `resign_state` names. Write evidence into one folder per task under `~/PaintWork`
-(never loose files in its root), and delete it when the item closes. Never touch the owner's artwork,
-the iPad, or another live session's worktree or simulator. Aim for 10 GiB free and stop starting
-runs below 5 GiB.
+**Keep storage lean — delete, do not archive (owner, 2026-11-17).** When a task merges, delete its
+worktree, branch, simulator and any evidence, xcresults, logs and device builds it no longer needs; no
+archive bundles — `git log` and origin are the history. Keep only what an open TODO item cites, and the one
+installed device build `resign_state` names. Evidence goes in one folder per task under `~/PaintWork`
+(never loose files in its root), deleted when the item closes. Never touch the owner's artwork, the iPad,
+or another live session's worktree or simulator. Aim for 10 GiB free; stop starting runs below 5 GiB.
 
-- **Fast tier (~14 min Debug, ~8 min Release, 4790 tests — MEASURED 2026-10-08)** — the pure-logic `*LogicTests` run headless. Use constantly.
-- **Full run (~76 min, MEASURED 2026-10-11)** — XCUITests are 99% of the runtime. Phase boundaries only, and
-  `simctl shutdown all` + `erase` the simulator *immediately before* it: leftover parallel clones
-  are the cause of nearly every mystery failure. After the erase run `tools/stage-photo-tip.sh <udid>`: the BrushMenu
-  photo-tip test needs its bar as the newest Photos item. Run the UI suite on an iPad (9th
-  generation) simulator — the owner's 1080×810 size premises fail on the 13" one.
+### Tiers
 
-### Why the full run costs what it does
+- **Fast tier (~14 min Debug, ~8 min Release, ~4800 tests)** — the headless `*LogicTests`. Use constantly.
+- **Full run (~76 min, 5438 tests, 363 classes)** — XCUITests are 99% of it. Phase boundaries only;
+  `simctl shutdown all` + `erase` immediately before (leftover clones cause nearly every mystery failure),
+  then `tools/stage-photo-tip.sh <udid>` (the BrushMenu photo-tip test needs its bar as the newest Photos
+  item). Run the UI suite on an iPad (9th generation) simulator — the owner's 1080×810 premises fail on the
+  13" one.
+- Parallel work is distributed per test *class*; the constraint is ideal work per clone (class-seconds ÷ 4),
+  not the longest class, and over-splitting costs setup per class. Balance splits on measured seconds,
+  never below one test; verify a split by xcresult test count; **pull the per-class table right after a
+  full run** (later runs on that `-derivedDataPath` evict the xcresult).
+- **Before reading a full run's wall clock**, check `System Failures` in the xcresult and count distinct
+  `Clone N of …` in the log: a clone can fail to bootstrap and the banner will not say. A busy machine
+  inflates wall clock too.
+- **No wall-clock assertions in a four-clone run or the fast tier.** The full suite runs bench files, so
+  gate a bench's assertion on an env-var opt-in (`BrushContactSheetBench`, `DabCostBench`'s
+  `PAINTAPP_PADCAP`) and print the measurement unconditionally; take four samples before adding headroom or
+  naming a cause. Triage a timing failure **warm**, never straight after an erase (4.7× worse).
+- **`tearDown` runs even when `setUpWithError` throws `XCTSkip`**: gate an opt-in suite's teardown on a flag
+  set past the guard.
+- **Some class names differ from their file names** (silently breaking `-only-testing`):
+  `SandwichCompositingUITests` and `BlendModesAndCompositorUITests` are in `LayerUITests.swift`,
+  `InterpolationWorkflowUITests` in `TimelineAndUndoUITests.swift`, `GalleryRecoveryUITests` in
+  `VectorShapeAndRecoveryUITests.swift`, `FillLiveAdjustUITests` in `FillUITests.swift`. Resolve the class
+  from the source (snippet below). `InterpolationWorkflowUITests.testInterpolateModeEndToEndFromGestureToScrub`
+  (~150 s) goes red under clones and passes alone: environmental until an isolated run says otherwise.
 
-**`xcodebuild` distributes parallel work per test *class*, never per test**, so a class is indivisible
-and the work is only as evenly spread as the classes are. That is the whole cost model.
+### Simulators, runs and reading results
 
-It was derived on 2026-08-15 by splitting the six heavy UI classes into three each: **961 tests in
-25.7 min → 1023 in 18.8 min**. Before the split four clones received 482 / 324 / 74 / **44** tests and
-two sat idle while the last ground on.
-
-**MEASURED 2026-10-11 at `38a3dd6`**, erased device, four working clones (`Clone 1`–`4` all in the log,
-no *System Failures* in the xcresult, no restart or crash block), nothing else building (an `xcodebuild`
-count sampled each minute read 1, the run's own, throughout), machine 81.7% idle at the start — taken
-straight after the erase, whose own work was 14.5% sys, where 2026-10-08's 97% was before the build:
-**5438 tests, 5373 passed, 7 failed, 58 skipped, 75.7 min** — the 5438 `func test` in the source, so
-the count reconciles. **17,201.1 class-seconds across 363 classes**, so four clones hold **71.7 min**
-of ideal work against 75.7 of wall clock — a 5.6% scheduling gap (7.6%, 6.5%, 7.1%, 10.6%, 10%, 16%
-before it). That is 155 tests and 17 classes after the 2026-10-08 run (5283 tests, 69.2 min, 15,417.2
-class-seconds; 75 commits, session 47's TODO (153)–(169)): per test 2.92 s → 3.16 s. Six new UI classes
-(10 tests, 515.5 s — `FillSliderLiveUITests`, `GuideOverStrokeUITests`, `GuideSliderUITests`,
-`GuideUnderLassoMoveUITests`, `HeldFingerUITests`, `TransformKeysSurviveUITests`) and four classes that
-grew (`StreamLiveUITests` +3 tests, `StreamLiveEngagedUITests` +2, `AnimationGroupMembershipUITests` +2,
-`OptionsPanelUITests` +2) are most of it; the rest is eleven logic and bench classes and the tests
-added to other existing ones.
-
-**Five of the seven reds are environmental and two were stale tests — none is a leak.** All seven ran
-in one serial batch on an erased device: five passed, and the two that failed again failed every time.
-*Stale:* `FillFootprintBench` — the full suite runs it and the fast tier does not, so no run had since
-TODO (158) cut the lasso's halo from 88 to 38 px — pinned the lasso's window at 456 = 280 + 2·88 and
-read 356; it now derives the window from `CanvasManager.fillWindowHalo`. And
-`LayerPanelControlsUITests`' effect-bar-beside-the-rail test asserted a layout the upright 13-inch
-window (1032 pt) cannot give, since `BottomDock.leadingInset` (TODO (169)) starts a card that cannot
-narrow at the margin, which runs it 23 pt under the options panel — the test runs in landscape now.
-*Environmental:* `OptionsPanelUITests`' Hue Colorize test drew correctly — cyan at −180°, yellow at 58°
-— but `adjust(toNormalizedSliderPosition: 0.5)` overshot to 58° instead of 0°, the second full run in a
-row, which the first adjust to `0.0` cannot do because the track's end clamps it — it ended at 0.62
-serial and 0.66 under clones, and asked again it did not move (`PaintUITestCase.adjustSlider` now takes
-the thumb and moves it the error still to go, to a tolerance the test names);
-`GuideUITests` (266.1 s in the run, 83 s alone), `GlareUITests`, `SelectionEditUITests`' mid-drag size
-slider (three samples) and `StreamLiveEngagedUITests`' layers-above/below test (a black centre) all
-passed in the batch.
-
-**A run is only as many clones as bootstrapped, and the banner does not say.** The first run of 2026-10-07
-(`9b5d486`) lost one of its four runners before it connected — the xcresult carries it as a *System
-Failures* entry, *"Early unexpected exit, operation never finished bootstrapping — no restart will be
-attempted"* — and ran on three: **98.6 min** for 15,976 class-seconds, 88.8 min of ideal work at three
-clones. Nothing in `** TEST FAILED **` separates that from a slow suite. Before reading a wall clock,
-read `System Failures` in the xcresult and count the distinct `Clone N of …` in the log; a missing number
-is the tell. That run's twelve reds were also not twelve of one thing: five passed in a serial batch,
-and seven did not — five whose pixel probe sat **under the docked settings card**, which the 375 pt
-timeline lifted over the host's middle (a probe there reads the card and calls it "the effect did
-nothing"; `PaintUITestCase.rowAboveTheDock` places ink above it and `assertAboveTheDock` fails loudly
-if a card ever grows past it), an eyedropper test that read paper from a *layer* pick after TODO (119)
-made the layer the default, and the menu one.
-
-| class | seconds | tests |
-|---|---|---|
-| **`BrushEditorUITests`** | **529.3** | 11 |
-| `TransformLayerModesUITests` | 516.1 | 5 |
-| `OptionsPanelUITests` | 412.7 | 14 |
-| `InkUnderTransformUITests` | 388.7 | 11 |
-| `StreamLiveUITests` | 357.1 | 11 |
-| `StreamLiveEngagedUITests` | 350.4 | 9 |
-| `AnimationGroupMembershipUITests` | 348.5 | 4 |
-| `LayerPanelControlsUITests` | 321.2 | 12 |
-| `SandwichCompositingUITests` | 307.2 | 10 |
-| `FillObjectUITests` | 295.1 | 14 |
-
-None of the ten sets a floor: the top class is 8.8 min against a 71.7 min share. Three rows rose with
-their tests — `StreamLiveUITests` 294.8 → 357.1 (+3 tests), `OptionsPanelUITests` 366.5 → 412.7 (+2) —
-and `StreamLiveEngagedUITests` (7 → 9 tests) and `AnimationGroupMembershipUITests` (2 → 4, 87 s a test,
-the longest 112.3 s) entered the ten at 350.4 and 348.5 s, the full-editor shape this section's "a new
-test was close to free … and then stopped being" bullet describes. `LayerPanelControlsUITests` 317.2 →
-321.2 on unchanged tests is noise, as is every fall — `BrushEditorUITests` 543.0 → 529.3,
-`TransformLayerModesUITests` 519.2 → 516.1, `InkUnderTransformUITests` 397.6 → 388.7,
-`SandwichCompositingUITests` 318.8 → 307.2, `FillObjectUITests` 302.4 → 295.1, and `SelectionAndMoveUITests`
-(287.7 → 278.9) and `PerfBaselineTests` (280.0 → 252.2) out of the ten. The longest single test that
-passed is 233.0 s (`InterpolationWorkflowUITests.testInterpolateModeEndToEndFromGestureToScrub`, 171.2 s
-on 2026-10-08); the longest of all is `GuideUITests`' 266.1 s, a red that took 83 s alone.
-
-**What eleven re-takings of that table between 2026-08-15 and 2026-09-09 actually established** — the
-tables themselves are in `git log`, and only these conclusions survived them:
-
-- **"One indivisible class sets the floor" is dead, and the arithmetic says why.** It held while
-  `LayerPanelUITests` was 515 s; it stopped holding once the top classes came within ~80 s of each
-  other. **The binding constraint is ideal work per clone, not the longest class** — a class only sets
-  the floor once it exceeds the per-clone share, and the longest here is 9.8 min against a 29.8 min
-  share. Splitting the longest just promotes the second, and **past some point splitting makes it
-  worse**, because every new class pays its own setup. The class count has grown 109 → 208.
-- **A class grows past the floor while nobody is looking.** `LayerPanelUITests` had to be *discovered*
-  at 515 s; `GraphEditorUITests` went 40 s → 271 s over three stages, each adding two or three tests to
-  the obvious place; `BrushEditorUITests` did not exist one morning and was 516 s by that night.
-  **Re-take this table when you add UI tests to an existing class, not when the suite feels slow.**
-- **Only the total is worth trending.** Per-class seconds are not independent of which classes a clone
-  is co-scheduled with, so single rows are noisier than they look: `SelectionAndMoveUITests` rose
-  274 → 398 on the same ten tests while `SandwichCompositingUITests` fell 346 → 265 on the same ten,
-  and `BrushEditorUITests` came down 516 → 319 without being touched. **Read a single class's rise as a
-  signal only when it repeats.**
-- **A new test was close to free for five consecutive runs and then stopped being.** ~120 new tests once
-  cost +1,190 class-seconds, and the reason is visible rather than inferred: those were UI tests driving
-  a full-screen editor, and a class of those costs what the heavy classes cost. Wall clock is not
-  comparable across runs while the suite is growing — per test it has stayed flat.
-- **Balance a split on measured seconds, not test count**, and **no split goes below one test**: one
-  test measured 71 s and then 58 s, which is a seventh of its old class by itself.
-- **A run measured against a busy machine is not a measurement.** One attempt ran beside a research
-  workflow and reported **28.5 min** — four minutes worse — while its per-class seconds came out within
-  noise of the clean run's. **Contention costs wall clock through scheduling and leaves per-test
-  durations almost untouched**, so the class table looks right while the headline is wrong.
-- **Wall-clock assertions do not belong in a run with four parallel clones**, and the full suite is
-  exactly that. Two of one run's three environmental reds were timing assertions that passed alone;
-  bench files are excluded by filename and exist for this. **Triage a timing failure warm and never
-  after an erase** — the first run after a `simctl erase` measured 4.7x worse and read as a regression.
-  **But "excluded by filename" only excludes them from the *fast tier*; the full suite runs
-  everything**, which is how a bench with no gate of its own has now red three full runs. The remedy
-  is an env-var opt-in on the *assertion* — `BrushContactSheetBench`'s shape, and now
-  `DabCostBench`'s `PAINTAPP_PADCAP` — leaving the measurement printed unconditionally, since a
-  re-take reads the printed number and not the pass. **Before adding headroom instead, measure the
-  spread**: that bench read 338.7 / 374.1 / 378.7 / **489.5** ms against a 0.5 s cap on a 97.6%-idle
-  machine and 947.9 ms minutes after a full suite, so it had no headroom at all and the cap was
-  sampling the machine rather than checking the ruling. **And a two-run theory about *why* is worth
-  nothing**: the same failure looked exactly like a Debug-versus-Release effect until Release
-  measured 368.4 against Debug's 338.7, i.e. the same. Take four samples before naming a cause.
-- **`tearDown` runs even when `setUpWithError` throws `XCTSkip`**, so an opt-in suite must gate its
-  teardown on a flag set past the guard. Two tests once *failed* at 0.000 s in every full run because
-  teardown trapped unwrapping a nil `URL!`, reported as `Test crashed with signal trap` printed *beside*
-  the skip message — which reads as a failure of the code under test.
-- **Some class names differ from their file names**, which silently breaks any `-only-testing` selector
-  built from a filename. `SandwichCompositingUITests` and `BlendModesAndCompositorUITests` live in
-  `LayerUITests.swift`, `InterpolationWorkflowUITests` in `TimelineAndUndoUITests.swift`,
-  `GalleryRecoveryUITests` in `VectorShapeAndRecoveryUITests.swift`, `FillLiveAdjustUITests` in
-  `FillUITests.swift`. Resolve the class from the source every time — the snippet is in the triage
-  section below.
-- **`InterpolationWorkflowUITests.testInterpolateModeEndToEndFromGestureToScrub`** is the suite's
-  longest single test (~150 s) and has red under parallel clones in three consecutive full runs, passing
-  alone every time. Treat a red there as environmental until an isolated run says otherwise; do not bisect it.
-- **If you split a class, verify by test count from the xcresult** — a test that stops running still
-  prints green — and take the count *before* you merge as well as after: a split branch cut before
-  something was deleted will silently resurrect it, and the count is the only signal.
-- **A device made fresh for the run still contends with its own parallel clones.** All five of the
-  2026-09-12 run's failures — the `Mode1UITests`/`VectorLayerContentUITests` cut-and-punch cluster this
-  file already named from 2026-09-10, plus `CRTScreenUITests` and `ToolPanelsUITests`, new that day —
-  failed under four parallel clones of a device booted and erased minutes before the suite started, on
-  a 67%-idle machine with zero `Restarting after unexpected exit` or crash blocks in the log. All five
-  passed 5/5 in one serial, `-parallel-testing-enabled NO` re-run on that same device, no further erase.
-  **"Fresh" rules out stale simulator state; it says nothing about clone-vs-clone timing contention** —
-  different failure modes, same fix (an isolated serial re-run), and this run needed the fix for the
-  second reason, not the first.
-- **"Passes alone" rules out the machine, not the test that ran before it.** Three of 2026-09-25's
-  reds failed in the full run *and* in a serial batch of the ten, then passed alone on an erased device
-  — the environmental signature, and wrong. `setBrushSize` edits a preset through the brush editor, the
-  library is a file, the next launch adopts the edited default (`adoptLibrarySelections`), and
-  `launchIntoEditor` reset the preferences but not the library: every later test on that simulator drew
-  with the last editor test's brush. MEASURED: `ColorWheelsUITests` then the three, on an erased device,
-  turns all three red; `launchIntoEditor` now passes `-resetBrushLibrary` on each test's first launch.
-  **A failure that repeats in a serial batch but not alone is a leak between tests** — ask what the
-  test before it persisted. The tell here was that every one of them was sensitive to brush size.
-
-- Use the dedicated simulator by UDID: `eraser-mutex-test`,
-  `75C8B97E-47AF-484B-B7D2-CA7EB1B51B03`. Passing `-destination name=...` for a device this Mac
-  doesn't have (there is no "iPad Pro 13-inch (M4)" — it is an M5) does **not** error; xcodebuild
-  silently falls back, and you spend the run wondering what you tested.
-- `Engine/Deform` compiles standalone with `swiftc` (~5 s a loop) — use it to test engine
-  hypotheses instead of a 90 s `xcodebuild test`.
-- **`** TEST SUCCEEDED **` and exit 0 do not mean any test ran.** Read the count, never the banner:
+- Dedicated simulator by UDID: `eraser-mutex-test`, `75C8B97E-47AF-484B-B7D2-CA7EB1B51B03`.
+  `-destination name=...` for a device this Mac lacks does **not** error — xcodebuild silently falls back
+  (there is no "iPad Pro 13-inch (M4)"; it is an M5).
+- `Engine/Deform` compiles standalone with `swiftc` (~5 s a loop) — test engine hypotheses there instead of
+  a 90 s `xcodebuild test`.
+- **`** TEST SUCCEEDED **` and exit 0 do not mean any test ran, and the log is not the count.** Read the
+  count from the xcresult, and reconcile it against a static `func test` count:
 
   ```bash
   xcrun xcresulttool get test-results summary --path "$(ls -dt build/DerivedData/Logs/Test/*.xcresult | head -1)"
   ```
-  `totalTestCount: 0` with `result: "unknown"` is what a malformed `-only-testing` produces — and the
-  shell is the usual cause, because **zsh does not word-split unquoted `$VAR`**. Building a list of
-  flags into a string and passing `$SUITES` sends xcodebuild one long bogus argument, which it
-  ignores while reporting success. Use an array and `"${SUITES[@]}"`. The whole fast tier is:
+  `totalTestCount: 0` with `result: "unknown"` is what a malformed `-only-testing` produces. **zsh does not
+  word-split unquoted `$VAR`** — build selector lists as an array and pass `"${SUITES[@]}"`. The log's
+  per-test line differs serial (`Test Case '-[Suite testName]' passed`) from parallel
+  (`Test case 'Suite.testName()' passed on 'Clone 1 of …'`), and parallel lines interleave, so a grep
+  count is wrong either way. The whole fast tier, verbatim:
 
   ```bash
   SUITES=(); for s in $(ls PaintSoftwareUITests/*.swift | xargs -n1 basename | sed 's/\.swift$//' | grep -E "LogicTests$|CharacterizationTests$|^PerfBaselineTests$"); do SUITES+=(-only-testing:PaintSoftwareUITests/$s); done
@@ -237,309 +101,137 @@ tables themselves are in `git log`, and only these conclusions survived them:
     -destination 'platform=iOS Simulator,id=75C8B97E-47AF-484B-B7D2-CA7EB1B51B03' \
     "${SUITES[@]}" -parallel-testing-enabled NO -derivedDataPath build/DerivedData
   ```
-  **The selectors are built from *filenames*, and that loses tests silently in two directions.** Both
-  fired on 2026-09-02, in one session, in opposite ways. A filter hand-rebuilt as
-  `"LogicTests$|CharacterizationTests$"` drops the third alternate and with it **`PerfBaselineTests`,
-  53 tests** — and that is specifically the *timing* suite, so a hand-rolled fast-tier filter is blind
-  to performance regressions by construction. In the other direction, a *class* placed in a file of
-  another name never runs at all: `-only-testing:` names the file's stem, so the class is not selected
-  and nothing says so. Both report `** TEST SUCCEEDED **` with a plausible-looking count. Use the
-  command above verbatim, keep one `XCTestCase` per file with the class named after the file, and
-  reconcile the xcresult's `totalTestCount` against a static `func test` count at your own head — the
-  arithmetic is what catches it, and nothing else will.
-
-  **The tier selects logic suites by filename, so it runs no XCUITest — and a branch can be green in
-  Debug *and* Release and still be broken.** That blind spot has now cost two passes in one week:
-  `RecordingUITests`, and on 2026-09-07 the three persistence tests that a full run caught
-  (`GalleryRecoveryUITests`' backup-restore and trash-restore, and
-  `EraserAndPersistenceUITests.testSaveAndReloadPersistsStrokesAcrossAppRelaunch`). Nothing short of
-  the 25-minute suite proves a UI change, so **say in the summary that the UI tier was not run** rather
-  than reporting a green fast tier as if it covered the branch.
-
-  Three cheap things see a little way into it, and all are seconds rather than minutes:
+  Selectors come from *filenames*: a hand-rebuilt filter that drops `PerfBaselineTests` (the timing
+  suite, 53 tests) is blind to performance regressions, and a class in a file of another name never runs.
+  Keep one `XCTestCase` per file named after the file.
+- **The fast tier runs no XCUITest**, so a branch can be green in Debug *and* Release and still broken
+  (persistence tests, `RecordingUITests`). Say in the summary that the UI tier was not run. Cheap checks:
 
   ```bash
   tools/check-ui-identifiers.py     # no UI test may reach a control by its SF Symbol glyph name
   tools/check-ui-helpers.py         # no UI test may define a helper whose name PaintUITestCase already defines
   ```
-
-  The first exists because of the 2026-09-07 defect and would have caught it at zero cost. `ed7c8f4`
-  gave the gallery button an explicit `accessibilityIdentifier`, which **replaces** the implicit one
-  SwiftUI derives from `Image(systemName:)` — so the two helpers reaching it by `"square.grid.2x2"`
-  silently matched nothing, and three tests failed a mile from the code they guard. **A glyph name is
-  not an identifier the app promises**; a test using one depends on the *absence* of one, which makes
-  adding an identifier a breaking change. The check is pure text over both trees and reports exactly
-  that hazard, having been narrowed to it — the general "does this identifier exist" version was
-  written first and abandoned at 186 false positives, because identifiers reach their views through
-  `identifier:` parameters on a dozen helper views.
-
-  The second is the same idea for helpers: a copy written beside the test that needs it is how
-  `waitForPixel` came to exist in four classes, one of which handed back its *last reading* on a
-  timeout and so made ten `XCTAssertNotNil(waitForPixel(…))` assertions that could not go red. It
-  compares names, not signatures, because the copies all had different parameter lists.
-
-  The third is free and is about triage rather than prevention: **give every `XCTAssertTrue` in a
-  shared helper a message.** All three of those failures reported a bare `XCTAssertTrue failed`, which
-  names neither the element nor the reason, and two of them were inside `PaintUITestCase` where the
-  line number does not say which test called it. `xcodebuild` does print `file:line: error:` for a
-  serial run, so the line is recoverable; the *sentence* is not, and it is what turns a filename into
-  a diagnosis.
-
-  **Never write `@testable import PaintSoftware` in `PaintSoftwareUITests`.** It resolves nothing —
-  every app source a logic test touches is already compiled a second time into this target, so the
-  types are local to the module — and it **breaks `-configuration Release` outright**, because
-  `ENABLE_TESTABILITY` is set for Debug only and the app's Release `.swiftmodule` is then *"built
-  without '-enable-testing'"*. The damage is invisible where anyone would look: Debug compiles it
-  happily, the fast tier is green, and the only symptom is that nobody can measure the app in the
-  configuration it ships. One such import landed 2026-09-04 and cost a full pass of Debug-only
-  figures before it was found; see PERFORMANCE.md §12 for what those figures were worth. **Take a
-  Release fast tier before merging anything that adds a test file** — it is the only run that catches
-  this, and the one-line diff is all it takes to break again.
-
-  **`-parallel-testing-enabled NO` on every run that is not the full suite.** The scheme carries
-  `parallelizable = "YES"` (PaintSoftware.xcscheme:48) and that is correct — it is the whole cost
-  model above — but clones only earn their keep when there are many classes to distribute across
-  them. The logic tier is ~250 s of work total, so the clone boots cost more than they save, and
-  this section already warns that leftover clones cause "nearly every mystery failure".
-
-- **The log's per-test line is spelled differently in a parallel run than in a serial one**, so a grep
-  that counts one silently reports **zero** for the other. Serial prints
-  `Test Case '-[Suite testName]' passed`; parallel prints
-  `Test case 'Suite.testName()' passed on 'Clone 1 of …'` — different case, different shape, no
-  brackets. Counting a live parallel run with the serial pattern reads as a run that has started no
-  tests at all, which looks exactly like a hang; that cost one session a wrong diagnosis of a healthy
-  run twenty-five minutes in. It is the banner-versus-count trap again, so the answer is the same one:
-  **for a finished run read `xcresulttool`, never the log.** The log counts disagreed with the
-  xcresult on the very run that prompted this note (1914 against 1925) because a clone's output
-  interleaves and a line can be split.
-
-- **Pull the per-class table immediately after a full run, before running anything else against that
-  `-derivedDataPath`.** Xcode keeps only a handful of recent `Test-*.xcresult` bundles per derived-data
-  path, so the five single-test triage runs that follow a full suite evict the full run's own bundle —
-  and the table this file keeps asking to be re-taken is then unrecoverable. Reconstructing it by
-  summing each test's reported seconds out of the console log is not a substitute: it is a
-  log-reconstruction of a number the xcresult owns, and on a parallel run the log's per-test lines
-  interleave and split.
-
-- **A red xcresult is evidence about a *binary*, not about your working tree** — the same trap as the
-  banner, pointing the other way. `test-without-building` reuses whatever bundle was last compiled,
-  so editing a source file and re-running it tests the *old* code while reporting against the new
-  commit. Session 24 spent an opus worker "fixing" three effects that were already correct: a Sobel
-  divisor of 4 had been changed to `1/√20` before the commit, but the failing run predated the
-  rebuild, and every reported byte (128 where 114 was wanted, 90 where 81 was) is exactly the ratio
-  `√20/4 = 1.118` between the two constants. Before debugging a numeric failure, diff the constant
-  the test names against the value it reports — that is thirty seconds and it settles which of the
-  two you are looking at. Use plain `test` (which builds) unless you have a reason not to.
-
-  **And the simulator you are *driving* is a binary too, which is the same trap pointed at the
-  screenshot.** `simctl install` ships whatever `build/DerivedData/.../*.app` currently holds, and
-  that is the last thing any `xcodebuild` wrote to that path — including the run you used to
-  mutation-test an assertion. Session 26 reverted a deliberate `depth: 0` mutation, installed without
-  rebuilding, drew with the brush, and spent a cycle diagnosing a shipped defect that existed only in
-  the installed bundle. **Rebuild between a mutation run and a drive**, and when a drive contradicts a
-  green test about the same code, suspect the bundle before the code.
+  An explicit `accessibilityIdentifier` **replaces** SwiftUI's implicit glyph-derived one, so a glyph name
+  is not an identifier the app promises. Give every `XCTAssertTrue` in a shared helper a message (a bare
+  `XCTAssertTrue failed` names neither element nor reason).
+- **Never write `@testable import PaintSoftware` in `PaintSoftwareUITests`.** It resolves nothing (every
+  app source a logic test touches is compiled into that target a second time) and **breaks
+  `-configuration Release`** (`ENABLE_TESTABILITY` is Debug-only). **Take a Release fast tier before
+  merging anything that adds a test file.**
+- **`-parallel-testing-enabled NO` on every run that is not the full suite.** The scheme carries
+  `parallelizable = "YES"` (PaintSoftware.xcscheme:48), which is correct for the full run — do not change
+  the scheme; clone boots are pure cost for a few classes.
+- **A red xcresult is evidence about a binary, not your tree**: `test-without-building` reuses the last
+  bundle. Use plain `test` unless you have a reason, and diff the constant a failing test names against the
+  value it reports. **The simulator you drive is a binary too** — `simctl install` ships whatever
+  `build/DerivedData/.../*.app` last holds (including a mutation run): rebuild between a mutation run and a
+  drive, and when a drive contradicts a green test suspect the bundle first.
 
 ### A green assertion is only as good as its two operands
 
-Three failures of this shape landed in one day, and none of them looks wrong while you read it.
+- Mutate one fixture cumulatively; a fresh fixture per table row compares allocation addresses
+  (`LayerContentVersion` names tiers by `ObjectIdentifier`).
+- `Layer.layerEffect` is `kind.carriesEffect ? effect : nil` (value and vector layers only) and
+  `Layer.valueFill` is `kind == .value && effect == nil ? fill : nil`; render reads the accessor, so setting
+  the field on another kind measures nothing.
+- An assertion true by mathematics (noise differs between positions) cannot go red — assert at the pixels.
+  Ask: **if this went red, would the code be wrong?** (the hold lives in `AnimationCurve`/`TransformTrack`,
+  not `PoseInterpolation.blend`.)
+- A cel spanning frames is one bake key — give each frame its own picture. `CompositeProbe` counts
+  chunks, not frames. An `XCTNSPredicateExpectation` cannot fire during XCUITest's synchronous drag, so its
+  inverted twin passes unconditionally.
+- **A harness can take a different path from the artist**: a stroke's ink lands in place, `@Published
+  layers` never moves, and `reconcileLayers` (sole caller of `syncFrameBake`, `updateSandwich`,
+  `updateOnionSkin`, `updateInterpolationPreviews`) must be triggered by the stroke lift;
+  `PlaybackProbe.commitStroke` sends its own `objectWillChange` and hid a lost publish. Check that a probe
+  enters the changed path (PERFORMANCE.md §17.1).
 
-**A table that builds a fresh fixture per row is comparing allocation addresses.** `LayerContentVersion`
-names a cel's tiers by `ObjectIdentifier`, so two `CanvasManager`s differ in every leaf *before* anything
-is mutated. A per-field table built that way — one manager per row, digests compared across them —
-**passed with the field under test deleted from the encoder it was written to pin.** Mutate one fixture
-cumulatively, so a row's difference is attributable to the row.
+### A feature is not finished because its model is correct — drive it
 
-**`Layer.layerEffect` is `kind.carriesEffect ? effect : nil` — value and vector layers since TODO (92),
-and no other kind — and the render path reads the accessor, not the field.** So `layers[0].effect = …` on a raster layer reaches neither the tree nor the content version:
-forty rows of an effect table were setting nothing. `Layer.valueFill` is `kind == .value && effect == nil
-? fill : nil` and is inert the same way for a layer already in effect mode. Setting a field the shipped
-code does not read is the commonest way a fixture measures nothing.
+Features have shipped unusable with a green fast tier because every test asserted a stored value
+(a correct value drawn in the wrong place; a feature whose only entry needs state only it creates; a
+refusal with no notice). For any change with a visible surface:
 
-**And an assertion can be true of mathematics rather than of your code.** A test written to pin the
-grain artifact compared `BrushStamper.grainAlphaMultiplier` sampled at a stroke's *rest* points against
-the same function at its *posed* points, and required them to differ. That is the position-dependence
-of a noise field — **true by definition, under any implementation whatever**, including the one that
-fixes the bug. It could not have gone red. The right operands were one level down, where the pixels
-are: the dab **alphas** two poses of one stroke actually stamp. When an assertion would hold for any
-correct program *and* any incorrect one, it is measuring a definition, not a behaviour.
-
-**And an assertion can be true at the wrong *level*, which is the one that does real damage.** The four
-above measure nothing, so they merely fail to help. This one helps in the wrong direction: a **passing**
-test asserted `PoseInterpolation.blend(a, b, t: -0.4) == a`, captioned *"before the first key is a
-hold"*. The hold is real — but it lives one level up, in `AnimationCurve` and `TransformTrack`'s segment
-clamp, so a channel never hands `blend` an out-of-range `t` off either end. The test pinned a guarantee
-its own caller already makes, and in doing so **froze a defect underneath it for the length of a stage**:
-`blend` clamped where its doc says twice that it extrapolates, and an overshooting handle *inside* a
-segment was silently flattened. It could go red; it was simply about the wrong function. So the question
-to ask of an assertion is not only "can this go red" but **"if this went red, would the code be wrong?"**
-
-**A fixture can be eaten by the optimisation it is testing.** The obvious ten-frame document for
-RENDER §2.16 — one cel spanning frames 2–6, edit it, count re-renders — measures nothing, because that
-cel *is* a hold, so those five frames are one bake key and one composite. Every frame needs its own
-picture before "five frames re-rendered" is expressible at all.
-
-And `CompositeProbe` counts calls to `Compositor.composite`, which since chunking means **chunks, not
-frames**. Pin "one small frame is one composite" as its own test rather than assuming it inside five
-others.
-
-**And an expectation can be unevaluatable during the very action it is timed against.** An
-`XCTNSPredicateExpectation` built before an XCUITest drag cannot fire during it, because XCUITest's drag
-is synchronous — so the affirmative test times out, and its **inverted twin passes unconditionally**,
-whatever the app does. That is how a "no readout appears on a sideways drag" test can be green against
-an app that shows one on every drag. If an assertion's window closes before the behaviour it names can
-occur, it is measuring the harness.
-
-**And a harness can take a different code path from the artist and look right the whole way.** This
-is the sharpest instance yet and it cost a full-suite red on 2026-09-10. A pass moved the cel
-thumbnail out of `@Published layers` to stop an edit raising a second SwiftUI pass; it worked, MEASURED
-on the device at 49.9 → 35.7 ms an edit. But a brush stroke's ink lands **in place**, in the texture
-the cel already references, so `@Published layers` never moves and *nothing in the model announces
-that a drawing changed*. That diff had been arriving **by accident**, 400 ms late, from the debounced
-tile install writing `Cel.thumbnail` through `layers`. Removing it meant a stroke lift raised no
-SwiftUI pass at all — and `reconcileLayers` is the only caller of `syncFrameBake`, `updateSandwich`,
-`updateOnionSkin` and `updateInterpolationPreviews`, so the frame was never dirtied and never baked.
-Six XCUITests said so; **the fast tier was green in Debug and Release, statically reconciled, with
-four mutations, and saw none of it.**
-
-**The device probe did not see it either, and that is the part to carry.** `PlaybackProbe.commitStroke`
-does not call `strokeEnded` — it commits through the shape seam and sends its own `objectWillChange`.
-So the harness supplied the publish the artist's own path had just lost, and measured a clean before
-and after while the app was broken. PERFORMANCE.md §17.1 already says a bench measuring a *component*
-cannot find a cost in a *composition*; this is one level worse, because the harness was driving the
-real editor and still did not execute the line that mattered. **Before trusting a probe about a change
-to a code path, check that the probe enters that path** — `strokeEnded`'s own header had claimed for
-months that it forced the diff, and it never sent anything.
-
-### A feature is not finished because its model is correct — drive it before you call it done
-
-**Three features shipped to the owner's iPad in one pass that could not be used at all**, and the owner
-found all three in about a minute. Every one had a green fast tier, mutation-tested assertions, and a
-worker report describing it as complete. The owner, afterwards:
-
-> *"these bugs makes features unusable and thus unfinished, where as if I did not step in and test it, it
-> would have gotten marked as fully done. Even a quick one minuite test could have found out these things."*
-
-**The common cause is structural, not carelessness.** Every test in this repo reaches the model directly
-and asserts a **stored value**. Not one asserted what is *drawn*, or whether an artist can *reach* the
-feature. So the suite was blind to an entire class of defect by construction, and the more rigorous the
-worker, the more confidently it reported done.
-
-**Case 1 — a correct value drawn in the wrong place.** Dragging a node in the graph editor wrote the right
-number and the node did not move. `Channel.axis` auto-ranges to the channel's own live key values, so with
-**two** keys — the ordinary case, a Move at A and a Move at B — both are extremes and `t` is 0 and 1 *always*.
-The axis rescales by exactly what the drag changed and the dot lands back under the finger. Every assertion
-in the suite was on the value, and the value was never wrong.
-
-**Case 2 — a feature whose only entry point requires state that only that entry point can create.** A fresh
-transformation layer has an empty track; the graph editor lists only channels that carry a curve; the
-channel-list row is the only thing that says Move is the verb. So you must Move to get a channel, and the
-channel is the only thing that tells you to Move. The model was correct at every step and the loop was
-closed nowhere. **Look for this shape specifically** — it is invisible to any test that starts by
-constructing the state the artist cannot reach.
-
-**Case 3 — a refusal with no notice.** `beginContainerPoseMove` returned false and its caller discarded the
-`Bool`: no float, no highlight, nothing said. This file already has a section on that, reached by a new door.
-
-So, in addition to the two-operands rule above, for any change with a visible surface:
-
-1. **Drive it in the simulator and look at it.** Build, install, launch, perform the gesture, screenshot.
-   This is available to agents and takes a minute. If you cannot, say so loudly rather than skipping it.
-2. **Write a cold-start reachability test.** From a new document with no prior state, can the feature be
-   reached? Constructing the post-state in a fixture and asserting on it is what let all three of these ship.
-3. **Assert what is drawn or exposed, not only what is stored.** At least one assertion must fail if the
+1. **Drive it in the simulator and look at it**: build, install, launch, perform the gesture, screenshot.
+   If you cannot, say so loudly.
+2. **Write a cold-start reachability test**: from a new document with no prior state, can the feature be
+   reached? Constructing the post-state in a fixture is what let these ship.
+3. **Assert what is drawn or exposed**, not only what is stored — at least one assertion must fail if the
    affordance disappears while the model stays correct.
-4. **Answer "what does the artist do next?"** at each step, in the report. If any step's answer is "read the
-   source", the feature is unfinished.
+4. **Answer "what does the artist do next?"** at each step in the report. "Read the source" means unfinished.
+5. **Drive the app, not the feature**: before a device install, play a scene, pan from the grey, drag and
+   release a Move node, draw a stroke — on the device — and say you did. A green full suite says nothing
+   about feel. Put these four in the brief, not in the reviewer's head.
 
-**And "drive it" means the app, not the feature — the 2026-09-13 build regressed everything but the
-thing that was driven.** Five workers each drove their own feature to a screenshot; the build carried an
-always-on network client, a repaint closure on the layer host, a touch-path split and a new bottom-dock
-block, and the owner's first minute with it found playback stutter, the canvas freeze back, a pan that
-would not start outside the canvas and the Move box baking on a node release — none of them near the
-features driven, none reachable by any test in the suite. **Before a device install, drive the old
-things: play a scene, pan from the grey, drag and release a Move node, draw a stroke — on the device,
-and say in the report that you did.** A green full suite says nothing about feel.
+### Persistent statics, shared resources and the simulator host
 
-**The bar is the orchestrator's to set, and this one was set wrong.** The briefs for all three asked for
-round trips, cache keys, mutation tests and refutations, and got them. None asked whether a person could
-use the result. Put these four in the brief, not in the reviewer's head.
+- **The model writes no store (TODO 176):** `AppSettings` is the one `UserDefaults` store (an instance over
+  the defaults it is handed; logic tests hand it a suite of their own); only `AppSettingsKeeper`, held by
+  `ContentView`, carries a value to a `CanvasManager`. A new app-wide value goes there, never in a model
+  `didSet`. `-resetEditorPreferences` and `launchIntoEditor`'s `-resetBrushLibrary` reset it for UI tests.
+  **A failure that repeats in a serial batch but not alone is a leak between tests** — ask what the test
+  before it persisted.
+- **Everything that looks per-session and is not:**
+  - **Simulator UDID**: every worktree inherits the UDID above; `simctl shutdown all` + `erase` kills
+    another session's run (`Mach error -308 - (ipc/mig) server died` / `Invalid device state`). Check
+    `pgrep -x xcodebuild` first; if one is live, wait or use a device of your own, deleted afterwards:
 
-### A static that writes through to `UserDefaults` outlives the test that set it
+    ```bash
+    UDID=$(xcrun simctl create "<slug>" com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M4-8GB \
+      com.apple.CoreSimulator.SimRuntime.iOS-26-5) && xcrun simctl boot "$UDID"
+    # ... run with -destination "platform=iOS Simulator,id=$UDID" ...
+    xcrun simctl delete "$UDID"
+    ```
+  - **`git stash`** is one stack for every worktree — never use it; commit on your own `tmp/<id>` branch.
+  - **`origin/main`** is a shared ref any `git fetch` moves — reset only to a sha you recorded.
+  - **Never kill by process name** (`pgrep -f xcodebuild | xargs kill` is machine-wide). Kill only recorded
+    PIDs or `pkill -f "$PWD"`. `pgrep -f` counts substrings including its own caller (~3× the runs): use
+    `pgrep -x xcodebuild` and a fresh `lsof -a -p <pid> -d cwd`. In cleanup, protect the live run's ancestor
+    **chain** plus its own **subtree**, not every ancestor's descendants.
+  - **A worker's tree is a workbench** (half-finished edits, deliberate mutations): act on it only after
+    its completion notification and harvest *commits*. As the worker, **commit first, mutate second**
+    (or mutate a throwaway copy outside any worktree); verify and commit the same bytes.
+- **Wrap every run in [tools/simlock.sh](tools/simlock.sh)** — your own device stops you erasing someone
+  else's, not starving the machine (5 concurrent runs left 1–3% idle and returned wrong answers):
 
-`CanvasManager.renderResolution` once persisted on every set, so it was process-wide **and survived into
-the next run in the simulator container**. A suite that left it on `.half` produced **15 reds in a later
-fast tier**, across `EffectLayerLogicTests` and `PerfBaselineTests`, every one a half-resolution artifact
-of a *previous* run — reported, reasonably, as failures of the code under test. The persistence is what
-made it worse than a forgotten `Compositor.backend` restore: the damage shows up in a *different* suite,
-on a *later* run, with nothing pointing back.
+  ```bash
+  tools/simlock.sh xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware \
+    -destination "platform=iOS Simulator,id=$UDID" ... -parallel-testing-enabled NO
+  ```
+  It holds one of `SIMLOCK_SLOTS` (default 2) for the command's life and reclaims a dead owner's slot.
+  Machine load: `top -l 2 -n 0 -s 2 | grep "CPU usage" | tail -1` (`uptime` is not usable here).
+- **Waiting: block on one condition inside one command; never poll or queue timers** (polling costs a
+  request per check; queued timers left 78 sleeping shells and stale notifications). Background it if you
+  want to work meanwhile — the harness re-invokes you:
 
-**The fix is structural since TODO (176): the model writes no store.** `AppSettings` is the app's one
-`UserDefaults` store, an instance over the defaults it is handed — logic tests hand it a suite of their
-own — and only `AppSettingsKeeper`, held by `ContentView`, carries a value between it and a
-`CanvasManager`. A new app-wide value goes there, never into a model `didSet`; `-resetEditorPreferences`
-forgets it for every UI test.
-
-### The simulator subsystem degrades over a long session, and it looks like your code
-
-MEASURED across one heavy session (2026-09-05, dozens of runs and several created/deleted devices), the
-host's simulator daemons became unreliable in **two different disguises**, both of which read as a
-finding and were not:
-
-- **The shared device refused to bootstrap a test runner at all** — *"Early unexpected exit … Test
-  crashed with signal kill before establishing connection"* — on every run, while the same test passed
-  seconds later on a freshly created device. `simctl erase`, reboot and detaching the simulator panel
-  did not fix it; a later `erase` did. The device kept launching and driving the app fine throughout;
-  it was only the XCUITest runner that would not attach.
-- **`backboardd`, `testmanagerd` and `SimRenderServer` crashed mid-run**, taking **8 tests** down with
-  them across two unrelated suites. The tell is in the log — three `Restarting after unexpected exit,
-  crash, or test timeout` blocks — and **no failing test emitted an assertion line**. A full re-run on a
-  fresh device came back 0 failed.
-
-**So a cluster of failures with no assertion messages is a sick host, not a broken change**, and the
-cheap confirmation is a whole re-run on a **newly created** device rather than an isolated re-run of
-each failure: isolation confirms one test, and what you want to know is whether the *run* was sound.
-Creating and deleting a device costs about a minute and settles it.
-
-**The sharper test is whether the failing SET repeats, and it beats the no-assertion-message rule
-because today's failures all had messages.** MEASURED 2026-09-10, at the end of a session that had run
-eleven full suites and created a dozen devices: two consecutive full runs **of one binary** produced
-**disjoint** failure sets — eight then three, **no test in both** — and every one passed in isolation.
-The first eight included five that read as one coherent regression (the vector eraser "cuts it into two
-parts" got one, "a fully covered stroke is deleted" got one not zero, "the cut should land" failed
-outright) in a branch that had just changed a panel's layout, which is about as convincing as a false
-finding gets. **Not one of the five reproduced on a freshly created device.**
-
-So: **a regression fails the same tests twice.** When two runs of the same bytes disagree about *which*
-tests fail, the run is the variable, whatever the assertion messages say — and the failing set is
-cheaper to compare than any single test is to debug. Rule out the cheap causes first (disk, clone
-debris, `Restarting after unexpected exit` in the log, a stray booted device), and if those are clean,
-re-run whole on a new device before reading the list as a finding. The fresh device is also a partial
-cure, not merely a control: eight failures became three on the same commit.
+  ```bash
+  until grep -qE "TEST SUCCEEDED|TEST FAILED|BUILD FAILED" /tmp/run.log; do sleep 20; done
+  ```
+  **Put "block on one wait; do not queue timers; do not spawn subagents" in every brief.**
+- **A cluster of failures with no assertion messages is a sick host** (`backboardd`/`testmanagerd`/
+  `SimRenderServer` crashes, a runner that won't bootstrap, `Restarting after unexpected exit` in the log):
+  re-run whole on a **newly created** device. **A regression fails the same tests twice** — two runs of
+  the same bytes failing *disjoint* sets means the run is the variable. Parallel clones also contend with
+  each other on a fresh device: failures that pass in a serial re-run are timing, not stale state.
+- **A harness that measures growth is measuring its autorelease pool** until proven otherwise: wrap
+  measurement loops in `autoreleasepool { }` and prefer counting your own allocations (cache bytes,
+  `MTLBuffer.length`) over `phys_footprint`; say so if you use the proxy.
 
 ### Triaging a failed XCUITest — do this before suspecting your change
 
-A one-off XCUITest failure here is environmental far more often than it is real, and re-running the
-full suite to check costs 22 minutes for an answer a 30-second run gives. **The isolated re-run is
-the confirmation. Do not re-run the suite to decide whether a failure was real.**
+A one-off XCUITest failure is environmental far more often than real; the isolated re-run (30 s, against
+22 min) is the confirmation — do not re-run the suite to decide.
 
 ```bash
-xcrun simctl shutdown all; xcrun simctl erase 75C8B97E-47AF-484B-B7D2-CA7EB1B51B03
+xcrun simctl shutdown all; xcrun simctl erase 75C8B97E-47AF-484B-B7D2-CA7EB1B51B03   # only if no other session is on it
 xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware \
   -destination 'platform=iOS Simulator,id=75C8B97E-47AF-484B-B7D2-CA7EB1B51B03' \
   -only-testing:PaintSoftwareUITests/<Suite>/<test> \
   -parallel-testing-enabled NO -derivedDataPath build/DerivedData
 ```
 
-**`<Suite>` is the test *class*, not the file it lives in, and for the classes you are most likely to
-be triaging those two names are different.** The 2026-08-15 split that took the full suite from 25.7 to
-18.8 minutes cut six heavy UI files into three classes each **without renaming the files**, so
-`VectorShapeAndRecoveryUITests.swift` holds `GalleryRecoveryUITests` among others, `LayerUITests.swift`
-holds `BlendModesAndCompositorUITests`, and `FillUITests.swift` holds `FillLiveAdjustUITests`. Deriving
-the suite name from the filename produces a selector that matches nothing — and **that failure is
-silent and reads as success**: `Executed 0 tests, with 0 failures` followed by `** TEST SUCCEEDED **`
-and exit 0. It is the same trap as the banner-versus-count one above, reached by a different door, and
-it cost a session one four-test triage run on 2026-08-27. Resolve the class from the source before
-building the selector:
+`<Suite>` is the **class**, not the file; a wrong selector reports `Executed 0 tests` +
+`** TEST SUCCEEDED **`. Resolve it from the source:
 
 ```bash
 python3 -c "
@@ -553,256 +245,28 @@ for f in glob.glob('PaintSoftwareUITests/*.swift'):
         if 'func '+t+'(' in line: print(cls, f)" <testName>
 ```
 
-**`-parallel-testing-enabled NO` is not optional here**, and its absence is what the owner was
-watching when they asked why running one test spawns three iPads: the scheme is parallelizable, so
-xcodebuild clones the device even for a single test, and the clone boots are pure cost when there is
-one class to distribute. Measured 2026-08-15, same test, twice: without the flag it ran on `Clone 1
-of eraser-mutex-test`; with it, on `eraser-mutex-test` itself (the xcresult's `deviceId` is the UDID
-above), and the string "Clone" appears nowhere in the run. **Do not change the scheme** — the full
-suite is 18.8 min *because of* that setting.
-
-If a run is killed mid-flight, sweep for strays before blaming the next failure on your change:
+Without `-parallel-testing-enabled NO` xcodebuild clones the device even for one test. After a killed
+run, sweep strays — clones live in their own device set, so plain `simctl list` never shows them:
 
 ```bash
-xcrun simctl --set ~/Library/Developer/XCTestDevices list devices          # clones live HERE
-xcrun simctl --set ~/Library/Developer/XCTestDevices delete <udid>
+xcrun simctl --set ~/Library/Developer/XCTestDevices list devices
+xcrun simctl --set ~/Library/Developer/XCTestDevices delete <udid>     # --set is needed on delete too
 ```
+A duplicated `Clone N of <device>` number is debris from a dead run; sweep after runs finish, never during.
 
-**`xcrun simctl list devices | grep -i clone` finds nothing, ever** — the advice this file gave until
-2026-08-16, and it cannot work: `xcodebuild` creates clones in its own device set at
-`~/Library/Developer/XCTestDevices`, not the default one. The failure is silent and reads as success.
-The owner was looking at eight iPad windows while three separate `simctl` sweeps and an agent's own
-cleanup check all reported zero clones; the five it could not see were a live full-suite run, and the
-sixth was a shutdown `Clone 3 of eraser-mutex-test` left by a killed run some time earlier. `--set` is
-the whole fix, and it is needed on `delete` as well as `list`.
+Passes clean → environmental: say so, name the test, move on. Fails clean → it is yours. **Erase is right
+for a state flake and the worst case for a timing one** — run a duration assertion warm first. A failure
+that also repeats in a serial batch is a leak between tests.
 
-**A duplicated clone number is the tell for debris.** One healthy run numbers its clones 1..N once, so
-two rows both named `Clone 1 of <device>` means one belongs to a run that died. If a run is live,
-leave them alone — you cannot tell from the name which of the two is which, and deleting the wrong
-one kills a suite mid-flight. Sweep after runs finish, not during.
-A run that finishes normally tears its own clones down — both runs above left zero behind — so
-anything this finds is debris from a run that did not.
+### pbxproj: two branches can mint the same object id
 
-**One simulator, many worktrees: check who else is on it before you erase it.** The multi-session
-protocol at the top gives each session its own worktree but they all inherit the same UDID from this
-file, and `simctl shutdown all` + `erase` is not scoped to the caller — it kills whatever another
-session is running on that device *and* takes your own run down with it. It surfaces as
-`Mach error -308 - (ipc/mig) server died` or `Invalid device state`, which reads exactly like a flaky
-simulator and is not. Session 25 lost three runs to it before looking:
-
-```bash
-pgrep -fl xcodebuild                                   # another session's test run?
-```
-If one is live, either wait for it or take a device of your own and leave theirs alone:
-
-```bash
-UDID=$(xcrun simctl create "<slug>" com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M4-8GB \
-  com.apple.CoreSimulator.SimRuntime.iOS-26-5) && xcrun simctl boot "$UDID"
-# ... run with -destination "platform=iOS Simulator,id=$UDID" ...
-xcrun simctl delete "$UDID"                            # when you are done
-```
-
-**Never kill by process name. `pgrep -f xcodebuild | xargs kill` is machine-wide, and it is the same
-trap as the shared UDID and the shared stash wearing a third costume.** An agent sweeping for *its own*
-strays on 2026-08-27 killed the orchestrator's verification run instead. The damage does not announce
-itself as a kill: the first attempt died with **exit 144 and no xcodebuild output at all**, and the
-retry produced **`Mach error -308 - (ipc/mig) server died` with `passedTests: 0`** — which is the
-signature this file already attributes to *contention*, so it was diagnosed as a loaded machine and the
-run was restarted into the same hazard. Two runs and a wrong diagnosis. Kill only PIDs you recorded when
-you started the process, or `pkill -f "$PWD"` scoped to your own worktree path; and read a `-308` as
-"someone touched my device", of which contention is only one cause.
-
-**And `pgrep -f` does not count processes, it counts *substrings* — including its own caller.** A run
-is a chain: the zsh wrapper, the `simlock.sh` bash, and the real binary all carry the string, so
-`pgrep -f xcodebuild | wc -l` reads about **3x** the number of runs, and a `grep` for the pattern matches
-the grep. On 2026-08-29 a worker built a wait gate on that count requiring it to reach **zero**, which it
-never could — it was counting itself — and then attributed the load to a session whose worktree had been
-merged and deleted an hour earlier, because it reused a stale `lsof` cwd read instead of re-taking it.
-The same family as reading the banner instead of the count: **a proxy was measured and reported as the
-thing.** Use `pgrep -x xcodebuild` for the count and an `lsof -a -p <pid> -d cwd` read, taken *now*, for
-whose it is.
-
-**Cleaning up after that is its own trap, and the obvious filter matches everything.** Protecting a live
-run by walking a seed's ancestors *and then all of their descendants* protects the entire tree, because
-every shell shares one Claude parent — measured at **962 processes protected out of 962**. The correct
-set is the seed's ancestor **chain** plus the seed's own **subtree**: 13.
-
-**Tell a worker how to wait, not just what to wait for.** Asked to hold until the machine was quiet, that
-same worker polled — and queued each poll as a *background task*, leaving **78 shells** sleeping 1800 to
-2700 seconds. They cost no CPU and fire a stale completion notification each, which reads as a stream of
-finished work that has not happened. A brief that says "wait" should say **block on one wait; do not queue
-timers**.
-
-**And polling a finished-or-not question costs tokens, not CPU, which is why nobody notices it.** The
-owner watched an agent run `cd <worktree> && true` — a command whose entire output is nothing —
-**over two hundred times in one chain**, waiting for a test run, 2026-09-08. Each one is a full
-request: the whole conversation re-sent, a tool call, an empty result. A 25-minute suite polled that
-way costs more than the suite. The owner: *"there has to be a better alternative than to mindlessly
-waste context like that."*
-
-There is, and it is one line. **Block on the condition inside a single command**, so one tool call
-covers the whole wait however long it takes:
-
-```bash
-until grep -qE "TEST SUCCEEDED|TEST FAILED|BUILD FAILED" /tmp/run.log; do sleep 20; done
-```
-
-Run *that* in the background if you want to do other work meanwhile — the harness re-invokes you when
-it exits, so there is nothing to check for. **Put this in every brief**, beside "do not spawn
-subagents": an agent told only *what* to wait for will invent the loop, and the loop it invents is the
-expensive one. The rule generalises past test runs — it is the same mistake as reading a banner
-instead of a count, in that a cheap proxy for "is it done" gets re-read instead of the real signal
-being waited on once.
-
-**A device of your own stops you erasing someone else's. It does not stop you starving the machine —
-wrap every run in [tools/simlock.sh](tools/simlock.sh).**
-
-```bash
-tools/simlock.sh xcodebuild test -project PaintSoftware.xcodeproj -scheme PaintSoftware \
-  -destination "platform=iOS Simulator,id=$UDID" ... -parallel-testing-enabled NO
-```
-
-`pgrep` above is a check, not a lock, and it fails precisely when it matters: several sessions each
-look, each see an idle machine, and all start at once. Measured 2026-08-16 with every session
-correctly holding its own device — 8 cores, 5 booted simulators, 5 concurrent `xcodebuild` runs,
-**1–3% idle**. At that load a suite does not merely run slowly, **it returns wrong answers**: the same
-shape-hold test passed and failed on the same binary depending on contention, and an agent spent a
-cycle tuning a timing constant against what was actually CPU starvation. That is the banner-vs-count
-trap in a new costume — a red result that is evidence about the machine, not about the code.
-
-`simlock.sh` holds one of `SIMLOCK_SLOTS` (default 2) for the life of the command, queues when they
-are taken, and reclaims a slot whose owner died so one `^C` cannot wedge the machine for everyone
-after. It needs no daemon and no cleanup. Raise the slot count only on a machine with more cores;
-two is sized for this one, where the full suite already fans out to four clones of its own.
-
-**The erase is right for a state flake and is the WORST case for a timing one**, and that asymmetry
-cost a session an hour on 2026-09-05. A wall-clock assertion measured **43 ms** warm in the suite,
-**95.8 ms** cold in-suite, and **207 ms** on the first run after a `simctl erase` — so the isolated
-re-run this section prescribes failed **4.7× worse than the suite had**, and read as confirmation of a
-real regression in a branch that had not touched the code being timed. The same test then passed 28/28
-twice on a warm device. **So before erasing, ask what the failing assertion is about**: if it names a
-duration, run it warm first and erase only if it still fails. Better, do not put a wall-clock assertion
-in the fast tier at all — the bench files are excluded by filename and exist for exactly this.
-
-Passes clean → environmental. Say so in the summary, name the test, and move on; it is not a
-finding and does not need a fix — **unless it also failed in a serial batch with the other failures**,
-which is a leak between tests rather than the machine (see "Passes alone" above). Fails clean → now it is yours, and you have a 30-second loop to
-debug it in instead of a 22-minute one.
-
-The erase is the whole trick: session 23 watched `testDroppingFolderOntoFolderNestsIt` fail twice
-and pass three times, and the split was exactly whether the simulator had been erased first —
-nothing to do with the code under test. Two of those five runs were spent bisecting against the
-previous commit for a regression that did not exist.
-
-### A harness that measures growth is measuring its own autorelease pool until you prove otherwise
-
-**This cost two agents a wrong conclusion on 2026-09-06, in unrelated code, within hours of each
-other**, and in both cases the wrong number was about to be written down as a finding.
-
-One was counting `UIGestureRecognizer` failure requirements across add/remove cycles and read **3, 6,
-9, 12, 15, 18** — textbook unbounded accumulation, and the basis of a filed suspect for the timeline
-freeze. The identical cycles wrapped in `autoreleasepool` read **18, 18, 18, 18, 18, 18**. Flat. The
-other was measuring what a document holds after a hundred-frame scrub and read **+1,617 MB**, which
-would have gone into PERFORMANCE.md as an unbounded leak; the real figure is **+321 MB**.
-
-Anything autoreleased inside a loop lives until the pool drains, and in a test that is usually the end
-of the test method — so **a per-iteration measurement counts every iteration before it.** The curve
-that produces is a straight line through the origin, which is exactly what a leak looks like.
-
-So: **wrap the body of any measurement loop in `autoreleasepool { }` before believing its slope**, and
-prefer counting what your own code allocated — cache bytes, `MTLBuffer.length`, entry counts — over
-`phys_footprint`, which includes the pool and the simulator's own noise. If you do use a footprint
-proxy, say in the write-up that it is one and what it includes. It is the banner-versus-count trap in
-its purest form: a number that is real, reproducible, and about the wrong thing.
-
-**`uptime` is not a usable signal on this Mac** and earlier guidance to check it was wrong. Its load
-average is a slowly-decaying artifact of simulator churn: it read 404, then 382, with zero booted
-simulators, zero uninterruptible processes, and 94.6% idle CPU. Read the real number instead:
-
-```bash
-top -l 2 -n 0 -s 2 | grep "CPU usage" | tail -1
-```
-
-### A subagent's worktree is not yours to commit, and the tree you verified is not the tree you push
-
-On 2026-08-28 an orchestrator watched a worker's test run finish, grepped its worktree, saw the change
-was clean, and committed / merged / pushed it — **and deleted the worker's worktree and branch** while
-the worker was still running. What it pushed contained `leaked.rotation += float.frame.boxAngle`, two
-lines the worker had just written **on purpose**: it was mutation-testing its own new test, checking a
-guard could actually catch the defect it guards against. `main` shipped with the exact bug the feature
-exists to prevent, and the commit message said "it reaches no geometry at all". The worker recovered
-its own work, reverted, and hardened — three commits where there should have been one.
-
-Two separate mistakes, and the second is the interesting one.
-
-**Do not act on a worker's tree before its completion notification arrives.** A finished *test run* is
-not a finished *agent*; the run is one step, and the most dangerous edits come after it. There is a
-notification for this and it is the only signal that means what you want.
-
-**And a green check is evidence about the tree that existed when you ran it.** This file already warns
-that a *red* xcresult is evidence about a binary rather than about your working tree. The same hazard
-runs the other way and nothing warned about that: the grep was true when it ran and false four minutes
-later, because someone else was still typing. Verification and commit must be the same instant on the
-same bytes — `git show <sha>:<path>` after the fact, not a grep before it.
-
-**The general rule, because mutation testing is not the only way to lose here:** a worker's working
-tree is a *workbench*, not a deliverable. It legitimately holds half-finished edits, deliberate
-poison, scratch harnesses and debug printf. Only the worker knows which bytes are the product. Harvest
-its *commits*, or wait for it to say it is done. If you are the worker: **commit first and mutate
-second**, or mutate in a throwaway copy outside any worktree, because a mutation on disk is
-indistinguishable from the implementation to anyone who picks that tree up.
-
-### `git stash` is per-repository, not per-worktree
-
-An agent working in `../PaintApp-<id>` used `git stash push`/`pop` to park its edits between test runs, and the
-`pop` landed **`stash@{0}` from a completely different session** — "Abandoned vector-interpolation index
-snapshot, 134 commits behind origin/main" — into its tree as ~45 conflicted files. Nothing was lost (both stash
-entries survived, and the agent reset to its branch tip and re-applied its own changes), but the recovery cost a
-cycle and it could as easily have been committed by an agent that did not look.
-
-The stash is a single stack on the repository. Every worktree shares it, and `pop` takes whatever is on top
-regardless of which worktree pushed it. **Do not use `git stash` in this repo at all.** To park work, commit it
-on your own `tmp/<id>` branch — a commit you amend or reset later is free, and it cannot be picked up by anyone
-else. This is the same class of hazard as the shared simulator UDID above: a tool that looks per-session and is
-actually machine-wide.
-
-### `origin/main` is a shared ref, so `git reset --hard/--mixed origin/main` is not a stable target
-
-Any session's `git fetch` updates the *repository's* `origin/main`, including sessions in other
-worktrees. An agent that reset to it mid-task on 2026-09-02 found it had moved under them and staged a
-revert of all nine files another session had just merged — caught in `git status`, nothing lost, but it
-would have been an invisible revert inside an otherwise ordinary commit. Reset to a **recorded sha**
-you took yourself, or to your own branch tip, never to a name that another process can repoint. Same
-family as the shared stash above and the shared simulator UDID.
-
-### Two branches can mint the same pbxproj object id, and git will merge them happily
-
-The app target auto-includes sources via `PBXFileSystemSynchronizedRootGroup`, but **the UI-test
-target has an explicit `PBXSourcesBuildPhase`**, so a new *test* file must be added to
-`project.pbxproj` by hand.
-
-**And so must the app file it tests, which is a second entry pair nobody expects.** A logic test in
-`PaintSoftwareUITests` cannot reach app types by `@testable import`, so any app source a logic test
-touches is compiled into the test target *a second time* and needs its own `PBXFileReference` plus
-`PBXBuildFile` — see `Effect.swift`, `InterpolationRecipe.swift`, `ShapeHoldClock.swift` and
-`AnimationCurve.swift`, all listed by full path rather than by bare filename. **So a new type plus its
-logic test is four object ids, not two**, and a check that looks up a bare filename finds nothing and
-reads as a missing entry when the entry is there under its path. Two branches each adding one therefore each invent an object id — and on
-2026-08-16 two of them independently invented the *same* pair,
-`B2C3D4E5F6001122334455F1`/`F2`, one for `StrokeSampleGate.swift` and one for `ShapeHoldClock.swift`.
-
-Git merged that without a conflict, because the two definitions are on different lines. Xcode then
-resolves a duplicate id to whichever definition comes later, which **silently dropped
-`StrokeSampleGate.swift` from the test target**. The build failed with `cannot find
-'StrokeSampleGate' in scope` in a test file nobody on either branch had touched — an error pointing
-at neither change, on a merge git reported as clean.
-
-Before adding a pbxproj entry, check the id is not already taken, and prefer one derived from the
-file name over a hand-typed sequence:
-
-**Do not take the next sequential id off a neighbouring entry** — that is what makes two branches
-collide, since both are counting from the same base. After any rebase that touches `project.pbxproj`,
-check for duplicates:
+The app target auto-includes sources, but **the UI-test target has an explicit `PBXSourcesBuildPhase`**: a
+new *test* file is added to `project.pbxproj` by hand, and so is any app source a logic test touches
+(compiled into the test target a second time under its full path: `Effect.swift`,
+`InterpolationRecipe.swift`, `ShapeHoldClock.swift`, `AnimationCurve.swift`) — a new type plus its logic
+test is four object ids, and a bare-filename lookup finds nothing. Do not take the next sequential id off a
+neighbour: two branches minted the same pair and git merged it cleanly while Xcode silently dropped a file
+(`cannot find 'X' in scope` in a file nobody touched). After any rebase touching `project.pbxproj`:
 
 ```bash
 python3 -c "
@@ -812,37 +276,28 @@ defs=re.findall(r'^\t\t([0-9A-F]{24}) /\* (.*?) \*/ = \{isa = (\w+)', src, re.M)
 c=collections.Counter(d[0] for d in defs)
 print([k for k,v in c.items() if v>1])"      # must print []
 ```
-If a merge produces a "cannot find X in scope" for a symbol neither branch touched, suspect this
-before suspecting the code. It is the same family as the `@discardableResult` merge in
-[BUGS.md](BUGS.md): two changes to different lines that compose into a defect neither had alone.
 
 ## The Windows laptop — the streamer host for TODO (27), (98), (99)
 
 `desktop-cbr0fl6`, `100.104.85.111` on the tailnet (the iPad is `100.70.220.4`). Reach it with
-`ssh -i ~/.ssh/paintapp_windows -o BatchMode=yes PC@100.104.85.111 '<powershell>'` — PowerShell 5.1
-is the login shell, the account has a full admin token, no password ever crosses the wire.
-**Two accounts, and it matters**: `PC` is the admin SSH logs in as; **`kevin` is the person at the
-screen**, and only kevin's session can capture it — an SSH-spawned process sees a fake 1024×768
-"WinDisc" display and no windows. **The streamer is a normal program on kevin's side (TODO (99)):**
-a Start Menu shortcut and a desktop shortcut launch `Streamer.Tray.exe` directly, nothing starts it
-at logon, and `SingleInstanceGuard` (a named pipe) stops a double-click from starting a second copy:
-a launch while one is running makes it show its window (from the tray, minimized or both) and exits,
-and replaces an instance that does not answer within 5 s (TODO (171)). The `PaintStreamer` Scheduled Task still exists, registered with an
-Interactive principal for kevin, but **carries no trigger** — it is on-demand only, purely the
-mechanism this Mac uses to reach into kevin's session over SSH (an SSH-spawned process cannot
-capture the screen, above), driven from here by:
+`ssh -i ~/.ssh/paintapp_windows -o BatchMode=yes PC@100.104.85.111 '<powershell>'` (PowerShell 5.1, `PC` has
+a full admin token). **`PC` is the admin SSH logs in as; `kevin` is the person at the screen**, and only
+kevin's session can capture it (an SSH-spawned process sees a fake 1024×768 display). The streamer is a
+normal program on kevin's side (`Streamer.Tray.exe`, shortcuts; nothing starts it at logon;
+`SingleInstanceGuard` named pipe makes a second launch show the running window, replacing an instance that
+does not answer within 5 s). The `PaintStreamer` Scheduled Task has an Interactive principal for kevin and
+**no trigger** — it is how this Mac reaches kevin's session:
 
 ```bash
 tools/windows/streamer-remote.sh status|start|stop|log [n]|sources|deploy|test
 ```
 
-`deploy` tars `streamer/` over (Windows has `tar.exe`; `COPYFILE_DISABLE=1` or macOS ships `._*`
-sidecars that `dotnet publish` tries to compile), builds with the .NET 8 SDK at `C:\dotnet`, publishes
-to `C:\Users\kevin\AppData\Local\PaintStreamer\app` and restarts the task. GStreamer 1.26.8 is at
-`C:\Program Files\gstreamer\1.0\msvc_x86_64` (the MSI series; 1.28 moved to an `.exe` with unknown
-silent flags). `winget` fails over SSH; use direct installers. A locked laptop cannot be captured and
-cannot be unlocked from here — the streamer says "The laptop is locked" and waits. Prove the laptop
-end with `tools/stream/stream-client-check.py --host 100.104.85.111` and the iPad end against
+`deploy` tars `streamer/` over (use `COPYFILE_DISABLE=1` or macOS `._*` sidecars break `dotnet publish`),
+builds with the .NET 8 SDK at `C:\dotnet`, publishes to `C:\Users\kevin\AppData\Local\PaintStreamer\app`
+and restarts the task. GStreamer 1.26.8 is at `C:\Program Files\gstreamer\1.0\msvc_x86_64` (the MSI
+series; 1.28 moved to an `.exe`). `winget` fails over SSH; use direct installers. A locked laptop cannot be
+captured or unlocked from here (the streamer says "The laptop is locked" and waits). Prove the laptop end
+with `tools/stream/stream-client-check.py --host 100.104.85.111` and the iPad end against
 `tools/stream/fake-streamer.py --pattern`; STREAM.md §4 is the rest.
 
 ## Deploy to iPad
@@ -850,17 +305,12 @@ end with `tools/stream/stream-client-check.py --host 100.104.85.111` and the iPa
 ### The install gate — `tools/playcheck.sh <udid>`, green before every install
 
 On an iPad (9th generation) simulator of your own: it erases and boots the device, samples the
-simulator's own `backboardd` and the app once a second from the Mac (`tools/sim-footprint-sampler.sh`,
-`phys_footprint` and the kernel's peak), and runs `PlaycheckGateUITests` — the owner's routine on a
-5000² five-layer scene at his 1080×810 window — which asserts both peaks after every phase:
-`backboardd` ≤ 450 MiB and the app ≤ 1,165 MiB (the derivations are in the test's header). Exit 0 and
-`playcheck: GREEN` is the only pass; it also refuses a run whose xcresult does not hold exactly one
-passed test. Run through anything else the test fails, because without the sampler it measures
-nothing. **What it replaced, and why:** the gate asserted `LayerContentsCensus`, a count of the
-pictures the app *knows* it hands the render server. It stayed green while `2891caad` crashed the
-iPad on Play, because what grew was the app's own memory, which the census cannot see (2.07 GB on this
-routine, TODO.md). A proxy gate is not a gate; measure the processes the iPad kills.
-
+simulator's own `backboardd` and the app once a second (`tools/sim-footprint-sampler.sh`, `phys_footprint`
+and the kernel's peak) and runs `PlaycheckGateUITests` — the owner's routine on a 5000² five-layer scene at
+1080×810 — asserting after every phase `backboardd` ≤ 450 MiB and the app ≤ 1,165 MiB (derivations in the
+test's header). `playcheck: GREEN` with exit 0 is the only pass; run through anything else the test fails.
+It measures the processes the iPad kills, not a proxy (`LayerContentsCensus` stayed green while
+`2891caad` crashed on Play).
 
 ```bash
 source ~/.config/paintapp/.env      # KEYCHAIN_PASSWORD, SIGNING_IDENTITY, PROJECT_DIR, PROJECT_FILE, SCHEME
@@ -879,96 +329,65 @@ if [[ $((EXP_EPOCH - $(date +%s))) -lt 3600 ]]; then
 fi
 xcrun devicectl device install app --device E3B83820-DF74-5042-B52B-0D5BA17E4877 <path>.app
 ```
-**A manual sign does not need the iPad**: once the iPad is registered with the team (it is), a
-`generic/platform=iOS -allowProvisioningUpdates` Release build mints the profile, and `install` works
-with the iPad locked. Naming the iPad as the destination makes Xcode wait for it to unlock. Only on
-*"Your team has no devices from which to generate a provisioning profile"* name it and pass
-`-allowProvisioningDeviceRegistration` (2026-10-08).
-Check the expiry before installing, not after: an expired profile is how "PaintApp is no longer
-available" recurred. **There is no minimum-life floor (owner, 2026-11-16)** — install any verified
-build whenever useful; a short-lived profile only means the auto-resigner signs sooner. The scheme's LaunchAction stays Debug (Xcode's Run button is for development); `-configuration
-Release` above is what makes the shipped build the one that's actually optimised — Debug measured
-62x slower than Release on the alpha-mask render path. `~/PaintApp/deploy/deploy.sh` does this but
-**pulls `main` first**, so it never ships branch work — run the steps above from the worktree
-instead. The first `install` often fails with `NWError 54`; just re-run it. **`CoreDeviceError 1011` — "unable to locate a device matching the requested device
-identifier" — has two causes, and `devicectl list devices` tells them apart. Always run it first.**
-- **`available (paired)`** → a stale tunnel, not a missing iPad. `xcrun devicectl device info details
-  --device <UUID>` re-establishes it (watch `lastConnectionDate` move) and the next `install`
-  succeeds; retrying `install` alone does not, so it reads like a dead device and is not one.
-- **`unavailable`** → the iPad really is unreachable: asleep, locked, or off the network. `info
-  details` still answers from cache with a *stale* `lastConnectionDate`, so it looks like it worked
-  and the install fails anyway. Nothing on this Mac fixes it — the owner has to wake the device. Say
-  so rather than retrying; three attempts cost a minute and prove nothing. Never pass the device by
-name (`devicectl`'s columns shift on the space in "Kevin's iPad") — use the UUID above.
+**A manual sign does not need the iPad** (it is registered with the team): a
+`generic/platform=iOS -allowProvisioningUpdates` Release build mints the profile and `install` works with it
+locked; naming the iPad as destination makes Xcode wait for an unlock. Only on *"Your team has no devices
+from which to generate a provisioning profile"* name it and pass `-allowProvisioningDeviceRegistration`.
+Check the expiry before installing (an expired profile is how "PaintApp is no longer available" recurred).
+**No minimum-life floor (owner, 2026-11-16)** — install any verified build. The scheme's LaunchAction stays
+Debug; `-configuration Release` is what ships (Debug is 62× slower on the alpha-mask path).
+`~/PaintApp/deploy/deploy.sh` **pulls `main` first** and never ships branch work — run the steps above from
+the worktree. The first `install` often fails with `NWError 54`; re-run. **`CoreDeviceError 1011` — run
+`devicectl list devices` first:**
+- **`available (paired)`** → stale tunnel: `xcrun devicectl device info details --device <UUID>`, then
+  `install` succeeds.
+- **`unavailable`** → asleep, locked or off the network (`info details` answers from cache with a stale
+  date); nothing here fixes it — say so, do not retry. Never pass the device by name (columns shift on the
+  space in "Kevin's iPad"); use the UUID.
 
-**Auto-resign** ([docs/RESIGN.md](docs/RESIGN.md), `tools/resign/`): signing and installing are
-separate stages over `~/.config/paintapp/resign_state`. *Sign* needs only the Mac — when the newest
-profile is expired or within 1 h, it builds Release for `generic/platform=iOS` (fetch best-effort, never
-downgrading the installed source), verifies, and stages the app in `~/PaintWork/device-*`. *Install*
-needs only the iPad — whenever it is listed available, the staged build goes on and is promoted to
-`LAST_*`. A user LaunchAgent ticks every 5 min; the root LaunchDaemon ticks hourly and arms `pmset`
-wakes around expiry. The owner is notified only when he must act, never for a locked iPad. After a
-**manual** install, update all four `LAST_*` fields atomically (import a branch commit into
-`~/PaintApp` first) and never before the install succeeds. Change the script in git, run
-`bash tools/resign/test-resign.sh`, then `tools/resign/install.sh` to pin it. Log:
-`~/.config/paintapp/resign.log`.
+**Auto-resign** ([docs/RESIGN.md](docs/RESIGN.md), `tools/resign/`): *sign* (Mac only) and *install* (iPad
+only) are separate stages over `~/.config/paintapp/resign_state`. Sign: when the newest profile is expired
+or within 1 h, build Release for `generic/platform=iOS` (fetch best-effort, never downgrading the installed
+source), verify, stage in `~/PaintWork/device-*`. Install: whenever the iPad is listed available, install
+the staged build and promote it to `LAST_*`. A user LaunchAgent ticks every 5 min; the root LaunchDaemon
+hourly, arming `pmset` wakes around expiry. The owner is notified only when he must act. After a **manual**
+install, update all four `LAST_*` fields atomically (import a branch commit into `~/PaintApp` first), never
+before the install succeeds. Change the script in git, run `bash tools/resign/test-resign.sh`, then
+`tools/resign/install.sh` to pin it. Log: `~/.config/paintapp/resign.log`.
 
-Simulator testing runs locally too — the Tailscale/SSH `deploy/mac/*` scripts are for the Windows
-machine, not this Mac.
+Simulator testing runs locally — the Tailscale/SSH `deploy/mac/*` scripts are for the Windows machine.
 
 **Physical-device UI harnesses own every gallery fixture they create.** Create a uniquely named test
-folder and uniquely named scenes at setup, and record their exact project IDs/paths as owned fixtures.
-In teardown/finally—including after an assertion or test failure—move only those recorded fixtures to
-Trash through the existing gallery UI, then verify a fresh ProjectExport inventory before closeout.
-Never run a reset-heavy simulator-base harness on the owner's iPad; preserve real app settings and brush
-and palette libraries. Do not add a product cleanup hook or delete unowned/general-named scenes.
+folder and scenes at setup, record their exact project IDs/paths, and in teardown/finally (including after
+a failure) move only those to Trash through the gallery UI, then verify a fresh ProjectExport inventory.
+Never run a reset-heavy simulator-base harness on the owner's iPad; preserve real settings and brush and
+palette libraries. No product cleanup hook; never delete unowned or general-named scenes.
 
 ## Action recorder — get the bug off the owner's iPad instead of guessing at a simulator
 
-The owner can reproduce a device-only bug in four seconds; an agent poking a simulator cannot
-reproduce it at all. `PaintSoftware/Debug/ActionRecorder.swift` turns those four seconds into one
-greppable JSONL file. **Reach for it before spending runs trying to reproduce something the owner
-saw and you can't** — the canvas freezes were found from 43 of its files.
+`PaintSoftware/Debug/ActionRecorder.swift` turns the owner's four-second reproduction into one greppable
+JSONL file (touches with pencil-vs-finger type and hit target, recognizer transitions, canvas decisions,
+model changes, one clock). **Reach for it before spending runs reproducing something you can't.**
 
-**Turning it on**: Settings menu → **"Record My Actions"**. Reproduce the bug, then **"Stop Recording"**.
+- **On**: Settings → **"Record My Actions"**, reproduce, **"Stop Recording"**. The **flight recorder is
+  always on** (last 90 s in memory), saving `flight-*.jsonl` when `CanvasTouchAudit` finds the canvas not
+  answering a hand (trigger `canvas`; `canvasMiss` names every recognizer then not at rest) or on Settings →
+  **"Save Last 90 Seconds"** (cost: PERFORMANCE.md §23).
+- **Where**: `Documents/Recordings/recording-yyyyMMdd-HHmmss.jsonl` (and `flight-…`), with Share/Delete in
+  Settings. Pull over the cable:
 
-**The flight recorder is always on and writes nothing until asked.** From the editor's first
-appearance `ActionRecorder` keeps the last 90 s of the cheap events (touch-began/-ended with the
-recognizers each bound, recognizer transitions, what the canvas decided about its touches, model changes,
-presentations) in memory, and saves them as `flight-*.jsonl` beside the recordings when
-`CanvasTouchAudit` finds the canvas not answering a hand (trigger `canvas`, silent; the `canvasMiss` line
-names what and every recognizer under the window then not at rest), or on Settings →
-**"Save Last 90 Seconds"** — so after a device-only glitch the owner does
-nothing, or taps that one row. Its cost on a
-stroke is PERFORMANCE.md §23 (below the stroke's own run-to-run noise).
+  ```bash
+  xcrun devicectl device copy from --device E3B83820-DF74-5042-B52B-0D5BA17E4877 \
+    --domain-type appDataContainer --domain-identifier Starg.PaintSoftware \
+    --source "Documents/Recordings/<file>" --destination ./
+  ```
+- A tap on SwiftUI chrome records `"target": null` (no accessibility client on the iPad); canvas and timeline
+  touches record fully — use `hitClass` and the next `model` line (`WindowEventTap.resolveTarget`'s doc comment has the
+  measurement); record under an XCUITest runner to name every element.
 
-**Where recordings land**: `Documents/Recordings/recording-yyyyMMdd-HHmmss.jsonl` (and
-`flight-…jsonl`), inside the app container. The Settings menu lists them with Share and Delete, so the owner can AirDrop one straight
-out. To pull one over the cable instead:
-
-```bash
-xcrun devicectl device copy from --device E3B83820-DF74-5042-B52B-0D5BA17E4877 \
-  --domain-type appDataContainer --domain-identifier Starg.PaintSoftware \
-  --source "Documents/Recordings/<file>" --destination ./
-```
-
-**What is in it**: every touch with its pencil-vs-finger type and hit-test target, every gesture
-recognizer state transition, what the canvas decided about its touches (`canvas.touches`, `stroke`), model
-changes and canvas transforms — all on one clock, so cause sits beside effect.
-
-**Its one real limitation, and it is not a missing identifier in the app.** A tap on SwiftUI chrome
-records its *position* but not the control's identifier (`"target": null`), because **iOS only builds
-SwiftUI's accessibility identities when an accessibility client is attached to the process** — which
-there isn't, on the owner's own iPad. Canvas and timeline touches are UIKit and record fully. When you
-read a file full of nulls: the `hitClass` and the `model` line just after the touch usually name what
-was tapped, and the emitted window-normalised coordinate still replays. Record with an XCUITest runner
-attached if you need every element named. `WindowEventTap.resolveTarget`'s doc comment carries the
-measurement.
-
-`tools/recording2xcuitest.py <file>.jsonl` turns a recording into a **draft** XCUITest — the tedious
-90% (which element, what order, how far apart), not something that compiles untouched. It refuses to
-downgrade a pencil touch to a finger, because XCUITest cannot synthesise a pencil at all and a quiet
-downgrade would give a green test for a broken app.
+`tools/recording2xcuitest.py <file>.jsonl` drafts an XCUITest from a recording (the tedious 90%; it does
+not compile untouched) and refuses to downgrade a pencil touch to a finger, since XCUITest cannot
+synthesise a pencil.
 
 ## graphify
 
@@ -977,51 +396,55 @@ Prefer over raw grep for orienting.
 graphify update .              # refresh (AST-only, no API cost) — after code changes
 graphify query "<question>" ; graphify path "<A>" "<B>" ; graphify explain "<concept>"
 ```
-[graphify-out/GRAPH_REPORT.md](graphify-out/GRAPH_REPORT.md) is tracked; `graph.json`/`graph.html`
-and dated snapshot folders are gitignored blobs. Commit a refreshed report when you refresh the
-graph. A `PreToolUse` hook ([.claude/hooks/graphify-guard.sh](.claude/hooks/graphify-guard.sh))
-nudges toward it; it resolves `graphify` from PATH and fails open if missing.
+[graphify-out/GRAPH_REPORT.md](graphify-out/GRAPH_REPORT.md) is tracked; `graph.json`/`graph.html` and
+dated snapshot folders are gitignored. Commit a refreshed report when you refresh the graph. A
+`PreToolUse` hook ([.claude/hooks/graphify-guard.sh](.claude/hooks/graphify-guard.sh)) nudges toward it;
+it resolves `graphify` from PATH and fails open.
 
 ## Docs
 
-[HANDOFF.md](HANDOFF.md) is **both the state of the repo and the prompt that starts the next
-session** — its first section is the block to paste. It used to be two files, HANDOFF.md and
-nextprompt.md, and they drifted apart inside a single day because the same state had to be written
-twice. Keep it one file. Rewrite the paste block when you close a pass; do not append to it.
+[HANDOFF.md](HANDOFF.md) is **both the state of the repo and the prompt that starts the next session** —
+its first section is the paste block. Keep it one file; rewrite the paste block when you close a pass, do
+not append. [TODO.md](TODO.md) is **the owner's asks, live** — record them when they arrive, delete them
+when done and merged; [BUGS.md](BUGS.md) is what *we* find. **At most three items in flight at once**,
+unless the extras need no simulator. TODO's **"Later"** items (28), (30) each need a design conversation
+with the owner before they start.
 
-[TODO.md](TODO.md) is **the owner's asks, live** — record them there when they arrive and delete them
-when they are done and merged, not when a branch exists. It is the counterpart to [BUGS.md](BUGS.md),
-which is for what *we* find. **At most three items in flight at once**, unless the extras need no
-simulator; the cap is about the machine, not the plan (see `tools/simlock.sh` and what five concurrent
-runs did to this Mac).
+Specs under [docs/](docs/) — read a spec's rulings rather than re-deriving them, and prune docs rather than
+appending status:
 
-[TODO.md](TODO.md)'s **"Later"** section holds the long-term features — items (26)-(28) and (30).
-**Each needs a design conversation with the owner before it starts**, and an item built from its TODO
-entry alone was built wrong.
-
-The feature specs and reference docs below live under [docs/](docs/) — most of them are archived
-rather than live, so they are kept out of the root alongside the session-level files above.
-
-[RENDER.md](docs/RENDER.md) is the rendering specification — **what was TODO item (29), closed 2026-09-06 and deleted from TODO.md** — the background baker that replaces live main-thread compositing, the on-disk frame store, export, and §5 stage 7's memory audit (PERFORMANCE.md §13 is that measurement; the two device measurements it still owes live in PERFORMANCE.md §10.4). **Its §2 is sixteen owner rulings; read them rather than re-deriving them.** The knob is the truth (§2.12): a frame whose textures do not fit the budget is composited in **horizontal strips** at full size (§3.8, `Engine/StripedComposite.swift`) and never at a smaller one — `CompositorBudget.affordableSize` is deleted. **§3.8 carries the trap that reaches past this feature: three memos — `PixelOps.RasterizeKey`, `MaskResolver.CacheKey` and `MetalCompositor`'s `UploadCache.Key` — are keyed on the buffer's *size*, so any future work that composites the same content into two equally sized buffers collides on one entry and gets the first one's pixels, silently.** The third of those has no CoreGraphics counterpart and was found only by running the byte-for-byte pin on the second backend.
-[KEYFRAMES.md](docs/KEYFRAMES.md) is the keyframe-animation specification — TODO item (21), designed 2026-08-28. **Its §2 is thirty owner rulings; read them rather than re-deriving them, and §8 is the build order.** Four of them (§2.1, §2.23, §2.24 and §2.28's closing rule) are **superseded and kept**: the owner reversed their own Animate-mode ruling on 2026-08-29 and §2.26/§2.27 replaced it with the keyframe-mark workflow — a keyframe is a bare mark in time, an edit between two marks holds its previous value, and the *next* mark commits it. §2.28 then settles what "a keyframe" *is* against the model: the **union** of the explicit marks and every frame a channel keys on, computed by one accessor and never stored twice — three device reports were the same divergence between those two lists, and **the third one found that §2.28's own closing rule was the cause**: it let a mark and a key both live at one frame, the graph editor could not repair that, and a dragged node left its mark behind as an indicator with no node. A mark a key lands on is dropped now. `keyframeMarks` itself cannot go — it is the only storage for §2.26's first step. The three that shape everything else: a transform key stores a **quad** from day one so Distort lands later with no migration; posed ink is drawn by **baking the dab walk in rest space** and mapping dab centres per frame, which removes the shimmer *and* the per-sample-width problem together; and **bake is an authoring feature, never a performance instruction** — smooth playback comes from a disk-backed frame cache, which is RENDER.md §3.5-3.7's store rather than §4.6's span-scoped design and is merged. **Stages 4 and 5 are both merged.** `PixelOps.RasterizeKey` and `LayerContentVersion` both carry `DerivedCelContent.identity`, so a posed frame cannot composite from a stale un-posed image; and the rest-space dab bake removed the grain boil, so the test that pinned that artefact is retired rather than red. **§2.16's Move half stays declined** and belongs to the brush overhaul, TODO (37). **(21) closed whole on 2026-09-12** — stage 6's bake was its last box (§6 carries what the build settled, and `StrokeDistort.rest` is the persisted rest walk it needed).
-[EFFECT_BACKDROP.md](docs/EFFECT_BACKDROP.md) is the specification for what an adjustment layer grades — the canvas paper is a `UIView` painted *behind* the composite, so every effect and blend mode is masked to the artist's own ink. **Fully ruled 2026-08-27; §6 is the build order and §2 is the two consequences that are inherent rather than incidental**: an effect that grades the paper makes the composite opaque, which is why the Behind onion skin moves above it in z-order; and filling paper into the accumulator destroys the alpha that Outline, Sobel and Bloom read as shape, which is what the ink-only input exists for. **Bloom and Sobel each get an artist-facing choice of input — Sobel's new default changes how it looks in existing documents.**
-[LASSO_FILL.md](docs/LASSO_FILL.md) is the lasso fill specification — the algorithm, its name in the literature, the edge cases decided, and what shipped applications do.
-[LASSO_MOVE.md](docs/LASSO_MOVE.md) is the lasso *move* specification — splitting strokes and fills at the selection boundary so only what is inside travels, and how much of it the vector eraser and the raster floating piece already built. **Its §5 is thirty-three owner rulings settled across six dates between 2026-08-21 and 2026-10-12; do not re-litigate any of them.** That count was "six" here until 2026-08-28 and had been stale for a week, which is worth knowing because this line is what a session reads *instead of* the file — and it went stale again within the day, at §5.22, and again at §5.24 and §5.25 later the same day, which is the argument for reading §5 rather than this sentence. The load-bearing ones: a lasso move moves **only what is inside the loop** (Move with no selection still moves the whole cel, which is correct as it stands); a split stroke becomes **two independent strokes**; selection is **by the centre line**, knowingly, so a thick stroke whose spine is outside the loop does not move; undo is **one step per nudge**, which covers the whole-layer transform too; the lassoed part **floats with move nodes and bakes on commit**, which is `FloatingPiece`'s existing lifecycle; a Freeform stretch scales ink by **`sqrt(|det|)`**, the map's area root, so the stretch arm reduces to the similarity arm exactly at `aspect == 1`; §5.19-21: the Move box **stays axis-aligned** with no automatic tilt, a stretch made about a hand-turned box **records the axis it was made about** (which completes the box's transform to a general affine rather than extending it), and turning the box **costs no undo step** — a deliberate exception to §5.5, not an amendment to it; and §5.23-24, the newest: in the Touching and Enclosed membership modes text and placed images follow the mode via their own quad rather than the centre rule, which stays for Cut, choosing Enclosed and catching nothing says so, unlike §5.9's silent empty lasso, because there the paper was blank and here the rule excluded a loop full of ink; and §5.25, that under Cut **Clear cuts at the loop** like the raster arm and like the fills it already cut, rather than deleting every element the loop touches; and §5.26, that **membership belongs to the selection rather than to Move** — the picker lives in the Select panel and **all three consumers obey it with no exception, Move and Recolour and Clear** (which supersedes §5.25's fixing of Clear on Cut), and the owner's word *"enclosed"* in that ask means the mode the app calls **Cut**, the only one that splits; and **§5.27**, that a lasso means what it means **on screen, on every frame** — including one where a pose channel shows the drawing somewhere other than where it is stored, which is why `activeVectorMoveTarget`'s `celPoseIsResting` refusal is gone and the loop is pulled back per element instead. **That ruling shipped as KEYFRAMES §8 stage 5a.** And §5.28-33, how the Select tool is used: every loop — the first, an add, a subtract — and Deselect is **its own undo step**, the Freehand lasso **takes taps as corners and closes on its start node** (a stroke lifted anywhere else stays open) and **survives the eyedropper**, and a drawn region **follows the artist to another layer and across every frame step** while a tapped set stays on its cel.
-[CANVAS_RESIZE.md](docs/CANVAS_RESIZE.md) is the canvas-resize specification — TODO item (9), the crop/expand and scale-to-fit modes, and the arithmetic of the letterbox map. **Read its §0 before touching anything on that path: `setCanvasPadding` is already a whole-document crop/expand and `VectorCanvas.mapping(_:throughSimilarity:)` is already the exact vector scaler, so the feature is mostly joining two things that exist.** Its §2 lays out the coupling to TODO item (8) with the cost of each option and **recommends** — not rules — that the fixed-point coordinate width be a property of the *format* rather than of the canvas extent, so that a resize re-encodes nothing; §6 is answered in full (2026-08-28).
-[LAYER_TRANSFORM.md](docs/LAYER_TRANSFORM.md) is the ruling on `VectorCanvas._transform` — whether a vector cel should carry an affine at all, or store every object in canvas coordinates. **Verdict: adopt, with changes** — eleven of its sixteen entry points invert it away again, and it carries three unfiled defects (ink drawn on a shrunk cel is clipped away, a scaled-up cel is a bitmap magnify, and interpolation drops the transform entirely). Its §6 is the honest answer to the bit-width question that started it: **the ruling buys no bits.** That §6 once concluded "(8)'s settled 24 stays 24" and this line repeated it; both are stale. 24 was the live decision for four minutes on 2026-08-26 before `35b541c` settled **16 bits an axis**, and §6 carries its own correction. The stale text was this line.
-[TRANSFORM_LAYER.md](docs/TRANSFORM_LAYER.md) is a **different feature with a confusingly similar name** —
-not `VectorCanvas._transform` above, but TODO (61): making the transform a `LayerKind` of its own with
-five modes (parallax, rotate, repeat, screen shake, duplicate offset). **Ruled and shipped in full on
-2026-09-11** — seventeen rulings in §2 (one reversed the same day: a transform layer's keys are cropped
-to its bar, not kept inert), §8's rows carry the commits. Its §3.4 region formulas and CPU blend count
-were corrected by the build; read the file, not the item that named it.
-[README.md](README.md) is the app and its architecture. [VECTOR_INTERPOLATION.md](docs/VECTOR_INTERPOLATION.md)
-is the interpolation feature — settled decisions and the future-upgrade list. [BUGS.md](BUGS.md) is
-open issues only. [PERFORMANCE.md](PERFORMANCE.md) is the ranked optimisation programme, the work
-ruled *not* worth doing, and every figure's provenance — read it before optimising anything, and
-label any number you add MEASURED or INFERRED. [ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) is a
-one-time survey (2026-08-22) of where a large feature will cost more than it should — four numbered
-findings, two closed in place and two (plus finding 3's atomicity half) still open as of 2026-09-06.
-[BRUSH_ENGINE_EXTENSIBILITY.md](docs/BRUSH_ENGINE_EXTENSIBILITY.md) and
-[REFACTOR_BASELINE.md](docs/REFACTOR_BASELINE.md) are reference. Keep them short: prune what is done
-rather than appending status.
+- [RENDER.md](docs/RENDER.md) — background baker, on-disk frame store, export (sixteen rulings in §2;
+  the knob is the truth, §2.12: a frame that doesn't fit the budget is composited in strips at full size,
+  §3.8, `Engine/StripedComposite.swift`, never smaller). **Trap (§3.8): `PixelOps.RasterizeKey`, `MaskResolver.CacheKey` and
+  `MetalCompositor`'s `UploadCache.Key` are keyed on the buffer's *size*, so compositing the same content
+  into two equally sized buffers collides and returns the first one's pixels.** Memory audit:
+  PERFORMANCE.md §13.
+- [KEYFRAMES.md](docs/KEYFRAMES.md) — keyframe animation (thirty rulings §2, build order §8; §2.1, §2.23,
+  §2.24, §2.28's closing rule superseded and kept). A keyframe is a bare mark; marks ∪ channel keys is
+  computed by one accessor, never stored twice; bake is an authoring feature, never a performance
+  instruction; `keyframeMarks` is the only storage for §2.26's first step so it stays; posed ink is baked in
+  rest space (`StrokeDistort.rest`) and `PixelOps.RasterizeKey` / `LayerContentVersion` carry
+  `DerivedCelContent.identity`; a transform key stores a quad; §2.16's Move half stays declined (TODO 37).
+- [EFFECT_BACKDROP.md](docs/EFFECT_BACKDROP.md) — what an adjustment layer grades (§6 build order).
+  Grading paper makes the composite opaque, and filling paper destroys the alpha Outline/Sobel/Bloom read —
+  hence their ink-only input choice.
+- [LASSO_FILL.md](docs/LASSO_FILL.md) — the lasso fill algorithm and edge cases.
+- [LASSO_MOVE.md](docs/LASSO_MOVE.md) — lasso *move*. **§5 holds thirty-three owner rulings; read it, do
+  not re-litigate** (selection by centre line, split strokes become two, one undo step per nudge,
+  membership belongs to the selection, on-screen meaning on every frame — `activeVectorMoveTarget`'s
+  `celPoseIsResting` refusal is gone — open lasso acts as closed, Freeform stretch scales ink by
+  `sqrt(|det|)`).
+- [CANVAS_RESIZE.md](docs/CANVAS_RESIZE.md) — TODO (9). Read §0: `setCanvasPadding` is already a
+  whole-document crop/expand and `VectorCanvas.mapping(_:throughSimilarity:)` the exact vector scaler.
+- [LAYER_TRANSFORM.md](docs/LAYER_TRANSFORM.md) — `VectorCanvas._transform` (adopt with changes).
+  **Not the same feature as** [TRANSFORM_LAYER.md](docs/TRANSFORM_LAYER.md), the transformation
+  `LayerKind` and its five modes (shipped).
+- [VECTOR_INTERPOLATION.md](docs/VECTOR_INTERPOLATION.md) — interpolation decisions (do not research or
+  rework it now); [SCHEDULER.md](docs/SCHEDULER.md) / [SCHEDULER_DESIGN.md](docs/SCHEDULER_DESIGN.md) — the
+  real-time rules and build order; [STREAM.md](docs/STREAM.md); [RESIGN.md](docs/RESIGN.md);
+  [BRUSH.md](docs/BRUSH.md); [ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md);
+  [BRUSH_ENGINE_EXTENSIBILITY.md](docs/BRUSH_ENGINE_EXTENSIBILITY.md) and
+  [REFACTOR_BASELINE.md](docs/REFACTOR_BASELINE.md) (reference).
+- [README.md](README.md) — the app and its architecture. [PERFORMANCE.md](PERFORMANCE.md) — ranked
+  optimisation programme, work ruled not worth doing, every figure's provenance: read it before optimising
+  anything and label any number you add MEASURED or INFERRED.

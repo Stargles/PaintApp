@@ -59,19 +59,16 @@ own branch, so `main`'s HANDOFF.md can be behind.
   The root agent acts as project manager: delegate investigation, implementation and focused
   verification with clear acceptance criteria. Root coordinates the shared native lane, reviews
   results and makes integration/release decisions without pulling routine test detail into its context.
-- **Keep the project and the machine lean (2026-11-17).** Delete finished worktrees, branches,
-  simulators, evidence and old builds instead of archiving them; a lean workspace is cleaner as well
-  as smaller. Details in CLAUDE.md, "Keep storage lean".
+- **Keep the project and the machine lean (2026-11-17):** delete, never archive — CLAUDE.md, "Keep storage lean".
 - **Keep going until you genuinely need him or the queue is done (owner, 2026-11-16, restated
   2026-11-18).** After a merge or install, start the next TODO item in the same turn. Asking "start the
   next one?" when it is already queued is not a genuine need; a ruling, an appearance trade-off or
   something only he can do is.
 - **The install gate runs without the iPad (owner, 2026-11-18).** The owner's 5-minute playcheck —
   play, step frames, erase in all three modes, undo, pan, fill on a 5000² five-layer scene — is a
-  simulator test that asserts the iPad's limits on the **measured** memory of the simulator's
-  `backboardd` and of the app (`tools/playcheck.sh`, CLAUDE.md "The install gate"), and the baked frame
-  shown on a step; no install without it green. Unlocking the iPad can cost him a drive,
-  so a device run happens only when it is already connected and unlocked — never wait or ask for it.
+  simulator test (`tools/playcheck.sh`, CLAUDE.md "The install gate"); no install without it green.
+  Unlocking the iPad can cost him a drive, so a device run happens only when it is already connected and
+  unlocked — never wait or ask for it.
   Every fix gets a test on the path the artist uses, not only on the code it changed: the play crash
   shipped three times because each guard covered the edit path and nothing ever pressed Play.
 - **A real scene is 300–1000 drawn cels.** Design memory around a window or budget, never "load it
@@ -122,16 +119,11 @@ own branch, so `main`'s HANDOFF.md can be behind.
   verify with `git log --oneline -1` on main.
 - In the same merge, delete your finished item **whole** from TODO.md. On a TODO.md rebase conflict,
   apply your removals to origin's copy — never keep your own copy (it resurrects finished items).
-- No `git stash` (one stack for every worktree). Never reset to `origin/main` (a shared ref) — only to
-  a sha you recorded.
 - `.git/hooks/post-checkout` rebuilds the graph and dirties the tracked `graphify-out/GRAPH_REPORT.md`
   on every branch switch, which blocks an `--ff-only` merge in that tree.
-- Your own simulator for every run (`xcrun simctl create`), deleted when done; wrap `xcodebuild test`
-  in `tools/simlock.sh`; `-parallel-testing-enabled NO` except for the full suite. Never `simctl
-  shutdown all`, never kill by process name.
-- Wait by blocking on one condition in a single command
-  (`until grep -qE "TEST SUCCEEDED|TEST FAILED|BUILD FAILED" log; do sleep 20; done`), never by
-  re-running a check.
+- Shared-resource rules (no `git stash`, no reset to `origin/main`, your own simulator wrapped in
+  `tools/simlock.sh`, never kill by process name, block on one wait): CLAUDE.md, "Persistent statics,
+  shared resources and the simulator host".
 - A device test needs the iPad unlocked ("Timed out while enabling automation mode" is the lock
   screen, reported as a test failure).
 

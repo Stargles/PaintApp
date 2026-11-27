@@ -2,34 +2,27 @@
 
 The owner's asks, live. Recorded when they arrive, deleted whole when done **and merged**.
 [BUGS.md](BUGS.md) is for what *we* find; [HANDOFF.md](HANDOFF.md) is the checkpoint, never the only
-record of an outstanding task. Items marked "(status unclear — check)" were carried from older notes and
-could not be verified as open or closed; verify against `main` and `git log`, then delete or fix.
+record of an outstanding task. "(status unclear — check)" means verify against `main` and `git log`,
+then delete or fix.
 
 ## Queue — the order work happens in (owner, Nov 21: *"communicate better … plan correctly"*)
 
 Every status report to the owner lists this queue with each item's state, not only what is in flight.
 "Installed" means the code on `main` — an ask below that is not marked shipped is **not** in it.
+Numbers are stable; a gap is a finished item.
 
-1. **Play crash** — measured: it is the **app's own memory** (1.9–2.5 GB on the simulator against the
-   iPad 9's 1,850 MiB app limit), not the render server (≤ 206 MiB now). Two producers fixed and merged
-   Nov 21 (renderers recording display lists; heavy objects freed only on main). **SCHEDULER.md stage 3
-   (one budget) merged and (as `adc8e327`) installed on the iPad Nov 25, owner to check:
-   `tools/playcheck.sh` GREEN four times**, app peak
-   1,138–1,142 MiB against the 1,165 gate (was 1,725 entering the scene at `ee0e672d`); every other
-   phase ≤ 1,073. `Engine/MemoryBudget.swift` is the one admission point (888 MiB on the iPad 9,
-   derivation in its header and PERFORMANCE.md §37). **Thin spot: Undo** — ~250 MiB the budget is not
-   asked about, 23 MiB under the gate; attribute it before an install (with (6)).
-   **Five resident layer pictures kept, measured**: on screen they are 477 MiB of the 888, and they are
-   what Undo repairs, what a bake of the shown frame reads with no walk, and what a pan redraws from.
-   A scene with more 5000² layers than fit (≈ 6 with a bake) refuses the extra pictures rather than
-   being killed; serving the layers that are not being edited from one composite is the next step if a
-   real scene needs it — owner to say whether Test1 grows past five layers.
-   Likely: the Nov 20 22:4x "crash" with no crash log was the resigner's test install (binary re-signed on
-   the iPad 22:49:34) killing the running app — see the resigner item.
-2. **Gallery shows the build** — merged Nov 21 ("Build <commit> · <date>"); reaches the iPad with (1).
-3. **Crash catcher** — merged Nov 21; reaches the iPad with the next install (with (1)).
-4. **Open lasso acts as closed for every action** (Nov 17 ruling) — merged Nov 21; reaches the iPad
-   with (1). Owner to check: draw an open C, then Copy, To New Layer, Clear.
+1. **Play crash** — the cause was the **app's own memory** (1.9–2.5 GB on the simulator against the iPad
+   9's 1,850 MiB app limit), not the render server. Fixed and installed (`adc8e327`, Nov 25), owner to
+   check on the iPad; `tools/playcheck.sh` GREEN, app peak 1,138–1,142 MiB against the 1,165 gate.
+   `Engine/MemoryBudget.swift` is the one admission point (888 MiB on the iPad 9; derivation in its header
+   and PERFORMANCE.md §37). **Thin spot: Undo** — ~250 MiB the budget is not asked about, 23 MiB under the
+   gate; attribute it before an install (with (6)). Five resident 5000² layer pictures are kept (477 of the
+   888 MiB): they are what Undo repairs, a bake of the shown frame reads and a pan redraws from. A scene
+   with more 5000² layers than fit (≈ 6 with a bake) refuses the extra pictures rather than being killed;
+   serving the unedited layers from one composite is the next step if a real scene needs it — owner to say
+   whether Test1 grows past five layers.
+4. **Open lasso acts as closed for every action** (Nov 17 ruling) — merged and installed; owner to check:
+   draw an open C, then Copy, To New Layer, Clear.
 5. **Scheduler build, S1–S9 (docs/SCHEDULER_DESIGN.md, merged Nov 25; owner rulings §7 pending).**
    **S1 merged, installed (`fe69a7c0`)**: scheduler core, frame reads as R1, one presenter swapping whole
    picture sets. MEASURED (iPad 9 sim, app clock): tap → whole frame **324–347 ms → 39–94 ms** at 5000²,
@@ -62,361 +55,157 @@ Every status report to the owner lists this queue with each item's state, not on
 6. **Undo latency / raster Undo budget** — rides on stage 3's one budget (merged). Undo is
    the playcheck's peak phase: ~250 MiB transient outside the budget (not the vector walk's
    transparency layers). `UndoHistory`'s own 192 MiB cap is not yet an entry in the one budget.
-7. **Re-check against `main`, then fix what remains:** stroke briefly disappears, stroke latency and
-   pan hitches, rapid-edit whole-iPad failures, Liquify shown while held, Move-exit gap,
-   the red `SelectionEditUITests` swatch test.
+7. **Re-check against `main`, then fix what remains:** stroke latency and pan hitches (open: live stamping
+   `DabImageCache.stamp` on main, Core Animation converting every landed picture on main because
+   `RasterSurface`'s byte order is not CA-native, the lift's `settleCelContent()` rendering one
+   window-sized eraser picture on main), rapid-edit whole-iPad failures, Liquify shown while held,
+   Move-exit gap, the red `SelectionEditUITests` swatch test.
    **Stroke-lift flicker (owner, Nov 26 on `ee72796b`: *"placing down a stroke still causes a brief flicker in the
    layer sometimes"*) — root-caused Nov 27, fixed, owner to confirm on the next build.** Two causes, both *ink drawn
-   twice*, which only a translucent brush shows (the simulator tests drew opaque black): (1) `retireUnlandedInk`
-   retired the model but left `heldInkView` up until some later pass, so for ~340 ms after the base landed the stroke
-   was drawn twice and then snapped back (every lift; his Round Soft at pressure-driven flow); (2) on main since
-   Nov 26 (`15327706`, not in his build) the flat row's under picture put a copy of the frame under the transparent
-   hosts for good a beat after each lift and took it away at the next touch; it is now **masked to the part of the
-   canvas no host has drawn** (`maskUnderPicture`: the canvas minus each host picture's on-screen quad), so it still
-   fills a pinch out's or a pan's revealed edge and is never under ink a host shows. `InkContinuityProbe` +
-   `InkContinuityUITests` read the committed layer tree after every main-thread turn and fail on both. Not S5: no
-   presenter set was involved.
+   twice*, which only a translucent brush shows: (1) `retireUnlandedInk` left `heldInkView` up for ~340 ms after the
+   base landed; (2) the flat row's under picture (`15327706`) put a copy of the frame under the transparent hosts
+   after each lift — now **masked to the part of the canvas no host has drawn** (`maskUnderPicture`).
+   `InkContinuityProbe` + `InkContinuityUITests` fail on both. The same rule covers erase (erased strokes
+   reappearing briefly) and frame changes: the screen never shows a mix of old and new pictures — hold the last
+   complete picture until every part of the new one is ready. Owner, Nov 25: check on the next build whether
+   *"brief flickering when i lay down multiple brushstrokes"* still happens before any more work.
 8. **Canvas freezes** — merged Nov 25 (`71f4fd6e`): one touch recognizer of our own replaces UIKit's pan /
-   pinch / rotation / tap web and the repair; all 43 flights replay clean. On the iPad since
-   Nov 25 (`c15ad799`); owner to confirm with fast three-finger redos and palm-down pans. Seven UI tests red on old
-   main too, to triage under (7): Distort corner, two `FillLiveAdjust`, `GuideUITests` grid, wide-picture
+   pinch / rotation / tap web (BUGS.md "The canvas stops answering two fingers"). On the iPad since
+   `c15ad799`; owner to confirm with fast three-finger redos and palm-down pans in `Ships` and Test1 (a
+   `flight-…` with trigger `canvas` is the report to pull; none is the answer wanted). Seven UI tests red on
+   old main too, to triage under (7): Distort corner, two `FillLiveAdjust`, `GuideUITests` grid, wide-picture
    Move box, `MenuInterruption` toolbar gap, `testDenyOutsideSelection…`.
 9. **One memory manager, not one per feature (owner, Nov 25: *"you decide … different features may have
    different specific memory management behaviors that they want programmed in … with some things needing
    to be strictly real time"*).** Decided: **go, designed together with stage 2 as one page** (time and memory
    are one admission question), reviewed before code. The page must settle:
    (a) *mechanism central, policy per feature* — a feature states facts (how it comes back: rebuild / disk /
-   never; cost to get back; predicted next use; smaller stand-ins it accepts, e.g. half-size or merged)
-   and may supply its own hooks; the manager alone decides when; no feature frees or spills on its own;
-   (b) *real time first* — R0/R1 run on reserved memory that nothing else may take and never wait on disk;
+   never; cost to get back; predicted next use; smaller stand-ins it accepts) and may supply hooks; the
+   manager alone decides when; no feature frees or spills on its own;
+   (b) *real time first* — R0/R1 run on reserved memory nothing else may take and never wait on disk;
    spilling and loading are R3 (R2 when predicted next), off main, stopped by a touch;
-   (c) *arbitration when several are queued* — one order (class, then cost-to-get-back per byte freed, then
-   recency), a floor per feature so none starves, limits against thrash (minimum stay, no spill of what
-   was just loaded), and a job that holds memory never waits for more; (d) one disk limit, write rate
-   bounded, spill only what is dearer to rebuild than to reload; (f) **use every core** (owner, Nov 25): core counts
-   read from the machine (the minimum, the iPad 9's A13, is 2 fast + 4 efficient cores and a GPU) — classes map to QoS (R0/R1 on the fast cores, bake /
-   thumbnails / spill on the efficient ones), big jobs split into tiles that run across cores, how many at
-   once set by cores *and* by memory (each parallel job needs its own buffers; today's bake allows 3), a
-   core always left for the pencil, GPU for what it does better, measured as throughput on the device's core
-   count and not the Mac's; (e) proof: the gate with a trace — zero
-   R1 waits on disk, zero spill/load work on main, hit rates per feature. Start with layer pictures (~500 of
+   (c) *arbitration* — one order (class, then cost-to-get-back per byte freed, then recency), a floor per
+   feature so none starves, limits against thrash (minimum stay, no spill of what was just loaded), a job
+   that holds memory never waits for more; (d) one disk limit, write rate bounded, spill only what is dearer
+   to rebuild than to reload; (e) proof: the gate with a trace — zero R1 waits on disk, zero spill/load work
+   on main, hit rates per feature; (f) **use every core** (owner, Nov 25): core counts read from the machine
+   (the iPad 9's A13 is the minimum: 2 fast + 4 efficient cores and a GPU) — classes map to QoS (R0/R1 on
+   the fast cores, bake / thumbnails / spill on the efficient ones), big jobs split into tiles across cores,
+   how many at once set by cores *and* memory (today's bake allows 3), a core always left for the pencil,
+   measured as throughput on the device's core count and not the Mac's. Start with layer pictures (~500 of
    888 MiB measured; unedited layers as two merged pictures); measure the stream before touching it.
-   (f) **Close the uncounted ~300 MiB (MEASURED Nov 26, S2 fix):** at the undo peak the app sits ~296–304 MiB above
-   what `MemoryBudget` holds, **on main too**; the gate's 277 MiB margin over the 888 budget only passes on slack.
-   S4 makes that memory asked-for (an R1 reserve, R2 pictures R1 can evict) instead of re-ruling the 0.48 fraction.
+   (g) **Close the uncounted ~300 MiB (MEASURED Nov 26):** at the undo peak the app sits ~296–304 MiB above
+   what `MemoryBudget` holds, **on main too**; the gate's 277 MiB margin over the 888 budget only passes on
+   slack. S4 makes that memory asked-for (an R1 reserve, R2 pictures R1 can evict) instead of re-ruling the
+   0.48 fraction.
 10. Audit follow-through, streaming on the real link, smaller asks below.
 11. **Liquify lags and 100% only smudges (owner, Nov 26, on `ee72796b`).** *"liquify needs to be real time. It seems to
     lag alot. Also when power is set to 100% (default) it should be powerful enough to completely grab the original
-    point under the pen, not just drag it like a smudge."* So: Liquify keeps up with the pen (SCHEDULER.md rules), and
-    at 100% the pixel under the pen at touch-down stays under the pen for the whole drag (a grab/translate, not a
-    decaying push); lower power blends toward today's smudge. Owner order: **after the scheduler (S2–S9)**.
-    Also (owner, Nov 26): *"liquify needs a visual indicator of how big the brush is when a stroke is being made.
-    same circle thing as the eraser."* Reuse the eraser's size circle (same view, not a copy) while a Liquify stroke is live.
+    point under the pen, not just drag it like a smudge."* Liquify keeps up with the pen (SCHEDULER.md rules); at
+    100% the pixel under the pen at touch-down stays under it for the whole drag (a grab, not a decaying push);
+    lower power blends toward today's smudge. Also: *"liquify needs a visual indicator of how big the brush is when
+    a stroke is being made. same circle thing as the eraser."* — reuse the eraser's size circle (same view) while
+    a Liquify stroke is live. Owner order: **after the scheduler (S2–S9)**.
 12. **Puppet warp — a Move mode (owner, Nov 26; Nov 27: *"make the queued puppet a move mode (like freeform or
     distort)"*).** A mode of the Move tool beside Freeform and Distort, acting on the selection (or the cel); not an
-    Edit-menu icon. Ruled Nov 26:
-    **raster and vector** (raster pixels bend like Liquify; vector strokes' points move, staying crisp and
+    Edit-menu icon. **Raster and vector** (raster pixels bend like Liquify; vector points move, staying crisp and
     editable); **pins: tap inside the selection to drop pins, drag one and the shape bends around it while the
     others stay put, tap a pin to remove it, commit with a button, one undo step.** No rotate handle. Reuse the
     ARAP solver (vector interpolation's lattice+ARAP) and Liquify's raster warp; build no second deformer. Owner
     order: **after the scheduler**, beside (11).
 
-## Current — iPad build `ee72796b` installed 2026-11-26, owner check pending (items below name older builds)
+## Current — iPad build `ee72796b` installed 2026-11-26, owner check pending
 
-- [ ] **Owner's check of `2891caad` FAILED (Nov 20, ~22:45, Test1).** Installed build confirmed `2891caad`
-  (latest main: includes the window surfaces `d72eb69f` and the To Cross fix `bd52b37f`).
-  (a) **Play crashes the app** — still; the 370 MiB simulator gate passed, so the gate does not model
-  what kills it. **No crash or JetsamEvent log on the iPad for Nov 20** (the Nov 18 ones exist), so
-  this is not an OS memory kill — find out what it is before fixing anything.
-  (b) **A frame step takes ~400 ms** and (c) **the drawing layer and the rest of the sandwich arrive
-  staggered and look different** — contradicts the claim that steps are instant and unstaggered. Code
-  read: `frameStepSettleSeconds = 0.5`; while settling `FrameBaker.image(for:)` returns nil on a ring
-  miss (no decode while flipping), and after the settle every layer re-renders its own picture.
-  (d) **Orange bars (the bake) take a couple of seconds per frame.**
-  **(a) measured on `tmp/nov21-play`, not merged, gate still RED.** What grows is the **app**, not
-  the render server. `tools/playcheck.sh` now samples the simulator's own `backboardd` and the app
-  (`phys_footprint` + the kernel's peak) through the routine; verified on `a893eccb` (the code that
-  killed the iPad's `backboardd` entering Test1): server 706 MiB entering, 951 over the routine. At
-  `40c8c005` the server never passed 206 MiB while the app peaked **1,916–2,524 MiB** (four runs) —
-  over the iPad 9's 1,850 MiB app limit (PERFORMANCE §15.5) on a 5×6 synthetic scene, so a heavier
-  Test1 pressing Play is the likely kill. Two producers fixed: (1) `PixelOps.transparentFormat` was
-  `.automatic` range, so every renderer recorded a display list that kept every image drawn into it
-  (the bake's three-at-a-time flatten held all five leaves plus re-decoded copies, 763 MiB live);
-  now `.standard`, immediate. (2) Default MainActor isolation gives every class without its own
-  `deinit` an isolated one: six `MetalFillSession`s (GPU buffers) let go on the fill queue waited for
-  a main thread busy with Undo — 2,292 MiB. 27 heavy holders are `nonisolated` now, guarded by
-  `tools/check-offmain-deinit.py` on the built app. With both: routine peak **1,740–1,804 MiB**, Undo no
-  longer spikes, steady 1,070–1,250. **Still over the gate's 1,165 MiB budget**: the steady state is
-  five canvas-sized host pictures (95 MiB each at 5000²) plus memos that each own 192 MiB
-  (`VectorRenderCache`, `PixelOps` flatten memo, the ring) — SCHEDULER.md stage 3's one budget — and
-  the entering/bake spike adds every vector render's second copy (`UIGraphicsImageRenderer` copies
-  its bitmap at `image{}`) on top. **Test1 itself could not be copied**: it lives in On My iPad/PaintApp
-  (File Provider storage), which `devicectl` cannot read; its bake files (Library/Caches, read-only)
-  show 5000² frames with large placed screen captures, ~25 MB compressed each, ≥20 frames.
-  No crash log for Nov 20 stays unexplained; the device's last launch signature is the 22:49 re-sign.
-  (b)/(d) seen in the same runs: the bake's display-list replay re-decoded every leaf per frame;
-  measure bake time per frame again after this branch before chasing it elsewhere.
-  (e) **The gallery's version (1.0.43 (1)) never changes** — the owner cannot tell which build he has.
-  Show the commit and build date; every build stamps it.
-  **(e) DONE on `tmp/nov21-version`, not merged**: `tools/stamp-build.sh` (build phase) stamps the built Info.plist
-  ("Build <sha8>[+] · Nov 20 22:31"; CFBundleVersion = commit count); `BuildLabelUITests` checks it.
-  Owner: *"Please fix everything and do it right. Don't screw up by poor planning and project
-  management."* Scheduler (docs/SCHEDULER.md) is not yet started — he asked whether it is.
-- [ ] **Owner's check of `e88cba87` FAILED (Nov 18 late).** Owner: *"I have no idea how this ever managed
-  to pass through all your tests, and if I caught this, then who knows what I did not catch."*
-  (a) **Play → heavy lag, then the iPad crashes** — the *third* time this regression has shipped;
-  prime suspect the new frame-change hold (a screen-sized snapshot per frame step, so per played frame).
-  (b) **Frame switching is not instant** — owner: frames are already baked, so a step should show the
-  baked frame at once; the hold covers the gap instead of removing it.
-  (c) **To Cross eraser still slow and the erased strokes flicker back** — recording saved on the iPad
-  (newest in Documents/Recordings).
-  **Fixed on `tmp/nov19-eraser`, not merged, owner to confirm on Test1:** a To Cross cut changes the
-  cut stroke's whole footprint, so one drag's live window grew to most of the 5000² canvas; past 12.6
-  million pixels its render was refused on the iPad 9 (192 MiB texture budget), the window was dropped
-  for the rest of the drag, the layer's older picture came back (the flicker) and the whole layer was
-  re-rendered every 0.25 s under the pen (the slowness). A victim no render had measured did the same.
-  Now the window is bounded to what the screen shows at the screen's resolution, an unmeasured victim
-  is measured at the cut, and a To Cross drag never falls back to re-rendering the layer.
-  `EraserFeedbackUITests` (red on main: 4 layer renders and 1 flicker-back in one drag).
-  (d) **Cut and Normal erasers draw no circle cursor**; To Cross does — all three need it.
-  **Fixed on `tmp/nov19-eraser`:** every vector eraser mode draws To Cross's ring (Cut and Erase at
-  the pen's pressure, To Cross at full size, as each resolves).
-  Gap to close with the fixes: no test played a baked scene on a 5000² document at the owner's size and
-  watched memory, and none timed a frame step against the baked frame.
-  **NEW — the iPad crashes while a 5000² scene is being seeded/opened (Nov 18, 23:33).** The opt-in
-  `DeviceStressUITests.testPlayAndStepFiveVectorLayersAtFullSize` (Debug build of the play fix) never
-  reached Play: ~34 s in, creating a 5000² canvas seeded 5 layers × 6 frames, backboardd was killed at
-  1,850 MiB (`~/PaintWork/nov18-owner-check/crash/JetsamEvent-2026-11-18-233341.ips`, log
-  `~/PaintWork/nov18-play-evidence/device.log`). The render-server census gate covers play and steps
-  only; extend it to open + first bake + seeding, find the producer, fix, then re-run the device test.
-  Likely the same family as Nov 16's "orange bars on entering a document".
-  **Found and fixed on `tmp/nov19-open`, not merged, device not yet re-run:** not the seed — every layer
-  host showed its cel as a canvas-sized bitmap (95 MiB at 5000²), so entering the scene handed the
-  render server 476 MiB of layers plus 47 of onion skin at once, every settled frame step five more,
-  every edit and undo one more: 6,825 MiB over the playcheck routine on the iPad 9 simulator. Layers,
-  the host's baked raster and the onion skin now reach the server as window-sized surfaces
-  (`CanvasPictureView`): 161 MiB entering, ~260 over the routine. Gate: `PlaycheckGateUITests` (the
-  owner's routine, budget 370 MiB over the whole session). Still canvas-sized bitmaps: the sandwich's
-  live halves and Move bands (blend-mode/effect/transform documents only), the lasso float.
-  **(a) and (b) fixed and installed in `2ecc771e`, play not yet confirmed on the device:** the bake reached the screen as a fresh
-  95 MiB bitmap per played frame (`belowView.image`) — 10,586 MiB handed to the render server in 12 s
-  of playback on the iPad 9 simulator; now a pair of window-sized surfaces (`BakedFrameWindow`), 25 MiB.
-  A step is a flip until it settles (`CanvasManager.framesAreFlipping`): it shows the bake, the hosts
-  render only once the playhead is still, under the bake; the snapshot hold is deleted. Gate:
-  `PlaybackSurfaceUITests` (red on `e88cba87`'s code). Owner to confirm play and steps on Test1.
-
-- [ ] **November 16 iPad test failed (owner, Test1, 5000², 5 vector layers).** Undo lag; the
-  circle-and-line Fill gap; rapid draw→Undo and rapid drawing blacked out / restarted the iPad; entering
-  a document showed orange bars ~10 s per frame. Owner: *a build this faulty must never reach the iPad;
-  fix everything, audit the repo for spaghetti, and keep going without stopping.* Owner's concern is
-  less-visible defects of the same kind, so the audit looks for them, not only for structure.
-  Lead: three Jetsam events all kill **backboardd at its 1,850 MiB limit** (app 626–816 MiB), so the
-  display server is drowning in surfaces the app hands it; every edit re-rasterized a whole 5000² vector
-  cel (350–640 ms); bakeComposite 2.2–7.4 s a frame. The Fill test line was Rough Ink at 0.1%,
-  pressure-varying. Owner also recalls Fill latency and a crash when rapidly filling several regions.
-  **Shipped Nov 17, awaiting the owner's hand test:** render-server pinning and 0.25 s render pacing,
-  band-from-memo bake, Undo trim that never wipes history (plus a notice), Fill at scale 1,
-  enclosed-ink Fill, Move lift repairing only the lifted footprint, and the recorder now logs tool
-  settings (owner: the missing settings were *a failure itself*). **Owner to confirm:** Undo lag, the
-  circle-and-line Fill (Mend Gaps with Reach sufficient must cover beneath the line while keeping the
-  circle's outer boundary), rapid draw/Undo, orange bars on entering Test1.
-- [ ] **Stroke latency and pan hitches on the Nov 17 build (owner, Nov 17 evening, Test1 5000²,
-  stream running).** Strokes sometimes lag noticeably and a canvas pan sometimes freezes for a split
-  second; owner suspects one underlying lag spike behind both. Owner: *"The main thread should never
-  freeze either way."* Recording `recording-20261117-220308` (in
-  `~/PaintWork/nov17-lag-evidence/`): main-thread run-loop passes of 113–796 ms every few seconds,
-  almost all in `sourcePhase` with no named span accounting for them (named main spans are ≤ 33 ms);
-  background `bakeComposite` 5.3–8.8 s per frame and `thumbnailFlatten` up to 794 ms run alongside.
-  Find what runs unattributed on main (stream frame handling, bake installs, `renderIsolated` on
-  main, IOSurface waits) and move it off; attribute every main-thread span the recorder sees.
-  **Found Nov 18 (simulator, WIP `tmp/nov17-hitch` @ `8a7c2bce`, NOTES.md in that worktree):**
-  (1) the live eraser re-renders all ink under it **on main** every move (`StrokeScratch.replaceCelContent`
-  → `CelContentPicture.rendered`) — one pass down a 5000² × 5-layer scene froze main 6.1 s (Debug);
-  draw that window off main into `WindowSurfaceView` like held edits; (2) live stamping
-  (`DabImageCache.stamp`, high-quality resample + per-dab brush copy) runs on main — ~17 ms at 6 px,
-  550–713 ms per event at big sizes; (3) Core Animation converts every landed picture on main because
-  `RasterSurface`'s byte order is not CA-native. Built, not gated: a main-thread stall sampler
-  (`mainStall` lines name the code), lift→base `ink` log, the frame bake paused while a touch is down
-  (+250 ms), thumbnails at `.utility`. The stroke flicker did not reproduce on the simulator.
-  **Installed Nov 18 (`e88cba87`), owner to confirm:** (1) is fixed — the live eraser renders off main
-  (big erase 6125 → 265 ms, simulator) — plus the stall sampler and the bake pause. **Still open:** (2)
-  live stamping on main; (3) the CA conversion; and the lift's `settleCelContent()` still renders one
-  window-sized eraser picture on main when the background one has not landed.
-- [ ] **Regression: a stroke briefly disappears after it is laid down, then reappears (owner, Nov 17
-  evening, build 9792e799, Test1 5000², Rough Ink).** Owner bets on *"a gap between some kind of
-  preview state and a baked state"*; this was fixed once before, so it is a regression — prime
-  suspect the Nov 17 render pacing (`DeferredVectorRender`, 0.25 s) / `DisplayPin` changes letting the
-  live ink go before the paced base picture lands (`UnlandedInk` exists for exactly this handoff).
-  Recording `recording-20261117-225331` (`~/PaintWork/nov17-lag-evidence/`) shows the strokes and
-  rasterizes but the recorder does not log the live-ink → base-picture handoff — make it.
-  **Owner, Nov 25:** still recalls *"brief flickering when i lay down multiple brushstrokes"* (build
-  `8545ac57`). His call: nothing now — check whether it still happens on the next build first.
-  **Same family, erase (owner, Nov 17 late):** erasing a lot at once, the erased strokes briefly
-  reappear and then vanish — the old base picture shown again before the erased one lands. Recording
-  on the iPad (newest after 22:53). One fix: the live picture stays until the base that matches it is
-  on screen, for adds and removes alike.
-  **Same family, frame change (owner, Nov 17 late, recorded on the iPad):** changing frames, parts
-  of the active layer are drawn over parts of the other layers for up to ~1 s before the frame settles;
-  a frame change must look near-instant. Likely regression. Rule for all three: the screen never shows
-  a mix of old and new pictures — hold the last complete picture until every part of the new one is ready.
-  **Frame-change cause found (different mechanism):** on a frame step the active layer's new cel has
-  no cached picture (the iPad 9 budget holds two 5000² renders), so the layer deliberately keeps its
-  previous picture — the previous frame's ink — over the new frame for up to ~1 s. Fix: hold the whole
-  previous frame, or show the baked new frame, until every layer of the new frame is ready.
-  **Installed Nov 18 (`e88cba87`), owner to confirm:** while any layer awaits its first picture of the
-  new frame, a screen-sized snapshot of the old frame covers the canvas
-  (`InteractionHitchUITests.testSteppingFramesNeverShowsAMixOfTwoFrames`: 8 mixed → 0). The simulator's
-  "vanishing stroke" was the test, not the app; the owner's stroke and erase flicker still need his
-  check. **Open:** a pan or zoom during the frame hold leaves the cover where it was.
-- [ ] **An open lasso selection acts as closed for every action (owner ruling, Nov 17).** Today an
-  open (unclosed) lasso lets Move work but the whole bottom selection bar — copy, duplicate to new
-  layer, etc. — does nothing. Owner: *"even if the lasso is open, it should still treat it as a closed
-  one. The circle to close it is for if the user wants to make a new selection."* Close the loop
-  implicitly (last point back to the start) for every consumer, and remove the Move-only special
-  case for open selections, which this makes redundant. Amends docs/LASSO_MOVE.md §5.29 — update it.
-  **Status (Nov 21, branch `tmp/nov21-lasso`, not merged):** the open lasso now writes the selection
-  itself (`syncSelectionToOpenLasso`), so the bar and Move read one `selection`; Move's special case
-  deleted; §5.29 amended. Needs the owner's check on the iPad: draw an open C, tap Copy / To New Layer /
-  Clear.
+- [ ] **November 16 iPad test (owner, Test1, 5000², 5 vector layers).** *A build this faulty must never reach
+  the iPad; fix everything, audit the repo for spaghetti, keep going without stopping* — the audit looks for
+  less-visible defects of the same kind. Shipped Nov 17, **owner to confirm:** Undo lag, the circle-and-line
+  Fill (Mend Gaps with Reach sufficient must cover beneath the line while keeping the circle's outer
+  boundary), rapid draw/Undo, orange bars on entering Test1. Owner also recalls Fill latency and a crash
+  when rapidly filling several regions.
 - [ ] **`SelectionEditUITests.testTheColourSwatchOpensThePickerOnTheLinesOwnColourAndTheLineFollowsItLive`
-  red on an iPad 9 simulator (Nov 17):** `emptyToolbarPoint` finds no 44 pt gap in the portrait
-  toolbar — the same stale premise fixed in `GraphEditorFingerUITests` by launching landscape.
-  Same failure in `SelectionEditLiveUITests`' two picker tests (Nov 21). Also red on `main` (Nov 21):
-  `SelectionAndMoveUITests.testDenyOutsideSelectionClipsStrokeUntilToggledOn` (Rectangle mode).
-- [ ] **Build the real-time scheduler — [docs/SCHEDULER.md](docs/SCHEDULER.md) (rules ruled Nov 17;
-  owner delegated them).** "Real time" in the owner's first prompt meant this; it was never built.
-  Five stages, each shipped and checked on the iPad. Owner may wait for a larger usage plan before the
-  migration (stages 2–5); stage 1 rides on the current hitch fix.
+  red on an iPad 9 simulator:** `emptyToolbarPoint` finds no 44 pt gap in the portrait toolbar (the stale
+  premise fixed in `GraphEditorFingerUITests` by launching landscape); same in `SelectionEditLiveUITests`' two
+  picker tests. Also red on `main`: `SelectionAndMoveUITests.testDenyOutsideSelectionClipsStrokeUntilToggledOn`
+  (Rectangle mode).
 - [ ] **Fix the November 16 audit findings** ([docs/AUDIT-2026-11-16.md](docs/AUDIT-2026-11-16.md), 18
-  ranked). Repeating defect: RAM-derived budgets (192 MiB on iPad 9) tested at 2048² that silently
-  decline, scale down or drop history at the owner's 5000². Silent refusals: done Nov 17 — artist-facing ones
-  already noticed except warp/posed raster (Move, warp, posed bake), which now say "Not enough memory
-  to do that"; Liquify's notice still says only "couldn't be prepared". **Open:** the canvas-size ceiling measures the app, not
-  backboardd's 1,850 MiB; (`CALayer.contents` installs audited Nov 17: each is one live surface
-  per layer; raster thumbnails no longer decode or keep a canvas-sized image); three bitmaps per vector cel; unbounded static caches; commit/un-suppress still invalidates
-  `.everything`; `renderIsolated` on the main thread. Add a gated 5000²×5-layer fixture for every budget
-  consumer (`DeviceStressUITests` is the device half).
-- [ ] **Raster Undo at 5000² is one whole-cel step (190.7 MB) against the iPad 9's 192 MB budget**, so
-  raster layers keep only the protected minimum of history. Price raster steps by dirty tiles, as vector
-  steps already are (0.11 MB a stroke).
+  ranked). Repeating defect: RAM-derived budgets (192 MiB on iPad 9) tested at 2048² that silently decline,
+  scale down or drop history at 5000². Liquify's notice still says only "couldn't be prepared". **Open:** the
+  canvas-size ceiling measures the app, not backboardd's 1,850 MiB; three bitmaps per vector cel; unbounded
+  static caches; commit/un-suppress still invalidates `.everything`; `renderIsolated` on the main thread. Add
+  a gated 5000²×5-layer fixture for every budget consumer (`DeviceStressUITests` is the device half).
+- [ ] **Raster Undo at 5000² is one whole-cel step (190.7 MB) against the iPad 9's 192 MB budget**, so raster
+  layers keep only the protected minimum of history. Price raster steps by dirty tiles, as vector steps
+  already are (0.11 MB a stroke).
 - [ ] **Fix severe Undo latency.** Owner: drawing is responsive on the latest Release, but Undo still has
-  *"enormous latency"*. Do not start another broad audit or testing/storage framework. Leads: settled
-  Undo's clipped repair copies a full image (~95 MiB per 5000² bitmap; PERFORMANCE.md §11.11b); On Top
-  stream surface work and vector rendering shared one serial queue, so a stream job waiting up to 500 ms
-  for an IOSurface could delay a settled Undo (a separate stream worker is in the source — check on the
-  iPad whether that was the delay Kevin saw). Simulator controls showed no stream-only excess and cannot
-  measure physical latency. On the iPad: one Undo per quiet interval, stream off vs a moving On Top
-  stream, counting rasters and timing tap to ink disappearance; use the recorder to pair an Undo press
-  with the accepted base picture. Change the renderer only if that comparison supports it.
+  *"enormous latency"*. No new broad audit or testing/storage framework. Leads: settled Undo's clipped repair
+  copies a full image (~95 MiB per 5000² bitmap; PERFORMANCE.md §11.11b); On Top stream surface work shared a
+  serial queue with vector rendering (a separate stream worker is in the source — check it was the delay). On
+  the iPad: one Undo per quiet interval, stream off vs a moving On Top stream, counting rasters and timing tap
+  to ink disappearance; pair an Undo press with the accepted base picture in the recorder. Change the
+  renderer only if that comparison supports it.
 
 ## Open reports and asks
 
-- [ ] **The auto-resigner broke again — "PaintApp is no longer available" (owner, Nov 20; ~10th time).**
-  Owner: *"Fix it well and fix it once. Remember the iPad might be locked, or the Mac might be off … When
-  the Mac is on and the iPad is unlocked it should automatically trigger so I don't have to tell you."*
-  **Merged and live Nov 21** ([docs/RESIGN.md](docs/RESIGN.md)): sign (Mac only,
-  generic destination, fetch best-effort) and install (iPad only) are separate stages over one state
-  file; a 5-minute user LaunchAgent plus the hourly root daemon's wakes; script tracked in
-  `tools/resign/`, pinned by `install.sh`, 14-case harness. Open: confirm the first real expiry (Nov 28 03:31 UTC) renews unattended.
-  **Defect (Nov 21): an install kills the app if it is running** — the rebuild's end-to-end test install
-  at 22:49 very likely is the owner's Nov 20 "crash" (no crash log). The auto-installer must never install
-  while PaintSoftware is running on the iPad (it would lose his unsaved strokes); defer until it is not.
-  **Fixed on `tmp/nov21-noinstall` (not merged, not re-pinned):** the install stage defers while the app is
-  running or the process query fails; harness case 3b. Orchestrator: merge, then `tools/resign/install.sh`.
-- [ ] **Catch iPad crashes without the owner (owner, Nov 19).** *"I shouldn't have been the one to catch
-  that iPad crash."* The app cannot catch a backboardd Jetsam in-process, but: (1) on launch, detect that
-  the last session ended uncleanly and save the flight recorder's last 90 s (persist it periodically so a
-  kill doesn't lose it) plus a "the iPad crashed last time" note; (2) MetricKit exit/crash diagnostics;
-  (3) a Mac-side pull of new `JetsamEvent-*.ips` / app crash logs via `devicectl` whenever the iPad is
-  reachable, flagged in the next session.
-  **Owner rulings (Nov 20):** on reopen after a crash show a **small fading notice** ("The app didn't
-  close cleanly last time — a crash report was saved"), report listed under Recordings in Settings. The
-  Mac pulls the iPad's crash logs **only when the owner asks** — no change to the hourly resign job; a
-  `tools/` script makes the pull one command.
-  **Status (merged Nov 21, not yet installed):** built — `UncleanExitWatch`
-  (foreground marker + persisted flight ring, promoted to `Recordings/crash-*.jsonl` on a launch that finds
-  the last run died in the foreground; a backgrounded end reports nothing), MetricKit diagnostics written as
-  `metrickit-*.jsonl`, the fading reopen notice (the flight badge's capsule, also drawn on the gallery), and
-  `tools/pull-ipad-crashes.sh`. Armed on the simulator only by `-uiTestCrashWatch`. Owner to confirm on the
-  iPad after the next install (a force-quit from the switcher is a background end and rightly reports
-  nothing; a real backboardd Jetsam or Xcode's Stop while drawing is what raises it).
-- [ ] **Intermittent whole-iPad failures during rapid edits.** Owner: black screen and brief restart
-  during draw → Undo → draw; also a crash after repeated Fill (Nov 11); Kevin confirms **rapid To Cross
-  erasing on Test1 (4096²) triggers the failure**. Coincided with rapid activity and a running stream.
-  Compare the same workload with and without a stream; check native stream-host rebuilds first, Fill's
-  full-size reference image (~95 MiB per pass when a stream is in the reference) and preview-to-base
-  handoff. Owner expects baked scenes to keep working memory bounded. A Nov 13 SystemMemoryReset report
-  names no killed process. Preserve exact Fill pixels; measure before naming a cause. Possibly related to
-  the 1,850 MiB backboardd finding above.
-- [ ] **Show vector Liquify while the stroke is held.** Owner: the iPad only shows the reshaping after
-  lift. Points should follow the gesture live, with exterior ink fixed and raster / linked in-between
-  behaviour preserved. Live-preview fix is installed; **real-Pencil confirmation is open.**
-- [ ] **Canvas freezes — fixed in code, awaiting the owner's confirmation on the iPad.** The cause and what
-  replaced it are BUGS.md's "The canvas stops answering two fingers". To confirm: fast three-finger redo
-  taps, two-finger pans and pinches with the palm down, in `Ships` and Test1. A `flight-…` with trigger
-  `canvas` after the install is the report to pull; none is the answer wanted.
-- [ ] **Confirm the one-tap Move report in Test.** On a saved scene, lasso visible vector ink and tap Move
-  once; the untouched box stays up; one Undo cancels the zero-nudge lift. Use a disposable copy for a
-  drag or Set Down. Also verify older physical workflows on real scenes (clipboard menus, Mend All Fills,
-  saving and recovery).
+- [ ] **Auto-resigner ("PaintApp is no longer available", ~10th time; owner Nov 20: *"Fix it well and fix it
+  once"*).** Merged and live ([docs/RESIGN.md](docs/RESIGN.md)); the install stage now defers while the app
+  runs. Open: confirm the first real expiry (Nov 28 03:31 UTC) renews unattended.
+- [ ] **Crash catcher (owner, Nov 19).** Merged and installed: `UncleanExitWatch`, MetricKit diagnostics, the
+  fading reopen notice, `tools/pull-ipad-crashes.sh` (pull only when the owner asks). Owner to confirm on the
+  iPad (a force-quit is a background end and rightly reports nothing; a real backboardd Jetsam or Xcode's Stop
+  while drawing is what raises it).
+- [ ] **Intermittent whole-iPad failures during rapid edits.** Black screen and brief restart during draw →
+  Undo → draw; a crash after repeated Fill (Nov 11); **rapid To Cross erasing on Test1 (4096²)** triggers it.
+  Coincided with a running stream. Compare with and without a stream; check native stream-host rebuilds, Fill's
+  full-size reference image (~95 MiB a pass with a stream in the reference) and preview-to-base handoff.
+  Preserve exact Fill pixels; measure before naming a cause. Possibly the 1,850 MiB backboardd finding.
+- [ ] **Show vector Liquify while the stroke is held.** Live-preview fix installed; **real-Pencil
+  confirmation is open.**
+- [ ] **Confirm the one-tap Move report in Test.** Lasso visible vector ink and tap Move once; the untouched
+  box stays up; one Undo cancels the zero-nudge lift. Use a disposable copy for a drag or Set Down. Also
+  verify older physical workflows on real scenes (clipboard menus, Mend All Fills, saving and recovery).
 - [ ] **Move-exit gap.** Owner prefers the lifted drawing stays visible until the compositor's finished
-  picture shows; stream displacement happens after release or Set Down. (Status unclear — check whether
-  the shipped Set Down continuity covers it.)
-- [ ] **Windows streaming on the real link** — see (27) below. Tailscale showed the laptop online but SSH
-  rejected the key on Nov 14; the stream host's TCP accept can replace an active iPad, so probe only from
-  the real desktop session with Kevin, and avoid hosts that repeatedly prompt for firewall access. Do not
-  poll an unreachable host. Qualify bounded Windows discovery (DNS name limits) on the real host too.
+  picture shows; stream displacement after release or Set Down. (Status unclear — check whether the shipped
+  Set Down continuity covers it.)
+- [ ] **Windows streaming on the real link** — see (27). The stream host's TCP accept can replace an active
+  iPad, so probe only from the real desktop session with Kevin; avoid hosts that repeatedly prompt for
+  firewall access; do not poll an unreachable host. Qualify bounded Windows discovery (DNS name limits) on
+  the real host too.
 - [ ] **Deferred: view previous crash reports in the app**, like recordings. Owner: *"at some point if it
   is possible."* Wait until requested.
-- [ ] **Old saved Views can hide a group's descendants** when last saved with the group visible (old writer:
-  Hide → Add View → All → Save). Repair each saved visibility state in the one-shot migration; keep the
-  current-format guard. (Status unclear — check; a fix `d5ff1463` was reported passing.)
 - [ ] **Retire the inline legacy migrations** (compositor Input A/B slot ranking; pre-group-property
-  marker) through the one-shot package repair, preserving Projects/Backups/Trash and order, then delete
-  the decoder branches. No new permissive decoder route. (Status unclear — check.)
+  marker) through the one-shot package repair, preserving Projects/Backups/Trash and order, then delete the
+  decoder branches. (Status unclear — check.)
 - [ ] **Bound stream timing storage between displayed pictures:** keep only count, total and max in the
   existing measurement owner, preserving cadence and log output. (Status unclear — check.)
-- [ ] **Smaller audit findings from October 29 (status unclear — check each against `main`):** shape
-  handles divide by a non-positive canvas scale during a tiny pinch (reuse the object overlay's guard);
-  `AddMenu.primePhoto` silently swallows photo import failure (reuse the existing menu notice); a placed
+- [ ] **Smaller audit findings from October 29 (status unclear — check each against `main`):** shape handles
+  divide by a non-positive canvas scale during a tiny pinch (reuse the object overlay's guard); a placed
   picture saved at scale 2 reloads at scale 1; Release UI-test target should build only the active
-  architecture; curve-flattening step count converts an unbounded length before its 64-chord cap (fix
-  reported harvested); compiler-warning triage (259 occurrences, 182 distinct rows — not 182 bugs; no
-  blanket `nonisolated(unsafe)`, no scheduling changes without tracing callers).
+  architecture; compiler-warning triage (259 occurrences — no blanket `nonisolated(unsafe)`, no scheduling
+  changes without tracing callers).
 - [ ] **Architecture audit follow-through (status unclear — check).** Owner, 2026-10-24: *"codebase
-  cleanliness and good architecture as well as performance is a priority"*, *"refactor things that are
-  messy and also find and fix bugs"*, *"Zombie code or bloat … should be dealt with. Dont be afraid to
-  prune."* Root causes, remove superseded paths whole, design for a 300–1000-cel window/byte budget,
-  measure claims. Findings are in docs/ARCHITECTURE_AUDIT.md; most source was reported implemented
-  (library relocation / Trash ownership, export cancellation, mask and video budgets, raster residency,
-  bounded stream writer, brush preview cache, curve drag, Mode1 eraser seed handoff, text restoration,
-  graph capacity, effect numeric domains). Whatever final-source gates were never run should be run once
-  on `main`, not re-narrated here. Mode3 (To Cross) per-sample full-base work was replaced by the
-  admitted window; final Release cost and the crash cause remain unmeasured.
-- [ ] **macOS prompts for ChatGPT access to OneDrive / other app data** (owner saw them; cause unproved).
-  Keep scope to the repository, PaintWork and owned-simulator paths; do not scan cloud folders or change
-  privacy settings. (Status unclear — check.)
+  cleanliness and good architecture as well as performance is a priority"*, *"Zombie code or bloat … should
+  be dealt with. Dont be afraid to prune."* Findings in docs/ARCHITECTURE_AUDIT.md, most reported implemented;
+  run whatever final-source gates were never run once on `main`. Mode3 (To Cross) final Release cost and the
+  crash cause remain unmeasured.
+- [ ] **macOS prompts for ChatGPT access to OneDrive / other app data** (cause unproved). Keep scope to the
+  repository, PaintWork and owned-simulator paths; do not scan cloud folders or change privacy settings.
+  (Status unclear — check.)
 
-**Owner working rulings that outlive any item:** an owner report lands here before any worker starts;
-a blocked release must not stop other open work (run independent tasks in parallel); root causes, not
-workarounds; old files are repaired once by a throwaway script and the decoder knows only the current
-format (below).
+**Owner working rulings that outlive any item:** an owner report lands here before any worker starts; a
+blocked release must not stop other open work; root causes, not workarounds; old files are repaired once by
+a throwaway script and the decoder knows only the current format.
 
 ---
 
 ## (27) Stream the computer's screen as a layer
 
-Built through stage 4 ([STREAM.md](docs/STREAM.md)): the Windows streamer (`streamer/`, the
-`PaintStreamer` task on `desktop-cbr0fl6`), the iPad stream layer, the bar with Freeze / Bake Frame,
-files both ways. **Remaining is stage 5 on the real link, with the owner at the laptop.** The owner's
-brief (2026-09-13), as it still constrains: stream the Windows screen as a layer live (Blender
-rotoscoping, moving the camera, continuing); a Windows-side drop box for images/videos and, if possible,
-iPad export back to the laptop; the stream tool under actions, one layer holding the stream object; an
-options bar with Freeze and Bake Frame (Bake splits the cel and replaces the stream with an image of that
-frame); *low latency, must not lag the main thread*; movable with the Move tool; *many screens or one
-specific app*; a streamer designed so it could one day merge into a Windows build of the paint app; the
-computer may be turned off and on mid-session; *"stream layers actively moving do not have to be
-rendered."*
+Built through stage 4 ([STREAM.md](docs/STREAM.md)). **Remaining is stage 5 on the real link, with the owner
+at the laptop.** The brief (2026-09-13), as it still constrains: stream the Windows screen as a layer live
+(Blender rotoscoping); a Windows-side drop box for images/videos and, if possible, iPad export back; one layer
+holding the stream object; options bar with Freeze and Bake Frame (Bake splits the cel and replaces the stream
+with an image of that frame); *low latency, must not lag the main thread*; movable with Move; *many screens or
+one specific app*; a streamer that could one day merge into a Windows build of the app; the computer may be
+turned off and on mid-session; *"stream layers actively moving do not have to be rendered."*
 
 - [ ] Owner streams Blender to the iPad and rotoscopes over it; source switch, window close, laptop lock
       and reboot behave as STREAM.md §4.5 / §2.8 say.
@@ -460,20 +249,17 @@ None is designed; each needs its own conversation with the owner before it start
 
 ## How to read and keep this file
 
-Items are in queue order. An item leaves **whole** when it is merged, not when a branch exists — owner,
-2026-09-06: *"Basically I want to be able to read the tasks on TODO clearly without already finished
-tasks."* Write what the artist sees or wants, the current lead, and the owner's own words where they
-constrain the fix; what happened this pass belongs in `git log` and HANDOFF.md. Receipts, gate counts and
-evidence paths do not belong here. Check an existing item before adding one in different words. Cite a
-symbol, not a line number. Three in flight at once unless the extras need no simulator. Verify a status
-before trusting it, including this file's own. A bare item number in a spec or code comment may name an
-item that has already left; `git log` resolves it — do not re-add a finished item to make a citation work.
+Items are in queue order and leave **whole** when merged, not when a branch exists (owner, 2026-09-06:
+*"Basically I want to be able to read the tasks on TODO clearly without already finished tasks."*). Write
+what the artist sees or wants, the current lead, and the owner's own words where they constrain the fix;
+receipts and gate counts belong in `git log` and HANDOFF.md. Check an existing item before adding one in
+different words. Cite a symbol, not a line number. Three in flight at once unless the extras need no
+simulator. Verify a status before trusting it, including this file's own. Do not re-add a finished item to
+make a citation work.
 
-**Old files are repaired once, never read forever.** Owner, 2026-10-10: *"I will still keep the rule of no
-legacy code. If an update causes existing files to be outdated, then they should be automatically
-repaired by a throwaway script the session makes."* A format change ships a one-shot repair of the
-owner's Projects, Backups and Trash at launch; the decoder knows only the current format; the repair is
-deleted once the owner confirms their files are repaired.
+**Old files are repaired once, never read forever** (owner, 2026-10-10: *"no legacy code … repaired by a
+throwaway script the session makes"*): a format change ships a one-shot repair of Projects, Backups and Trash
+at launch; the decoder knows only the current format; the repair is deleted once the owner confirms.
 
 The measurement baseline is [PERFORMANCE.md](PERFORMANCE.md) §1 (the owner works at 2048×1024, though the
 Nov 16 test scene is 5000²).
