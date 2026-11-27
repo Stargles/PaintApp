@@ -507,7 +507,12 @@ final class FillLiveSliderLogicTests: XCTestCase {
                 XCTAssertEqual(try celBytes(manager, layer: 0), before, "the fill is still off the document")
                 manager.goToFrame(origin + 1) // The same entry the timeline's scrub calls.
                 XCTAssertEqual(manager.currentFrame, origin + 1)
-                XCTAssertFalse(manager.fillGestureActive, "the outgoing draft is settled before the new frame is used")
+                if !waitForLanding {
+                    // Before its first picture there is nothing to bake, and the main thread does not wait
+                    // for one (SCHEDULER.md rule 1): the step goes ahead and the fill is baked as it lands.
+                    spin { !manager.fillGestureActive }
+                }
+                XCTAssertFalse(manager.fillGestureActive, "the outgoing draft is settled")
                 let landed = try celBytes(manager, layer: 0)
                 results.append((sample(landed, at: CGPoint(x: 28, y: 24)),
                                 sample(landed, at: CGPoint(x: 12, y: 24)),

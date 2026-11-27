@@ -501,6 +501,20 @@ are gone from the app: a fill tap (bucket or lasso) made while the live fill has
 be baked when it lands instead of waiting (`fillCommitsOnLanding`). `Scheduler.waitUntilIdle` now serves tests only
 (`CanvasManager.waitForFillWork` lives in the test target).
 
+**An Undo while a fill is still drawing takes that fill back** (`takeBackDrawingFill`: the newest queued tap, else the
+drawing fill) and the press is spent; a Redo then has nothing to redo. Found by the playcheck: with the old wait gone
+the press fell through to the step before the fill — four Undos took back the eraser, the cut, the To Cross erase and
+one setup step, and the fill landed on top after them.
+
+**Gate (iPad 9 sim, 5000² × 5 layers, main `ac97b9a1` → S3b):** GATE_NUMBERS
+
+**The brief's premise, refuted:** R1 `late` was not whole-cel renders an edit's repair could have avoided. They are
+`layer picture` renders of cels that are not memoized — the scene entering (5), and every frame step whose hosts
+re-render the new frame's five cels one after another in one group (19 of main's 30) — and no repair applies to a
+picture that was never drawn. S3b's cancellable walks drop the steps' stale renders (a step-away cancels the walk
+mid-cel), which is the reduction; what remains is §4 row 6's *cut* — the hosts behind a baked frame — which the design
+classes R2, not R1, and S5/S6 make cheap (three pictures, tiled walks).
+
 **Not built here:** the Move lift's `renderIsolated` still runs on main (§6 S3b row) — see TODO (5).
 
 ## 7. Owner rulings (Nov 25)

@@ -226,7 +226,7 @@ extension CanvasManager {
         guard fillLastRender == nil else { return true }
         fillLock.lock()
         defer { fillLock.unlock() }
-        return fillAnsweredGeneration == fillGeneration
+        return fillRenderedRegion?.generation == fillGeneration || fillAnsweredGeneration == fillGeneration
     }
 
     /// A tap the fill tool could not begin yet — see `queuedFills`.

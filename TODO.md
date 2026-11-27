@@ -57,9 +57,10 @@ Numbers are stable; a gap is a finished item.
    moment late** — caused by `d72eb69f`'s window-sized pictures (only the visible window is drawn, so
    newly revealed edges wait for a redraw). Owner: minor, fix along the way. Likely shape: keep a small
    whole-canvas picture under the window so revealed edges show at once (soft) until the sharp redraw.
-6. **Undo latency / raster Undo budget** — rides on stage 3's one budget (merged). Undo is
-   the playcheck's peak phase: ~250 MiB transient outside the budget (not the vector walk's
-   transparency layers). `UndoHistory`'s own 192 MiB cap is not yet an entry in the one budget.
+6. **Undo latency / raster Undo budget** — rides on stage 3's one budget (merged). **S3b (`tmp/nov27-s3b`): Undo is no
+   longer the playcheck's peak phase** — a vector Undo/Redo copies back the pixels its edit replaced (no walk, no second
+   picture), and those kept pixels are asked of `MemoryBudget` and evicted like any cache. UNDO_NUMBERS Left: raster
+   Undo still holds whole rasters per step, and `UndoHistory`'s own 192 MiB cap is not yet an entry in the one budget (S4).
 7. **Re-check against `main`, then fix what remains:** stroke latency and pan hitches (open: live stamping
    `DabImageCache.stamp` on main, Core Animation converting every landed picture on main because
    `RasterSurface`'s byte order is not CA-native, the lift's `settleCelContent()` rendering one
