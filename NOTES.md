@@ -1,14 +1,10 @@
 # S3b worker notes (drop at the end)
 Worktree ~/PaintWork/PaintApp-nov27-s3b, branch tmp/nov27-s3b from ac97b9a1. Sim nov27-s3b (udid in ~/PaintWork/nov27-s3b-evidence/udid).
 ## Done
-- baseline playcheck on main started -> ~/PaintWork/nov27-s3b-evidence/pc-before1
+- baseline playcheck main: r1late=30 (layer_picture=29, fill=1), undo peak 1126, others <=1015
+- LayerPicture + in-place repair/append/patch; kept pixels (budgeted) for undo; walk turn join/preempt (rasterizeLock gone); cancellable walks
+- fill taps queued (no main wait), undo while fill drawing takes it back; waitForFillWork test-only
+- tests: LayerPictureLogicTests, InPlaceRepairLogicTests, FillGestureRestart queued tests, VectorRenderLock preempt, QueuedFillUITests
+- playcheck after1 RED: undo while fill drawing fell through (fixed in last commit), pc-after2 running
 ## Next
-- map repair/undo/fill code
-- baseline playcheck main: r1late=30 (layer_picture=29, fill=1), undo peak 1126, others <=1000
-- LayerPicture + in-place repair/append/patch in VectorCanvas; walk turn (join/preempt) replaces rasterizeLock; cancellable walks (per element/stroke)
-- 390 vector/scheduler logic tests green
-## Next
-- CanvasPictureView stale revision check; StrokeCanvasView cancel stale renders
-- fill queue (waitForFillWork off main)
-- kept-pixel undo test, cancellation test, queued fill test
-- fast tier, playcheck x3, UI tests, docs
+- playcheck x3 green + numbers; mutations (scratchpad mutate.py); fast tier Debug+Release; UI classes; drive sim; docs (scratchpad s3b-asbuilt.md) + TODO 5/6

@@ -377,6 +377,43 @@ final class FillGestureRestartLogicTests: XCTestCase {
         XCTAssertLessThan(second.b, 50, "…so the second, blue, landed before it")
     }
 
+    /// **An Undo pressed while a fill is still drawing takes that fill back, and nothing else.** The
+    /// fill is the newest thing the artist did and is in no undo step yet; baking it first would mean
+    /// the main thread waiting for its pixels, and letting the press fall through to the history would
+    /// revert the edit *before* it — and then the fill would land on top. MEASURED on the playcheck
+    /// (5000², the fill still drawing two seconds on): four Undos took back the eraser, the cut, the To
+    /// Cross erase and one step more, and the fill landed after them.
+    ///
+    /// Mutation that reddens it: drop the `takeBackDrawingFill()` press in `undoNow`.
+    func testAnUndoWhileAFillIsDrawingTakesTheFillBackAndNothingElse() throws {
+        let manager = sceneManager()
+        manager.beginInteractiveFill(at: Self.onThePaper)
+        manager.endInteractiveFill()
+        manager.waitForFillWork()
+        settle()
+        XCTAssertTrue(manager.commitInteractiveFill(), "fixture: one fill in the history")
+        let steps = manager.history.undoStack.count
+
+        let gate = DispatchSemaphore(value: 0)
+        manager.fillWork { gate.wait() }
+        manager.beginInteractiveFill(at: Self.onTheSquare)
+        manager.endInteractiveFill()
+        manager.beginInteractiveFill(at: Self.onThePaper)   // queued behind it
+        manager.endInteractiveFill()
+        XCTAssertEqual(manager.queuedFills.count, 1, "PREMISE: a tap is queued behind the drawing fill")
+
+        manager.undo()   // the newest: the queued tap
+        XCTAssertTrue(manager.queuedFills.isEmpty, "the Undo did not take back the queued tap")
+        XCTAssertTrue(manager.fillGestureActive, "…and left the fill in front of it alone")
+        manager.undo()   // the drawing fill itself
+        XCTAssertFalse(manager.fillGestureActive, "the Undo did not take back the drawing fill")
+        XCTAssertEqual(manager.history.undoStack.count, steps, "the Undo reverted a step from before the fill")
+        gate.signal()
+        for _ in 0..<2 { manager.waitForFillWork(); settle() }
+        XCTAssertEqual(manager.history.undoStack.count, steps, "a taken-back fill landed anyway")
+        XCTAssertGreaterThan(try bakedPixel(manager, Self.onThePaper).r, 200, "the fill before it is still there")
+    }
+
     /// The counterweight: a loop that enclosed nothing still records nothing (LASSO_FILL.md §7.1),
     /// *including* when the tap queued behind it is what bakes it. An empty result stores no bytes.
     func testAQueuedTapStillDoesNotBakeAnEmptyLoopBeforeIt() {
