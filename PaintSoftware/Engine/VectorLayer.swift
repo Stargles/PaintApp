@@ -2356,6 +2356,11 @@ nonisolated final class VectorCanvas {
     /// **Renders that copied kept pixels back instead of walking** — an Undo or Redo served from
     /// `keptPixels`. The S3b gate's "walks per Undo 0 while kept pixels hold", counted.
     private(set) var keptRestores = 0
+    /// **Renders that repaired the picture in place**, and the rectangle the last one wrote — the S3b
+    /// gate's "copies per landed edit 0", counted, and the seam a test reads to say the repair was the
+    /// damage's size and not the canvas's.
+    private(set) var inPlaceWrites = 0
+    private(set) var lastInPlaceRect: CGRect = .null
 
     /// The clip of the most recent region repair, or `.null` — the seam a test reads to say the
     /// bound actually bound rather than merely ran.
@@ -6792,6 +6797,8 @@ nonisolated final class VectorCanvas {
         countWalkLocked(result, plan)
         if !current, Self.wraps(cachedImage, picture) { return nil }
         let image = picture.revise()
+        inPlaceWrites += 1
+        lastInPlaceRect = patch.canvasRect
         pictureList = plan.suppressed.isEmpty ? plan.elements : nil
         // A copy-back brings the restored list's promises with its pixels; a walk brings what it measured.
         if case .patch(_, let used) = plan.work {
