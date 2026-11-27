@@ -11,15 +11,19 @@ Signing and installing are two stages over one state file, `~/.config/paintapp/r
 | stage | needs | does |
 |---|---|---|
 | **sign** | the Mac and Xcode's Apple ID session — never the iPad | when the newest profile (staged, else installed) is expired or within an hour of it: fetch (best-effort), pick the source, build Release for `generic/platform=iOS` with `-allowProvisioningUpdates`, check the profile advanced and the signature verifies, copy the app to `~/PaintWork/device-<sha8>-Release-<profile creation>/`, record `STAGED_*` |
-| **install** | the iPad listed `available` by `devicectl list devices` **and PaintSoftware not running on it** | install the staged app, confirm the bundle is on the device, promote `STAGED_*` to `LAST_*`, delete the superseded build folder |
+| **install** | the iPad listed `available` by `devicectl list devices` **and PaintSoftware not in use on it** | install the staged app, confirm the bundle is on the device, promote `STAGED_*` to `LAST_*`, delete the superseded build folder |
 
-**Never install over a running app (Nov 21).** An install terminates the app and loses unsaved strokes.
-Before installing, the stage reads `devicectl device info processes` and defers (quiet `WAIT` line, no
-notification, nothing changed) if `.../PaintSoftware.app/PaintSoftware` is listed. It defers too if the
-query fails or does not look like a process list (no `launchd`). MEASURED on the iPad: the list holds every
-live process, so a backgrounded (suspended) app counts as running; the deferral then lasts until the owner
-closes the app or iOS evicts it. That is bounded by the profile's life (the app is dead when it expires)
-and the hourly wakes, not by a timer: a staged build can wait indefinitely behind an app left open.
+**Never install over an app in use (Nov 21, refined Nov 27).** An install terminates the app and loses
+unsaved strokes. `devicectl device info processes` lists every live process and carries only a pid and a
+path (MEASURED on iOS 26, `--json-output`: `executable`, `processIdentifier`; nothing on foreground or
+suspended), so an app the owner left stays listed for hours and cannot be judged by the list. Not listed:
+install. Listed: the stage copies the app's own `Library/Application Support/CrashWatch/foreground.marker`
+(`devicectl device copy from`, `appDataContainer`; written by `UncleanExitWatch` — `foreground` while the
+scene is active, `away` once it is in the background) and installs only if it says `away` and is at least
+`AWAY_SETTLE` (120 s) old, so the app's save on leaving the foreground (`ScenePhaseSaveGate`) has finished.
+Foreground, a fresh `away`, a missing marker, a failed copy, or a failed or implausible process query defers
+(quiet `WAIT` line, nothing changed). A suspended app loses nothing because it saved on the way out; an app
+killed while `foreground` is not listed, so it never blocks.
 
 `LAST_*` always names what is installed on the iPad; it is written only after an install succeeds, and
 every write is a sibling temp file renamed into place.

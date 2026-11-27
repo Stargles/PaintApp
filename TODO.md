@@ -311,12 +311,6 @@ Every status report to the owner lists this queue with each item's state, not on
 
 ## Open reports and asks
 
-- [ ] **The installer waits forever on an app the owner closed (owner, Nov 26: *"its literally not open and hasent
-  been for a long while"*).** `resign.sh` refuses while `devicectl device info processes` lists PaintSoftware, but iOS
-  keeps a left app SUSPENDED in that list, so a staged build sat from 18:36 to 20:30. Installed `ee72796b` by hand on
-  his word. Fix at the root: wait only while the app is in the foreground (or prove the app saves on backgrounding so a
-  suspended app loses nothing), not on any listed process; test in `test-resign.sh`, pin with `install.sh`.
-
 - [ ] **The auto-resigner broke again — "PaintApp is no longer available" (owner, Nov 20; ~10th time).**
   Owner: *"Fix it well and fix it once. Remember the iPad might be locked, or the Mac might be off … When
   the Mac is on and the iPad is unlocked it should automatically trigger so I don't have to tell you."*

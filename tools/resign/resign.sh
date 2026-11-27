@@ -26,6 +26,7 @@ STAGE_ROOT=${RESIGN_STAGE_ROOT:-/Users/juliapark/PaintWork}
 RUN_USER=${RESIGN_RUN_USER:-juliapark}
 DEVICE_UUID=${RESIGN_DEVICE_UUID:-E3B83820-DF74-5042-B52B-0D5BA17E4877}
 BUNDLE_ID=Starg.PaintSoftware
+AWAY_SETTLE=${AWAY_SETTLE:-120}   # seconds the app must have been in the background before an install may close it
 APP_EXECUTABLE=PaintSoftware
 WAKE_OWNER=com.paintapp.resign
 
@@ -374,8 +375,11 @@ install_staged() {
     fi
     out=$(mktemp -t paintapp-install)
     # An install terminates the running app and loses unsaved strokes. devicectl lists every live
-    # process, suspended (backgrounded) apps included, so a backgrounded app defers too; that ends
-    # when the owner closes the app or iOS evicts it. A failed or implausible query defers as well.
+    # process and says nothing of foreground or suspended, so a listed app is judged by the marker the
+    # app keeps (`UncleanExitWatch`: `away` once the scene is in the background, `foreground` while
+    # active; the app saves on leaving active, `ScenePhaseSaveGate`). Listed and `away` for
+    # AWAY_SETTLE seconds (the save has long finished) installs; listed and anything else (foreground,
+    # a fresh `away`, no marker, a failed read) defers. A failed or implausible process query defers too.
     run_bounded 60 "$out" run_as_user xcrun devicectl device info processes --device "$DEVICE_UUID" || rc=$?
     if (( rc != 0 )) || ! grep -q '/sbin/launchd' "$out"; then
         rm -f "$out"
@@ -383,9 +387,22 @@ install_staged() {
         return 0
     fi
     if grep -Eq "/${APP_EXECUTABLE}\.app/${APP_EXECUTABLE}[[:space:]]*\$" "$out"; then
-        rm -f "$out"
-        quiet "staged build waiting; PaintSoftware is running on the iPad and an install would close it — installs once it is closed"
-        return 0
+        local mark_dir mark_json="" mark_state mark_at mark_epoch
+        mark_dir=$(mktemp -d -t paintapp-mark)
+        if run_bounded 60 "$out" run_as_user xcrun devicectl device copy from --device "$DEVICE_UUID" \
+            --domain-type appDataContainer --domain-identifier "$BUNDLE_ID" \
+            --source "Library/Application Support/CrashWatch/foreground.marker" --destination "$mark_dir/marker"; then
+            mark_json=$(cat "$mark_dir/marker" 2>/dev/null || true)
+        fi
+        rm -rf "$mark_dir"
+        mark_state=$(sed -n 's/.*"mark" *: *"\([a-z]*\)".*/\1/p' <<< "$mark_json")
+        mark_at=$(sed -n 's/.*"at" *: *"\([0-9TZ:-]*\)".*/\1/p' <<< "$mark_json")
+        mark_epoch=$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$mark_at" +%s 2>/dev/null || echo "")
+        if [[ "$mark_state" != away || -z "$mark_epoch" ]] || (( $(date +%s) - mark_epoch < AWAY_SETTLE )); then
+            rm -f "$out"
+            quiet "staged build waiting; PaintSoftware is in use on the iPad (marker: ${mark_state:-unreadable}) and an install would close it — installs once it has been left"
+            return 0
+        fi
     fi
     log "Installing ${STAGED_SOURCE_SHA:0:8} (profile to $STAGED_PROFILE_EXPIRATION) on $DEVICE_UUID"
     run_bounded 600 "$out" run_as_user xcrun devicectl device install app --device "$DEVICE_UUID" "$STAGED_APP_PATH" || rc=$?

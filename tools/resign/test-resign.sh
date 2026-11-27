@@ -43,6 +43,10 @@ case "$2 $3" in
       exit 0
     fi
     echo "PaintSoftware   Starg.PaintSoftware   1.0" ;;
+  "device copy")
+    [[ -e "$FAKE_DIR/marker_fail" ]] && exit 1
+    dest=; while [[ $# -gt 0 ]]; do [[ "$1" == --destination ]] && dest=$2; shift; done
+    cp "$FAKE_DIR/marker" "$dest" ;;
 esac
 EOF
 cat > "$BIN/security" <<'EOF'
@@ -129,27 +133,39 @@ ok "unreachable iPad at sign time: signs generic, stages, no install, no notify"
 [[ "$(grep -c 'list devices' "$FAKE/calls")" == 1 ]] || die "device query count"
 ok "pending install while away: no rebuild, only a device query"
 
-# 3b. iPad available but PaintSoftware is running (or the process query fails): nothing is installed,
-# the state is untouched, and it is quiet. Not running: installs as in case 4.
+# 3b. iPad available and PaintSoftware listed: devicectl cannot tell foreground from suspended, so the
+# app's own marker decides. Foreground, a fresh away, no marker and a failed read all defer (nothing
+# installed, state untouched, quiet); away for longer than AWAY_SETTLE installs (case 4). A failed
+# process query defers.
 printf 'X  x  %s  available (paired)  iPad\n' "$UUID" > "$FAKE/devices"
-touch "$FAKE/app_running"; : > "$FAKE/calls"; run
-! grep -q 'device install' "$FAKE/calls" || die "installed over a running app"
-[[ -n "$(get STAGED_APP_PATH)" && "$(get LAST_SOURCE_SHA)" == "$INSTALLED" && ! -e "$FAKE/notify" ]] || die "running-app state"
-grep -q 'PaintSoftware is running' "$CFG/resign.log" || die "no reason logged"
-! grep -q 'VERDICT: \(FAIL\|OK\)' <(tail -1 "$CFG/resign.log") || die "wrong verdict"
+stamp() { date -u -v-"$1"S '+{"mark":"'"$2"'","at":"%Y-%m-%dT%H:%M:%SZ"}' > "$FAKE/marker"; }
+defers() {   # $1 = what the case is
+  : > "$FAKE/calls"; run
+  ! grep -q 'device install' "$FAKE/calls" || die "installed: $1"
+  [[ -n "$(get STAGED_APP_PATH)" && "$(get LAST_SOURCE_SHA)" == "$INSTALLED" && ! -e "$FAKE/notify" ]] || die "state: $1"
+  grep -q 'PaintSoftware is in use' "$CFG/resign.log" || die "no reason logged: $1"
+}
+touch "$FAKE/app_running"
+stamp 3600 foreground; defers "foreground app"
+stamp 10 away;         defers "app left seconds ago"
+rm -f "$FAKE/marker";  defers "no marker"
+stamp 3600 away; touch "$FAKE/marker_fail"; defers "marker unreadable"
+rm -f "$FAKE/marker_fail"
 rm -f "$FAKE/app_running"; touch "$FAKE/processes_fail"; : > "$FAKE/calls"; run
 ! grep -q 'device install' "$FAKE/calls" || die "installed with an unreadable process list"
 [[ -n "$(get STAGED_APP_PATH)" && ! -e "$FAKE/notify" ]] || die "query-failure state"
 rm -f "$FAKE/processes_fail"
-ok "running app or failed process query: no install, state kept, quiet"
+ok "foreground / fresh-away / no marker / failed reads: no install, state kept, quiet"
 
-# 4. iPad appears: installs the staged build, promotes it, deletes the superseded one.
-printf 'X  x  %s  available (paired)  iPad\n' "$UUID" > "$FAKE/devices"; : > "$FAKE/calls"; run
+# 4. The app is still listed but has been suspended for an hour (marker away): installs the staged
+# build, promotes it, deletes the superseded one.
+touch "$FAKE/app_running"; stamp 3600 away; : > "$FAKE/calls"; run
+rm -f "$FAKE/app_running"
 grep -q "device install app --device $UUID $STAGED" "$FAKE/calls" || die "no install"
 [[ "$(get LAST_APP_PATH)" == "$STAGED" && "$(get LAST_SOURCE_SHA)" == "$NEXT" && -z "$(get STAGED_APP_PATH)" ]] || die "promotion"
 [[ ! -e "$STAGE/device-old" ]] || die "superseded build kept"
 valid_state "promote"
-ok "iPad appears: installs, promotes staged to installed, deletes superseded build"
+ok "listed but suspended for an hour: installs, promotes staged to installed, deletes superseded build"
 
 # 5. Fetch fails: rebuilds the installed source, no notification.
 reset -300; G -C "$CLONE" remote set-url origin "$WORK/no-such-origin"; run
