@@ -94,6 +94,8 @@ Every status report to the owner lists this queue with each item's state, not on
     point under the pen, not just drag it like a smudge."* So: Liquify keeps up with the pen (SCHEDULER.md rules), and
     at 100% the pixel under the pen at touch-down stays under the pen for the whole drag (a grab/translate, not a
     decaying push); lower power blends toward today's smudge. Owner order: **after the scheduler (S2–S9)**.
+    Also (owner, Nov 26): *"liquify needs a visual indicator of how big the brush is when a stroke is being made.
+    same circle thing as the eraser."* Reuse the eraser's size circle (same view, not a copy) while a Liquify stroke is live.
 12. **Puppet warp tool (owner, Nov 26).** Make a selection → Edit menu → a Puppet Warp icon. Ruled Nov 26:
     **raster and vector** (raster pixels bend like Liquify; vector strokes' points move, staying crisp and
     editable); **pins: tap inside the selection to drop pins, drag one and the shape bends around it while the
