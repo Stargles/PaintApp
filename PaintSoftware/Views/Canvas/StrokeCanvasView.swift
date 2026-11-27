@@ -1941,6 +1941,7 @@ final class StrokeCanvasView: CanvasPlaneView {
     }
 
     private func handleMove(_ touch: UITouch, _ event: UIEvent) {
+        InkContinuityProbe.strokeMoved(to: touch.location(in: nil))
         if liquifySession != nil { moveLiquifyGesture(touch, event); return }
         if guideStartTime != nil { recordGuideSample(touch, event); return }
         if consumedAsMotionGroupTap { return }
@@ -1979,7 +1980,7 @@ final class StrokeCanvasView: CanvasPlaneView {
         if liquifySession != nil { finishLiquifyGesture(touch); return }
         if guideStartTime != nil { endGuideStroke(touch); return }
         if consumedAsMotionGroupTap { consumedAsMotionGroupTap = false; return }
-        defer { InkContinuityProbe.strokeEnded() }
+        InkContinuityProbe.strokeLifting()
         if vectorCanvas != nil { endVectorStroke(touch); return }
         // Shape detected and reverted: skip stroke-end bookkeeping, just notify the coordinator.
         if shapeFollowingTouch {

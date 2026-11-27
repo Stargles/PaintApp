@@ -155,9 +155,25 @@ final class InteractionHitchUITests: PaintUITestCase {
         try strokesInQuickSuccession(app)
     }
 
-    private func strokesInQuickSuccession(_ app: XCUIApplication) throws {
+    /// The same at the iPad 9's pace: the pen-up render takes 300 ms and every window draw 40 ms.
+    func testNoCommittedFrameLacksTheStrokeWhenTheRenderIsSlow() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-uiTestInkProbe", "-uiTestSlowVectorRenderMillis", "300", "-uiTestSlowWindowDrawMillis", "40"]
+        try strokesInQuickSuccession(app)
+    }
+
+    /// The same on a document the compositor draws — a Multiply layer at the bottom — where the lifted
+    /// stroke's host sits between the live pair's halves until the bake lands (`SandwichPresentation`).
+    func testNoCommittedFrameLacksTheStrokeOnACompositedDocument() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-uiTestInkProbe", "-uiTestSlowVectorRenderMillis", "300", "-uiTestSlowWindowDrawMillis", "40"]
+        try strokesInQuickSuccession(app, multiplyLayerBelow: true)
+    }
+
+    private func strokesInQuickSuccession(_ app: XCUIApplication, multiplyLayerBelow: Bool = false) throws {
         let canvas = openOwnersScene(brush: 5.0 / 199, app: app)
         defer { XCUIDevice.shared.orientation = .portrait }
+        if multiplyLayerBelow { setBlendMode(app, layerIndex: 4, to: "multiply") }
         openBrushLibrary(app)
         setBrushSize(app, normalized: 0.25)
         app.buttons["toolbar.brushButton"].tap()

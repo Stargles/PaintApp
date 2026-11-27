@@ -5,14 +5,16 @@ import UIKit
 ///
 /// A screenshot is one frame in several, taken hundreds of milliseconds apart, and the owner's flicker
 /// is one frame or two (TODO item 7). So this samples **every main-thread turn**: a run-loop observer
-/// ordered after Core Animation's own commit observer reads one pixel of the window's layer tree,
-/// which is the state that commit just handed the render server. The pixel is the stroke's first
-/// point — ink is laid there by the first dab and nothing the app does afterwards removes it — so the
-/// stroke's own ink is always the expected value, and a *light* sample after a dark one, between
-/// touch-down and `settleSeconds` after the lift, is a committed state with the stroke missing.
+/// ordered after Core Animation's own commit observer reads a few pixels of the window's layer tree,
+/// which is the state that commit just handed the render server.
 ///
-/// Armed by `-uiTestInkProbe` on the simulator only (`UITestSeeds`), and published on `canvas.host`
-/// as `ink:<strokes>,<dips>` plus the series of the first dip.
+/// The pixel is the middle of the stroke's own path, read just before the lift is processed — what the
+/// pen laid down and the screen was showing. From the lift to `settleSeconds` after it, a sample that
+/// has lost that ink is a committed state with the stroke missing: a dip. (A stroke whose middle was
+/// not dark at the lift says nothing and is not counted.)
+///
+/// Armed by `-uiTestInkProbe` on the simulator only, and published on `canvas.host` as
+/// `ink:<strokes watched>,<dips>` plus the series of the first dip.
 @MainActor
 enum InkContinuityProbe {
 
@@ -23,31 +25,51 @@ enum InkContinuityProbe {
     static let isOn = ProjectBackupManager.isSimulator
         && ProcessInfo.processInfo.arguments.contains("-uiTestInkProbe")
 
-    private struct Run {
-        let point: CGPoint
-        weak var window: UIWindow?
-        let began = CACurrentMediaTime()
-        var lifted: CFTimeInterval?
-        var sawInk = false
-        var dipped = false
-        var series: [(t: Double, gray: Int)] = []
-    }
-
     /// Told when a watched stroke is settled, so the published field is current without another pass.
     static var onChange: (() -> Void)?
 
+    private struct Run {
+        var path: [CGPoint] = []
+        weak var window: UIWindow?
+        var point: CGPoint?
+        /// A point of bare paper well clear of the stroke, white at the lift: it must stay white.
+        var paper: CGPoint?
+        var lifted: CFTimeInterval = 0
+        var dipped = false
+        var series: [(ms: Int, gray: Int)] = []
+    }
+
     private static var run: Run?
     private static var observer: CFRunLoopObserver?
-    private static var strokes = 0
+    private static var watched = 0
     private static var dips = 0
     private static var firstDip = ""
 
     /// A stroke's first touch, in `window`'s coordinates.
     static func strokeBegan(at point: CGPoint, in window: UIWindow?) {
         guard isOn, let window else { return }
-        finish()
-        run = Run(point: point, window: window)
-        strokes += 1
+        settle()
+        run = Run(path: [point], window: window)
+    }
+
+    static func strokeMoved(to point: CGPoint) {
+        guard isOn, run?.point == nil else { return }
+        run?.path.append(point)
+    }
+
+    /// The lift, before anything is done about it: what the screen shows now is the stroke.
+    static func strokeLifting() {
+        guard isOn, var current = run, current.point == nil, let window = current.window else { return }
+        let point = current.path[current.path.count / 2]
+        guard pixel(at: point, in: window) < 100 else { run = nil; return }
+        current.point = point
+        let clear = CGPoint(x: point.x, y: point.y + 140)
+        if pixel(at: clear, in: window) > 240 { current.paper = clear }
+        current.lifted = CACurrentMediaTime()
+        run = current
+        watched += 1
+        // Idle after the settle there is no turn to end the run, so one is made.
+        DispatchQueue.main.asyncAfter(deadline: .now() + settleSeconds + 0.1) { settleIfDue() }
         guard observer == nil else { return }
         // After Core Animation's commit observer (order 2,000,000), so what is read is what was committed.
         let created = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, 2_100_000) { _, _ in
@@ -57,48 +79,41 @@ enum InkContinuityProbe {
         observer = created
     }
 
-    static func strokeEnded() {
-        guard isOn, run != nil else { return }
-        run?.lifted = CACurrentMediaTime()
-        // Idle after the settle there is no turn to end the run, so one is made.
-        DispatchQueue.main.asyncAfter(deadline: .now() + settleSeconds + 0.1) { finishIfSettled() }
-    }
-
     /// The `ink:` field.
     static var field: String {
-        return "\(strokes),\(dips)" + (firstDip.isEmpty ? "" : " inkdip:\(firstDip)")
+        "\(watched),\(dips)" + (firstDip.isEmpty ? "" : " inkdip:\(firstDip)")
     }
 
     private static func sample() {
-        guard var current = run, let window = current.window else { return }
-        let now = CACurrentMediaTime()
-        let gray = pixel(at: current.point, in: window)
-        let t = now - (current.lifted ?? current.began)
-        current.series.append((t, gray))
-        if gray < 100 { current.sawInk = true }
-        else if gray > 180, current.sawInk, !current.dipped { current.dipped = true }
+        guard var current = run, let point = current.point, let window = current.window else { return }
+        let gray = pixel(at: point, in: window)
+        current.series.append((Int((CACurrentMediaTime() - current.lifted) * 1000), gray))
+        if gray > 180 { current.dipped = true }
+        if let paper = current.paper, pixel(at: paper, in: window) < 200 { current.dipped = true }
         run = current
-        finishIfSettled()
+        settleIfDue()
     }
 
-    private static func finishIfSettled() {
-        guard let current = run, let lifted = current.lifted,
-              CACurrentMediaTime() - lifted > settleSeconds else { return }
-        finish()
+    private static func settleIfDue() {
+        guard let current = run, current.point != nil,
+              CACurrentMediaTime() - current.lifted > settleSeconds else { return }
+        settle()
     }
 
-    private static func finish() {
+    private static func settle() {
         guard let current = run else { return }
         run = nil
+        guard current.point != nil else { return }
         defer { DispatchQueue.main.async { onChange?() } }
         guard current.dipped else { return }
         dips += 1
         if firstDip.isEmpty {
-            firstDip = current.series.map { String(format: "%.0f:%d", $0.t * 1000, $0.gray) }.joined(separator: ",")
+            firstDip = current.series.map { "\($0.ms):\($0.gray)" }.joined(separator: ",")
         }
     }
 
-    /// The window's layer tree, drawn at `point`: one grey value, white where nothing is drawn.
+    /// The window's layer tree, drawn at `point`: a grey value, white where nothing is drawn — the
+    /// mean of a 3×3 patch, so one texture pixel of a rough edge is not a verdict.
     private static func pixel(at point: CGPoint, in window: UIWindow) -> Int {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -109,10 +124,13 @@ enum InkContinuityProbe {
             context.cgContext.translateBy(x: 1.5 - point.x, y: 1.5 - point.y)
             window.layer.render(in: context.cgContext)
         }
-        guard let data = image.cgImage?.dataProvider?.data, let bytes = CFDataGetBytePtr(data),
-              let cg = image.cgImage else { return 255 }
-        let row = cg.bytesPerRow, bpp = cg.bitsPerPixel / 8
-        let offset = row + bpp
-        return (Int(bytes[offset]) + Int(bytes[offset + 1]) + Int(bytes[offset + 2])) / 3
+        guard let cg = image.cgImage, let data = cg.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return 255 }
+        let bpp = cg.bitsPerPixel / 8
+        var sum = 0
+        for y in 0..<3 { for x in 0..<3 {
+            let o = y * cg.bytesPerRow + x * bpp
+            sum += Int(bytes[o]) + Int(bytes[o + 1]) + Int(bytes[o + 2])
+        } }
+        return sum / 27
     }
 }
