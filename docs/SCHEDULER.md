@@ -1,9 +1,10 @@
 # SCHEDULER — real-time rules for every piece of work in PaintApp
 
 Status: **rules ruled; stage 3 (one budget) merged 2026-11-21** (`Engine/MemoryBudget.swift`); **the build is
-designed in [SCHEDULER_DESIGN.md](SCHEDULER_DESIGN.md) (2026-11-25)**; **S1 and S3a built 2026-11-25** — the core in
-`Engine/Scheduling/`, frame reads as R1, rule 10's presenter (`CanvasPresenter`) — scheduler and memory manager as one page, its
-§6 is the build order. The owner delegated the rules: *"I'll let you pick
+designed in [SCHEDULER_DESIGN.md](SCHEDULER_DESIGN.md) (2026-11-25)**; **S1 and S3a built 2026-11-25, S2 2026-11-26, S3b 2026-11-27** — the core in
+`Engine/Scheduling/`, frame reads as R1, rule 10's presenter (`CanvasPresenter`); layer pictures repaired in place, Undo
+from kept pixels, cancellable walks with no lock across them, and no wait left on the main thread (a fill tap behind a
+fill still drawing is queued) — scheduler and memory manager as one page, its §6 is the build order. The owner delegated the rules: *"I'll let you pick
 out the rules for this because if I explicitly define it I might miss something critical. Basically, all
 the UX stuff the user interacts with should be hard or firm real time like moving the canvas, canvas
 updating, drawing strokes, erasing, etc. To make this so, everything that can run on a background thread

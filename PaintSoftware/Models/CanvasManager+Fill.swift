@@ -288,6 +288,30 @@ extension CanvasManager {
         }
     }
 
+    /// **Whether a fill tap is still waiting on a render** — the live fill has not rendered yet, or a
+    /// tap is queued behind it. Such a fill is not in the history yet, and cannot be baked into it
+    /// without waiting for its pixels.
+    var fillIsDrawing: Bool { !queuedFills.isEmpty || (fillGestureActive && !fillHasProduced) }
+
+    /// **An Undo pressed while a fill is still drawing takes that fill back, and the press is spent**:
+    /// the newest queued tap first, else the drawing fill itself. The fill is the newest thing the
+    /// artist did and is in no step yet, so the alternative — baking it would mean waiting for its
+    /// pixels (rule 1) — or letting the press fall through to the history would revert what they did
+    /// *before* it, and the fill would then land on top. True when it took a fill back.
+    func takeBackDrawingFill() -> Bool {
+        guard fillIsDrawing else { return false }
+        if !queuedFills.isEmpty {
+            queuedFills.removeLast()
+            // The fill in front stays adjustable once nothing waits behind it.
+            if queuedFills.isEmpty { fillCommitsOnLanding = false }
+        } else {
+            fillCommitsOnLanding = false
+            cancelInteractiveFill()
+        }
+        refreshUndoRedoState()
+        return true
+    }
+
     /// `landQueuedFills` in the next main-thread turn — out of the landing or the edit that asked.
     private func scheduleQueuedFills() {
         DispatchQueue.main.async { [weak self] in self?.landQueuedFills() }

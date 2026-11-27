@@ -4857,6 +4857,8 @@ final class CanvasManager: ObservableObject {
             cancelVectorFloat()
             return
         }
+        // A fill still drawing is the newest thing too, and is in no step yet: the press takes it back.
+        if takeBackDrawingFill() { return }
         guard finalizePendingGesturesForHistoryAction() else { return }
         // `history.undo()` returns nil (and does nothing) on an empty stack — that is the "silent
         // when nothing happened" case `raise` must not be called for. `finalizePendingGesturesFor-
@@ -4879,6 +4881,8 @@ final class CanvasManager: ObservableObject {
         if textEditUndoHandler?(true) == true { return }
         // And an open lasso has nothing to redo, which is why the button is dim while one is up.
         if openLasso != nil { return }
+        // A fill still drawing is a new edit, so there is nothing to redo past it.
+        if fillIsDrawing { return }
         guard finalizePendingGesturesForHistoryAction() else { return }
         if let label = history.redo() {
             raise(.historyRedo(label))
