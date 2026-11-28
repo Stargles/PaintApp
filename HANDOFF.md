@@ -4,70 +4,47 @@
 
 From `/Users/juliapark/Desktop/Kevin.P/PaintSoftware`, use this prompt:
 
-> Continue PaintSoftware from HANDOFF.md. Read AGENTS.md, CLAUDE.md and the top of TODO.md; verify
-> `main` equals `origin/main`. Usage is tight: one worker at a time, Sonnet unless the task needs Opus,
-> short briefs, no re-reading of what HANDOFF already says. Follow "Resume here" below.
+> Resume PaintSoftware from HANDOFF.md. Read AGENTS.md, CLAUDE.md and the top of TODO.md; verify
+> `main` equals `origin/main`; follow "Resume here".
 
-## Resume here — November 21, 2026
+## Resume here — November 27, 2026 (evening, Toronto)
 
-0. **Running (Nov 26).** iPad has `c15ad799` (budget + freeze fix); `fe69a7c0` (S1: frame steps instant,
-   whole-frame presenter) is gated green and STAGED in `resign_state` — installs itself when the app is closed.
-   In flight, ONE worker at a time (pacing; two in parallel hit the 5-hour limit): **S3a** on
-   `tmp/nov25-s3a` (R1 queues onto the scheduler; was mutation-testing, resumed). **S2** on `tmp/nov25-s2`
-   is paused mid-build (bake format v2 + zoom-out edges + "keep baked frames" setting, default off, stored in
-   the scene folder) — resume it with SendMessage after S3a reports, or a fresh Sonnet from its NOTES.md.
-   Then S3b, S4–S9 (docs/SCHEDULER_DESIGN.md §6). Release script: `~/PaintWork/rel.sh` (needs worktree
-   `~/PaintWork/PaintApp-rel` on `tmp/rel` at main; gates, signs, stages, cleans up). Owner checks pending:
-   Play on Test1, open lasso, freezes, brushstroke flicker. Test1 AirDrop still to come. Root stays high
-   level (AGENTS.md); an idle >1 h session re-reads its whole context, so avoid long idle workers.
-1. **Nov 21 plan, in order (owner: "fix everything and do it right"; TODO.md top item).** Installed:
-   `8545ac57` (= `2891caad` code), profile to Nov 28 — the owner's check of it FAILED: Play still takes
-   the iPad down, steps ~400 ms and staggered, bake bars slow, version label never changes. **No device
-   runs for crashes, ever** (owner). In flight: (A) `tmp/nov21-play` — measure the *simulator's real
-   backboardd footprint* on the owner's real Test1 (copied read-only off the iPad), fix the producer,
-   make the gate assert that instead of the `LayerContentsCensus` proxy — **done Nov 21: it is the app's memory; gate is `tools/playcheck.sh`, still red; stage 3 next (TODO queue (1))**; (B) `tmp/nov21-version` — the
-   gallery shows commit + build date; (C) `tmp/nov20-crash` — crash catcher (fading notice; Mac pulls
-   iPad logs only when asked). Then: (D) frame steps instant and unstaggered + bake speed, built as
-   docs/SCHEDULER.md stage 2 on (A)'s harness — one fresh worker after (A) merges. The auto-resigner
-   is rebuilt and live (docs/RESIGN.md); confirm the Nov 28 renewal happened unattended.
-2. **Owner's 2-minute check is next:** draw, erase a lot, Undo, pan, change frames, play, fill. TODO.md's
-   "Current" section names what each item is waiting for him to confirm, and the leftovers still open.
-3. **Next owner ask, queued:** an open lasso acts as closed for every bottom-bar action (TODO.md item;
-   remove the Move-only open-lasso path).
-4. **Scheduler (owner said go, 2026-11-18):** stage 2 = an Opus design page reviewed before code, then the
-   core + R1 migration; stage 3 = one memory budget + a reuse pool for canvas-sized pictures; then stages
-   4–5. Clear context between stages. Every change must keep docs/SCHEDULER.md's rules.
-5. The Mac may be busy with the owner's own work — check running processes before any timing run.
+1. **On the iPad:** `eb58e751` (S3b) installed. Its profile expires 2026-11-28 03:31 UTC; the
+   auto-resigner should sign a fresh build from `main` before then — confirm in
+   `~/.config/paintapp/resign.log` that it did, unattended.
+2. **Merged on `main`:** scheduler S1, S2, S3a, S3b (in-place layer-picture repair, kept-pixel Undo,
+   queued second Fill tap), the stroke-flicker fix, the installer's foreground-marker check, and the
+   compacted CLAUDE.md/TODO.md.
+3. **In flight — S4, the memory manager:** branch `tmp/nov27-s4`, worktree `~/PaintWork/PaintApp-nov27-s4`,
+   simulator `E1DB1A4B-4CB2-4E7F-A97D-31A7F552D223`, evidence `~/PaintWork/nov27-s4-evidence/`. Its
+   `NOTES.md` is the state. Done: one-eviction-order budget (`NextUse`/`ComesBack`), Undo's 192 MiB cap
+   folded into the budget, CG shrink-copy counted (`BakedFrameWindow.shrinkFilter`), bake starvation
+   fixed (reserve = room an answer can reach), the 10 fast-tier failures resolved (7 stale tests, 3 real
+   bugs); Debug fast tier green (5795); playcheck GREEN once (app peak 1,021 MiB). **Open:** late answers
+   read 134 vs base 32 — taken hours apart under unknown machine load, so possibly contention; a worker
+   was told to A/B base and S4 interleaved with CPU idle recorded. If it reports no real regression or
+   fixes one: Release fast tier, playcheck ×3, the touched UI classes alone on an erased device, drive
+   the app, remove `-uiTestAllocationLedger` from `PlaycheckGateUITests`, "S4 as built" in
+   docs/SCHEDULER_DESIGN.md + TODO 5/6/9, delete `NOTES.md`, rebase, merge, release.
+4. **Then, in order:** S5–S9 (docs/SCHEDULER_DESIGN.md §6), Liquify (TODO 11), Puppet Warp as a Move
+   mode (TODO 12), triage of the pre-existing UI reds (TODO 7; the two `FillLiveAdjust` reds are among them).
+5. **Release:** `git worktree add ~/PaintWork/PaintApp-rel -b tmp/rel origin/main`, then
+   `bash ~/PaintWork/rel.sh` (the script is not executable; it gates, signs, stages and cleans up).
+   The installer puts a staged build on once the app has been in the background for 120 s.
+6. **Owner checks pending:** frame steps, the open lasso, freezes, stroke flicker, Play on Test1
+   (Test1 AirDrop still to come).
 
-## Sign-off — November 17, 2026, Toronto
+## How to work (owner rulings, 2026-11-27)
 
-- **The November 16 failures are fixed on `main`** (TODO.md's first item has the list): the
-  display server is no longer handed a canvas-sized picture per edit (the backboardd Jetsam
-  behind the black-outs), the bake reuses its band memo (orange bars), Undo trims history to its
-  budget with a notice instead of wiping it, Fill covers ink enclosed by the region (the owner's
-  circle-and-line), the recorder logs tool settings, and a Move's lift repairs only what was lifted.
-- **Gates at `d08d18a5`:** Debug and Release fast tiers 5,679 passed + 4 skipped each; the first
-  full UI run (on the 13" simulator, which fails the 1080×810 size premises — use an iPad 9th
-  generation simulator for the UI suite) left 33 reds; re-run serially on a fresh iPad 9 simulator
-  with the one extra Fill red the worker found, 12 remain and all 12 are red on old `main` with
-  the same message (TODO.md item). Four Fill regressions found on the way were fixed in `10f65379`.
-- **Device stress on the owner's iPad passed** — `PaintSoftwareUITests/DeviceStressUITests.swift`,
-  opt-in with `PAINTAPP_DEVICE_STRESS=1`, creates and trashes its own `ZZ-stress-*` folder and
-  scene, never resets settings or libraries. Log: `~/PaintWork/nov17-device-stress/device-run3.log`.
-- **Installed on the iPad 2026-11-17 (Toronto, evening)**: signed Release `9792e799` (binary UUID
-  `0A93A076-21CE-329D-88CE-1FFC3BE90D1B`, profile through Nov 20 07:09 UTC) from
-  `~/PaintWork/crash-20261111/device-fresh-9792e799-Release/`; `resign_state` updated. The integrated
-  `tmp/*` branches, old evidence, archives and old session simulators are deleted (owner: keep it lean).
-- **Lessons:** the Release optimiser may free a never-read `var` at its last use — hold test pins
-  with `withExtendedLifetime`; on the real iPad the number pad covers the size fields, so a device
-  harness hides the keyboard between fields; "Timed out while enabling automation mode" is the lock
-  screen.
+- Global rules in `~/.claude/CLAUDE.md` bind every session: pace against the 5-hour window only;
+  a hook refuses to wake an agent over 200k tokens with a cold cache; subagents cache for 1 hour;
+  worker hand-offs follow the seven-part NOTES.md checklist and are deleted once used.
+- The orchestrator runs mechanical checks itself (fast tiers, playcheck, solo UI classes, reading
+  result lines) — waiting costs it almost nothing — and sends workers only design work and failures.
+  Brief workers to read narrowly: S4's first worker spent ~200k tokens reading before editing.
+- The owner uses this Mac too: record CPU idle with every timing run and compare builds A/B
+  interleaved; never assume quiet or busy.
+- Every reply the owner sends costs usage: state scope and exclusions up front; ask only real decisions.
+- Some old wait shells are frozen with SIGSTOP on purpose (ending them wakes finished agents); leave them.
 
 TODO.md tracks outstanding work and owner rulings. Older checkpoints are in `git log -p HANDOFF.md`.
-
-## Resume rules
-
-Read AGENTS.md, CLAUDE.md and TODO.md. Keep this checkpoint current and keep tasks in TODO.
-Use task-appropriate model and effort. Delegate coherent work through verification where it saves
-effort. Run quick checks directly and avoid redundant handoffs or reviewer agents. Root owns
-priorities, acceptance, the shared native lane and release decisions.
